@@ -68,7 +68,7 @@ $ sudo mkdir -p /opt/call-me-maybe
 $ sudo chown "$USER" /opt/call-me-maybe
 $ git clone https://github.com/YOU/call-me-maybe /opt/call-me-maybe
 
-# On a WORKSTATION (alpaca), build and ship the binary. Check the Pi arch
+# On a WORKSTATION (not the Pi), build and ship the binary. Check the Pi arch
 # first: uname -m says aarch64 -> arm64 build, armv7l -> armv7 build.
 $ make cross
 $ scp bin/doorman-linux-arm64 pi@raspberrypi:/opt/call-me-maybe/bin/doorman
