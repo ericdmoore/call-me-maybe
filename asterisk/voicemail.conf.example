@@ -1,0 +1,27 @@
+; ─────────────────────────────────────────────────────────────
+; Voicemail — copy to /etc/asterisk/voicemail.conf and edit.
+;
+; attach=yes is the load-bearing line: every message is emailed with the
+; recording attached, which is most of the project's voicemail roadmap
+; implemented by Asterisk itself. Point mailcmd at msmtp/sendmail relaying
+; through your provider (e.g. SES) — see RUNBOOK.
+;
+; CHANGE THE PASSWORDS. 4242 below is a placeholder, and voicemail
+; passwords are dialable from any handset via *97.
+; ─────────────────────────────────────────────────────────────
+
+[general]
+format = wav49|wav
+attach = yes
+maxmsg = 100
+maxsecs = 180
+minsecs = 2
+serveremail = lobby@example.com
+emailsubject = [Home phone] Voicemail for ${VM_NAME} from ${VM_CALLERID}
+; mailcmd = /usr/bin/msmtp -t
+
+[household]
+; mailbox => password,Display Name,email
+kids   => 4242,Kids Room,kids@example.com
+adults => 4242,Adults,adults@example.com
+family => 4242,Family,family@example.com

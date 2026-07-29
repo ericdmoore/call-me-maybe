@@ -1,32 +1,15 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-
-# Test binary, built with `go test -c`
-*.test
-
-# Code coverage profiles and other test artifacts
-*.out
-coverage.*
-*.coverprofile
-profile.cov
-
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
-go.work
-go.work.sum
-
-# env file
+# Secrets and local state — never commit these.
 .env
+policy.toml
+handsets.toml
+asterisk/pjsip.conf
+asterisk/ari.conf
+# Rendered output: pjsip_handsets.conf contains real SIP passwords.
+asterisk/generated/
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# Built prompt audio (regenerate with `bun run prompts:build`)
+prompts/build/
+
+bin/
+*.log
+.DS_Store

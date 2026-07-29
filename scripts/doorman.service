@@ -1,0 +1,39 @@
+# Install:
+#   sudo cp scripts/doorman.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now doorman
+[Unit]
+Description=Call Me Maybe — doorman (Asterisk ARI lobby)
+Documentation=https://callmemaybe.cc
+After=network-online.target asterisk.service
+Wants=network-online.target
+# Asterisk going down takes doorman with it; ARI is useless without it.
+BindsTo=asterisk.service
+
+[Service]
+Type=simple
+User=doorman
+Group=doorman
+WorkingDirectory=/opt/call-me-maybe
+EnvironmentFile=/opt/call-me-maybe/.env
+# One static binary; no runtime, no interpreter, nothing else to install.
+ExecStart=/opt/call-me-maybe/bin/doorman
+Restart=always
+RestartSec=2
+# Give up and alert rather than crash-looping forever on a bad config.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Hardening. doorman only needs loopback and its own directory.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/call-me-maybe
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=128M
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

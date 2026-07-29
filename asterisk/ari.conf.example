@@ -1,0 +1,15 @@
+; Credentials for the doorman app. These must match ARI_USERNAME and
+; ARI_PASSWORD in .env. Generate a real password:
+;   openssl rand -base64 24
+
+[general]
+enabled = yes
+pretty = no
+; Do NOT allow origin wildcards; nothing but doorman should speak ARI.
+allowed_origins =
+
+[doorman]
+type = user
+read_only = no
+password_format = plain
+password = CHANGE_ME

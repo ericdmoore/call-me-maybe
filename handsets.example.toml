@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────
+# Call Me Maybe — the hardware inventory.
+#   cp handsets.example.toml handsets.toml
+#
+# This file is the single source of truth for the phone plant. `doorman
+# render` generates the per-handset Asterisk config from it (PJSIP blocks,
+# internal numbers, BLF hints, the ring-all and page-all groups), so the
+# id, the SIP endpoint, and the dialplan can never drift apart.
+#
+# It changes when you buy hardware. Rules — who gets in, what rings, when —
+# live in policy.toml. Secrets live in .env; `password_env` names the
+# variable, never the value.
+# ─────────────────────────────────────────────────────────────
+
+[[handsets]]
+id = "kitchen"
+label = "Kitchen"
+endpoint = "PJSIP/kitchen"       # must be PJSIP/<id>; render enforces it
+number = 101                     # internal extension + BLF hint (100-199)
+page = true                      # rings on dial-500 page-all
+mailbox = "adults"               # MWI lamp follows this voicemail.conf box
+password_env = "HANDSET_KITCHEN_PASSWORD"
+
+[[handsets]]
+id = "living-room"
+label = "Living room"
+endpoint = "PJSIP/living-room"
+number = 102
+page = true
+password_env = "HANDSET_LIVING_ROOM_PASSWORD"
+
+[[handsets]]
+id = "office"
+label = "Office"
+endpoint = "PJSIP/office"
+number = 103
+page = true
+mailbox = "adults"
+password_env = "HANDSET_OFFICE_PASSWORD"
+
+[[handsets]]
+id = "primary-bed"
+label = "Primary bedroom"
+endpoint = "PJSIP/primary-bed"
+number = 104
+page = false                     # nobody pages the bedroom
+mailbox = "adults"
+password_env = "HANDSET_PRIMARY_BED_PASSWORD"
+
+[[handsets]]
+id = "kids-room"
+label = "Kids' room"
+endpoint = "PJSIP/kids-room"
+number = 105
+page = true
+mailbox = "kids"
+password_env = "HANDSET_KIDS_ROOM_PASSWORD"
+
+# A pseudo-handset: any dialplan destination can be a policy target. No SIP
+# registration, so no number/password — render skips it, policy can dial it.
+[[handsets]]
+id = "conference"
+label = "Family conference bridge"
+endpoint = "Local/600@internal"
+
+# ── Groups ───────────────────────────────────────────────────
+# A group id works anywhere a handset id does in policy.toml — [house],
+# extensions, ladder steps. Groups contain handsets only (no nesting).
+
+[[groups]]
+id = "adults"
+label = "Adult handsets"
+handsets = ["kitchen", "office", "primary-bed"]

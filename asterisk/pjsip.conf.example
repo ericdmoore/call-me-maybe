@@ -1,0 +1,97 @@
+; ─────────────────────────────────────────────────────────────
+; Call Me Maybe — PJSIP
+;
+; Trunk side: the Pi REGISTERs outbound to VoIP.ms. `line=yes` +
+; `endpoint=voipms` binds inbound calls on that registration back to
+; the endpoint below, which is what removes the need for an
+; `identify` block, a static provider IP, or any port forwarding.
+;
+; Handset side: Grandstreams register inward to Asterisk on the LAN.
+; ─────────────────────────────────────────────────────────────
+
+[global]
+type=global
+; Keepalives hold the NAT pinhole open. 30s is comfortably inside the
+; UDP timeout on consumer routers (eero included).
+keep_alive_interval=30
+endpoint_identifier_order=ip,username,anonymous
+
+[transport-udp]
+type=transport
+protocol=udp
+bind=0.0.0.0:5060
+; Uncomment and set if the Pi ever sits behind a router that mangles SIP.
+;local_net=192.168.1.0/24
+;external_media_address=
+;external_signaling_address=
+
+; ─── VoIP.ms trunk ───────────────────────────────────────────
+; Replace 123456_home with your SUB ACCOUNT (Main Menu -> Sub Accounts),
+; not your main VoIP.ms login. Replace POP with your chosen server,
+; e.g. dallas.voip.ms / atlanta.voip.ms — use the same host everywhere.
+
+[voipms_auth]
+type=auth
+auth_type=userpass
+username=123456_home
+password=CHANGE_ME
+
+[voipms_reg]
+type=registration
+outbound_auth=voipms_auth
+server_uri=sip:POP.voip.ms
+client_uri=sip:123456_home@POP.voip.ms
+contact_user=123456_home
+retry_interval=60
+forbidden_retry_interval=600
+expiration=300
+line=yes
+endpoint=voipms
+
+[voipms_aor]
+type=aor
+contact=sip:POP.voip.ms
+qualify_frequency=60
+
+[voipms]
+type=endpoint
+context=inbound-trunk
+disallow=all
+allow=ulaw
+allow=g722
+outbound_auth=voipms_auth
+aors=voipms_aor
+from_user=123456_home
+from_domain=POP.voip.ms
+; Transcoding is wasted CPU on a Pi; let the endpoints negotiate directly
+; where they can, but keep media on the box so we can bridge and record.
+direct_media=no
+rtp_symmetric=yes
+force_rport=yes
+rewrite_contact=yes
+; DTMF: RFC2833 is what VoIP.ms sends. Without this the lobby never
+; hears an extension.
+dtmf_mode=rfc4733
+
+; ─── Handsets ────────────────────────────────────────────────
+; GENERATED from handsets.toml — run `doorman render`, copy the output
+; here, chown asterisk:asterisk, chmod 640 (it contains real passwords).
+; Add a phone by editing handsets.toml, never this file.
+#include "pjsip_handsets.conf"
+
+; ─── Home Assistant Assist (optional) ────────────────────────
+; A static endpoint at HA's IP for the native VoIP integration — no
+; registration, HA just answers. Requires the Opus codec module in Asterisk
+; (HA's Assist audio is Opus); see RUNBOOK for the caveats before enabling.
+;[homeassistant]
+;type=endpoint
+;context=internal
+;disallow=all
+;allow=opus
+;allow=ulaw
+;aors=homeassistant
+;direct_media=no
+;
+;[homeassistant]
+;type=aor
+;contact=sip:assist@HA_IP_HERE:5060

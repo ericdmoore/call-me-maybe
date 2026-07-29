@@ -1,0 +1,108 @@
+# ─────────────────────────────────────────────────────────────
+# Call Me Maybe — the rules: who gets in, what rings, and when.
+#   cp policy.example.toml policy.toml
+#   ./bin/doorman check
+#
+# Hardware lives in handsets.toml; secrets live in .env. This file is the
+# one that changes weekly, and it is safe to edit at 9pm: a file that fails
+# validation is rejected on reload and the previous good policy stays in
+# service. Handset and group ids referenced here must exist in handsets.toml.
+# ─────────────────────────────────────────────────────────────
+
+# What rings when a known caller is welcomed.
+[house]
+handsets = ["kitchen", "living-room", "office", "primary-bed"]
+# When nobody answers, the caller lands in this mailbox (voicemail.conf's
+# [household] section) instead of being dismissed. Remove to disable.
+voicemail = "family"
+# Shown on the handset display. {name} is the extension/group label for
+# internal routing; {number} is the normalised caller.
+caller_id_format = "Lobby: {name} <{number}>"
+
+# ── The allow-list ───────────────────────────────────────────
+# These callers hear "Welcome, I'll connect you" and ring the whole house.
+# Numbers may be written any way you like — 512-555-0100, (512) 555-0100,
+# +15125550100 — they are normalised to E.164 at load time. Anything that
+# is not a real number is a load error, not a silent never-match.
+
+[[people]]
+name = "Grandma"
+numbers = ["512-555-0100"]
+
+[[people]]
+name = "Eric"
+numbers = ["+15125550101", "512-555-0102"]
+notes = "mobile + work line"
+
+[[people]]
+name = "School front office"
+numbers = ["(512) 555-0150"]
+notes = "attendance line — do not remove"
+
+# ── Schedules ────────────────────────────────────────────────
+# Named time windows, defined once and referenced by id from extensions.
+# Turning bedtime off for spring break is one `enabled = false` here — no
+# hunting through extensions. A window that crosses midnight belongs to the
+# day it STARTS: this one covers Sunday night through Monday 07:00, and
+# Friday/Saturday nights stay open.
+
+[[schedules]]
+id = "school-night"
+enabled = true
+start = "20:30"
+end = "07:00"
+days = ["SU", "MO", "TU", "WE", "TH"]
+
+# ── Extensions ───────────────────────────────────────────────
+# Unknown callers dial one of these in the lobby. The PIN *is* the
+# extension, so treat it like a password: pick 6 random digits, do not
+# use 100000/123456, and do not print them on anything public.
+#
+#   openssl rand -hex 8 | tr -dc '0-9' | head -c 6
+
+[[extensions]]
+pin = "428917"
+label = "Kitchen"
+handsets = ["kitchen"]
+
+[[extensions]]
+pin = "310244"
+label = "Office"
+handsets = ["office"]
+
+[[extensions]]
+pin = "775301"
+label = "Whole house"
+handsets = ["kitchen", "living-room", "office", "primary-bed"]
+voicemail = "family"
+
+# ── A ringer ladder with quiet hours ─────────────────────────
+# Callers who dial the kids' extension ring the kids' room for 3 ring
+# cycles (~6s each), escalate to the adult handsets for 4 more, then land
+# in the kids mailbox. On school nights the line doesn't ring at all —
+# straight to voicemail between 20:30 and 07:00. Flip `enabled` under
+# [extensions.afterhours] to false for holidays.
+
+[[extensions]]
+pin = "902118"
+label = "Kids"
+voicemail = "kids"
+afterhours = "school-night"
+
+  [[extensions.steps]]
+  handsets = ["kids-room"]
+  rings = 3
+
+  [[extensions.steps]]
+  handsets = ["adults"]     # group
+  rings = 4                 # or `seconds = 24` for an exact duration
+
+
+# ── An outside line into the family conference ───────────────
+# Local channels let a "handset" be any dialplan destination: this PIN drops
+# a caller straight into the ConfBridge at 600. Uncomment to use.
+#[[extensions]]
+#pin = "000000"            # rotate immediately: doorman rotate "Conference"
+#label = "Conference"
+#handsets = ["conference"]
+# (the "conference" pseudo-handset ships in handsets.example.toml)
