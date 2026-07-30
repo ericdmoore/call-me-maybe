@@ -1,0 +1,29 @@
+<!--
+  Call Me Maybe — edge stud.
+  The centre-point interruption a Deco frame puts halfway along each rail: a
+  lozenge in a scalloped fan, with the rule stopping either side of it. Drawn for
+  a top edge; rotate for the others.
+  Without this a long rail reads as a mere line. With it, the frame has a middle.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 34" width="64" height="34"
+     fill="none" stroke="currentColor" role="img" aria-label="Art Deco edge stud">
+  <!-- Scalloped fan sitting under the lozenge -->
+  <path d="M12 6 A20 20 0 0 0 52 6" stroke-width="1.2"/>
+  <g stroke-width="1" opacity="0.6">
+    <path d="M32 6 L18 9.5"/>
+    <path d="M32 6 L24 12.6"/>
+    <path d="M32 6 L32 14"/>
+    <path d="M32 6 L40 12.6"/>
+    <path d="M32 6 L46 9.5"/>
+  </g>
+
+  <!-- Stub rules running out to meet the rail -->
+  <g stroke-width="1.4">
+    <path d="M0 6 H10"/>
+    <path d="M54 6 H64"/>
+  </g>
+
+  <!-- The lozenge, and a smaller one inside it -->
+  <path d="M32 0 L42 10 L32 20 L22 10 Z" stroke-width="1.6"/>
+  <path d="M32 5 L37 10 L32 15 L27 10 Z" fill="currentColor" stroke="none"/>
+</svg>

@@ -1,3 +1,13 @@
+<p align="center">
+  <img src="brand/readme/mark-threshold-ornate-brass.svg" width="190"
+       alt="The Call Me Maybe mark: a lit doorway inside an Art Deco medallion" />
+</p>
+
+<p align="center">
+  <img src="brand/readme/divider-dial-brass.svg" width="460"
+       alt="" aria-hidden="true" />
+</p>
+
 # Call Me Maybe
 
 ![Carly Rae Jepson](https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExcjhoaTRpN3EzaDVpbGF6eW1qMm5qbWRwMnNtb2h2NW1udWlzeTd3dSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/kGdRnb1kF4OmQ/giphy.gif)

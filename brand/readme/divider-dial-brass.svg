@@ -1,0 +1,77 @@
+<!--
+  GENERATED for README use — do not edit.
+  Source: brand/ornament-dial-divider.svg
+  Only difference: currentColor is baked to #c8a24a, because GitHub loads
+  README images via <img>, where currentColor has no CSS context and falls
+  back to black. Brass reads on both GitHub themes.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 52" width="400" height="52"
+     fill="none" stroke="#c8a24a" preserveAspectRatio="xMidYMid meet"
+     role="img" aria-label="Ornamental divider: a rotary dial rosette between two lightning bolts">
+
+  <!-- One bolt to the right of the rosette, and the same geometry mirrored for
+       the left. Centreline kinks at 232 → 270 → 300 → 340 → 368 → 394, thinning
+       as it travels and ending on a point.
+       Written out twice rather than defs + use on purpose: a divider gets used
+       several times on a page, and an internal id would collide with itself.
+       This file has no ids at all, so it can be inlined freely. -->
+  <g stroke="none">
+    <g>
+      <polygon points="232,20 270,8.6 270,17.4 232,32" fill="#c8a24a" fill-opacity="0.9"/>
+      <polygon points="270,8.6 300,25.8 300,32.2 270,17.4" fill="#c8a24a" fill-opacity="0.78"/>
+      <polygon points="300,25.8 340,11.8 340,16.2 300,32.2" fill="#c8a24a" fill-opacity="0.62"/>
+      <polygon points="340,11.8 368,24.7 368,27.3 340,16.2" fill="#c8a24a" fill-opacity="0.5"/>
+      <polygon points="368,24.7 394,21 368,27.3" fill="#c8a24a" fill-opacity="0.38"/>
+      <path d="M396 21 l3 3 -3 3 -3 -3 Z" fill="#c8a24a" fill-opacity="0.55"/>
+    </g>
+    <g transform="translate(400,0) scale(-1,1)">
+      <polygon points="232,20 270,8.6 270,17.4 232,32" fill="#c8a24a" fill-opacity="0.9"/>
+      <polygon points="270,8.6 300,25.8 300,32.2 270,17.4" fill="#c8a24a" fill-opacity="0.78"/>
+      <polygon points="300,25.8 340,11.8 340,16.2 300,32.2" fill="#c8a24a" fill-opacity="0.62"/>
+      <polygon points="340,11.8 368,24.7 368,27.3 340,16.2" fill="#c8a24a" fill-opacity="0.5"/>
+      <polygon points="368,24.7 394,21 368,27.3" fill="#c8a24a" fill-opacity="0.38"/>
+      <path d="M396 21 l3 3 -3 3 -3 -3 Z" fill="#c8a24a" fill-opacity="0.55"/>
+    </g>
+  </g>
+
+  <!-- Bead runs, tucked under the bolts so the field is not empty -->
+  <g fill="#c8a24a" stroke="none" opacity="0.75">
+    <circle cx="252" cy="40" r="1.7"/><circle cx="268" cy="40" r="1.7"/>
+    <circle cx="284" cy="40" r="1.7"/><circle cx="300" cy="40" r="1.7"/>
+    <circle cx="316" cy="40" r="1.7"/><circle cx="332" cy="40" r="1.7"/>
+    <circle cx="148" cy="40" r="1.7"/><circle cx="132" cy="40" r="1.7"/>
+    <circle cx="116" cy="40" r="1.7"/><circle cx="100" cy="40" r="1.7"/>
+    <circle cx="84" cy="40" r="1.7"/><circle cx="68" cy="40" r="1.7"/>
+  </g>
+
+  <!-- Stepped terminals, closing both ends -->
+  <g fill="#c8a24a" stroke="none">
+    <path d="M6 18 h5 v16 h-5 Z"/>
+    <path d="M12 22 h4 v8 h-4 Z" fill-opacity="0.6"/>
+    <path d="M18 25 h3 v2 h-3 Z" fill-opacity="0.4"/>
+    <path d="M394 18 h-5 v16 h5 Z"/>
+    <path d="M388 22 h-4 v8 h4 Z" fill-opacity="0.6"/>
+    <path d="M382 25 h-3 v2 h3 Z" fill-opacity="0.4"/>
+  </g>
+
+  <!-- Short fluted stubs bridging rosette to bolt -->
+  <g stroke-width="1.2" opacity="0.7">
+    <path d="M224 20 h6 M224 26 h8 M224 32 h6"/>
+    <path d="M176 20 h-6 M176 26 h-8 M176 32 h-6"/>
+  </g>
+
+  <!-- The rosette: the Dial, reduced to what survives at this size -->
+  <g transform="translate(200 26)">
+    <circle r="21" stroke-width="2"/>
+    <circle r="16.5" stroke-width="1" opacity="0.6"/>
+    <g stroke-width="1.6">
+      <circle cx="0" cy="-12.5" r="2.6"/><circle cx="0" cy="12.5" r="2.6"/>
+      <circle cx="-12.5" cy="0" r="2.6"/><circle cx="12.5" cy="0" r="2.6"/>
+      <circle cx="-8.8" cy="-8.8" r="2.6"/><circle cx="8.8" cy="-8.8" r="2.6"/>
+      <circle cx="-8.8" cy="8.8" r="2.6"/><circle cx="8.8" cy="8.8" r="2.6"/>
+    </g>
+    <!-- Centre ziggurat -->
+    <path d="M-4 4 v-2 h1.6 v-2 h1.6 v-2 h1.6 v2 h1.6 v2 H4 v2 Z"
+          fill="#c8a24a" stroke="none"/>
+  </g>
+</svg>

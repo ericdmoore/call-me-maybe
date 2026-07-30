@@ -1,0 +1,38 @@
+<!--
+  Call Me Maybe — frame corner ornament.
+  Drawn for the top-left; mirror it with scale(-1,1) / scale(1,-1) for the other
+  three, which is how the period cut them too — one block, four impressions.
+
+  Three motifs stacked, all from the references: nested quarter-arcs, a ray fan
+  converging on the corner, and the square-in-square key. The key is the piece
+  that makes a corner read as *finished* rather than merely stopped.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"
+     fill="none" stroke="currentColor" role="img" aria-label="Art Deco corner ornament">
+  <!-- Nested quarter-arcs, struck from the corner -->
+  <path d="M8 76 A68 68 0 0 1 76 8" stroke-width="1.4"/>
+  <path d="M8 62 A54 54 0 0 1 62 8" stroke-width="1"/>
+  <path d="M8 48 A40 40 0 0 1 48 8" stroke-width="1" opacity="0.65"/>
+
+  <!-- Ray fan converging on the corner, between the second and outer arc -->
+  <g stroke-width="1" opacity="0.7">
+    <path d="M20.6 55.6 L25.6 73.7"/>
+    <path d="M33.2 44.9 L42 66.9"/>
+    <path d="M44.9 33.2 L56.1 56.1"/>
+    <path d="M55.6 20.6 L66.9 42"/>
+    <path d="M62 8 L73.7 25.6"/>
+    <path d="M8 62 L8 76" opacity="0"/>
+  </g>
+
+  <!-- Square-in-square key: the corner's full stop -->
+  <rect x="10" y="10" width="17" height="17" stroke-width="1.6"/>
+  <rect x="15" y="15" width="7" height="7" fill="currentColor" stroke="none"/>
+
+  <!-- Beads trailing away along both rails -->
+  <g fill="currentColor" stroke="none" opacity="0.8">
+    <circle cx="35" cy="18.5" r="1.7"/>
+    <circle cx="44" cy="18.5" r="1.7"/>
+    <circle cx="18.5" cy="35" r="1.7"/>
+    <circle cx="18.5" cy="44" r="1.7"/>
+  </g>
+</svg>

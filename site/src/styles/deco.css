@@ -775,3 +775,139 @@ samp {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ── Page frame ────────────────────────────────────────────────────────────
+   Paired rules around the viewport, an ornamented corner at each turn, and a
+   lozenge stud halfway along the top and bottom rails.
+
+   Fixed rather than wrapped around the content: a long scrolling page should
+   still read as one framed plate, which is what a Deco border is for. It never
+   intercepts input — pointer-events is none on the container and inherited by
+   everything in it.
+
+   --pf-inset is the one number to change; everything else is derived from it. */
+
+.page-frame {
+  --pf-inset: clamp(10px, 1.2vw, 16px);
+
+  /* How much empty margin actually exists beside the content column. Below
+     74rem that is the gutter; above it, the centred column leaves far more. */
+  --pf-room: max(var(--gutter), calc((100vw - 74rem) / 2));
+
+  /* Never reach further inward than that room allows. The frame is fixed while
+     the page scrolls, so an over-long corner would have text sliding under it
+     rather than beside it — computed rather than eyeballed. */
+  --pf-corner: min(clamp(40px, 4vw, 60px), calc(var(--pf-room) - var(--pf-inset)));
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  color: var(--accent);
+}
+
+/* Rails. Two lines each, the outer heavier — the pairing is the period's, and
+   a single hairline reads as a browser artefact rather than a decision. */
+.pf-rail {
+  position: absolute;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.pf-top,
+.pf-bottom {
+  left: var(--pf-inset);
+  right: var(--pf-inset);
+  height: 1px;
+}
+
+.pf-top {
+  top: var(--pf-inset);
+  box-shadow: 0 4px 0 -3px currentColor;
+}
+
+.pf-bottom {
+  bottom: var(--pf-inset);
+  box-shadow: 0 -4px 0 -3px currentColor;
+}
+
+.pf-left,
+.pf-right {
+  top: var(--pf-inset);
+  bottom: var(--pf-inset);
+  width: 1px;
+}
+
+.pf-left {
+  left: var(--pf-inset);
+  box-shadow: 4px 0 0 -3px currentColor;
+}
+
+.pf-right {
+  right: var(--pf-inset);
+  box-shadow: -4px 0 0 -3px currentColor;
+}
+
+/* Corners. One drawing, four orientations. */
+.pf-corner {
+  position: absolute;
+  width: var(--pf-corner);
+  height: var(--pf-corner);
+  opacity: 0.9;
+}
+
+.pf-tl {
+  top: var(--pf-inset);
+  left: var(--pf-inset);
+}
+
+.pf-tr {
+  top: var(--pf-inset);
+  right: var(--pf-inset);
+  transform: scaleX(-1);
+}
+
+.pf-bl {
+  bottom: var(--pf-inset);
+  left: var(--pf-inset);
+  transform: scaleY(-1);
+}
+
+.pf-br {
+  bottom: var(--pf-inset);
+  right: var(--pf-inset);
+  transform: scale(-1, -1);
+}
+
+/* Studs: the midpoint of a rail, so a long run has a centre. */
+.pf-stud {
+  position: absolute;
+  left: 50%;
+  width: clamp(44px, 5vw, 64px);
+  height: auto;
+  transform: translateX(-50%);
+}
+
+.pf-stud-top {
+  top: calc(var(--pf-inset) - 0.32em);
+}
+
+.pf-stud-bottom {
+  bottom: calc(var(--pf-inset) - 0.32em);
+  transform: translateX(-50%) scaleY(-1);
+}
+
+/* On a phone the ornaments would eat the very margin they decorate, so below
+   this width only the rules survive. */
+@media (max-width: 44rem) {
+  .pf-corner,
+  .pf-stud {
+    display: none;
+  }
+}
+
+/* The frame is atmosphere. If someone has asked for less of it, oblige. */
+@media (prefers-reduced-transparency: reduce) {
+  .page-frame {
+    opacity: 0.6;
+  }
+}

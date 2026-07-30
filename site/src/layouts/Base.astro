@@ -1,5 +1,6 @@
 ---
 import '../styles/deco.css';
+import PageFrame from '../components/PageFrame.astro';
 
 interface Props {
   title: string;
@@ -40,6 +41,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? 'https://callmemaybe
   </head>
 
   <body data-state-host data-state="waiting">
+    <PageFrame />
     <slot />
   </body>
 </html>
