@@ -2,6 +2,7 @@
 import Base from '../layouts/Base.astro';
 import Threshold from '../components/Threshold.astro';
 import Divider from '../components/Divider.astro';
+import InstallCommand from '../components/InstallCommand.astro';
 import Keypad from '../components/Keypad.astro';
 import { byKind, kindLabels, type Kind } from '../data/hardware';
 
@@ -241,6 +242,8 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
           ))
         }
       </ol>
+
+      <InstallCommand />
     </div>
   </section>
 

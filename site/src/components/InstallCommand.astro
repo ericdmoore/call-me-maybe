@@ -1,0 +1,62 @@
+---
+/**
+ * The install one-liner, with a copy button — because an install command that
+ * has to be selected by hand from a terminal block gets mis-copied.
+ *
+ * The command is real: it resolves the latest GitHub release, picks the build
+ * for the host, and verifies a SHA-256 against the published checksums before
+ * installing anything.
+ */
+const command =
+  'curl -fsSL https://raw.githubusercontent.com/ericdmoore/call-me-maybe/main/install.sh | bash';
+---
+
+<div class="install">
+  <p class="eyebrow">Or skip the build</p>
+
+  <div class="install-line">
+    <code data-install-cmd>{command}</code>
+    <button class="install-copy" type="button" data-copy aria-live="polite">Copy</button>
+  </div>
+
+  <p class="install-note">
+    Detects your OS and architecture, verifies a SHA-256 against the published
+    checksums, and installs to <code>/usr/local/bin</code> — or
+    <code>~/.local/bin</code> when that is not writable. It installs the man page
+    too, and touches nothing else: no Asterisk, no service, no config. Pass
+    <code>--version</code>, <code>--prefix</code>, or <code>--force</code> if you
+    want to be specific.
+  </p>
+</div>
+
+<script is:inline>
+  (() => {
+    const btn = document.querySelector('[data-copy]');
+    const src = document.querySelector('[data-install-cmd]');
+    if (!btn || !src) return;
+
+    // Without the clipboard API the text is still selectable, so the button is
+    // the enhancement rather than the mechanism — hide it instead of offering a
+    // control that cannot work.
+    if (!navigator.clipboard) {
+      btn.hidden = true;
+      return;
+    }
+
+    let revert = null;
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(src.textContent.trim());
+        btn.textContent = 'Copied';
+        btn.dataset.done = 'true';
+      } catch {
+        btn.textContent = 'Press ⌘C';
+      }
+      window.clearTimeout(revert);
+      revert = window.setTimeout(() => {
+        btn.textContent = 'Copy';
+        delete btn.dataset.done;
+      }, 2000);
+    });
+  })();
+</script>
