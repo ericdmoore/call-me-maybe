@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Call Me Maybe — pre-push gate.
+#
+# Install with `make hooks` (sets core.hooksPath, so this file is versioned
+# with the code instead of living in an untracked .git/hooks).
+#
+# Blocks a push on: unformatted code, vet findings, failing tests, or a
+# secret file that has been force-added to the index. Bypass in a genuine
+# emergency with `git push --no-verify`, then fix it immediately.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+fail() { printf '\n\033[31m✗ pre-push: %s\033[0m\n' "$1" >&2; exit 1; }
+step() { printf '\033[2m→ %s\033[0m\n' "$1"; }
+
+# Nothing to check on a branch deletion (`git push origin :branch`).
+only_deletes=true
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+	[ -n "${local_sha:-}" ] || continue
+	# All-zero local sha means "delete this ref".
+	case "$local_sha" in
+		*[!0]*) only_deletes=false ;;
+	esac
+done
+if [ "$only_deletes" = true ]; then
+	exit 0
+fi
+
+# ── Secrets ──────────────────────────────────────────────────────────
+# .gitignore covers these, but `git add -f` walks straight past it and this
+# is a public repo holding SIP passwords and door PINs.
+step "checking for tracked secrets"
+secrets=$(git ls-files -- \
+	.env \
+	policy.toml \
+	handsets.toml \
+	asterisk/pjsip.conf \
+	asterisk/ari.conf \
+	'asterisk/generated/*')
+if [ -n "$secrets" ]; then
+	printf 'these files must never be committed:\n%s\n' "$secrets" >&2
+	fail "secret files are tracked (git rm --cached them)"
+fi
+
+# ── Formatting ───────────────────────────────────────────────────────
+step "gofmt"
+unformatted=$(gofmt -l .)
+if [ -n "$unformatted" ]; then
+	printf 'not gofmt-clean:\n%s\n\nrun: make fmt\n' "$unformatted" >&2
+	fail "unformatted files"
+fi
+
+# ── Vet and tests ────────────────────────────────────────────────────
+step "go vet"
+go vet ./... || fail "go vet found problems"
+
+# nilness, plus the rule that caller IDs and PINs never reach the logs. The
+# linter is built from the tools/ submodule; the build is cached after the
+# first run.
+step "cmmlint"
+(cd tools && go build -o ../bin/cmmlint ./cmd/cmmlint) || fail "could not build cmmlint"
+./bin/cmmlint ./... || fail "cmmlint found problems"
+
+step "go test"
+go test ./... || fail "tests are failing — not pushing"
+
+step "analyzer tests"
+(cd tools && go test ./...) >/dev/null || fail "tools/ tests are failing"
+
+# ── The shipped examples must stay valid ─────────────────────────────
+# A broken policy.example.toml is the first thing a new user copies.
+step "validating example config"
+go run ./cmd/doorman check --handsets handsets.example.toml policy.example.toml >/dev/null \
+	|| fail "policy.example.toml does not validate"
+
+printf '\033[32m✓ pre-push checks passed\033[0m\n'

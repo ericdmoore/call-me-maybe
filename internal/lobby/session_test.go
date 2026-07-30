@@ -79,7 +79,7 @@ func startWith(t *testing.T, policySrc, callerNumber string, limiter *RateLimite
 			RingCycle:          40 * time.Millisecond,
 			MaxPinAttempts:     2,
 		},
-		Now: func() time.Time { return h.now },
+		Now:          func() time.Time { return h.now },
 		OnLegCreated: func(legID string, _ *Session) { h.legs <- legID },
 		OnFinished:   func(*Session) { close(h.finished) },
 	})

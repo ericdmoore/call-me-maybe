@@ -13,8 +13,36 @@ breaks every transfer and every voicemail handoff).
 ## Ground rules
 
 ```bash
-make check      # vet + test + build; must be green
+make hooks      # once, per clone — installs the pre-push gate
+make check      # gofmt + vet + lint + test + build; must be green
+make cover      # tests with -race, plus per-package coverage floors
+make lint       # nilness, plus the no-secrets-in-logs rule
 ```
+
+`go vet` already runs 35 analyzers from `golang.org/x/tools/go/analysis`,
+including the ones that matter most here: `lostcancel`, `copylocks`,
+`atomic`, `waitgroup`, `testinggoroutine`, `loopclosure`. `make lint` adds
+what vet leaves out — `nilness`, which needs SSA — plus **`nologsecrets`,
+which mechanically enforces the rule below that caller IDs and PINs never
+reach the logs.** It allows `len(digits)` and `tail(number)`, because logging
+a count or a redacted fragment is useful and safe; it rejects the value
+itself, including through `fmt.Sprint` or a slice expression. The analyzer
+lives in the nested `tools/` module so that `golang.org/x/tools` never enters
+the daemon's dependency graph — `doorman` still builds from exactly two
+dependencies.
+
+`make hooks` points `core.hooksPath` at the versioned `.githooks/`, so the
+pre-push gate travels with the repo. It refuses a push on unformatted code,
+vet findings, failing tests, an example config that no longer validates, or a
+secret file that has been force-added past `.gitignore`. `git push
+--no-verify` bypasses it for a genuine emergency; CI runs the same checks, so
+the bypass only buys you the walk of shame in a pull request.
+
+Coverage floors are per-package rather than one global number, because the
+global figure is dominated by `cmd/` and `internal/ari` — thin glue over
+Asterisk, covered by `scripts/smoke.sh` on real hardware instead of unit
+tests. Floors live in `scripts/coverage.sh`. Raise them when you add tests;
+do not lower one to get a push through.
 
 - No new dependencies without a strong reason. There are two, both
   permissive, and the stdlib covers the rest.
