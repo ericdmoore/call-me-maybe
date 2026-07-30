@@ -1,0 +1,62 @@
+<!--
+  Call Me Maybe — section divider, dial rosette.
+  The Dial mark demoted from logo to ornament, which is where it earns its keep:
+  a horizontal rule for breaking sections, with the rosette as the centre stud
+  and stepped terminals at each end. Flanking runs are paired rules plus beads,
+  the same grammar as the frames.
+  Stretches: the rules are drawn to the viewBox edges, so give it width and let
+  the height sit at 48.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 48" width="400" height="48"
+     fill="none" stroke="currentColor" preserveAspectRatio="xMidYMid meet"
+     role="img" aria-label="Ornamental divider with a rotary dial rosette">
+  <!-- Paired rules, left and right, stopping clear of the rosette -->
+  <g stroke-width="2">
+    <path d="M6 24 H150"/>
+    <path d="M250 24 H394"/>
+  </g>
+  <g stroke-width="1" opacity="0.6">
+    <path d="M18 30 H150"/>
+    <path d="M250 30 H382"/>
+  </g>
+
+  <!-- Bead runs -->
+  <g fill="currentColor" stroke="none">
+    <circle cx="60" cy="17" r="1.8"/><circle cx="76" cy="17" r="1.8"/>
+    <circle cx="92" cy="17" r="1.8"/><circle cx="108" cy="17" r="1.8"/>
+    <circle cx="124" cy="17" r="1.8"/>
+    <circle cx="276" cy="17" r="1.8"/><circle cx="292" cy="17" r="1.8"/>
+    <circle cx="308" cy="17" r="1.8"/><circle cx="324" cy="17" r="1.8"/>
+    <circle cx="340" cy="17" r="1.8"/>
+  </g>
+
+  <!-- Stepped terminals -->
+  <g fill="currentColor" stroke="none">
+    <path d="M6 18 h5 v12 h-5 Z"/>
+    <path d="M12 21 h4 v6 h-4 Z" fill-opacity="0.6"/>
+    <path d="M394 18 h-5 v12 h5 Z"/>
+    <path d="M388 21 h-4 v6 h4 Z" fill-opacity="0.6"/>
+  </g>
+
+  <!-- Fluting either side of the rosette -->
+  <g stroke-width="1.2" opacity="0.7">
+    <path d="M156 14 V34 M162 17 V31 M168 20 V28"/>
+    <path d="M244 14 V34 M238 17 V31 M232 20 V28"/>
+  </g>
+
+  <!-- The rosette: the Dial, reduced to what survives at this size -->
+  <g transform="translate(200 24)">
+    <circle r="21" stroke-width="2"/>
+    <circle r="16.5" stroke-width="1" opacity="0.6"/>
+    <!-- eight apertures, symmetric about both axes -->
+    <g stroke-width="1.6">
+      <circle cx="0" cy="-12.5" r="2.6"/><circle cx="0" cy="12.5" r="2.6"/>
+      <circle cx="-12.5" cy="0" r="2.6"/><circle cx="12.5" cy="0" r="2.6"/>
+      <circle cx="-8.8" cy="-8.8" r="2.6"/><circle cx="8.8" cy="-8.8" r="2.6"/>
+      <circle cx="-8.8" cy="8.8" r="2.6"/><circle cx="8.8" cy="8.8" r="2.6"/>
+    </g>
+    <!-- centre ziggurat -->
+    <path d="M-4 4 v-2 h1.6 v-2 h1.6 v-2 h1.6 v2 h1.6 v2 H4 v2 Z"
+          fill="currentColor" stroke="none"/>
+  </g>
+</svg>

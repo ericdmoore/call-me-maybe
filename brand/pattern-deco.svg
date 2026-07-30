@@ -1,0 +1,67 @@
+<!--
+  Call Me Maybe — seamless Deco tile, 80×80.
+  Line ornament in the register of the reference pattern: quarter-fans in the
+  corners, scallops centred on each edge, a lozenge at the middle, chevrons on
+  the diagonals.
+  It tiles because every element that meets an edge is either centred on that
+  edge or mirrored on the opposite one — four tiles meeting at a corner complete
+  the corner fan into a full rosette.
+  Use as a CSS background (background-repeat: repeat; background-size: 80px) or
+  inline as a <pattern>. Single colour via currentColor; drop the opacity on the
+  parent rather than editing the file.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="80" height="80"
+     fill="none" stroke="currentColor" stroke-width="1" role="img"
+     aria-label="Seamless Art Deco line pattern">
+  <!-- Corner quarter-fans. Four tiles meeting complete each into a rosette. -->
+  <g>
+    <path d="M0 26 A26 26 0 0 0 26 0"/>
+    <path d="M0 19 A19 19 0 0 0 19 0"/>
+    <path d="M0 12 A12 12 0 0 0 12 0"/>
+    <path d="M80 26 A26 26 0 0 1 54 0"/>
+    <path d="M80 19 A19 19 0 0 1 61 0"/>
+    <path d="M80 12 A12 12 0 0 1 68 0"/>
+    <path d="M0 54 A26 26 0 0 1 26 80"/>
+    <path d="M0 61 A19 19 0 0 1 19 80"/>
+    <path d="M0 68 A12 12 0 0 1 12 80"/>
+    <path d="M80 54 A26 26 0 0 0 54 80"/>
+    <path d="M80 61 A19 19 0 0 0 61 80"/>
+    <path d="M80 68 A12 12 0 0 0 68 80"/>
+  </g>
+
+  <!-- Rays inside each corner fan -->
+  <g opacity="0.65">
+    <path d="M0 0 L18 18"/>
+    <path d="M80 0 L62 18"/>
+    <path d="M0 80 L18 62"/>
+    <path d="M80 80 L62 62"/>
+  </g>
+
+  <!-- Scallops centred on the edges: each completes across the seam -->
+  <g>
+    <path d="M32 0 A8 8 0 0 0 48 0"/>
+    <path d="M32 80 A8 8 0 0 1 48 80"/>
+    <path d="M0 32 A8 8 0 0 1 0 48"/>
+    <path d="M80 32 A8 8 0 0 0 80 48"/>
+  </g>
+
+  <!-- Central lozenge, paired -->
+  <path d="M40 26 L54 40 L40 54 L26 40 Z"/>
+  <path d="M40 32 L48 40 L40 48 L32 40 Z" opacity="0.7"/>
+
+  <!-- Stepped spurs off the lozenge, on the axes -->
+  <g opacity="0.8">
+    <path d="M40 26 V20 M37 22 h6"/>
+    <path d="M40 54 V60 M37 58 h6"/>
+    <path d="M26 40 H20 M22 37 v6"/>
+    <path d="M54 40 H60 M58 37 v6"/>
+  </g>
+
+  <!-- Chevrons on the diagonals, filling the field between fan and lozenge -->
+  <g opacity="0.55">
+    <path d="M22 30 L30 22 M25 33 L33 25"/>
+    <path d="M58 30 L50 22 M55 33 L47 25"/>
+    <path d="M22 50 L30 58 M25 47 L33 55"/>
+    <path d="M58 50 L50 58 M55 47 L47 55"/>
+  </g>
+</svg>

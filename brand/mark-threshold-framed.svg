@@ -1,0 +1,68 @@
+<!--
+  Call Me Maybe — "The Threshold", framed.
+  The same direction at a lower ornament setting: paired rules, chamfered
+  corners with stepped shoulders, a single bead run, and fluted flanks — but no
+  lozenge and no corner fans. Between this and mark-threshold-ornate.svg you can
+  see roughly where the ornateness dial wants to sit; the ornate one is richer
+  at large sizes, this one survives smaller.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 180" width="160" height="180"
+     fill="none" stroke="currentColor" role="img"
+     aria-label="A framed Art Deco doorway with light spilling out">
+  <defs>
+    <clipPath id="cmm-fr-open">
+      <path d="M56 138 V88 h5 V78 h6 V70 h7 V64 h12 v6 h7 v8 h6 v10 h5 v50 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Chamfered outer frame — the corners step in, as on a Deco cartouche -->
+  <path d="M4 22 L22 4 H138 L156 22 V158 L138 176 H22 L4 158 Z" stroke-width="2.5"/>
+  <path d="M11 26 L26 11 H134 L149 26 V154 L134 169 H26 L11 154 Z" stroke-width="1"/>
+
+  <!-- Bead run along the top and bottom chamfered edges -->
+  <g fill="currentColor" stroke="none">
+    <circle cx="46" cy="17.5" r="1.8"/><circle cx="58" cy="17.5" r="1.8"/>
+    <circle cx="70" cy="17.5" r="1.8"/><circle cx="90" cy="17.5" r="1.8"/>
+    <circle cx="102" cy="17.5" r="1.8"/><circle cx="114" cy="17.5" r="1.8"/>
+    <circle cx="46" cy="162.5" r="1.8"/><circle cx="58" cy="162.5" r="1.8"/>
+    <circle cx="70" cy="162.5" r="1.8"/><circle cx="90" cy="162.5" r="1.8"/>
+    <circle cx="102" cy="162.5" r="1.8"/><circle cx="114" cy="162.5" r="1.8"/>
+    <!-- centre studs -->
+    <path d="M76 14 h8 v7 h-8 Z"/><path d="M76 159 h8 v7 h-8 Z"/>
+  </g>
+
+  <!-- Fluted flanks -->
+  <g stroke-width="1.2" opacity="0.65">
+    <path d="M20 40 V140 M26 46 V134 M32 52 V128"/>
+    <path d="M140 40 V140 M134 46 V134 M128 52 V128"/>
+  </g>
+
+  <!-- Light from the doorway -->
+  <g clip-path="url(#cmm-fr-open)" stroke-width="2.6" opacity="0.5">
+    <path d="M80 138 V56"/>
+    <path d="M80 138 L68 60"/><path d="M80 138 L92 60"/>
+    <path d="M80 138 L58 74"/><path d="M80 138 L102 74"/>
+  </g>
+
+  <!-- Portal, two nested setbacks -->
+  <path d="M42 138 V86 h5 V76 h5 V68 h4 V62 h5 V56 h38 v6 h5 v6 h4 v8 h5 v10 h5 v52"
+        stroke-width="2.5"/>
+  <path d="M56 138 V88 h5 V78 h6 V70 h7 V64 h12 v6 h7 v8 h6 v10 h5 v50"
+        stroke-width="2"/>
+
+  <!-- Pier fluting -->
+  <g stroke-width="1" opacity="0.55">
+    <path d="M47 138 V90"/><path d="M51 138 V82"/>
+    <path d="M113 138 V90"/><path d="M109 138 V82"/>
+  </g>
+
+  <!-- Keystone -->
+  <path d="M76 56 h8 v-5 h-2 v-4 h-4 v4 h-2 Z" fill="currentColor" stroke="none"/>
+
+  <!-- Steps -->
+  <g fill="currentColor" stroke="none">
+    <rect x="50" y="138" width="60" height="4"/>
+    <rect x="42" y="142" width="76" height="4" fill-opacity="0.7"/>
+    <rect x="34" y="146" width="92" height="4" fill-opacity="0.45"/>
+  </g>
+</svg>
