@@ -1,40 +1,62 @@
 {
-  // Cloudflare Pages deployment for callmemaybe.cc.
+  // Cloudflare Workers deployment for callmemaybe.cc.
   //
-  // Pages rather than Workers static assets, to match the other projects in
-  // this account (bullmoose.cc and the tensr.fitness sites are all Pages,
-  // deployed from the CLI). One mental model beats a marginally more modern
-  // platform for the sixth project.
+  // A Worker that serves static assets and nothing else: there is no `main`,
+  // because the site has no server-side work to do. Cloudflare serves ./dist
+  // from the edge.
   //
-  //   npm run cf:preview   serve ./dist through the Pages runtime locally
+  // Workers rather than Pages for one concrete reason: `wrangler pages` has no
+  // domain subcommand, so on Pages the custom domains can only be attached
+  // through the dashboard and live nowhere in the repo. Here they are the
+  // `routes` array below — reviewable, diffable, and reproducible, which is how
+  // the rest of this project treats configuration.
+  //
+  //   npm run cf:preview   build, then serve through the real Workers runtime
   //   npm run deploy       build, then publish
   //
-  // Credentials come from the environment. This repo's .env carries
-  // CF_API_TOKEN and CF_ACCOUNT_ID (wrangler still honours those legacy names;
-  // CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are the current ones). .env is
-  // gitignored and the pre-push hook refuses a push that tracks it.
+  // Credentials come from the environment; this repo's .env carries them. .env
+  // is gitignored and the pre-push hook refuses a push that tracks it.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "callmemaybe",
   "compatibility_date": "2026-07-29",
 
-  // Pages serves this directory. It also serves 404.html for unmatched paths
-  // by convention, so the Deco "Good day." page needs no extra configuration —
-  // unlike Workers static assets, which wants an explicit not_found_handling.
-  "pages_build_output_dir": "./dist"
+  "assets": {
+    "directory": "./dist",
+    // Serve the Deco "Good day." page for unknown paths instead of a bare
+    // Cloudflare error. Astro builds it from src/pages/404.astro.
+    "not_found_handling": "404-page"
+  },
 
-  // Custom domains are NOT configurable here. Pages attaches them through the
-  // dashboard (Workers & Pages → callmemaybe → Custom domains); there is no
-  // `wrangler pages domain` command. That is the one real cost of choosing
-  // Pages: the domain wiring lives outside version control.
+  // Gives every deploy a working URL at callmemaybe.<subdomain>.workers.dev,
+  // independent of whether the custom domains are attached yet. Keep it on: it
+  // is how you verify a deploy without touching the live hostname.
+  "workers_dev": true,
+
+  // ── Custom domains ───────────────────────────────────────────────────────
+  // Deliberately not enabled yet. As of 2026-07-30 the nameservers for both
+  // zones are delegated to Cloudflare and fully propagated (the .cc registry
+  // and Cloudflare/Google/Quad9 all return becky+max), but Cloudflare still
+  // reports callmemaybe.cc as `pending` until its own verification catches up.
   //
-  // Current state of the two zones, checked 2026-07-30:
-  //   dialdoorman.cc  active  — can serve immediately
-  //   callmemaybe.cc  pending — nameservers not yet delegated to Cloudflare at
-  //                             the registrar, so attaching it will not resolve
-  //                             until the zone activates
+  // Attaching a domain whose zone is pending gives you the worst outcome: a
+  // deploy that reports success and a hostname that does not resolve. So
+  // deploy to workers.dev first, confirm the site, then uncomment this once
+  // `callmemaybe.cc` reads active.
   //
-  // If dialdoorman.cc is a spare rather than a mirror, point it at
-  // callmemaybe.cc with a Redirect Rule on that zone instead of attaching both
-  // to the project — two live hostnames both serving the site contradicts the
-  // <link rel="canonical"> in Base.astro.
+  // Attaching a custom domain also creates a DNS record, so the API token
+  // needs Zone → DNS → Edit on these zones, not just Workers Scripts → Edit.
+  //
+  // "routes": [
+  //   { "pattern": "callmemaybe.cc", "custom_domain": true },
+  //   { "pattern": "www.callmemaybe.cc", "custom_domain": true }
+  // ],
+  //
+  // dialdoorman.cc is left out on purpose. It is active and could serve today,
+  // but two hostnames both serving the site contradicts the <link
+  // rel="canonical"> in Base.astro. If it is a spare rather than a mirror, give
+  // it a Redirect Rule to callmemaybe.cc instead of a second custom domain.
+
+  "observability": {
+    "enabled": true
+  }
 }

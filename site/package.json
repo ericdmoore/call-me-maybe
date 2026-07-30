@@ -8,8 +8,8 @@
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check",
-    "cf:preview": "astro build && wrangler pages dev ./dist",
-    "deploy": "astro build && wrangler pages deploy",
+    "cf:preview": "astro build && wrangler dev",
+    "deploy": "astro build && wrangler deploy",
     "cf:whoami": "wrangler whoami"
   },
   "devDependencies": {
