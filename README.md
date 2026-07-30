@@ -12,8 +12,8 @@
 
 ![Carly Rae Jepson](https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExcjhoaTRpN3EzaDVpbGF6eW1qMm5qbWRwMnNtb2h2NW1udWlzeTd3dSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/kGdRnb1kF4OmQ/giphy.gif)
 
-**A programmable home phone for a spare Raspberry Pi. Known callers ring the
-whole house; everyone else meets the bouncer.**
+**A programmable home phone. Known callers ring the whole house; everyone else
+meets the bouncer. Runs happily on a spare Raspberry Pi.**
 
 [callmemaybe.cc](https://callmemaybe.cc)
 
@@ -21,7 +21,8 @@ whole house; everyone else meets the bouncer.**
 
 *The home phone my kids never saw coming.*
 
-A programmable home phone that runs on a spare Raspberry Pi.
+A programmable home phone. A Raspberry Pi is the obvious host — cheap, silent,
+and it only has to do one thing — but anything that runs Asterisk will do.
 
 Known callers hear *"Welcome, I'll connect you"* and the whole house rings. Everyone else meets the lobby: dial a 6-digit extension, or the bouncer says *"Good day"* and hangs up.
 
@@ -37,9 +38,9 @@ inbound call ──→ ┤
 
 ---
 
-<sub>**Repo metadata** — description: *A programmable home phone for a spare
-Raspberry Pi. Known callers ring the whole house; everyone else meets the
-bouncer.* · topics: `asterisk` `voip` `sip` `raspberry-pi` `pbx` `homelab`
+<sub>**Repo metadata** — description: *A programmable home phone. Known callers
+ring the whole house; everyone else meets the bouncer. Runs happily on a spare
+Raspberry Pi.* · topics: `asterisk` `voip` `sip` `raspberry-pi` `pbx` `homelab`
 `self-hosted` `home-automation` `golang` `telephony`</sub>
 
 ## How it fits together

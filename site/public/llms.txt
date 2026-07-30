@@ -1,10 +1,10 @@
 # Call Me Maybe
 
-> A programmable home phone for a spare Raspberry Pi. Known callers ring the whole
-> house; everyone else meets a lobby where they dial a 6-digit extension, or a
-> bouncer says "Good day" and hangs up. Asterisk handles SIP, RTP, and DTMF; a
-> single static Go binary called `doorman` decides who gets in, driving Asterisk
-> over ARI on loopback.
+> A programmable home phone. Known callers ring the whole house; everyone else
+> meets a lobby where they dial a 6-digit extension, or a bouncer says "Good day"
+> and hangs up. Asterisk handles SIP, RTP, and DTMF; a single static Go binary
+> called `doorman` decides who gets in, driving Asterisk over ARI on loopback. A
+> Raspberry Pi is the obvious host, but anything that runs Asterisk will do.
 
 The fastest way to understand the configuration surface is to ask the binary
 rather than to read prose:
