@@ -1,0 +1,327 @@
+---
+import Base from '../layouts/Base.astro';
+import Doorman from '../components/Doorman.astro';
+import Keypad from '../components/Keypad.astro';
+import { byKind, kindLabels, type Kind } from '../data/hardware';
+
+const repo = 'https://github.com/ericdmoore/call-me-maybe';
+
+const features = [
+  {
+    term: 'Ringer ladders',
+    body: 'Ring the kids’ room for three cycles, escalate to the adults for four more, then take a message. Per extension.',
+  },
+  {
+    term: 'Quiet hours',
+    body: 'A named schedule like school-night, referenced by any extension. Between 20:30 and 07:00 that line does not ring at all.',
+  },
+  {
+    term: 'Paging',
+    body: 'Dial 500 and every handset opens at once. Dinner is ready without shouting up the stairs.',
+  },
+  {
+    term: 'Call parking',
+    body: 'Park a call on 700 in the kitchen, pick it up from the office. The house behaves like a small hotel.',
+  },
+  {
+    term: 'Family conference',
+    body: 'Dial 600 and everyone who joins is in the same room. An extension can drop an outside caller straight into it.',
+  },
+  {
+    term: 'Busy lamps',
+    body: 'BLF hints, so the lamp on your handset tells you the office is already on a call before you pick up.',
+  },
+  {
+    term: 'Voicemail',
+    body: 'Per-mailbox, with the message delivered to email. Message-waiting lamps follow whichever box you point a phone at.',
+  },
+  {
+    term: 'Hold music',
+    body: 'Because a silent hold is indistinguishable from a dropped call.',
+  },
+  {
+    term: 'Swappable bouncer',
+    body: 'The greeting is a folder of audio. Drop in another pack and a Victorian doorman, a bureaucrat, or a ship’s computer meets your strangers instead.',
+  },
+];
+
+const steps = [
+  {
+    title: 'A number to answer',
+    body: 'Create a sub-account with a VoIP provider, point a DID at it, and turn on E911. A couple of dollars a month, and the one line item worth not skipping on a house phone.',
+  },
+  {
+    title: 'Asterisk on the Pi',
+    body: 'apt install asterisk, copy the config from the repo, restart. Confirm the trunk registered before going further — everything above this rung depends on it.',
+  },
+  {
+    title: 'A voice for the lobby',
+    body: 'Render the prompts once on a workstation with piper and copy the WAVs across. The Pi never synthesises speech, so a broken speech service can never make the phone unreachable.',
+  },
+  {
+    title: 'Hand the doorman the rules',
+    body: 'Write who is known and what rings, run doorman check, and enable the service. Edits go live within a second, and a file that fails validation is discarded rather than applied.',
+  },
+];
+
+const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
+---
+
+<Base
+  title="Call Me Maybe — a programmable home phone for a spare Raspberry Pi"
+  description="Known callers ring the whole house. Everyone else meets the lobby: dial a six-digit extension, or the bouncer says Good day and hangs up. Runs on a spare Raspberry Pi, with no port forwarding."
+>
+  <!-- ── The lobby ──────────────────────────────────────────────────────── -->
+  <header class="lobby">
+    <div class="wrap">
+      <Doorman />
+
+      <h1 class="wordmark">
+        Call Me
+        <span class="maybe">Maybe</span>
+      </h1>
+
+      <div class="hero-rules" aria-hidden="true">
+        <span></span>
+        &#9670;
+        <span></span>
+      </div>
+
+      <p class="tagline">
+        A programmable home phone for a spare Raspberry Pi. Known callers ring
+        the whole house. Everyone else meets the doorman.
+      </p>
+
+      <Keypad />
+    </div>
+  </header>
+
+  <!-- ── The two doors ──────────────────────────────────────────────────── -->
+  <section class="panel">
+    <div class="wrap">
+      <p class="eyebrow">When the phone rings</p>
+      <h2 class="display">Two doors, one decision</h2>
+
+      <div class="prose" style="margin-top:1.25rem;">
+        <p>
+          Every caller is checked against a list before anything rings. The
+          number is folded to a single canonical form first, because the same
+          person arrives as <code>5125550100</code> one day and
+          <code>+15125550100</code> the next, and comparing raw strings is how
+          Grandma ends up talking to a bouncer.
+        </p>
+      </div>
+
+      <div class="flow stepped">
+        <div>
+          <p class="who">Known caller</p>
+          <p class="said">&ldquo;Welcome, I&rsquo;ll connect you.&rdquo;</p>
+          <p class="then">
+            Every handset in the house rings at once. The first to answer gets
+            the call; the rest stop. Nobody dials anything.
+          </p>
+        </div>
+        <div>
+          <p class="who">Everyone else</p>
+          <p class="said">&ldquo;Welcome to the phone lobby. Please dial an extension.&rdquo;</p>
+          <p class="then">
+            Ten seconds for the first digit, three between the rest. A valid
+            extension rings that room. Silence, or a wrong guess, gets
+            &ldquo;Good day.&rdquo; and a click.
+          </p>
+        </div>
+      </div>
+
+      <div class="prose" style="margin-top:2rem;">
+        <p>
+          Ten seconds sounds generous until you watch someone read a number off
+          a card. The window is ten seconds to the <em>first</em> digit, then
+          three between digits &mdash; so a confident caller is through in two
+          seconds and a fumbling one still gets a fair shot.
+        </p>
+        <p>
+          A six-digit code exposed to the phone network is a million
+          combinations: ample against a person, thin against a machine that can
+          redial. So after three failed calls in an hour, a number skips the
+          greeting entirely and goes straight to &ldquo;Good day.&rdquo; &mdash;
+          no prompt, no dial window, nothing to work against.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Architecture ───────────────────────────────────────────────────── -->
+  <section class="panel">
+    <div class="wrap">
+      <p class="eyebrow">How it fits together</p>
+      <h2 class="display">Nothing opens a port</h2>
+
+      <div class="prose" style="margin-top:1.25rem;">
+        <p>
+          The Pi registers <strong>outbound</strong> to a VoIP provider, and
+          incoming calls ride that registration back in. No port forwarding, no
+          inbound firewall rules, no dynamic DNS. The only connection crossing
+          your network edge is one the Pi opened itself.
+        </p>
+        <p>
+          Asterisk does SIP, RTP, and tone detection, because it is very good at
+          those and there is no reason to write them again. Everything about
+          <em>who gets in</em> lives in <code>doorman</code>: one static Go
+          binary, talking to Asterisk over loopback. One call is one goroutine,
+          and a caller hanging up cancels a context that unwinds the whole
+          thing.
+        </p>
+        <p>
+          It is also its own operations tool. It will tell you what your
+          configuration adds up to, show you how a caller ID normalises, and
+          hand a language model the entire config surface as JSON Schema.
+        </p>
+      </div>
+
+      <div class="terminal" tabindex="0" aria-label="Example terminal session">
+        <div><span class="c">$</span> <b>doorman check</b></div>
+        <div>&#10003; policy.toml is valid</div>
+        <div>&nbsp;</div>
+        <div>&nbsp;&nbsp;allow-listed numbers : 4</div>
+        <div>&nbsp;&nbsp;extensions&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; : 4</div>
+        <div>&nbsp;&nbsp;house ring group&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; : kitchen, living-room, office</div>
+        <div>&nbsp;&nbsp;Kids&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; : 2-stage ladder, afterhours configured</div>
+        <div>&nbsp;</div>
+        <div><span class="c">$</span> <b>doorman e164 &quot;(512) 555-0100&quot;</b></div>
+        <div>(512) 555-0100&nbsp;&nbsp;&rarr;&nbsp;&nbsp;+15125550100&nbsp;&nbsp;<span class="c">(usable for the allow-list)</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Features ───────────────────────────────────────────────────────── -->
+  <section class="panel">
+    <div class="wrap">
+      <p class="eyebrow">Beyond the lobby</p>
+      <h2 class="display">The rest of the switchboard</h2>
+
+      <div class="prose" style="margin-top:1.25rem;">
+        <p>
+          Once the handsets are registered, they get the toolkit a small office
+          PBX has had for thirty years. It turns out to be a remarkably good fit
+          for a house.
+        </p>
+      </div>
+
+      <ul class="features">
+        {
+          features.map((f) => (
+            <li>
+              <dfn>{f.term}</dfn>
+              <p>{f.body}</p>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <!-- ── Setup ──────────────────────────────────────────────────────────── -->
+  <section class="panel">
+    <div class="wrap">
+      <p class="eyebrow">An afternoon, roughly</p>
+      <h2 class="display">Four rungs, bottom up</h2>
+
+      <div class="prose" style="margin-top:1.25rem;">
+        <p>
+          In that order, and confirm each before climbing. A failure low down
+          explains every symptom above it, which is why the runbook is written
+          as a ladder rather than a checklist.
+        </p>
+      </div>
+
+      <ol class="steps">
+        {
+          steps.map((s) => (
+            <li>
+              <div>
+                <h3>{s.title}</h3>
+                <p>{s.body}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <!-- ── Hardware ───────────────────────────────────────────────────────── -->
+  <section class="panel" id="hardware">
+    <div class="wrap">
+      <p class="eyebrow">What to buy</p>
+      <h2 class="display">Suggested hardware</h2>
+
+      <div class="prose" style="margin-top:1.25rem;">
+        <p>
+          <code>doorman</code> has no opinion about brands. Anything that
+          registers over SIP works, so buy on ergonomics and price. The type
+          matters more than the model: wired desk phones never surprise you,
+          DECT is the right answer for cordless, and an ATA means the phones
+          already in your house may need nothing bought at all.
+        </p>
+        <p>
+          For the Pi itself, one choice is worth being rigid about:
+          <strong>use wired Ethernet</strong>. Wi-Fi jitter on the box handling
+          audio is the difference between a clear call and someone sounding
+          underwater. Then put it on a small UPS &mdash; a house phone that dies
+          in a power cut is worse than none, because you thought you had one.
+        </p>
+      </div>
+
+      {
+        kinds.map((kind) => (
+          <div class="hw-group">
+            <h3>{kindLabels[kind]}</h3>
+            <ul class="hw-list">
+              {
+                byKind(kind).map((item) => (
+                  <li>
+                    <span class="hw-name">
+                      {item.url ? <a href={item.url} rel="nofollow sponsored noopener">{item.name}</a> : item.name}
+                    </span>
+                    <span class="hw-type">{item.type}</span>
+                    <p class="hw-note">{item.note}</p>
+                  </li>
+                ))
+              }
+            </ul>
+          </div>
+        ))
+      }
+
+      <p class="disclosure">
+        <strong>Disclosure.</strong> The Amazon links above are affiliate links
+        &mdash; buy through one and the project earns a commission at no cost to
+        you. Nothing here is sponsored and no vendor has paid for placement. Be
+        aware of the obvious bias anyway: everything with a link earns
+        something, so the honest guidance is the part that does not.
+        <code>doorman</code> works with any SIP endpoint, the ATA above may mean
+        buying nothing at all, and a free softphone will test your whole ringer
+        ladder before you spend a cent.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── Footer ─────────────────────────────────────────────────────────── -->
+  <footer class="wrap foot">
+    <div>
+      <p style="margin:0 0 0.35rem;">
+        <span class="display" style="font-size:var(--t-xs);color:var(--accent);">Call Me Maybe</span>
+      </p>
+      <p style="margin:0;">
+        Apache 2.0. Bundled audio CC BY-SA 4.0.<br />
+        The home phone my kids never saw coming.
+      </p>
+    </div>
+    <nav aria-label="Project links">
+      <a href={repo}>Source</a>
+      <a href={`${repo}/blob/main/docs/RUNBOOK.md`}>Runbook</a>
+      <a href={`${repo}/blob/main/docs/PACKS.md`}>Build a pack</a>
+      <a href="/llms.txt">llms.txt</a>
+    </nav>
+  </footer>
+</Base>

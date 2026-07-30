@@ -1,0 +1,42 @@
+{
+  // Cloudflare deployment for callmemaybe.cc.
+  //
+  // This is a Worker that serves static assets and nothing else — there is no
+  // `main` script, because the site has no server-side work to do. Cloudflare
+  // serves ./dist straight from the edge.
+  //
+  //   npm run deploy      build, then publish
+  //   npm run cf:preview  build, then serve it through the real Workers runtime
+  //
+  // Wrangler needs to be logged in first: `npx wrangler login`.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "callmemaybe",
+  "compatibility_date": "2026-07-29",
+
+  "assets": {
+    "directory": "./dist",
+    // Serve the Deco 404 page for unknown paths rather than a bare Cloudflare
+    // error. Astro builds it from src/pages/404.astro.
+    "not_found_handling": "404-page"
+  },
+
+  // Custom domains. Each zone must already exist in this Cloudflare account —
+  // `wrangler deploy` fails on a pattern whose zone it cannot find, so delete
+  // any line below that does not apply rather than leaving it to error.
+  //
+  // Both domains currently serve the same site. If dialdoorman.cc should
+  // instead redirect to callmemaybe.cc, drop it from this list and use a
+  // Cloudflare Bulk Redirect on that zone — a redirect rule costs nothing to
+  // run, where a second custom domain here means two hostnames both claiming
+  // to be canonical, which search engines dislike and which the <link
+  // rel="canonical"> in Base.astro already contradicts.
+  "routes": [
+    { "pattern": "callmemaybe.cc", "custom_domain": true },
+    { "pattern": "www.callmemaybe.cc", "custom_domain": true },
+    { "pattern": "dialdoorman.cc", "custom_domain": true }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}

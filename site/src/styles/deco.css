@@ -1,0 +1,756 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   callmemaybe.cc — Art Deco.
+
+   The conceit: this site is the lobby. Black lacquer, aged brass, a doorman,
+   and a keypad that decides whether you come in. Every motif is CSS or short
+   SVG primitives — no bitmaps, no webfonts, nothing to load and nothing to
+   fall back from.
+
+   Type is period-correct rather than fashionable: Futura (1927) for display,
+   set uppercase with wide tracking the way a Deco poster would; a warm
+   high-contrast serif for reading; mono for digits. All system stacks.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Night lobby — the primary world. */
+  --ink: #0b0c10;         /* black lacquer; blue-biased, not pure black */
+  --ink-raised: #14161d;  /* panel above the ground */
+  --smoke: #2a2c33;       /* rules and hairlines, biased toward the ground */
+  --brass: #c8a24a;       /* aged brass — desaturated so it never glares */
+  --brass-lit: #e6c878;   /* lit brass: hover, focus, emphasis */
+  --brass-dim: #7a6431;   /* unlit brass for inactive keys */
+  --ivory: #ede6d6;       /* warm paper white */
+  --ivory-soft: #b9b3a5;  /* secondary text */
+  --jade: #3f8a7b;        /* admitted */
+  --oxblood: #9c3f4d;     /* dismissed — "Good day." */
+
+  --ground: var(--ink);
+  --raised: var(--ink-raised);
+  --text: var(--ivory);
+  --text-soft: var(--ivory-soft);
+  --rule: var(--smoke);
+  --accent: var(--brass);
+  --accent-lit: var(--brass-lit);
+  --accent-dim: var(--brass-dim);
+
+  /* Type */
+  --display: Futura, "Avenir Next Condensed", "Avenir Next", "Century Gothic",
+             "URW Gothic", "Trebuchet MS", ui-sans-serif, sans-serif;
+  --body: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua",
+          Georgia, serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Scale — 1.25 from 1rem, with a display step above it. */
+  --t-xs: 0.75rem;
+  --t-sm: 0.875rem;
+  --t-base: 1.0625rem;
+  --t-md: 1.3rem;
+  --t-lg: 1.65rem;
+  --t-xl: 2.2rem;
+  --t-2xl: 3rem;
+  --t-hero: clamp(2.6rem, 9vw, 6.5rem);
+
+  --measure: 64ch;
+  --gutter: clamp(1.25rem, 5vw, 4rem);
+
+  color-scheme: dark;
+}
+
+/* Lights on. Not an inversion — the same lobby by day, on cream stock the way
+   a Deco poster was actually printed. Brass darkens to read on ivory. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground: #efe9dc;
+    --raised: #e5ddcc;
+    --text: #16171c;
+    --text-soft: #55565e;
+    --rule: #cbbfa6;
+    --accent: #8a6a1f;
+    --accent-lit: #6b5115;
+    --accent-dim: #b8a678;
+    --jade: #2c6459;
+    --oxblood: #7d2c39;
+    color-scheme: light;
+  }
+}
+
+/* The viewer's toggle wins in both directions. */
+:root[data-theme="light"] {
+  --ground: #efe9dc;
+  --raised: #e5ddcc;
+  --text: #16171c;
+  --text-soft: #55565e;
+  --rule: #cbbfa6;
+  --accent: #8a6a1f;
+  --accent-lit: #6b5115;
+  --accent-dim: #b8a678;
+  --jade: #2c6459;
+  --oxblood: #7d2c39;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --ground: var(--ink);
+  --raised: var(--ink-raised);
+  --text: var(--ivory);
+  --text-soft: var(--ivory-soft);
+  --rule: var(--smoke);
+  --accent: var(--brass);
+  --accent-lit: var(--brass-lit);
+  --accent-dim: var(--brass-dim);
+  --jade: #3f8a7b;
+  --oxblood: #9c3f4d;
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: var(--t-base);
+  line-height: 1.65;
+  overflow-x: hidden;
+}
+
+/* ── Deco primitives ───────────────────────────────────────────────────── */
+
+/* Uppercase, wide-tracked display type. The single most Deco thing available
+   without a licensed face. */
+.display {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-weight: 500;
+  text-wrap: balance;
+}
+
+.eyebrow {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.32em;
+  font-size: var(--t-xs);
+  color: var(--accent);
+  margin: 0;
+}
+
+/* Stepped corners — the ziggurat silhouette, the defining Deco form. */
+.stepped {
+  clip-path: polygon(
+    0 1.25rem, 0.65rem 1.25rem, 0.65rem 0.65rem, 1.25rem 0.65rem, 1.25rem 0,
+    calc(100% - 1.25rem) 0, calc(100% - 1.25rem) 0.65rem,
+    calc(100% - 0.65rem) 0.65rem, calc(100% - 0.65rem) 1.25rem, 100% 1.25rem,
+    100% calc(100% - 1.25rem), calc(100% - 0.65rem) calc(100% - 1.25rem),
+    calc(100% - 0.65rem) calc(100% - 0.65rem),
+    calc(100% - 1.25rem) calc(100% - 0.65rem), calc(100% - 1.25rem) 100%,
+    1.25rem 100%, 1.25rem calc(100% - 0.65rem),
+    0.65rem calc(100% - 0.65rem), 0.65rem calc(100% - 1.25rem), 0 calc(100% - 1.25rem)
+  );
+}
+
+/* Thin double rule, the way Deco borders always came in pairs. */
+.rule-pair {
+  border-top: 1px solid var(--accent-dim);
+  box-shadow: 0 3px 0 -2px var(--accent-dim);
+  height: 0;
+  margin: 0;
+}
+
+/* Vertical fluting, as on a Deco pilaster. */
+.fluting {
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 7px,
+    color-mix(in srgb, var(--accent) 22%, transparent) 7px 8px
+  );
+}
+
+/* ── Layout ────────────────────────────────────────────────────────────── */
+
+.wrap {
+  width: min(74rem, 100% - var(--gutter) * 2);
+  margin-inline: auto;
+}
+
+.panel {
+  padding-block: clamp(3.5rem, 9vw, 7rem);
+  position: relative;
+}
+
+.panel + .panel {
+  border-top: 1px solid var(--rule);
+}
+
+.prose {
+  max-width: var(--measure);
+}
+
+.prose p {
+  margin: 0 0 1.1em;
+}
+
+.prose p:last-child {
+  margin-bottom: 0;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+}
+
+h2 {
+  font-size: var(--t-xl);
+}
+
+h3 {
+  font-size: var(--t-md);
+}
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+a:hover {
+  color: var(--accent-lit);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-lit);
+  outline-offset: 3px;
+}
+
+code,
+kbd,
+samp {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+/* ── Hero: the lobby ──────────────────────────────────────────────────── */
+
+.lobby {
+  position: relative;
+  text-align: center;
+  padding-block: clamp(3rem, 8vw, 6rem) clamp(3.5rem, 9vw, 6rem);
+  overflow: hidden;
+}
+
+/* Sunburst. A repeating conic gradient is exactly the right tool: infinitely
+   crisp rays, no path data, no image. */
+.lobby::before {
+  content: "";
+  position: absolute;
+  inset: -40% -10% auto;
+  aspect-ratio: 1;
+  background: repeating-conic-gradient(
+    from 0deg at 50% 100%,
+    color-mix(in srgb, var(--accent) 13%, transparent) 0deg 2.4deg,
+    transparent 2.4deg 7.2deg
+  );
+  mask-image: radial-gradient(ellipse 60% 65% at 50% 100%, #000 15%, transparent 72%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.lobby > * {
+  position: relative;
+  z-index: 1;
+}
+
+.wordmark {
+  font-family: var(--display);
+  text-transform: uppercase;
+  font-size: var(--t-hero);
+  line-height: 0.92;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+  margin: 0;
+  color: var(--text);
+}
+
+.wordmark .maybe {
+  display: block;
+  color: var(--accent);
+  /* The word the whole project is named for gets the widest tracking on the
+     page — the Deco marquee treatment. */
+  letter-spacing: 0.3em;
+  margin-inline-start: 0.3em;
+}
+
+.tagline {
+  font-size: var(--t-md);
+  color: var(--text-soft);
+  max-width: 44ch;
+  margin: 1.75rem auto 0;
+  text-wrap: balance;
+}
+
+.hero-rules {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin: 2rem auto 0;
+  max-width: 30rem;
+  color: var(--accent-dim);
+}
+
+.hero-rules span {
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+}
+
+/* ── Doorman ───────────────────────────────────────────────────────────── */
+
+.doorman {
+  display: block;
+  width: clamp(9rem, 22vw, 13rem);
+  height: auto;
+  margin: 0 auto 1.5rem;
+  color: var(--accent);
+}
+
+.doorman .hat {
+  transform-origin: 50% 78%;
+  transition: transform 620ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+/* Tipped in greeting, once you are known. */
+[data-state="admitted"] .doorman .hat {
+  transform: rotate(-19deg) translate(-5px, -5px);
+}
+
+[data-state="dismissed"] .doorman {
+  color: var(--oxblood);
+}
+
+[data-state="admitted"] .doorman {
+  color: var(--jade);
+}
+
+.doorman,
+.doorman * {
+  transition: color 400ms ease, fill 400ms ease, stroke 400ms ease;
+}
+
+/* ── Keypad ────────────────────────────────────────────────────────────── */
+
+.keypad-shell {
+  background: var(--raised);
+  border: 1px solid var(--accent-dim);
+  padding: clamp(1.25rem, 4vw, 2rem);
+  width: min(21rem, 100%);
+  margin: 2.5rem auto 0;
+}
+
+.readout {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--t-lg);
+  letter-spacing: 0.42em;
+  text-align: center;
+  color: var(--accent-lit);
+  background: color-mix(in srgb, var(--ground) 65%, #000 20%);
+  border: 1px solid var(--rule);
+  padding: 0.6rem 0.5rem 0.6rem 0.92rem;
+  min-height: 2.6em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.readout[data-empty="true"] {
+  color: var(--accent-dim);
+  letter-spacing: 0.2em;
+  font-size: var(--t-sm);
+  font-family: var(--display);
+  text-transform: uppercase;
+}
+
+.keys {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.key {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--accent-dim);
+  color: var(--text);
+  font-family: var(--display);
+  padding: 0.6rem 0.25rem 0.45rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.key:hover,
+.key:focus-visible {
+  border-color: var(--accent-lit);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-lit);
+}
+
+.key:active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.key .digit {
+  font-size: var(--t-md);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The letters are the only hint the easter egg gets. A real telephone keypad
+   has them; someone who thinks in dialpads will find the rest. */
+.key .letters {
+  font-size: 0.5rem;
+  letter-spacing: 0.16em;
+  color: var(--text-soft);
+  min-height: 0.7em;
+}
+
+.verdict {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: var(--t-sm);
+  text-align: center;
+  margin-top: 1rem;
+  min-height: 3.4em;
+  color: var(--text-soft);
+}
+
+.verdict b {
+  display: block;
+  font-size: var(--t-md);
+  letter-spacing: 0.14em;
+  font-weight: 500;
+}
+
+[data-state="dismissed"] .verdict b {
+  color: var(--oxblood);
+}
+
+[data-state="admitted"] .verdict b {
+  color: var(--jade);
+}
+
+/* The nameplate. Engraved brass, and the only place she is named. */
+.nameplate {
+  margin: 1.25rem auto 0;
+  border-top: 1px solid var(--accent-dim);
+  border-bottom: 1px solid var(--accent-dim);
+  padding: 0.7rem 0.5rem;
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  font-size: var(--t-xs);
+  color: var(--accent);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 700ms ease 240ms, transform 700ms ease 240ms;
+}
+
+[data-state="admitted"] .nameplate {
+  opacity: 1;
+  transform: none;
+}
+
+.nameplate small {
+  display: block;
+  font-family: var(--body);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--t-sm);
+  color: var(--text-soft);
+  margin-top: 0.35rem;
+  font-style: italic;
+}
+
+/* ── Flow diagram ─────────────────────────────────────────────────────── */
+
+.flow {
+  display: grid;
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  margin-top: 2.5rem;
+}
+
+@media (min-width: 46rem) {
+  .flow {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.flow > div {
+  background: var(--raised);
+  padding: 1.5rem;
+}
+
+.flow .who {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: var(--t-xs);
+  color: var(--accent);
+}
+
+.flow .said {
+  font-size: var(--t-md);
+  margin: 0.6rem 0 0.5rem;
+  color: var(--text);
+}
+
+.flow .then {
+  color: var(--text-soft);
+  font-size: var(--t-sm);
+  margin: 0;
+}
+
+/* ── Feature list ─────────────────────────────────────────────────────── */
+
+.features {
+  list-style: none;
+  padding: 0;
+  margin: 2.5rem 0 0;
+  display: grid;
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+}
+
+@media (min-width: 40rem) {
+  .features {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 62rem) {
+  .features {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.features li {
+  background: var(--ground);
+  padding: 1.4rem;
+}
+
+.features dfn {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: var(--t-sm);
+  font-style: normal;
+  color: var(--accent);
+  display: block;
+  margin-bottom: 0.45rem;
+}
+
+.features p {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--text-soft);
+}
+
+/* ── Setup: a real sequence, so it is numbered ─────────────────────────── */
+
+.steps {
+  list-style: none;
+  counter-reset: step;
+  padding: 0;
+  margin: 2.5rem 0 0;
+  display: grid;
+  gap: 1.5rem;
+}
+
+@media (min-width: 52rem) {
+  .steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2rem 2.5rem;
+  }
+}
+
+.steps li {
+  counter-increment: step;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.steps li::before {
+  content: counter(step, decimal-leading-zero);
+  font-family: var(--display);
+  font-size: var(--t-lg);
+  color: var(--accent-dim);
+  letter-spacing: 0.05em;
+  line-height: 1;
+  border-right: 1px solid var(--accent-dim);
+  padding-right: 1rem;
+}
+
+.steps h3 {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: var(--t-sm);
+  color: var(--text);
+  margin-bottom: 0.4rem;
+}
+
+.steps p {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--text-soft);
+}
+
+/* ── Terminal sample ──────────────────────────────────────────────────── */
+
+.terminal {
+  margin: 2rem 0 0;
+  background: color-mix(in srgb, var(--ground) 70%, #000 25%);
+  border: 1px solid var(--rule);
+  padding: 1.1rem 1.3rem;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: var(--t-sm);
+  line-height: 1.75;
+  color: var(--text-soft);
+}
+
+:root[data-theme="light"] .terminal {
+  background: color-mix(in srgb, var(--raised) 80%, #000 6%);
+}
+
+.terminal b {
+  color: var(--accent-lit);
+  font-weight: 400;
+}
+
+.terminal .c {
+  color: var(--text-soft);
+  opacity: 0.75;
+}
+
+/* ── Hardware ─────────────────────────────────────────────────────────── */
+
+.hw-group + .hw-group {
+  margin-top: 2.5rem;
+}
+
+.hw-group h3 {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: var(--t-sm);
+  color: var(--accent);
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--accent-dim);
+}
+
+.hw-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.hw-list li {
+  display: grid;
+  gap: 0.15rem 1.5rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+@media (min-width: 48rem) {
+  .hw-list li {
+    grid-template-columns: 16rem 9rem 1fr;
+    align-items: baseline;
+  }
+}
+
+.hw-list .hw-name {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: var(--t-sm);
+}
+
+.hw-list .hw-type {
+  font-size: var(--t-xs);
+  font-family: var(--mono);
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.hw-list .hw-note {
+  font-size: var(--t-sm);
+  color: var(--text-soft);
+  margin: 0;
+}
+
+.disclosure {
+  margin-top: 2rem;
+  padding: 1.1rem 1.3rem;
+  border: 1px solid var(--rule);
+  font-size: var(--t-sm);
+  color: var(--text-soft);
+}
+
+.disclosure strong {
+  color: var(--text);
+  font-weight: 400;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────── */
+
+.foot {
+  padding-block: 3rem 4rem;
+  border-top: 1px solid var(--rule);
+  font-size: var(--t-sm);
+  color: var(--text-soft);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.foot nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+
+/* ── Motion ───────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

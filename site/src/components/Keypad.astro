@@ -1,0 +1,169 @@
+---
+/**
+ * The lobby keypad — the hero, and the site's one interactive claim.
+ *
+ * This is not decoration: it behaves the way the real lobby behaves. Six
+ * digits, then a verdict. Anything unrecognised gets the bouncer's actual
+ * line, which teaches the product better than a paragraph would.
+ *
+ * One extension is recognised. The keys carry letters the way a real
+ * telephone keypad does, and that is the entire hint.
+ */
+---
+
+<div class="keypad-shell stepped" data-keypad>
+  <p class="eyebrow" style="text-align:center;margin-bottom:0.85rem;">The lobby</p>
+
+  <div class="readout" data-readout data-empty="true" role="status" aria-live="polite">
+    Dial an extension
+  </div>
+
+  <div class="keys" role="group" aria-label="Telephone keypad">
+    <button class="key" type="button" data-key="1"><span class="digit">1</span><span class="letters"></span></button>
+    <button class="key" type="button" data-key="2"><span class="digit">2</span><span class="letters">ABC</span></button>
+    <button class="key" type="button" data-key="3"><span class="digit">3</span><span class="letters">DEF</span></button>
+    <button class="key" type="button" data-key="4"><span class="digit">4</span><span class="letters">GHI</span></button>
+    <button class="key" type="button" data-key="5"><span class="digit">5</span><span class="letters">JKL</span></button>
+    <button class="key" type="button" data-key="6"><span class="digit">6</span><span class="letters">MNO</span></button>
+    <button class="key" type="button" data-key="7"><span class="digit">7</span><span class="letters">PQRS</span></button>
+    <button class="key" type="button" data-key="8"><span class="digit">8</span><span class="letters">TUV</span></button>
+    <button class="key" type="button" data-key="9"><span class="digit">9</span><span class="letters">WXYZ</span></button>
+    <button class="key" type="button" data-key="*" aria-label="Star — clear"><span class="digit" aria-hidden="true">✱</span><span class="letters">CLEAR</span></button>
+    <button class="key" type="button" data-key="0"><span class="digit">0</span><span class="letters">OPER</span></button>
+    <button class="key" type="button" data-key="#" aria-label="Hash — enter"><span class="digit" aria-hidden="true">#</span><span class="letters">ENTER</span></button>
+  </div>
+
+  <p class="verdict" data-verdict>
+    Six digits. Or ten seconds of silence, and the doorman decides for you.
+  </p>
+
+  <div class="nameplate" data-nameplate aria-hidden="true">
+    Here&rsquo;s my number
+    <small>&mdash; so call me, maybe</small>
+  </div>
+</div>
+
+<script is:inline>
+  (() => {
+    const shell = document.querySelector('[data-keypad]');
+    if (!shell) return;
+
+    const readout = shell.querySelector('[data-readout]');
+    const verdict = shell.querySelector('[data-verdict]');
+    const plate = shell.querySelector('[data-nameplate]');
+    const stage = document.querySelector('[data-state-host]') || document.body;
+
+    const LENGTH = 6;
+    // CALLME, spelled on a telephone keypad. The letters printed on the keys
+    // are the only clue offered.
+    const KNOWN = '225563';
+
+    const IDLE = 'Six digits. Or ten seconds of silence, and the doorman decides for you.';
+
+    let digits = '';
+    let idle = null;
+    let resetting = null;
+
+    const setState = (s) => stage.setAttribute('data-state', s);
+
+    const paint = () => {
+      if (digits === '') {
+        readout.dataset.empty = 'true';
+        readout.textContent = 'Dial an extension';
+        return;
+      }
+      readout.dataset.empty = 'false';
+      // Show what has been dialled. A real lobby would not echo a PIN, but a
+      // keypad that gives no feedback feels broken — and nothing here is
+      // actually a credential.
+      readout.textContent = digits;
+    };
+
+    const clear = (message) => {
+      digits = '';
+      paint();
+      verdict.innerHTML = message || IDLE;
+      setState('waiting');
+      plate.setAttribute('aria-hidden', 'true');
+    };
+
+    const armIdle = () => {
+      window.clearTimeout(idle);
+      // The real first-digit window is ten seconds. So is this one.
+      idle = window.setTimeout(() => {
+        if (digits.length > 0 && digits.length < LENGTH) {
+          setState('dismissed');
+          verdict.innerHTML = '<b>Good day.</b>Ten seconds, no extension. The line is clear again.';
+          digits = '';
+          paint();
+        }
+      }, 10000);
+    };
+
+    const evaluate = () => {
+      window.clearTimeout(idle);
+      if (digits === KNOWN) {
+        setState('admitted');
+        verdict.innerHTML = '<b>Welcome. I&rsquo;ll connect you.</b>The whole house is ringing.';
+        plate.setAttribute('aria-hidden', 'false');
+        digits = '';
+        return;
+      }
+      setState('dismissed');
+      verdict.innerHTML = '<b>Good day.</b>Not on the list, and that is not an extension here.';
+      digits = '';
+      paint();
+      resetting = window.setTimeout(() => clear(), 3400);
+    };
+
+    const press = (k) => {
+      window.clearTimeout(resetting);
+      if (k === '*') {
+        clear();
+        return;
+      }
+      if (k === '#') {
+        if (digits.length > 0) evaluate();
+        return;
+      }
+      if (!/^[0-9]$/.test(k)) return;
+
+      if (plate.getAttribute('aria-hidden') === 'false') {
+        plate.setAttribute('aria-hidden', 'true');
+        setState('waiting');
+      }
+      if (digits.length >= LENGTH) digits = '';
+
+      digits += k;
+      paint();
+      armIdle();
+
+      if (digits.length === LENGTH) evaluate();
+    };
+
+    shell.querySelectorAll('[data-key]').forEach((btn) => {
+      btn.addEventListener('click', () => press(btn.dataset.key));
+    });
+
+    // Typing works too, but only once the keypad has been scrolled to — so
+    // the page does not swallow keystrokes meant for the browser.
+    document.addEventListener('keydown', (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      if (/^[0-9]$/.test(e.key)) {
+        press(e.key);
+      } else if (e.key === 'Backspace' || e.key === 'Escape') {
+        clear();
+      } else if (e.key === 'Enter' && digits.length > 0) {
+        press('#');
+      } else {
+        return;
+      }
+      e.preventDefault();
+    });
+
+    setState('waiting');
+  })();
+</script>

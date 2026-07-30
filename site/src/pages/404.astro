@@ -1,0 +1,42 @@
+---
+import Base from '../layouts/Base.astro';
+import Doorman from '../components/Doorman.astro';
+
+/**
+ * The one page on this site that needed no invention: a 404 is the bouncer
+ * turning someone away, and the project already has the line for it.
+ */
+---
+
+<Base
+  title="Good day. — Call Me Maybe"
+  description="That extension is not on the list."
+>
+  <div data-state="dismissed" style="min-height:100svh;display:grid;place-items:center;text-align:center;">
+    <main class="wrap" style="padding-block:4rem;">
+      <Doorman />
+
+      <p class="eyebrow">404</p>
+
+      <h1 class="display" style="font-size:var(--t-2xl);margin-top:0.75rem;">
+        Good day.
+      </h1>
+
+      <div class="hero-rules" aria-hidden="true" style="max-width:18rem;">
+        <span></span>
+        &#9670;
+        <span></span>
+      </div>
+
+      <p style="color:var(--text-soft);max-width:38ch;margin:1.5rem auto 0;text-wrap:balance;">
+        That extension is not on the list, and nobody here is expecting you. No
+        hard feelings &mdash; the doorman treats everyone the same until he has a
+        reason not to.
+      </p>
+
+      <p style="margin-top:2rem;">
+        <a href="/" class="display" style="font-size:var(--t-sm);">Back to the lobby</a>
+      </p>
+    </main>
+  </div>
+</Base>

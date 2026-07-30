@@ -1,0 +1,19 @@
+{
+  "name": "callmemaybe-site",
+  "private": true,
+  "type": "module",
+  "description": "callmemaybe.cc — the project site",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "cf:preview": "astro build && wrangler dev",
+    "deploy": "astro build && wrangler deploy",
+    "cf:whoami": "wrangler whoami"
+  },
+  "devDependencies": {
+    "astro": "^5.14.1",
+    "wrangler": "^4.115.0"
+  }
+}

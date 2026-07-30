@@ -89,6 +89,28 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq mandoc
           mandoc -Tlint docs/doorman.1
 
+  # The site is a deliverable too, and a broken build should be loud.
+  site:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      # llms.txt is served by the site but authored at the repo root. Catch the
+      # copy going stale rather than serving two different answers.
+      - name: public/llms.txt matches the root copy
+        run: |
+          diff ../llms.txt public/llms.txt \
+            || { echo "::error::site/public/llms.txt has drifted from llms.txt — copy it across"; exit 1; }
+
   # Proves the Pi targets still compile. Cheap, and catches the 32-bit
   # breakage (int size, unaligned atomics) that amd64 tests never see.
   cross:

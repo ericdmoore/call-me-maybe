@@ -1,0 +1,45 @@
+---
+import '../styles/deco.css';
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site ?? 'https://callmemaybe.cc');
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical.href} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical.href} />
+
+    <!-- Brass on lacquer, so browser chrome matches the lobby. -->
+    <meta name="theme-color" content="#0b0c10" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#efe9dc" media="(prefers-color-scheme: light)" />
+
+    <!-- An SVG favicon keeps the no-bitmaps rule: a brass ziggurat. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230b0c10'/%3E%3Cpath d='M6 26h20v-4h-4v-4h-4v-4h-4v4h-4v4H6z' fill='%23c8a24a'/%3E%3C/svg%3E"
+    />
+
+    <!-- Agents arriving at the site get pointed at the same orientation file
+         the repository ships. -->
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt" />
+  </head>
+
+  <body data-state-host data-state="waiting">
+    <slot />
+  </body>
+</html>

@@ -1,0 +1,68 @@
+# Call Me Maybe
+
+> A programmable home phone for a spare Raspberry Pi. Known callers ring the whole
+> house; everyone else meets a lobby where they dial a 6-digit extension, or a
+> bouncer says "Good day" and hangs up. Asterisk handles SIP, RTP, and DTMF; a
+> single static Go binary called `doorman` decides who gets in, driving Asterisk
+> over ARI on loopback.
+
+The fastest way to understand the configuration surface is to ask the binary
+rather than to read prose:
+
+```bash
+doorman schema            # every config key, type, default, and cross-file
+                          # reference as JSON Schema — policy.toml,
+                          # handsets.toml, and the environment
+doorman schema policy     # just policy.toml
+doorman schema handsets   # just handsets.toml
+doorman schema env        # just the environment variables
+doorman check             # validate a real config and report what it resolves to
+doorman help              # every subcommand
+```
+
+**`doorman schema` describes shape; `doorman check` is the authority on
+validity.** JSON Schema cannot express this system's cross-file identifier
+references (a ladder step naming a handset that must exist in
+`handsets.toml`), its mutually exclusive keys (`handsets` XOR `steps`), or the
+roughly thirty semantic rules the validator applies. Those appear in the
+schema as `x-cross-references` and `x-rules` annotations, but a config is only
+known-good once `doorman check` exits 0.
+
+## Configuration model
+
+Three files, three cadences. Do not merge them; the split is deliberate.
+
+- **`.env`** — secrets and tuning. Changes rarely. Template: [examples/.env.example](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/.env.example)
+- **`handsets.toml`** — the hardware: what phones exist. Changes when hardware is bought. `doorman render` generates the per-handset Asterisk config from it, so the inventory and the dialplan cannot drift. Template: [examples/handsets.example.toml](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/handsets.example.toml)
+- **`policy.toml`** — the rules: who gets in, what rings, when. Changes weekly and is safe to hand-edit; an invalid file is rejected on reload and the last good policy stays in service. Template: [examples/policy.example.toml](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/policy.example.toml)
+
+## Docs
+
+- [README](https://github.com/ericdmoore/call-me-maybe/blob/main/README.md): architecture, diagrams, setup, suggested hardware
+- [CLAUDE.md](https://github.com/ericdmoore/call-me-maybe/blob/main/CLAUDE.md): the invariants — the rules that, if broken, fail in ways that look like working software. Read this before changing behaviour.
+- [docs/RUNBOOK.md](https://github.com/ericdmoore/call-me-maybe/blob/main/docs/RUNBOOK.md): provisioning, a bottom-up verification ladder, a symptom-to-cause table, and raw ARI calls for probing by hand
+- [docs/architecture.md](https://github.com/ericdmoore/call-me-maybe/blob/main/docs/architecture.md): why the pieces are split the way they are
+- [docs/editor.md](https://github.com/ericdmoore/call-me-maybe/blob/main/docs/editor.md): `doorman lsp` — diagnostics and completions from the same validator that guards the daemon
+- [docs/TASKS.md](https://github.com/ericdmoore/call-me-maybe/blob/main/docs/TASKS.md): the backlog, with acceptance criteria
+- [docs/PACKS.md](https://github.com/ericdmoore/call-me-maybe/blob/main/docs/PACKS.md): the prompt-pack format — the bouncer's personality is a swappable folder of audio
+- [CONTRIBUTING.md](https://github.com/ericdmoore/call-me-maybe/blob/main/CONTRIBUTING.md): ground rules, no CLA
+- [man page](https://github.com/ericdmoore/call-me-maybe/blob/main/docs/doorman.1): `man doorman` once installed
+
+## Facts worth knowing before you suggest a change
+
+- **Extensions are credentials.** A 6-digit PIN reachable from the PSTN is a password. Never print one, never log one, and prefer `doorman rotate` over choosing one by hand.
+- **Caller IDs and PINs must never reach the logs.** This is enforced mechanically by a custom `go/analysis` pass in `tools/nologsecrets`, not just by review. `len(digits)` and `tail(number)` are allowed; the value itself is not, including through `fmt.Sprint` or a slice expression.
+- **Caller IDs are normalised to E.164 before anything compares them.** The same person arrives as `5125550100`, `15125550100`, and `+15125550100` on different days. Probe any value with `doorman e164 "(512) 555-0100"`.
+- **A bad `policy.toml` cannot take the phone down.** Edits are picked up live; a file that fails validation is logged and discarded.
+- **Prompts are pre-rendered WAVs, not runtime TTS.** The Pi never synthesises speech, so a broken speech service can never make the phone unreachable.
+- **The lobby and the bouncer are two branches of one state machine**, not separate services. Splitting them would add a network hop and no seam.
+- **Tests never need a live Asterisk.** State machine changes go through the fake-ARI harness in `internal/lobby/fake_ari_test.go`.
+- **Test fixtures use `555-01xx` numbers**, which are reserved for fiction.
+
+## Repo conventions
+
+- `make check` — gofmt, vet, lint, test, build. Must be green.
+- `make cover` — tests with `-race` plus per-package coverage floors.
+- `make hooks` — installs the pre-push gate (same checks as CI).
+- Two dependencies in the daemon, both permissive; the stdlib covers the rest. Lint tooling lives in a nested `tools/` module so it never enters the shipped binary's dependency graph.
+- Tests use stdlib `testing`, colocated with the code.
