@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# No write access needed: this workflow only reads the code.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Single source of truth for the toolchain version.
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::not gofmt-clean: $unformatted"
+            gofmt -d .
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      # -race matters here: one call is one goroutine and the session state
+      # machine is driven entirely by channel sends from the ARI event router.
+      - name: test + coverage floors
+        run: bash scripts/coverage.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 14
+
+      # The examples are the first thing a new user copies, so a broken
+      # cross-reference in them is a real defect. This runs the same
+      # validator the daemon uses.
+      - name: validate shipped example config
+        run: go run ./cmd/doorman check --handsets handsets.example.toml policy.example.toml
+
+      - name: build
+        run: make build
+
+  # Proves the Pi targets still compile. Cheap, and catches the 32-bit
+  # breakage (int size, unaligned atomics) that amd64 tests never see.
+  cross:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: cross-compile Pi binaries
+        run: make cross
+      - name: shellcheck the shipped scripts
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck install.sh scripts/smoke.sh scripts/coverage.sh prompts/build.sh .githooks/pre-push

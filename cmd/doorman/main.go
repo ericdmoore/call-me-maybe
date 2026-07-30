@@ -30,7 +30,10 @@ import (
 	"callmemaybe/internal/render"
 )
 
-const version = "0.4.1"
+// version is the release identity. A release build stamps it from the git tag
+// with -ldflags "-X main.version=..."; this default is what a plain
+// `go build` reports. It must stay a var — the linker cannot rewrite a const.
+var version = "0.4.1"
 
 func main() {
 	if len(os.Args) > 1 {

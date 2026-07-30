@@ -7,9 +7,15 @@ asterisk/ari.conf
 # Rendered output: pjsip_handsets.conf contains real SIP passwords.
 asterisk/generated/
 
-# Built prompt audio (regenerate with `bun run prompts:build`)
+# Built prompt audio (regenerate with `bash prompts/build.sh`)
 prompts/build/
 
+# Build and test output
 bin/
+dist/
+coverage.out
+*.out
+*.test
+
 *.log
 .DS_Store

@@ -239,6 +239,90 @@ cp policy.example.toml policy.toml      # allow-list + extensions
 
 Then `sudo cp scripts/doorman.service /etc/systemd/system/` and enable it.
 
+Or skip the build and take a release binary:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ericdmoore/call-me-maybe/main/install.sh | bash
+```
+
+It detects your OS and architecture, verifies the SHA-256 against the
+published checksums, and installs to `/usr/local/bin` (or `~/.local/bin` when
+that isn't writable). `--version`, `--prefix`, and `--force` all work.
+
+---
+
+## Suggested hardware
+
+`doorman` has no opinion about brands. Anything that registers to Asterisk as
+a SIP endpoint works — `handsets.toml` only needs a `PJSIP/<id>`, and
+`doorman render` generates the rest. So buy on ergonomics and price, not
+compatibility.
+
+### The Pi
+
+Asterisk plus one Go binary is a light load; the phone plant is idle almost
+all the time. **A Pi 4 (2 GB) or Pi 5 is plenty, and a 3B+ is fine** — this
+is a genuinely good use for the one already in your drawer.
+
+#### Raspberry Pi
+
+* [Pi 5 on Amazon](https://amzn.to/3S3E5vV) — most headroom, wants active cooling and the 5 V/5 A supply
+* [Pi 4 on Amazon](https://amzn.to/3RYUgdU) — the sweet spot; 2 GB is ample, and a PoE HAT fits
+* [Pi 3 on Amazon](https://amzn.to/4xghXxv) — cheapest that still has wired Ethernet
+
+What actually matters more than the model:
+
+- **Use wired Ethernet for the Pi itself.** WiFi jitter on the box doing RTP
+  is the difference between clear audio and someone sounding underwater. This
+  is the one hardware choice worth being rigid about. (A Pi Zero 2 W has no
+  Ethernet port — it needs a USB adapter, at which point buy a 4.)
+- **Boot from a USB SSD if you can, or use an A2 microSD.** A 24/7 service
+  writing logs and voicemail is the classic way to wear out a cheap card, and
+  the failure looks like a phone that mysteriously stopped answering.
+- **A PoE HAT** on a Pi 4 gets you power and network over one cable, which is
+  what you want if it lives in a closet next to the switch.
+- **Put it on a small UPS.** A house phone that dies in a power cut is worse
+  than no house phone, because you thought you had one. (VoIP still dies with
+  your internet — which is exactly why the E911 note above matters.)
+
+### Handsets
+
+Grandstream's Wi-Fi handsets are what this was built and tested against:
+
+#### Grandstream Cordless WiFi IP Phone WP826 SIP Phone
+[on Amazon](https://amzn.to/44YDPRP)
+
+#### Grandstream WiFi Phone, 2.8 in Screen, Bluetooth WP836
+
+#### Grandstream WP816 Compact Portable Wi-Fi Phone
+[on Amazon](https://amzn.to/4yMiB7h)
+
+### Other good-value options
+
+Prices move, so these are categories rather than quotes. Every one of them
+registers over SIP and drops into `handsets.toml` unchanged.
+
+| Want | Look at | Why |
+|---|---|---|
+| **Cheapest desk phone** | Grandstream GRP2601/2602, Yealink T31P, Fanvil X3U | PoE, wired, one cable, nothing to charge. The most reliable phone per dollar. |
+| **Cordless done properly** | Grandstream DP752 base + DP722/DP730 handsets; Yealink W73P/W79P | DECT, not Wi-Fi: days of battery, and it roams between rooms without dropping the call. One base carries several handsets, each registering as its own SIP account — so one `[[handsets]]` entry per handset, exactly like a desk phone. |
+| **Reuse the phones you own** | Grandstream HT802 (2 FXS ports), Obihai OBi200 | An ATA turns your existing analog cordless base — or a 1950s rotary phone — into a SIP endpoint. Often the cheapest path in the house, and the most fun. |
+| **Nicest per dollar** | Used Poly VVX 250/350/450, Cisco SPA504G | Office decommissions flood the used market at a fraction of new. Budget an hour for factory-resetting units that were provisioned by their last owner. |
+| **Free** | Linphone, or Groundwire on a kid's phone | A softphone is a real endpoint. Good way to test a ladder before buying anything. |
+
+**Wi-Fi vs DECT vs wired, honestly:** Wi-Fi handsets are convenient and give
+you one less base station, but they hand off between access points poorly —
+walk from the kitchen to the garage mid-call and you may lose it. DECT is the
+technically better answer for cordless and its batteries last far longer.
+Wired PoE desk phones never surprise you at all. A sensible house is usually
+a couple of wired phones in fixed spots plus one cordless system.
+
+<sub>Amazon links above are affiliate links — if you buy through them the
+project earns a commission at no cost to you. They do not affect which
+hardware is recommended; nothing here is sponsored, and the alternatives
+table exists precisely so the recommendation isn't just the thing with a
+link.</sub>
+
 ---
 
 ## Design notes
@@ -267,9 +351,19 @@ criteria.
 Three skills ship with the repo: `/diagnose-call`, `/add-person`, `/ship`.
 
 ```bash
-make check                # vet + test + build
+make hooks                # once per clone — installs the pre-push gate
+make check                # gofmt + vet + test + build
+make cover                # -race, plus per-package coverage floors
 ./scripts/smoke.sh        # on the Pi — verifies the whole chain
 ```
+
+The pre-push hook (`.githooks/pre-push`, versioned with the code) blocks a
+push on unformatted code, vet findings, failing tests, an example config that
+stopped validating, or a secret force-added past `.gitignore`. CI runs the
+same checks on every push and pull request, cross-compiles both Pi targets,
+and shellchecks the shipped scripts. Tagging with `make release-tag TAG=x.y.z`
+builds all five targets, stamps the version into each binary, and publishes a
+release with SHA-256 checksums that `install.sh` verifies.
 
 The state machine in `internal/lobby/session.go` is fully covered through the
 fake-ARI harness in `internal/lobby/fake_ari_test.go` — known callers,

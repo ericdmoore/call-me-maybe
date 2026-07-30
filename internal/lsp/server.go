@@ -35,10 +35,10 @@ func NewServer(in io.Reader, out io.Writer, log *slog.Logger) *Server {
 }
 
 type request struct {
-	JSONRPC string          `json:"jsonrpc"`
+	JSONRPC string           `json:"jsonrpc"`
 	ID      *json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params"`
+	Method  string           `json:"method"`
+	Params  json.RawMessage  `json:"params"`
 }
 
 // Run processes messages until exit or EOF.

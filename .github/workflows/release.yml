@@ -1,0 +1,96 @@
+name: Release
+
+# Tag-driven: `make release-tag VERSION=0.5.0` (or `git tag -a v0.5.0 && git push --tags`)
+# builds every target, stamps the version into the binary, and publishes a
+# GitHub release with checksums that install.sh verifies.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build a release for"
+        required: true
+
+permissions:
+  contents: write # required to create the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A manual re-run checks out the requested tag, not the branch.
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0 # need tags for git describe
+
+      # GITHUB_REF_NAME is the branch on workflow_dispatch, so resolve the
+      # tag once here and use TAG everywhere below.
+      - name: Resolve tag
+        id: tag
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          case "$tag" in
+            v*) ;;
+            *) echo "::error::expected a v-prefixed tag, got '$tag'"; exit 1 ;;
+          esac
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Gate on the same checks as CI
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          bash scripts/coverage.sh
+
+      - name: Build every target
+        id: build
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >>"$GITHUB_OUTPUT"
+          mkdir -p dist
+
+          # linux/arm64  — 64-bit Pi OS (uname -m = aarch64)
+          # linux/armv7  — the 32-bit userland many Pi installs still run
+          # linux/amd64  — an x86 box acting as the PBX
+          # darwin/*     — for `doorman check`/`render`/`lsp` on a workstation
+          build() { # os arch armversion suffix
+            echo "→ doorman-$4"
+            env CGO_ENABLED=0 GOOS="$1" GOARCH="$2" ${3:+GOARM=$3} \
+              go build -trimpath \
+                -ldflags "-s -w -X main.version=$VERSION" \
+                -o "dist/doorman-$4" ./cmd/doorman
+          }
+          build linux  arm64 ""  linux-arm64
+          build linux  arm   7   linux-armv7
+          build linux  amd64 ""  linux-amd64
+          build darwin arm64 ""  darwin-arm64
+          build darwin amd64 ""  darwin-amd64
+
+          cd dist
+          sha256sum doorman-* >checksums.txt
+          cat checksums.txt
+
+      # Confirm the stamped version matches the tag, so a release can never
+      # ship a binary that misreports itself.
+      - name: Verify stamped version
+        run: |
+          got=$(./dist/doorman-linux-amd64 version | awk '{print $2}')
+          want="${{ steps.build.outputs.version }}"
+          [ "$got" = "$want" ] || { echo "::error::binary says $got, tag says $want"; exit 1; }
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag \
+            dist/doorman-* dist/checksums.txt
