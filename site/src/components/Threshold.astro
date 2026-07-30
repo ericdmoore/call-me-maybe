@@ -1,0 +1,148 @@
+---
+/**
+ * The mark: "The Threshold", ornate. Source of truth is
+ * brand/mark-threshold-ornate.svg at the repo root — if you change one, change
+ * both. It is inlined rather than <img>-ed so it can inherit `currentColor` and
+ * react to the lobby's data-state.
+ *
+ * The old Doorman component tipped his cap when the keypad admitted you. The
+ * doorway does something better: it lights up. Same reward, and it does not
+ * require a figure standing in the frame.
+ */
+---
+
+<svg
+  class="threshold-mark"
+  viewBox="0 0 200 200"
+  fill="none"
+  stroke="currentColor"
+  role="img"
+  aria-labelledby="threshold-title"
+>
+  <title id="threshold-title">A lit doorway inside an Art Deco medallion</title>
+  <defs>
+    <clipPath id="th-open">
+      <path d="M76 148 V96 h5 V86 h6 V78 h7 V72 h12 v6 h7 v8 h6 v10 h5 v52 Z" />
+    </clipPath>
+    <clipPath id="th-lozenge">
+      <path d="M100 28 L172 100 L100 172 L28 100 Z" />
+    </clipPath>
+  </defs>
+
+  <!-- Outer frame: paired rules -->
+  <rect x="5" y="5" width="190" height="190" stroke-width="2.5" />
+  <rect x="11" y="11" width="178" height="178" stroke-width="1" />
+
+  <!-- Bead-dot border -->
+  <g fill="currentColor" stroke="none">
+    <g>
+      <circle cx="26" cy="17.5" r="1.9" /><circle cx="38" cy="17.5" r="1.9" />
+      <circle cx="50" cy="17.5" r="1.9" /><circle cx="62" cy="17.5" r="1.9" />
+      <circle cx="74" cy="17.5" r="1.9" /><circle cx="86" cy="17.5" r="1.9" />
+      <circle cx="114" cy="17.5" r="1.9" /><circle cx="126" cy="17.5" r="1.9" />
+      <circle cx="138" cy="17.5" r="1.9" /><circle cx="150" cy="17.5" r="1.9" />
+      <circle cx="162" cy="17.5" r="1.9" /><circle cx="174" cy="17.5" r="1.9" />
+      <circle cx="26" cy="182.5" r="1.9" /><circle cx="38" cy="182.5" r="1.9" />
+      <circle cx="50" cy="182.5" r="1.9" /><circle cx="62" cy="182.5" r="1.9" />
+      <circle cx="74" cy="182.5" r="1.9" /><circle cx="86" cy="182.5" r="1.9" />
+      <circle cx="114" cy="182.5" r="1.9" /><circle cx="126" cy="182.5" r="1.9" />
+      <circle cx="138" cy="182.5" r="1.9" /><circle cx="150" cy="182.5" r="1.9" />
+      <circle cx="162" cy="182.5" r="1.9" /><circle cx="174" cy="182.5" r="1.9" />
+    </g>
+    <g>
+      <circle cx="17.5" cy="26" r="1.9" /><circle cx="17.5" cy="38" r="1.9" />
+      <circle cx="17.5" cy="50" r="1.9" /><circle cx="17.5" cy="62" r="1.9" />
+      <circle cx="17.5" cy="74" r="1.9" /><circle cx="17.5" cy="86" r="1.9" />
+      <circle cx="17.5" cy="114" r="1.9" /><circle cx="17.5" cy="126" r="1.9" />
+      <circle cx="17.5" cy="138" r="1.9" /><circle cx="17.5" cy="150" r="1.9" />
+      <circle cx="17.5" cy="162" r="1.9" /><circle cx="17.5" cy="174" r="1.9" />
+      <circle cx="182.5" cy="26" r="1.9" /><circle cx="182.5" cy="38" r="1.9" />
+      <circle cx="182.5" cy="50" r="1.9" /><circle cx="182.5" cy="62" r="1.9" />
+      <circle cx="182.5" cy="74" r="1.9" /><circle cx="182.5" cy="86" r="1.9" />
+      <circle cx="182.5" cy="114" r="1.9" /><circle cx="182.5" cy="126" r="1.9" />
+      <circle cx="182.5" cy="138" r="1.9" /><circle cx="182.5" cy="150" r="1.9" />
+      <circle cx="182.5" cy="162" r="1.9" /><circle cx="182.5" cy="174" r="1.9" />
+    </g>
+    <path d="M96 14 h8 v7 h-8 Z" /><path d="M96 179 h8 v7 h-8 Z" />
+    <path d="M14 96 v8 h7 v-8 Z" /><path d="M179 96 v8 h7 v-8 Z" />
+  </g>
+
+  <!-- Inner rule -->
+  <rect x="24" y="24" width="152" height="152" stroke-width="1.4" />
+
+  <!-- Corner ray-fans -->
+  <g stroke-width="1" opacity="0.6">
+    <g>
+      <path d="M28 28 L28 62" /><path d="M28 28 L38 60" /><path d="M28 28 L50 56" />
+      <path d="M28 28 L56 50" /><path d="M28 28 L60 38" /><path d="M28 28 L62 28" />
+    </g>
+    <g transform="translate(200,0) scale(-1,1)">
+      <path d="M28 28 L28 62" /><path d="M28 28 L38 60" /><path d="M28 28 L50 56" />
+      <path d="M28 28 L56 50" /><path d="M28 28 L60 38" /><path d="M28 28 L62 28" />
+    </g>
+    <g transform="translate(0,200) scale(1,-1)">
+      <path d="M28 28 L28 62" /><path d="M28 28 L38 60" /><path d="M28 28 L50 56" />
+      <path d="M28 28 L56 50" /><path d="M28 28 L60 38" /><path d="M28 28 L62 28" />
+    </g>
+    <g transform="translate(200,200) scale(-1,-1)">
+      <path d="M28 28 L28 62" /><path d="M28 28 L38 60" /><path d="M28 28 L50 56" />
+      <path d="M28 28 L56 50" /><path d="M28 28 L60 38" /><path d="M28 28 L62 28" />
+    </g>
+  </g>
+
+  <!-- Corner lozenges -->
+  <g fill="currentColor" stroke="none">
+    <path d="M34 34 l5 5 -5 5 -5 -5 Z" />
+    <path d="M166 34 l5 5 -5 5 -5 -5 Z" />
+    <path d="M34 166 l5 5 -5 5 -5 -5 Z" />
+    <path d="M166 166 l5 5 -5 5 -5 -5 Z" />
+  </g>
+
+  <!-- Fluting at the midpoints -->
+  <g stroke-width="1.2" opacity="0.75">
+    <path d="M88 26 V44 M94 26 V50 M106 26 V50 M112 26 V44" />
+    <path d="M88 174 V156 M94 174 V150 M106 174 V150 M112 174 V156" />
+    <path d="M26 88 H44 M26 94 H50 M26 106 H50 M26 112 H44" />
+    <path d="M174 88 H156 M174 94 H150 M174 106 H150 M174 112 H156" />
+  </g>
+
+  <!-- Lozenge -->
+  <path d="M100 28 L172 100 L100 172 L28 100 Z" stroke-width="2.5" />
+  <path d="M100 36 L164 100 L100 164 L36 100 Z" stroke-width="1" />
+
+  <g clip-path="url(#th-lozenge)">
+    <g stroke-width="2.2" opacity="0.28">
+      <path d="M100 148 L100 40" />
+      <path d="M100 148 L84 44" /><path d="M100 148 L116 44" />
+      <path d="M100 148 L68 54" /><path d="M100 148 L132 54" />
+      <path d="M100 148 L54 70" /><path d="M100 148 L146 70" />
+      <path d="M100 148 L44 90" /><path d="M100 148 L156 90" />
+    </g>
+
+    <!-- The light out of the doorway. This is what brightens when the lobby
+         admits you, so it carries its own class. -->
+    <g class="th-light" clip-path="url(#th-open)" stroke-width="2.6">
+      <path d="M100 148 V64" />
+      <path d="M100 148 L88 68" /><path d="M100 148 L112 68" />
+      <path d="M100 148 L78 82" /><path d="M100 148 L122 82" />
+    </g>
+
+    <path d="M62 148 V94 h5 V84 h5 V76 h4 V70 h5 V64 h38 v6 h5 v6 h4 v8 h5 v10 h5 v54"
+          stroke-width="2.5" />
+    <path d="M76 148 V96 h5 V86 h6 V78 h7 V72 h12 v6 h7 v8 h6 v10 h5 v52"
+          stroke-width="2" />
+
+    <g stroke-width="1" opacity="0.55">
+      <path d="M67 148 V98" /><path d="M71 148 V90" />
+      <path d="M133 148 V98" /><path d="M129 148 V90" />
+    </g>
+
+    <path d="M96 64 h8 v-5 h-2 v-4 h-4 v4 h-2 Z" fill="currentColor" stroke="none" />
+
+    <g fill="currentColor" stroke="none">
+      <rect x="70" y="148" width="60" height="4" />
+      <rect x="62" y="152" width="76" height="4" fill-opacity="0.7" />
+      <rect x="54" y="156" width="92" height="4" fill-opacity="0.45" />
+    </g>
+  </g>
+</svg>

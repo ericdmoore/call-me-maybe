@@ -314,37 +314,58 @@ samp {
   background: currentColor;
 }
 
-/* ── Doorman ───────────────────────────────────────────────────────────── */
+/* ── The mark ──────────────────────────────────────────────────────────── */
 
-.doorman {
+.threshold-mark {
   display: block;
-  width: clamp(9rem, 22vw, 13rem);
+  width: clamp(9.5rem, 24vw, 14rem);
   height: auto;
-  margin: 0 auto 1.5rem;
+  margin: 0 auto;
   color: var(--accent);
 }
 
-.doorman .hat {
-  transform-origin: 50% 78%;
-  transition: transform 620ms cubic-bezier(0.34, 1.4, 0.64, 1);
+/* The doorway lights up when the lobby admits you — the reward the old
+   cap-tipping animation used to carry, minus the figure in the frame. */
+.threshold-mark .th-light {
+  opacity: 0.5;
+  transition: opacity 520ms ease;
 }
 
-/* Tipped in greeting, once you are known. */
-[data-state="admitted"] .doorman .hat {
-  transform: rotate(-19deg) translate(-5px, -5px);
-}
-
-[data-state="dismissed"] .doorman {
-  color: var(--oxblood);
-}
-
-[data-state="admitted"] .doorman {
+[data-state="admitted"] .threshold-mark {
   color: var(--jade);
 }
 
-.doorman,
-.doorman * {
+[data-state="admitted"] .threshold-mark .th-light {
+  opacity: 1;
+}
+
+[data-state="dismissed"] .threshold-mark {
+  color: var(--oxblood);
+}
+
+/* Dismissed: the light goes out. */
+[data-state="dismissed"] .threshold-mark .th-light {
+  opacity: 0.14;
+}
+
+.threshold-mark,
+.threshold-mark * {
   transition: color 400ms ease, fill 400ms ease, stroke 400ms ease;
+}
+
+/* ── Divider ───────────────────────────────────────────────────────────── */
+
+.deco-divider {
+  display: block;
+  width: min(30rem, 100%);
+  height: auto;
+  margin: 1.25rem auto 0;
+  color: var(--accent);
+}
+
+/* Between panels it wants more air than it does under the mark. */
+.panel > .wrap > .deco-divider {
+  margin-block: 2.5rem;
 }
 
 /* ── Keypad ────────────────────────────────────────────────────────────── */

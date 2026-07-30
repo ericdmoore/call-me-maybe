@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
-import Doorman from '../components/Doorman.astro';
+import Threshold from '../components/Threshold.astro';
+import Divider from '../components/Divider.astro';
 import Keypad from '../components/Keypad.astro';
 import { byKind, kindLabels, type Kind } from '../data/hardware';
 
@@ -74,18 +75,14 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
   <!-- ── The lobby ──────────────────────────────────────────────────────── -->
   <header class="lobby">
     <div class="wrap">
-      <Doorman />
+      <Threshold />
+
+      <Divider />
 
       <h1 class="wordmark">
         Call Me
         <span class="maybe">Maybe</span>
       </h1>
-
-      <div class="hero-rules" aria-hidden="true">
-        <span></span>
-        &#9670;
-        <span></span>
-      </div>
 
       <p class="tagline">
         A programmable home phone for a spare Raspberry Pi. Known callers ring
