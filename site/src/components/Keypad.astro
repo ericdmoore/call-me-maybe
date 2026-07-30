@@ -37,6 +37,20 @@
     Six digits. Or ten seconds of silence, and the doorman decides for you.
   </p>
 
+  <!-- The payoff. The image is deliberately srcless until someone actually
+       solves it: it is 1.2 MB, which is thirty-five times the whole page, and
+       nobody who never finds the easter egg should pay for it. Hotlinked rather
+       than vendored — see the note in the script below. -->
+  <figure class="egg-portrait" data-portrait hidden>
+    <img
+      data-gif="https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExcjhoaTRpN3EzaDVpbGF6eW1qMm5qbWRwMnNtb2h2NW1udWlzeTd3dSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/kGdRnb1kF4OmQ/giphy.gif"
+      alt="Carly Rae Jepsen, delighted"
+      width="200"
+      height="200"
+      decoding="async"
+    />
+  </figure>
+
   <div class="nameplate" data-nameplate aria-hidden="true">
     Here&rsquo;s my number
     <small>&mdash; so call me, maybe</small>
@@ -51,6 +65,7 @@
     const readout = shell.querySelector('[data-readout]');
     const verdict = shell.querySelector('[data-verdict]');
     const plate = shell.querySelector('[data-nameplate]');
+    const portrait = shell.querySelector('[data-portrait]');
     const stage = document.querySelector('[data-state-host]') || document.body;
 
     const LENGTH = 6;
@@ -79,12 +94,30 @@
       readout.textContent = digits;
     };
 
+    // The image is hotlinked from Giphy rather than copied into this repo. The
+    // project rejects redistributing content it does not hold the rights to —
+    // docs/PACKS.md turns away audio on exactly that basis — and vendoring a
+    // celebrity GIF would be the same act. Embedding is what Giphy publishes it
+    // for. The cost is one third-party request, paid only by people who solve
+    // the puzzle.
+    const showPortrait = () => {
+      if (!portrait) return;
+      const img = portrait.querySelector('img');
+      if (img && !img.src) img.src = img.dataset.gif;
+      portrait.hidden = false;
+    };
+
+    const hidePortrait = () => {
+      if (portrait) portrait.hidden = true;
+    };
+
     const clear = (message) => {
       digits = '';
       paint();
       verdict.innerHTML = message || IDLE;
       setState('waiting');
       plate.setAttribute('aria-hidden', 'true');
+      hidePortrait();
     };
 
     const armIdle = () => {
@@ -106,11 +139,13 @@
         setState('admitted');
         verdict.innerHTML = '<b>Welcome. I&rsquo;ll connect you.</b>The whole house is ringing.';
         plate.setAttribute('aria-hidden', 'false');
+        showPortrait();
         digits = '';
         return;
       }
       setState('dismissed');
       verdict.innerHTML = '<b>Good day.</b>Not on the list, and that is not an extension here.';
+      hidePortrait();
       digits = '';
       paint();
       resetting = window.setTimeout(() => clear(), 3400);
@@ -130,6 +165,7 @@
 
       if (plate.getAttribute('aria-hidden') === 'false') {
         plate.setAttribute('aria-hidden', 'true');
+        hidePortrait();
         setState('waiting');
       }
       if (digits.length >= LENGTH) digits = '';
