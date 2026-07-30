@@ -55,7 +55,7 @@ Layout:
   never print to it in lsp mode.
 - `internal/render` — generates per-handset Asterisk config from
   handsets.toml; secrets substituted from env, never stored in the file.
-- `internal/config` — env parsing; names match `.env.example` exactly.
+- `internal/config` — env parsing; names match `examples/.env.example` exactly.
 
 Config interfaces: `.env` (secrets + tuning), `handsets.toml` (hardware
 inventory — source of truth for the generated Asterisk config), `policy.toml`

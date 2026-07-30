@@ -97,10 +97,10 @@ $ sudo systemctl restart asterisk
 
 ```bash
 $ cd /opt/call-me-maybe
-$ cp .env.example .env
-$ cp policy.example.toml policy.toml
+$ cp examples/.env.example .env
+$ cp examples/policy.example.toml policy.toml
 $ nano .env                            # ARI_PASSWORD must match ari.conf
-$ cp handsets.example.toml handsets.toml
+$ cp examples/handsets.example.toml handsets.toml
 $ nano handsets.toml                   # your phones: ids, numbers, page/MWI
 $ nano .env                            # one HANDSET_*_PASSWORD per phone:
                                        #   openssl rand -base64 18
@@ -386,7 +386,7 @@ the call belongs to Asterisk, and doorman deliberately never touches it again.
 ### Ringer ladders and afterhours
 
 Both are pure `policy.toml`; see the `Kids` extension in
-`policy.example.toml` for the shape. A ladder is `[[extensions.steps]]`
+`examples/policy.example.toml` for the shape. A ladder is `[[extensions.steps]]`
 blocks — each rings its handsets/groups for `rings` cycles (~6s each, or
 `seconds = N` exactly) before escalating; exhausting the ladder lands in the
 extension's `voicemail`. Afterhours (`[extensions.afterhours]`) is a window

@@ -64,7 +64,10 @@ jobs:
       # cross-reference in them is a real defect. This runs the same
       # validator the daemon uses.
       - name: validate shipped example config
-        run: go run ./cmd/doorman check --handsets handsets.example.toml policy.example.toml
+        run: |
+          go run ./cmd/doorman check \
+            --handsets examples/handsets.example.toml \
+            examples/policy.example.toml
 
       - name: build
         run: make build

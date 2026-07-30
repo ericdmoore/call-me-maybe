@@ -147,10 +147,18 @@ call-me-maybe/
 ├── internal/lobby/        the state machine — lobby, bouncer, ring groups + fake-ARI tests
 ├── internal/policy/       allow-list, PINs, E.164, hot reload, PIN rotation
 ├── internal/ari/          thin typed ARI client (REST + reconnecting WebSocket)
-├── internal/config/       env parsing, names match .env.example
+├── internal/lsp/          language server — same validator, as you type
+├── internal/config/       env parsing, names match examples/.env.example
+├── examples/              .env / policy / handsets templates to copy
 ├── asterisk/              pjsip / extensions / ari / http / rtp config
 ├── prompts/               prompt text + piper build script
-├── scripts/               systemd unit + smoke.sh
+├── scripts/               systemd unit, smoke.sh, coverage floors
+├── tools/                 nested module: custom analyzers (not linked into doorman)
+├── .githooks/             pre-push gate, installed by `make hooks`
+├── .github/workflows/     CI and tag-driven releases
+├── install.sh             release installer — detects host, verifies checksums
+├── site/                  callmemaybe.cc — the public site
+├── ecomm/                 store.callmemaybe.cc — pack storefront
 └── docs/                  RUNBOOK · TASKS · architecture · roadmap
 ```
 
@@ -232,8 +240,8 @@ scp bin/doorman-linux-arm64 pi@raspberrypi:/opt/call-me-maybe/bin/doorman
 On the Pi:
 
 ```bash
-cp .env.example .env                    # set ARI_PASSWORD to match ari.conf
-cp policy.example.toml policy.toml      # allow-list + extensions
+cp examples/.env.example .env                    # set ARI_PASSWORD to match ari.conf
+cp examples/policy.example.toml policy.toml      # allow-list + extensions
 ./bin/doorman check
 ```
 

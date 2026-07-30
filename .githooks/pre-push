@@ -69,9 +69,11 @@ step "analyzer tests"
 (cd tools && go test ./...) >/dev/null || fail "tools/ tests are failing"
 
 # ── The shipped examples must stay valid ─────────────────────────────
-# A broken policy.example.toml is the first thing a new user copies.
+# A broken examples/policy.example.toml is the first thing a new user copies.
 step "validating example config"
-go run ./cmd/doorman check --handsets handsets.example.toml policy.example.toml >/dev/null \
-	|| fail "policy.example.toml does not validate"
+go run ./cmd/doorman check \
+	--handsets examples/handsets.example.toml \
+	examples/policy.example.toml >/dev/null \
+	|| fail "examples/policy.example.toml does not validate"
 
 printf '\033[32m✓ pre-push checks passed\033[0m\n'

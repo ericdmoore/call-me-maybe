@@ -61,7 +61,7 @@ func main() {
 
 const usage = `doorman — the Call Me Maybe lobby daemon
 
-  doorman                       run the service (configuration via env, see .env.example)
+  doorman                       run the service (configuration via env, see examples/.env.example)
   doorman check [path]          validate a policy file
   doorman rotate [flags] [label ...]
                                 rotate extension PINs; all extensions when no labels given

@@ -1,8 +1,8 @@
 // Package config parses doorman's runtime configuration from environment
-// variables. Names and defaults match .env.example exactly. In production,
+// variables. Names and defaults match examples/.env.example exactly. In production,
 // systemd's EnvironmentFile loads .env; in development, `make run` sources it.
 //
-// The voicemail keys in .env.example (VOICEMAIL_*, STT_*, SMTP_*) are
+// The voicemail keys in examples/.env.example (VOICEMAIL_*, STT_*, SMTP_*) are
 // intentionally not read yet — the config shape is settled ahead of the
 // feature so .env does not churn when it lands.
 package config
@@ -137,7 +137,7 @@ func Load() (Config, error) {
 	}
 
 	if len(issues) > 0 {
-		return Config{}, fmt.Errorf("invalid environment configuration:\n%s\n\nSee .env.example", strings.Join(issues, "\n"))
+		return Config{}, fmt.Errorf("invalid environment configuration:\n%s\n\nSee examples/.env.example", strings.Join(issues, "\n"))
 	}
 	return c, nil
 }

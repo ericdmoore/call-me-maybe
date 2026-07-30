@@ -215,7 +215,7 @@ if [ -f "$REPO/policy.toml" ]; then
   [ "$PERM" = "600" ] && pass "policy.toml is 0600" \
     || warn "policy.toml is $PERM, expected 600" "it contains PINs: sudo chmod 600 $REPO/policy.toml"
 else
-  fail "policy.toml not found" "cp policy.example.toml policy.toml"
+  fail "policy.toml not found" "cp examples/policy.example.toml policy.toml"
 fi
 
 if [ -f "$REPO/handsets.toml" ]; then
@@ -229,7 +229,7 @@ if [ -f "$REPO/.env" ]; then
   [ "$PERM" = "600" ] && pass ".env is 0600" \
     || warn ".env is $PERM, expected 600" "sudo chmod 600 $REPO/.env"
 else
-  fail ".env not found" "cp .env.example .env"
+  fail ".env not found" "cp examples/.env.example .env"
 fi
 
 # ── Rung 8: recent behaviour ─────────────────────────────────
