@@ -24,7 +24,7 @@ favicon. That is a feature of the ladder, not a defect in one rung.
 
 | File | What it is |
 |---|---|
-| `ornament-dial-divider.svg` | Section divider. The Dial mark demoted from logo to rosette, with paired rules, beads, and stepped terminals. Give it width; height sits at 48. |
+| `ornament-dial-divider.svg` | Section divider. The Dial demoted from logo to rosette, flanked by tapering lightning bolts — pulse dialling makes and breaks the current, so the sparks are literal. Give it width; height sits at 52. |
 | `pattern-deco.svg` | Seamless 80×80 tile. `background-repeat: repeat; background-size: 80px`. |
 
 The pattern tiles because every element meeting an edge is either centred on
@@ -53,3 +53,15 @@ size, editable by hand, and no bitmaps anywhere — matching the site.
 Drawn from the shared vocabulary in the references — bilateral symmetry,
 radiating rays, stepped setbacks, bead borders, nested frames, lozenges,
 fluting — without reproducing any specific work.
+
+## Why the divider has no ids
+
+`ornament-dial-divider.svg` contains no `id` attributes and no `<use>`. A
+divider gets inlined several times on a page, and an internal id would collide
+with itself — the second copy would reference the first one's geometry, or
+nothing at all. The mirrored bolt is written out twice instead. Keep it that way
+if you edit it.
+
+The marks that *do* carry ids (`mark-threshold-ornate.svg` uses clipPaths) are
+fine inlined once per page. Inline one more than once and the ids need
+suffixing.
