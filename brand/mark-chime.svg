@@ -1,0 +1,45 @@
+<!--
+  Call Me Maybe — mark 05, "The Chime".
+  A house drawn as a Deco skyline, with concentric arcs leaving it: the phone
+  ringing, seen from outside. The most abstract of the set — no figure, no door,
+  no dial, just a building making a sound. Scales down further than any of the
+  others because it is six shapes.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112 104" width="112" height="104"
+     fill="none" stroke="currentColor" role="img"
+     aria-label="A stepped building with sound radiating from it">
+  <!-- The arcs: sound. Struck through at the sides so they read as radiating
+       rather than as a closed target. -->
+  <g stroke-width="2" opacity="0.85">
+    <path d="M34 62 A22 22 0 0 1 78 62" />
+  </g>
+  <g stroke-width="2" opacity="0.55">
+    <path d="M22 62 A34 34 0 0 1 90 62" />
+  </g>
+  <g stroke-width="2" opacity="0.3">
+    <path d="M10 62 A46 46 0 0 1 102 62" />
+  </g>
+
+  <!-- The house, as a stepped Deco tower: setbacks, centred, symmetric -->
+  <g>
+    <path d="M40 96 V70 h6 V60 h4 V52 h12 v8 h4 v10 h6 v26 Z"
+          fill="currentColor" fill-opacity="0.24"/>
+    <path d="M40 96 V70 h6 V60 h4 V52 h12 v8 h4 v10 h6 v26 Z" stroke-width="2"/>
+    <!-- Fluting: the windows, and the vertical emphasis Deco towers live on -->
+    <g stroke-width="1" opacity="0.6">
+      <path d="M48 92 V64"/>
+      <path d="M56 92 V56"/>
+      <path d="M64 92 V64"/>
+    </g>
+    <!-- Finial -->
+    <path d="M54 52 h4 v-6 h-1.4 v-4 h-1.2 v4 H54 Z" fill="currentColor" stroke="none"/>
+  </g>
+
+  <!-- Ground: paired rules again -->
+  <g stroke-width="2">
+    <path d="M8 96 H104"/>
+  </g>
+  <g stroke-width="1" opacity="0.6">
+    <path d="M2 100 H110"/>
+  </g>
+</svg>

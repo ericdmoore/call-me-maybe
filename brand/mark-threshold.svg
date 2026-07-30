@@ -1,0 +1,51 @@
+<!--
+  Call Me Maybe — mark 02, "The Threshold".
+  The lobby with nobody in it. A stepped Deco portal, light spilling out of the
+  opening — you are either standing in that light or you are not. The doorman is
+  implied by the door, which is the whole point of the project.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 124" width="100" height="124"
+     fill="none" stroke="currentColor" role="img" aria-label="A stepped doorway with light spilling out">
+  <defs>
+    <!-- Keep the arch, knock out the opening, so the mark works on any ground -->
+    <mask id="cmm-threshold-mask">
+      <rect width="100" height="124" fill="#000"/>
+      <path d="M6 118 V64 h8 V50 h8 V38 h10 V28 h10 V22 h16 v6 h10 v10 h10 v12 h8 v14 h8 v54 Z" fill="#fff"/>
+      <path d="M30 118 V52 h6 V42 h8 V36 h12 v6 h8 v10 h6 v66 Z" fill="#000"/>
+    </mask>
+    <clipPath id="cmm-threshold-open">
+      <path d="M30 118 V52 h6 V42 h8 V36 h12 v6 h8 v10 h6 v66 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Light from inside: rays fanning up out of the doorway -->
+  <g clip-path="url(#cmm-threshold-open)" stroke="currentColor" stroke-width="2.6" opacity="0.42">
+    <path d="M50 118 V30"/>
+    <path d="M50 118 L38 34"/>
+    <path d="M50 118 L62 34"/>
+    <path d="M50 118 L28 46"/>
+    <path d="M50 118 L72 46"/>
+  </g>
+
+  <!-- The portal itself -->
+  <g mask="url(#cmm-threshold-mask)">
+    <path d="M6 118 V64 h8 V50 h8 V38 h10 V28 h10 V22 h16 v6 h10 v10 h10 v12 h8 v14 h8 v54 Z"
+          fill="currentColor" fill-opacity="0.22"/>
+    <!-- Fluting on the piers -->
+    <g stroke="currentColor" stroke-width="1" opacity="0.5">
+      <path d="M12 118 V66"/><path d="M18 118 V56"/><path d="M24 118 V46"/>
+      <path d="M88 118 V66"/><path d="M82 118 V56"/><path d="M76 118 V46"/>
+    </g>
+  </g>
+
+  <!-- Outline, drawn over the mask so every edge stays crisp -->
+  <path d="M6 118 V64 h8 V50 h8 V38 h10 V28 h10 V22 h16 v6 h10 v10 h10 v12 h8 v14 h8 v54"
+        stroke-width="2"/>
+  <path d="M30 118 V52 h6 V42 h8 V36 h12 v6 h8 v10 h6 v66" stroke-width="2"/>
+
+  <!-- Steps down to the street -->
+  <g fill="currentColor" stroke="none">
+    <rect x="24" y="118" width="52" height="3"/>
+    <rect x="14" y="121" width="72" height="3" fill-opacity="0.6"/>
+  </g>
+</svg>

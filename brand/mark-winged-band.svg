@@ -1,0 +1,52 @@
+<!--
+  Call Me Maybe — mark 04, "The Winged Band".
+  Mercury's winged helmet, reduced to a band and two sets of geometric blades.
+  The Rockefeller relief in the references has exactly this in gold leaf, and
+  Mercury is the messenger — which is what a telephone is. Figurative enough to
+  feel like an emblem, abstract enough that no doorman is standing there.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 132 60" width="132" height="60"
+     fill="none" stroke="currentColor" stroke-width="2" role="img"
+     aria-label="A winged band, after Mercury's helmet">
+  <!-- Wings: four tapering blades a side, stacked and swept back. Mirrored
+       exactly — the blades get shorter as they rise, which is what gives the
+       shape its lift. -->
+  <g>
+    <!-- left -->
+    <path d="M50 30 L10 30 L20 24 H50 Z" fill="currentColor" fill-opacity="0.30"/>
+    <path d="M50 24 L16 20 L26 15 H50 Z" fill="currentColor" fill-opacity="0.22"/>
+    <path d="M50 18 L24 12 L33 8 H50 Z" fill="currentColor" fill-opacity="0.15"/>
+    <path d="M50 30 L10 30 L20 24 H50 Z"/>
+    <path d="M50 24 L16 20 L26 15 H50 Z"/>
+    <path d="M50 18 L24 12 L33 8 H50 Z"/>
+
+    <!-- right -->
+    <path d="M82 30 L122 30 L112 24 H82 Z" fill="currentColor" fill-opacity="0.30"/>
+    <path d="M82 24 L116 20 L106 15 H82 Z" fill="currentColor" fill-opacity="0.22"/>
+    <path d="M82 18 L108 12 L99 8 H82 Z" fill="currentColor" fill-opacity="0.15"/>
+    <path d="M82 30 L122 30 L112 24 H82 Z"/>
+    <path d="M82 24 L116 20 L106 15 H82 Z"/>
+    <path d="M82 18 L108 12 L99 8 H82 Z"/>
+  </g>
+
+  <!-- The band -->
+  <rect x="48" y="26" width="36" height="9" fill="currentColor" fill-opacity="0.42"/>
+  <rect x="48" y="26" width="36" height="9"/>
+
+  <!-- Crown above the band, held under tension like every good Deco curve -->
+  <path d="M51 26 Q66 10 81 26" />
+
+  <!-- Stepped badge, centred -->
+  <path d="M62 24 h8 v-3 h-2.5 v-3 h-3 v3 H62 Z" fill="currentColor" stroke="none"/>
+
+  <!-- Brim, wider than the band so the emblem sits on something -->
+  <path d="M43 35 H89 L82 43 H50 Z" fill="currentColor" fill-opacity="0.18"/>
+  <path d="M43 35 H89 L82 43 H50 Z"/>
+
+  <!-- Plinth -->
+  <g fill="currentColor" stroke="none">
+    <rect x="54" y="46" width="24" height="3"/>
+    <rect x="47" y="49" width="38" height="3" fill-opacity="0.6"/>
+    <rect x="40" y="52" width="52" height="3" fill-opacity="0.35"/>
+  </g>
+</svg>

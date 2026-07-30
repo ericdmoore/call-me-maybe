@@ -1,0 +1,45 @@
+{
+  // dialdoorman.cc → callmemaybe.cc, as a standalone Worker.
+  //
+  //   npm run deploy:redirect
+  //
+  // Separate from the site Worker deliberately — see redirect/worker.js for
+  // why, and for why this is a Worker at all rather than a Redirect Rule.
+  //
+  // Attaching the custom domains below also creates the proxied DNS records on
+  // the dialdoorman.cc zone, which was empty. That matters: a redirect can only
+  // fire on traffic that reaches Cloudflare, and nothing reaches it without a
+  // proxied record.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dialdoorman-redirect",
+  "main": "redirect/worker.js",
+  "compatibility_date": "2026-07-29",
+
+  // No workers.dev URL: this Worker is meaningless except on its own hostnames,
+  // and an extra public endpoint that 301s to the real site is just noise.
+  "workers_dev": false,
+
+  // NOTE: no `routes` block, and that is not an oversight.
+  //
+  // `wrangler deploy` reconciles a routes list by calling
+  // /zones/{zone}/workers/routes, which the deploy token cannot reach — it is
+  // denied on both zones. Custom domains themselves live on a different,
+  // account-level endpoint (/accounts/{id}/workers/domains) which the token
+  // *can* reach, so the two hostnames are attached there instead:
+  //
+  //   curl -X PUT -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  //     -H "Content-Type: application/json" \
+  //     "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/domains" \
+  //     -d '{"zone_id":"<dialdoorman.cc zone id>","hostname":"dialdoorman.cc",
+  //          "service":"dialdoorman-redirect","environment":"production"}'
+  //
+  // Attaching this way also creates the proxied DNS record, which the empty
+  // dialdoorman.cc zone needed before any redirect could fire.
+  //
+  // Put the routes back here once the token gains `Zone → Workers Routes →
+  // Edit`; keeping them in config is the better end state.
+
+  "observability": {
+    "enabled": true
+  }
+}

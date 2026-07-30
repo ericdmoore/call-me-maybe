@@ -1,0 +1,51 @@
+<!--
+  Call Me Maybe — mark 01, "The Dial".
+  A rotary dial and a Deco rosette are the same drawing: a ring of apertures
+  around a stepped medallion. Nobody has to be depicted, and the object says
+  "telephone" before you have read a word.
+  Ten apertures, arranged symmetrically about the vertical — Deco insists on
+  that symmetry, so the gap falls at the bottom and becomes the plinth.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120"
+     fill="none" stroke="currentColor" role="img" aria-label="Rotary dial rosette">
+  <!-- Paired rules: Deco borders always come in twos -->
+  <circle cx="60" cy="60" r="56" stroke-width="2"/>
+  <circle cx="60" cy="60" r="50.5" stroke-width="1"/>
+
+  <!-- Radial spurs, turning the dial into a rosette -->
+  <g stroke-width="1" opacity="0.45">
+    <path d="M69.8 23.3 L74.0 15.2"/><path d="M50.2 23.3 L46.0 15.2"/>
+    <path d="M86.9 33.1 L93.4 26.6"/><path d="M33.1 33.1 L26.6 26.6"/>
+    <path d="M96.7 50.2 L104.8 46.0"/><path d="M23.3 50.2 L15.2 46.0"/>
+    <path d="M96.7 69.8 L104.8 74.0"/><path d="M23.3 69.8 L15.2 74.0"/>
+    <path d="M86.9 86.9 L93.4 93.4"/><path d="M33.1 86.9 L26.6 93.4"/>
+  </g>
+
+  <!-- The ten apertures -->
+  <g stroke-width="2">
+    <circle cx="69.8" cy="23.3" r="6.4"/>
+    <circle cx="50.2" cy="23.3" r="6.4"/>
+    <circle cx="86.9" cy="33.1" r="6.4"/>
+    <circle cx="33.1" cy="33.1" r="6.4"/>
+    <circle cx="96.7" cy="50.2" r="6.4"/>
+    <circle cx="23.3" cy="50.2" r="6.4"/>
+    <circle cx="96.7" cy="69.8" r="6.4"/>
+    <circle cx="23.3" cy="69.8" r="6.4"/>
+    <circle cx="86.9" cy="86.9" r="6.4"/>
+    <circle cx="33.1" cy="86.9" r="6.4"/>
+  </g>
+
+  <!-- Stepped plinth, filling the gap the symmetry created -->
+  <g fill="currentColor" stroke="none">
+    <rect x="52" y="96" width="16" height="4"/>
+    <rect x="46" y="100" width="28" height="4" fill-opacity="0.65"/>
+    <rect x="40" y="104" width="40" height="4" fill-opacity="0.4"/>
+  </g>
+
+  <!-- Centre medallion: concentric ring plus a ziggurat, the smallest
+       Deco signature available -->
+  <circle cx="60" cy="60" r="19" stroke-width="2"/>
+  <circle cx="60" cy="60" r="14" stroke-width="1" opacity="0.55"/>
+  <path d="M52 66 v-4 h3 v-4 h3 v-4 h4 v4 h3 v4 h3 v4 Z"
+        fill="currentColor" stroke="none"/>
+</svg>

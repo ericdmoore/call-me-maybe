@@ -10,6 +10,7 @@
     "check": "astro check",
     "cf:preview": "astro build && wrangler dev",
     "deploy": "astro build && wrangler deploy",
+    "deploy:redirect": "wrangler deploy -c wrangler.redirect.jsonc",
     "cf:whoami": "wrangler whoami"
   },
   "devDependencies": {
