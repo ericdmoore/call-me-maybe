@@ -1054,3 +1054,95 @@ samp {
 .install-note code {
   color: var(--accent);
 }
+
+/* ── Softphones ───────────────────────────────────────────────────────────
+   Sits below the affiliate disclosure, so it is styled as a distinct plate
+   rather than a continuation of the buying tables — the visual break is part of
+   the honesty. */
+
+.softphones {
+  margin-top: 2.5rem;
+  border: 1px solid var(--accent-dim);
+  border-top-width: 3px;
+  padding: clamp(1.2rem, 3.5vw, 2rem);
+  background: color-mix(in srgb, var(--raised) 55%, var(--ground) 45%);
+}
+
+.softphones-head {
+  font-size: var(--t-md);
+  margin-top: 0.55rem;
+  color: var(--text);
+}
+
+.softphones-lede {
+  margin: 1rem 0 0;
+  max-width: 62ch;
+  font-size: var(--t-sm);
+  color: var(--text-soft);
+}
+
+.softphone-list {
+  list-style: none;
+  padding: 0;
+  margin: 1.6rem 0 0;
+  display: grid;
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+}
+
+@media (min-width: 44rem) {
+  .softphone-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.softphone-list li {
+  background: var(--ground);
+  padding: 1.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.softphone-list a {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: var(--t-sm);
+}
+
+.softphone-meta {
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.softphone-where {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.62rem;
+  color: var(--text-soft);
+}
+
+.softphone-note {
+  margin: 0.5rem 0 0;
+  font-size: var(--t-sm);
+  color: var(--text-soft);
+}
+
+.softphones-catch {
+  margin: 1.5rem 0 0;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--rule);
+  font-size: var(--t-sm);
+  color: var(--text-soft);
+  max-width: 66ch;
+}
+
+.softphones-catch strong {
+  color: var(--text);
+  font-weight: 400;
+}

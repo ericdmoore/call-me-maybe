@@ -1,0 +1,64 @@
+---
+/**
+ * The zero-cost path, placed after the affiliate disclosure on purpose: these
+ * two links earn nothing, and sitting below the disclosure makes that visible
+ * rather than something the reader has to take on trust.
+ *
+ * rel is deliberately just noopener — no `sponsored`, unlike the hardware links.
+ */
+
+const apps = [
+  {
+    name: 'Linphone',
+    url: 'https://www.linphone.org/en/',
+    cost: 'Free · open source',
+    where: 'iOS · Android · macOS · Windows · Linux',
+    note:
+      'Runs on everything, including the desktop you are reading this on. The quickest way to hear the lobby answer without owning a single handset.',
+  },
+  {
+    name: 'Groundwire',
+    url: 'https://play.google.com/store/apps/details?id=cz.acrobits.softphone.aliengroundwire&hl=en-US',
+    cost: 'Paid, around $10',
+    where: 'Android · also on iOS',
+    note:
+      'Acrobits, and worth the money for one reason: it works much harder to stay reachable in the background. That is the difference between an app you open and a phone that rings.',
+  },
+];
+---
+
+<div class="softphones">
+  <p class="eyebrow">Nothing to buy</p>
+  <h3 class="display softphones-head">Not ready for a dedicated handset?</h3>
+
+  <p class="softphones-lede">
+    A softphone is a real SIP endpoint. It registers exactly like the hardware
+    above, gets its own entry in <code>handsets.toml</code>, and rings when the
+    ladder says so &mdash; so you can hear the bouncer, test a ringer ladder, and
+    dial your own extension using the phone already in your pocket, before
+    spending anything.
+  </p>
+
+  <ul class="softphone-list">
+    {
+      apps.map((a) => (
+        <li>
+          <a href={a.url} rel="noopener">{a.name}</a>
+          <span class="softphone-meta">{a.cost}</span>
+          <span class="softphone-where">{a.where}</span>
+          <p class="softphone-note">{a.note}</p>
+        </li>
+      ))
+    }
+  </ul>
+
+  <p class="softphones-catch">
+    <strong>The honest catch.</strong> A softphone only rings while it is
+    registered, and phone operating systems are ruthless about suspending apps in
+    the background. On a desktop that is a non-issue. On a mobile it needs push
+    notifications or a foreground service, and push against a self-hosted PBX
+    takes real configuration. Treat a softphone as the best way to try all of
+    this, and as a genuinely good desk phone &mdash; not yet as the handset you
+    expect to wake you at 2am. That is what the hardware above is for.
+  </p>
+</div>

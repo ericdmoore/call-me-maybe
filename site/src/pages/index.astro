@@ -3,6 +3,7 @@ import Base from '../layouts/Base.astro';
 import Threshold from '../components/Threshold.astro';
 import Divider from '../components/Divider.astro';
 import InstallCommand from '../components/InstallCommand.astro';
+import Softphones from '../components/Softphones.astro';
 import Keypad from '../components/Keypad.astro';
 import { byKind, kindLabels, type Kind } from '../data/hardware';
 
@@ -295,12 +296,14 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
         <strong>Disclosure.</strong> The Amazon links above are affiliate links
         &mdash; buy through one and the project earns a commission at no cost to
         you. Nothing here is sponsored and no vendor has paid for placement. Be
-        aware of the obvious bias anyway: everything with a link earns
-        something, so the honest guidance is the part that does not.
+        aware of the obvious bias anyway: every product link in those tables
+        earns something, so the honest guidance is the part that does not.
         <code>doorman</code> works with any SIP endpoint, the ATA above may mean
         buying nothing at all, and a free softphone will test your whole ringer
         ladder before you spend a cent.
       </p>
+
+      <Softphones />
     </div>
   </section>
 
