@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -32,6 +33,8 @@ func runTemplate(args []string) int {
 		return runTemplateShow(args[1:])
 	case "apply":
 		return runTemplateApply(args[1:])
+	case "lint":
+		return runTemplateLint(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown: doorman template %s\n\n%s", args[0], templateUsage)
 		return 2
@@ -42,9 +45,16 @@ const templateUsage = `doorman template — fill in a policy template
 
   doorman template list                  templates on this machine
   doorman template show <id>             its questions and what it emits
+  doorman template lint <file|->         validate a template, on disk or piped
   doorman template apply <id> [flags]    answer the questions, print the TOML
       -apply                             append to policy.toml instead of printing
       -answers k=v,k=v                   skip the interview
+      -file <path|->                     use a template file directly, not an id
+
+The format is published: doorman schema template. Lint reads stdin when the
+path is "-", so a template can be piped in before it is installed anywhere:
+
+  curl -fsSL https://example.com/kids.toml | doorman template lint -
 
 Templates are searched in ./templates, then $XDG_CONFIG_HOME/doorman/templates
 (or ~/.config/doorman/templates). A template may emit extensions and schedules
@@ -167,6 +177,7 @@ func runTemplateApply(args []string) int {
 	answerFlag := fs.String("answers", "", "k=v,k=v to skip the interview")
 	policyFlag := fs.String("policy", "", "policy file (default $POLICY_PATH or ./policy.toml)")
 	handsetsFlag := fs.String("handsets", "", "handsets file (default $HANDSETS_PATH or ./handsets.toml)")
+	fileFlag := fs.String("file", "", "read the template from this path, or - for stdin")
 	// The template id comes first, then flags. Go's flag package stops parsing
 	// at the first positional argument, so `apply kids-line --answers=…` would
 	// silently ignore every flag and drop into an interactive prompt. Pull the
@@ -179,14 +190,28 @@ func runTemplateApply(args []string) int {
 	if id == "" && fs.NArg() > 0 {
 		id = fs.Arg(0)
 	}
-	if id == "" {
+	var t *tmpl.Template
+	var err error
+	switch {
+	case *fileFlag != "":
+		data, name, rerr := readTemplateSource(*fileFlag)
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "✗ %s: %v\n", name, rerr)
+			return 1
+		}
+		if t, err = tmpl.Parse(data); err != nil {
+			fmt.Fprintf(os.Stderr, "✗ %s\n%v\n", name, err)
+			return 1
+		}
+	case id != "":
+		if t, err = byID(id); err != nil {
+			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+			return 1
+		}
+	default:
 		fmt.Fprintln(os.Stderr, "usage: doorman template apply <id> [flags]")
+		fmt.Fprintln(os.Stderr, "       doorman template apply --file kids.toml")
 		return 2
-	}
-	t, err := byID(id)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
-		return 1
 	}
 
 	polPath := policyPathArg(*policyFlag)
@@ -392,4 +417,53 @@ func gatherAnswers(t *tmpl.Template, flagValue string, pol *policy.Policy) (tmpl
 		fmt.Println()
 	}
 	return answers, nil
+}
+
+// readTemplateSource reads a template from a path, or from stdin when the path
+// is "-". Piping matters: it is how you check something before deciding to keep
+// it, without first writing it to disk.
+func readTemplateSource(path string) ([]byte, string, error) {
+	if path == "-" {
+		data, err := io.ReadAll(os.Stdin)
+		return data, "(stdin)", err
+	}
+	data, err := os.ReadFile(path)
+	return data, path, err
+}
+
+// runTemplateLint validates a template without running it. This is the payoff
+// of templates being data rather than text: a mustache template's validity
+// depends on the answers, so it cannot be checked until someone fills it in.
+// This one can be checked the moment it is written.
+func runTemplateLint(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: doorman template lint <file|->")
+		fmt.Fprintln(os.Stderr, "       cat kids.toml | doorman template lint -")
+		return 2
+	}
+
+	failed := 0
+	for _, path := range args {
+		data, name, err := readTemplateSource(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "✗ %s: %v\n", name, err)
+			failed++
+			continue
+		}
+		t, err := tmpl.Parse(data)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "✗ %s\n%v\n", name, err)
+			failed++
+			continue
+		}
+		fmt.Printf("✓ %s — %s@%s, %d question(s), emits %d extension(s) and %d schedule(s)\n",
+			name, t.Meta.ID, t.Meta.Version, len(t.Questions),
+			len(t.Emit.Extensions), len(t.Emit.Schedules))
+	}
+	if failed > 0 {
+		fmt.Fprintf(os.Stderr, "\n%d template(s) did not validate. The format is published:\n", failed)
+		fmt.Fprintln(os.Stderr, "  doorman schema template")
+		return 1
+	}
+	return 0
 }

@@ -10,6 +10,7 @@ import (
 
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/schema"
+	"callmemaybe/internal/tmpl"
 )
 
 // The schema is hand-authored, because the rules worth publishing — mutual
@@ -185,4 +186,45 @@ func tomlKeys(t reflect.Type) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// The template format is a published interface with outside authors, so its
+// schema falling behind the Go structs is worse than for the config files:
+// someone validates against it, it passes, and then the CLI rejects the file.
+func TestTemplateFormatDocumentsEveryKey(t *testing.T) {
+	documented := map[string]bool{}
+	collectProperties(schema.TemplateFormat(), documented)
+
+	for _, key := range tomlKeys(reflect.TypeOf(tmpl.Template{})) {
+		// Emitted policy structures are documented by reference to the policy
+		// schema rather than repeated field by field.
+		switch key {
+		case "handsets", "steps", "rings", "seconds", "voicemail", "afterhours",
+			"afterhours_ring", "label", "pin", "when", "start", "end", "days",
+			"schedules", "extensions":
+			continue
+		}
+		if !documented[key] {
+			t.Errorf("tmpl.Template exposes %q but `doorman schema template` does not document it", key)
+		}
+	}
+}
+
+func TestTemplateSchemaIsSelectable(t *testing.T) {
+	s, err := schema.Get("template")
+	if err != nil {
+		t.Fatalf("template schema not selectable: %v", err)
+	}
+	if s.Title == "" {
+		t.Error("template schema has no title")
+	}
+	// The emit allow-list is the security property; it has to be stated where
+	// an author will read it.
+	joined := ""
+	for _, r := range s.Rules {
+		joined += r
+	}
+	if !strings.Contains(joined, "people") {
+		t.Error("the schema should say templates may not emit [[people]]")
+	}
 }

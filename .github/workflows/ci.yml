@@ -85,6 +85,11 @@ jobs:
           fi
           echo "examples correctly refuse to load without doorman init"
 
+      # A shipped template that does not validate would be a broken example in
+      # the one place people look for a working one.
+      - name: shipped templates lint
+        run: go run ./cmd/doorman template lint templates/*.toml
+
       # init must produce something that passes the strict check.
       - name: doorman init round-trip
         run: |

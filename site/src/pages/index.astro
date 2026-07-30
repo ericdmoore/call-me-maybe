@@ -50,20 +50,20 @@ const features = [
 
 const steps = [
   {
-    title: 'A number to answer',
-    body: 'Create a sub-account with a VoIP provider, point a DID at it, and turn on E911. A couple of dollars a month, and the one line item worth not skipping on a house phone.',
+    title: 'Grab a number',
+    body: 'A sub-account with a VoIP provider, a DID pointed at it, and E911 switched on. A couple of dollars a month, and E911 is the one line item worth not skipping on a phone your family will reach for in a hurry.',
   },
   {
-    title: 'Asterisk on the Pi',
-    body: 'apt install asterisk, copy the config from the repo, restart. Confirm the trunk registered before going further — everything above this rung depends on it.',
+    title: 'Install some software',
+    body: 'One command fetches the binary, checks it against the published checksums, and offers to install Asterisk for you. On a Pi that is the whole rung — the installer knows apt, and asks before it uses it.',
   },
   {
-    title: 'A voice for the lobby',
-    body: 'Render the prompts once on a workstation with piper and copy the WAVs across. The Pi never synthesises speech, so a broken speech service can never make the phone unreachable.',
+    title: 'Give your doorman a voice',
+    body: 'Prompts are rendered once, on a workstation, and copied across as ordinary WAV files. The Pi never synthesises speech, so a broken speech service can never make the phone unreachable — and swapping the voice is swapping a folder.',
   },
   {
-    title: 'Hand the doorman the rules',
-    body: 'Write who is known and what rings, run doorman check, and enable the service. Edits go live within a second, and a file that fails validation is discarded rather than applied.',
+    title: 'Add the house rules',
+    body: 'Who is known, what rings, and when. Run doorman check, enable the service, and you are answering calls. Edits go live within a second, and a file that fails validation is discarded rather than applied.',
   },
 ];
 
@@ -221,11 +221,13 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
   <section class="panel">
     <div class="wrap">
       <p class="eyebrow">An afternoon, roughly</p>
-      <h2 class="display">Four rungs, bottom up</h2>
+      <h2 class="display">Make the switch to retro fun on modern systems</h2>
 
       <div class="prose" style="margin-top:1.25rem;">
         <p>
-          In that order, and confirm each before climbing. A failure low down
+          A rotary dial and a bakelite handset, answered by something that
+          understands SIP, cryptographic randomness, and your calendar. In this
+          order, and confirm each rung before climbing — a failure low down
           explains every symptom above it, which is why the runbook is written
           as a ladder rather than a checklist.
         </p>

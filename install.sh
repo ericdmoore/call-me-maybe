@@ -215,11 +215,59 @@ if "$target" version >/dev/null 2>&1; then
 	"$target" version
 fi
 
+# ── Asterisk ─────────────────────────────────────────────────────────────
+# doorman is useless without it, so offer to install it rather than leaving a
+# "now go read the runbook" cliff. Two things make this careful rather than
+# convenient:
+#
+#   * `curl … | bash` means stdin is the *script*, not the user, so a plain
+#     `read` would consume the rest of the script or return nothing. Prompts
+#     have to come from /dev/tty, and are skipped entirely when there is none.
+#   * There is no Homebrew formula for Asterisk. On macOS it means building
+#     from source, which is not something to start behind a y/n prompt.
+offer_asterisk() {
+	command -v asterisk >/dev/null 2>&1 && { ok "asterisk is already installed"; return; }
+
+	if [ "$os" = "darwin" ]; then
+		warn "asterisk has no Homebrew formula — on macOS it must be built from source."
+		info "doorman itself works here for check/render/lsp/e164; the phone wants Linux."
+		return
+	fi
+
+	if ! command -v apt-get >/dev/null 2>&1; then
+		info "install asterisk with your package manager, then see docs/RUNBOOK.md"
+		return
+	fi
+
+	# No terminal to ask on — a piped install must never silently sudo.
+	if [ ! -r /dev/tty ]; then
+		info "asterisk is not installed. Run: sudo apt-get install -y asterisk"
+		return
+	fi
+
+	printf '\n%s?%s Install asterisk now with apt (needs sudo)? [y/N] ' "$YEL" "$OFF" >&2
+	read -r reply </dev/tty || reply=""
+	case "$reply" in
+		[yY]*) ;;
+		*) info "skipped. When you are ready: sudo apt-get install -y asterisk"; return ;;
+	esac
+
+	info "installing asterisk"
+	if sudo apt-get update -qq && sudo apt-get install -y asterisk; then
+		ok "asterisk installed"
+	else
+		die "asterisk install failed — install it manually, then re-run doorman"
+	fi
+}
+
+offer_asterisk
+
 cat >&2 <<EOF
 
-Next: doorman needs Asterisk, a policy file, and prompts.
+Next:
 
-    doorman check          validate policy.toml + handsets.toml
+    doorman init           interview, generate secrets, write the config
+    doorman check          confirm it all resolves
     doorman help           every subcommand
 
 Provisioning is in docs/RUNBOOK.md:

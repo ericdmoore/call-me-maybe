@@ -20,6 +20,7 @@ package schema
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Schema is the subset of JSON Schema draft 2020-12 this package emits.
@@ -81,7 +82,7 @@ var (
 )
 
 // Names are the selectable schema names for `doorman schema <name>`.
-var Names = []string{"policy", "handsets", "env"}
+var Names = []string{"policy", "handsets", "env", "template"}
 
 // Get returns one schema by name.
 func Get(name string) (*Schema, error) {
@@ -92,8 +93,10 @@ func Get(name string) (*Schema, error) {
 		return Handsets(), nil
 	case "env":
 		return Env(), nil
+	case "template":
+		return TemplateFormat(), nil
 	}
-	return nil, fmt.Errorf("unknown schema %q (want one of policy, handsets, env)", name)
+	return nil, fmt.Errorf("unknown schema %q (want one of %s)", name, strings.Join(Names, ", "))
 }
 
 // All returns the bundle of every schema.
@@ -108,6 +111,7 @@ func All(version string) *Bundle {
 			"policy.toml":   Policy(),
 			"handsets.toml": Handsets(),
 			"env":           Env(),
+			"template":      TemplateFormat(),
 		},
 	}
 }
@@ -459,5 +463,80 @@ func Env() *Schema {
 		},
 		Properties: props,
 		Required:   []string{"ARI_USERNAME", "ARI_PASSWORD"},
+	}
+}
+
+// ── the template format ──────────────────────────────────────────────────
+
+// Template describes the policy-template format itself, so a template author
+// can validate against something published rather than reverse-engineering the
+// Go structs. Same reasoning as the config schemas: the format is an interface,
+// and an interface nobody can read is not one.
+func TemplateFormat() *Schema {
+	return &Schema{
+		SchemaURI:   "https://json-schema.org/draft/2020-12/schema",
+		ID:          "https://callmemaybe.cc/schema/template.json",
+		Title:       "A policy template",
+		Type:        "object",
+		Description: "Declares questions and the policy structures to emit from the answers. A template is data, not text: answers are referenced rather than interpolated, so the output is serialised and cannot be malformed or injected into.",
+		Rules: []string{
+			"Templates may emit extensions and schedules only. One that could write [[people]] could add its author to the allow-list.",
+			"PINs must be \"$generate.pin\" — a template may not hardcode a credential.",
+			"Every $reference must name a declared question.",
+			"A value may be conditional: { when = \"$answer\", value = ... }.",
+			"Accepted as TOML or JSON, chosen by content rather than file extension.",
+		},
+		Required:             []string{"template"},
+		AdditionalProperties: falsy,
+		Properties: map[string]*Schema{
+			"template": {
+				Type:                 "object",
+				Description:          "Identity and provenance.",
+				Required:             []string{"id", "name", "version"},
+				AdditionalProperties: falsy,
+				Properties: map[string]*Schema{
+					"id":          {Type: "string", Description: "Stable identifier, used as the argument to `doorman template apply`."},
+					"name":        {Type: "string", Description: "Human name, shown by `doorman template list`."},
+					"version":     {Type: "string", Description: "Author's version of this template."},
+					"description": {Type: "string", Description: "One sentence on what it sets up."},
+					"author":      {Type: "string"},
+				},
+			},
+			"questions": {
+				Type:        "array",
+				Description: "What the operator is asked, in order.",
+				Items: &Schema{
+					Type:                 "object",
+					Required:             []string{"id", "prompt", "type"},
+					AdditionalProperties: falsy,
+					Properties: map[string]*Schema{
+						"id":     {Type: "string", Description: "Referenced from emit blocks as $id."},
+						"prompt": {Type: "string", Description: "Asked verbatim, so write it as a question."},
+						"type": {
+							Type:        "string",
+							Enum:        []any{"handset", "handset-group", "time-window", "mailbox", "yes-no", "text"},
+							Description: "Drives both the prompt style and validation. handset and handset-group offer a picker from handsets.toml.",
+						},
+						"default": {Description: "Offered when the operator presses enter. For time-window, a table of start, end, and days."},
+						"choices": {Type: "array", Items: &Schema{Type: "string"}},
+					},
+				},
+			},
+			"emit": {
+				Type:                 "object",
+				Description:          "The policy structures produced. This is an allow-list; adding to it is a security decision.",
+				AdditionalProperties: falsy,
+				Properties: map[string]*Schema{
+					"schedules": {
+						Type:  "array",
+						Items: &Schema{Type: "object", Description: "Same shape as policy.toml [[schedules]]. A colliding id is suffixed and references are rewritten."},
+					},
+					"extensions": {
+						Type:  "array",
+						Items: &Schema{Type: "object", Description: "Same shape as policy.toml [[extensions]], except pin must be \"$generate.pin\"."},
+					},
+				},
+			},
+		},
 	}
 }
