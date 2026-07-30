@@ -1,0 +1,72 @@
+# The kid's line.
+#
+# A template is data, not text: it declares its questions and the structures it
+# emits, and `doorman template apply` builds real values and serialises them.
+# Nothing here is string-interpolated into TOML, so a room name containing a
+# quote cannot inject anything.
+#
+# Templates may emit extensions and schedules only — never [[people]]. A
+# template that could add to the allow-list could add its own author to it.
+
+[template]
+id          = "kids-line"
+name        = "Kid's line"
+version     = "1.0.0"
+author      = "Call Me Maybe"
+description = "Rings a child's room, escalates to the adults, and either takes a message or redirects during quiet hours."
+
+[[questions]]
+id     = "room"
+prompt = "Which handset is in their room?"
+type   = "handset"
+
+[[questions]]
+id     = "escalate_to"
+prompt = "If nobody answers, which handsets should ring next?"
+type   = "handset-group"
+
+[[questions]]
+id      = "mailbox"
+prompt  = "Which mailbox takes their messages?"
+type    = "mailbox"
+default = "kids"
+
+[[questions]]
+id     = "quiet"
+prompt = "Quiet hours — when should this line stop ringing?"
+type   = "time-window"
+default = { start = "20:30", end = "07:00", days = ["SU", "MO", "TU", "WE", "TH"] }
+
+[[questions]]
+id     = "redirect_at_night"
+prompt = "During quiet hours, ring the adults instead of taking a message?"
+type   = "yes-no"
+
+# ── What it emits ────────────────────────────────────────────────────────
+
+[[emit.schedules]]
+id    = "kids-quiet-hours"
+start = "$quiet.start"
+end   = "$quiet.end"
+days  = "$quiet.days"
+
+[[emit.extensions]]
+label      = "$room.label"
+pin        = "$generate.pin"
+voicemail  = "$mailbox"
+afterhours = "kids-quiet-hours"
+
+# A conditional value: the redirect is only set when the answer says so.
+# Without it, quiet hours mean "take a message" — the historical behaviour.
+# This is the whole conditional vocabulary: a guard and a value, no expressions.
+afterhours_ring = { when = "$redirect_at_night", value = "$escalate_to" }
+
+  # Their room first, for three ring cycles.
+  [[emit.extensions.steps]]
+  handsets = "$room"
+  rings    = 3
+
+  # Then the grown-ups.
+  [[emit.extensions.steps]]
+  handsets = "$escalate_to"
+  rings    = 4

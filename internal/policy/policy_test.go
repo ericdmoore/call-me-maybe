@@ -339,3 +339,146 @@ endpoint = "PJSIP/kitchen"
 		t.Fatalf("a %d-digit pin should load, got %v", MinPINLength, problems)
 	}
 }
+
+// afterhours could only ever mean "take a message". That cannot express
+// homework hours, a rotating night shift, or forwarding to a babysitter — all
+// of which want the window to ring somewhere else instead.
+func TestAfterhoursRingRedirects(t *testing.T) {
+	handsets := []byte(`
+[[handsets]]
+id = "kids-room"
+endpoint = "PJSIP/kids-room"
+
+[[handsets]]
+id = "office"
+endpoint = "PJSIP/office"
+
+[[groups]]
+id = "adults"
+handsets = ["office"]
+`)
+	policy := []byte(`
+[house]
+handsets = ["office"]
+
+[[schedules]]
+id = "homework"
+start = "16:00"
+end = "18:00"
+days = ["MO", "TU", "WE", "TH"]
+
+[[extensions]]
+pin = "902118"
+label = "Kids"
+handsets = ["kids-room"]
+afterhours = "homework"
+afterhours_ring = ["adults"]
+`)
+	if problems := LintSplit(policy, handsets); len(problems) != 0 {
+		t.Fatalf("afterhours_ring should be accepted: %v", problems)
+	}
+}
+
+// The redirect is a destination, so its handsets must resolve like any other.
+func TestAfterhoursRingValidatesTargets(t *testing.T) {
+	handsets := []byte(`
+[[handsets]]
+id = "kids-room"
+endpoint = "PJSIP/kids-room"
+`)
+	problems := LintSplit([]byte(`
+[house]
+handsets = ["kids-room"]
+
+[[schedules]]
+id = "night"
+start = "20:00"
+end = "07:00"
+
+[[extensions]]
+pin = "902118"
+label = "Kids"
+handsets = ["kids-room"]
+afterhours = "night"
+afterhours_ring = ["nobody-by-that-name"]
+`), handsets)
+	if len(problems) == 0 {
+		t.Fatal("an unknown afterhours_ring target should be a load error")
+	}
+	if !strings.Contains(strings.Join(problems, " "), "nobody-by-that-name") {
+		t.Errorf("the error should name the unresolved target: %v", problems)
+	}
+}
+
+// A redirect with no window to apply to is a configuration mistake, not a
+// silent no-op.
+func TestAfterhoursRingRequiresASchedule(t *testing.T) {
+	problems := LintSplit([]byte(`
+[house]
+handsets = ["kids-room"]
+
+[[extensions]]
+pin = "902118"
+label = "Kids"
+handsets = ["kids-room"]
+afterhours_ring = ["kids-room"]
+`), []byte(`
+[[handsets]]
+id = "kids-room"
+endpoint = "PJSIP/kids-room"
+`))
+	if len(problems) == 0 {
+		t.Fatal("afterhours_ring without afterhours should be an error")
+	}
+}
+
+// The old rule was "afterhours requires voicemail". With a redirect there is
+// somewhere for the caller to go, so a mailbox becomes optional.
+func TestAfterhoursRingSatisfiesTheSomewhereToGoRule(t *testing.T) {
+	handsets := []byte(`
+[[handsets]]
+id = "kids-room"
+endpoint = "PJSIP/kids-room"
+
+[[handsets]]
+id = "office"
+endpoint = "PJSIP/office"
+`)
+	if problems := LintSplit([]byte(`
+[house]
+handsets = ["office"]
+
+[[schedules]]
+id = "night"
+start = "20:00"
+end = "07:00"
+
+[[extensions]]
+pin = "902118"
+label = "Kids"
+handsets = ["kids-room"]
+afterhours = "night"
+afterhours_ring = ["office"]
+`), handsets); len(problems) != 0 {
+		t.Fatalf("a redirect should satisfy the somewhere-to-go rule: %v", problems)
+	}
+
+	// Neither a mailbox nor a redirect is still an error.
+	if problems := LintSplit([]byte(`
+[house]
+handsets = ["office"]
+
+[[schedules]]
+id = "night"
+start = "20:00"
+end = "07:00"
+
+[[extensions]]
+pin = "902118"
+label = "Kids"
+handsets = ["kids-room"]
+afterhours = "night"
+`), handsets); len(problems) == 0 {
+		t.Error("afterhours with neither voicemail nor redirect should still fail")
+	}
+}

@@ -99,6 +99,15 @@ type Extension struct {
 	// inline-table form can produce a helpful error instead of a decode
 	// failure.)
 	Afterhours any `toml:"afterhours"`
+	// AfterhoursRing redirects the call during the afterhours window instead
+	// of sending it straight to voicemail. Without it, quiet hours can only
+	// mean "take a message" — which cannot express homework hours, a rotating
+	// night shift, or forwarding to a babysitter.
+	//
+	// If nobody answers the redirect, the caller still lands in voicemail (or
+	// is politely dismissed when there is no mailbox), so this narrows what
+	// happens during the window rather than removing the fallback.
+	AfterhoursRing []string `toml:"afterhours_ring"`
 	// Enabled defaults to true when absent, hence the pointer.
 	Enabled *bool `toml:"enabled"`
 }
@@ -204,6 +213,9 @@ type ResolvedExtension struct {
 	Label      string
 	Plan       RingPlan
 	Afterhours *Afterhours
+	// AfterhoursPlan is what rings during the window. Zero steps means the
+	// historical behaviour: straight to voicemail.
+	AfterhoursPlan RingPlan
 }
 
 // Policy is a validated policy file compiled into lookups.
@@ -212,6 +224,12 @@ type Policy struct {
 	exts           map[string]ResolvedExtension
 	house          RingPlan
 	callerIDFormat string
+
+	// Retained for tooling rather than call handling: filling in a template
+	// needs to know what handsets exist and which ids are already taken.
+	handsets    map[string]Handset
+	groups      map[string][]string
+	scheduleIDs map[string]bool
 
 	// PinLength is the uniform PIN length, or 0 if extensions have mixed
 	// lengths. When uniform, the collector can fire the moment the last digit
@@ -538,8 +556,10 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 				fail("%s references unknown schedule %q", where, ref)
 			}
 			ah = window // nil when the schedule is disabled: inert
-			if known && window != nil && e.Voicemail == "" {
-				fail("%s has afterhours but no voicemail — an afterhours caller needs somewhere to go", where)
+			// A caller during quiet hours needs somewhere to go: either a
+			// mailbox, or another phone to ring.
+			if known && window != nil && e.Voicemail == "" && len(e.AfterhoursRing) == 0 {
+				fail("%s has afterhours but no voicemail and no afterhours_ring — an afterhours caller needs somewhere to go", where)
 			}
 		default:
 			fail("%s: afterhours is now a named schedule — define [[schedules]] with id/start/end/days and set afterhours = \"<id>\"", where)
@@ -574,13 +594,24 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		}
 		plan.Mailbox = e.Voicemail
 
+		var ahPlan RingPlan
+		if len(e.AfterhoursRing) > 0 {
+			if e.Afterhours == nil {
+				fail("%s has afterhours_ring but no afterhours schedule — there is no window for it to apply to", where)
+			}
+			ahPlan.Steps = []RingStep{{
+				Endpoints: expand(where+" afterhours_ring", e.AfterhoursRing),
+			}}
+			ahPlan.Mailbox = e.Voicemail
+		}
+
 		if e.Enabled != nil && !*e.Enabled {
 			continue
 		}
 		if !placeholder {
 			lengths[len(e.PIN)] = true
 		}
-		exts[key] = ResolvedExtension{PIN: e.PIN, Label: e.Label, Plan: plan, Afterhours: ah}
+		exts[key] = ResolvedExtension{PIN: e.PIN, Label: e.Label, Plan: plan, Afterhours: ah, AfterhoursPlan: ahPlan}
 	}
 
 	if len(problems) > 0 {
@@ -594,12 +625,20 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		}
 	}
 
+	scheduleIDs := make(map[string]bool, len(schedules))
+	for id := range schedules {
+		scheduleIDs[id] = true
+	}
+
 	return &Policy{
 		allow:          allow,
 		exts:           exts,
 		house:          house,
 		callerIDFormat: format,
 		PinLength:      pinLength,
+		handsets:       handsets,
+		groups:         groups,
+		scheduleIDs:    scheduleIDs,
 	}, nil
 }
 
@@ -739,4 +778,56 @@ func (p *Policy) ExtensionCount() int { return len(p.exts) }
 func (p *Policy) FormatCallerID(name, number string) string {
 	s := strings.ReplaceAll(p.callerIDFormat, "{name}", name)
 	return strings.ReplaceAll(s, "{number}", number)
+}
+
+// ── Accessors used when filling in a template ────────────────────────────
+
+// HandsetIDs lists every handset id, sorted. Used to offer a picker rather
+// than making someone remember what they called the spare room.
+func (p *Policy) HandsetIDs() []string {
+	out := make([]string, 0, len(p.handsets))
+	for id := range p.handsets {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// RingTargetIDs lists everything valid in a `handsets = [...]` position:
+// handsets and groups both.
+func (p *Policy) RingTargetIDs() []string {
+	out := p.HandsetIDs()
+	for id := range p.groups {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// HandsetLabel resolves an id to its human label, falling back to the id.
+func (p *Policy) HandsetLabel(id string) string {
+	if h, ok := p.handsets[id]; ok && h.Label != "" {
+		return h.Label
+	}
+	return id
+}
+
+// ScheduleIDs is the set of schedule ids already defined, so a template does
+// not collide with one the operator wrote.
+func (p *Policy) ScheduleIDs() map[string]bool {
+	out := make(map[string]bool, len(p.scheduleIDs))
+	for id := range p.scheduleIDs {
+		out[id] = true
+	}
+	return out
+}
+
+// PINs is the set of extension PINs already in use, so a generated one cannot
+// collide.
+func (p *Policy) PINs() map[string]bool {
+	out := make(map[string]bool, len(p.exts))
+	for _, e := range p.exts {
+		out[e.PIN] = true
+	}
+	return out
 }

@@ -45,6 +45,8 @@ func main() {
 		switch os.Args[1] {
 		case "init":
 			os.Exit(runInit(os.Args[2:]))
+		case "template":
+			os.Exit(runTemplate(os.Args[2:]))
 		case "check":
 			os.Exit(runCheck(os.Args[2:]))
 		case "rotate":
@@ -88,6 +90,9 @@ const usage = `doorman — the Call Me Maybe lobby daemon
                                 the environment. name is policy, handsets, or
                                 env; all three when omitted. Written to be
                                 read by tooling and by LLMs — see llms.txt
+  doorman template <cmd>        list, show, and fill in policy templates:
+                                a template declares questions and the structures
+                                it emits, and this writes ordinary policy TOML
   doorman rotate [flags] [label ...]
                                 rotate extension PINs; all extensions when no labels given
       -policy path              policy file (default $POLICY_PATH or ./policy.toml)

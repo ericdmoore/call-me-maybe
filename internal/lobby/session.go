@@ -380,8 +380,16 @@ func (s *Session) evaluate(digits *string, attempts *int, reset func(time.Durati
 	if ext, ok := s.pol.LookupExtension(entered); ok {
 		s.deps.Limiter.Success(s.limitKey())
 		if ext.Afterhours.Active(s.now()) {
-			// Quiet hours: a valid PIN, but the line does not ring. Straight
-			// to voicemail — validation guarantees a mailbox exists.
+			// Quiet hours. Either the call is redirected somewhere that is
+			// awake — homework hours sending the kids' line to the adults, a
+			// rotating night shift — or, with no redirect configured, it goes
+			// straight to voicemail, which is the historical behaviour.
+			if len(ext.AfterhoursPlan.Steps) > 0 {
+				s.log.Info("extension in afterhours, redirecting",
+					"extension", ext.Label)
+				s.runPlan(ext.AfterhoursPlan, ext.Label)
+				return true
+			}
 			s.log.Info("extension in afterhours, sending to voicemail",
 				"extension", ext.Label)
 			s.sendToVoicemail(ext.Plan.Mailbox)

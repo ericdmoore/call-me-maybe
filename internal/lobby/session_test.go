@@ -565,3 +565,67 @@ func TestHouseNoAnswerFallsToFamilyVoicemail(t *testing.T) {
 	h.sess.CallerLeft()
 	h.waitFinished(t)
 }
+
+// With afterhours_ring the window rings somewhere awake instead of going
+// straight to voicemail — homework hours sending the kids' line to the adults.
+// Proving it at the policy layer is not enough; the state machine has to
+// actually originate.
+func TestAfterhoursRingRedirectsInsteadOfVoicemail(t *testing.T) {
+	src := strings.Replace(kidsLadderPolicy,
+		`afterhours = "school-night"`,
+		"afterhours = \"school-night\"\nafterhours_ring = [\"adults\"]", 1)
+
+	h := startWith(t, src, "9995550199", nil)
+	// 21:30 on a Tuesday: inside the school-night window.
+	h.now = time.Date(2026, 7, 7, 21, 30, 0, 0, time.Local)
+
+	h.finishPlayback(t)
+	dialPin(h, "555001")
+
+	// Instead of the voicemail handoff, the adults' handsets ring.
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+	h.fake.expect(t, "Originate")
+	h.fake.expect(t, "Originate")
+	adult := <-h.legs
+	<-h.legs
+
+	h.sess.LegAnswered(adult)
+	h.fake.expectAny(t, "RingStop", "AddToBridge", "Hangup")
+
+	h.sess.CallerGone()
+	h.waitFinished(t)
+}
+
+// And the fallback still works: if the redirect goes unanswered the caller
+// lands in voicemail rather than being dropped.
+func TestAfterhoursRingFallsBackToVoicemail(t *testing.T) {
+	src := strings.Replace(kidsLadderPolicy,
+		`afterhours = "school-night"`,
+		"afterhours = \"school-night\"\nafterhours_ring = [\"adults\"]", 1)
+
+	h := startWith(t, src, "9995550199", nil)
+	h.now = time.Date(2026, 7, 7, 21, 30, 0, 0, time.Local)
+
+	h.finishPlayback(t)
+	dialPin(h, "555001")
+
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+	h.fake.expect(t, "Originate")
+	h.fake.expect(t, "Originate")
+	<-h.legs
+	<-h.legs
+
+	// Nobody answers before the stage times out.
+	h.fake.expectAny(t, "Hangup", "Hangup", "RingStop", "DestroyBridge")
+	if c := h.fake.expect(t, "SetChannelVar"); c.Args[2] != "kids" {
+		t.Fatalf("mailbox = %s, want kids", c.Args[2])
+	}
+	h.fake.expect(t, "Continue")
+
+	h.sess.CallerLeft()
+	h.waitFinished(t)
+}
