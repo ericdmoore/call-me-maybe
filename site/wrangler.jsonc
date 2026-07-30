@@ -33,26 +33,25 @@
   "workers_dev": true,
 
   // ── Custom domains ───────────────────────────────────────────────────────
-  // Deliberately not enabled yet. As of 2026-07-30 the nameservers for both
-  // zones are delegated to Cloudflare and fully propagated (the .cc registry
-  // and Cloudflare/Google/Quad9 all return becky+max), but Cloudflare still
-  // reports callmemaybe.cc as `pending` until its own verification catches up.
+  // Enabled 2026-07-30, once three preconditions were all true: the zone read
+  // `active` (not merely delegated), the API token had Zone → DNS → Edit — a
+  // custom domain creates a DNS record, so Workers Scripts → Edit alone is not
+  // enough — and the site was confirmed working on workers.dev first.
   //
-  // Attaching a domain whose zone is pending gives you the worst outcome: a
-  // deploy that reports success and a hostname that does not resolve. So
-  // deploy to workers.dev first, confirm the site, then uncomment this once
-  // `callmemaybe.cc` reads active.
+  // Attaching a domain whose zone is still `pending` produces the worst
+  // outcome available: a deploy that reports success against a hostname that
+  // does not resolve. Verify the zone status before adding a pattern here:
   //
-  // Attaching a custom domain also creates a DNS record, so the API token
-  // needs Zone → DNS → Edit on these zones, not just Workers Scripts → Edit.
-  //
-  // "routes": [
-  //   { "pattern": "callmemaybe.cc", "custom_domain": true },
-  //   { "pattern": "www.callmemaybe.cc", "custom_domain": true }
-  // ],
-  //
+  //   curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  //     "https://api.cloudflare.com/client/v4/zones?name=callmemaybe.cc" \
+  //     | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"][0]["status"])'
+  "routes": [
+    { "pattern": "callmemaybe.cc", "custom_domain": true },
+    { "pattern": "www.callmemaybe.cc", "custom_domain": true }
+  ],
+
   // dialdoorman.cc is left out on purpose. It is active and could serve today,
-  // but two hostnames both serving the site contradicts the <link
+  // but two hostnames both serving the same content contradicts the <link
   // rel="canonical"> in Base.astro. If it is a spare rather than a mirror, give
   // it a Redirect Rule to callmemaybe.cc instead of a second custom domain.
 
