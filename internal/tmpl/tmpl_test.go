@@ -301,3 +301,76 @@ func TestGeneratedPINsAreUniqueAndValid(t *testing.T) {
 		t.Errorf("generated %d distinct PINs across 20 renders, want 20", len(taken))
 	}
 }
+
+// Templates may be authored in whichever of the three formats the author
+// prefers, detected by content rather than file extension — so a template piped
+// in on stdin, with no filename at all, still works.
+func TestYAMLTemplatesParse(t *testing.T) {
+	tp, err := tmpl.Parse([]byte(`
+template:
+  id: yaml-one
+  name: YAML One
+  version: 1.0.0
+
+questions:
+  - id: room
+    prompt: Which?
+    type: handset
+
+emit:
+  extensions:
+    - label: $room.label
+      pin: $generate.pin
+      handsets: $room
+`))
+	if err != nil {
+		t.Fatalf("YAML template: %v", err)
+	}
+	if tp.Meta.ID != "yaml-one" || len(tp.Questions) != 1 {
+		t.Fatalf("parsed wrong: %+v", tp.Meta)
+	}
+	out, err := tp.Render(tmpl.Answers{"room": "kitchen"}, opts())
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if problems := policy.LintSplit([]byte(basePolicy+out), []byte(handsets)); len(problems) != 0 {
+		t.Fatalf("YAML-authored template produced invalid policy: %v", problems)
+	}
+}
+
+// The three formats must not be confused for one another. YAML is permissive
+// enough to accept a TOML file and produce a document with nothing set, so it
+// deliberately gets last refusal.
+func TestFormatDetectionDoesNotConfuseTOMLForYAML(t *testing.T) {
+	tomlSrc := []byte(`
+[template]
+id = "toml-one"
+name = "TOML One"
+version = "1.0.0"
+
+[[questions]]
+id = "room"
+prompt = "Which?"
+type = "handset"
+
+[[emit.extensions]]
+label = "$room.label"
+pin = "$generate.pin"
+handsets = "$room"
+`)
+	tp, err := tmpl.Parse(tomlSrc)
+	if err != nil {
+		t.Fatalf("TOML template: %v", err)
+	}
+	if tp.Meta.ID != "toml-one" {
+		t.Errorf("id = %q — TOML was not parsed as TOML", tp.Meta.ID)
+	}
+}
+
+// Something that is none of the three has to say so, rather than parsing to an
+// empty template and failing later with a confusing validation error.
+func TestUnparseableTemplateIsReported(t *testing.T) {
+	if _, err := tmpl.Parse([]byte("this is not a template at all\n\t\x00")); err == nil {
+		t.Fatal("garbage should not parse as a template")
+	}
+}

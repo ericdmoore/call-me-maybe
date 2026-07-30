@@ -64,5 +64,5 @@ Three files, three cadences. Do not merge them; the split is deliberate.
 - `make check` — gofmt, vet, lint, test, build. Must be green.
 - `make cover` — tests with `-race` plus per-package coverage floors.
 - `make hooks` — installs the pre-push gate (same checks as CI).
-- Two dependencies in the daemon, both permissive; the stdlib covers the rest. Lint tooling lives in a nested `tools/` module so it never enters the shipped binary's dependency graph.
+- Three dependencies in the daemon, all permissive; the stdlib covers the rest. Lint tooling lives in a nested `tools/` module so it never enters the shipped binary's dependency graph.
 - Tests use stdlib `testing`, colocated with the code.

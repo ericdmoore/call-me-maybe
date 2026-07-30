@@ -11,34 +11,42 @@ const repo = 'https://github.com/ericdmoore/call-me-maybe';
 
 const features = [
   {
+    slug: 'ringer-ladders',
     term: 'Ringer ladders',
     body: 'Ring the kids’ room for three cycles, escalate to the adults for four more, then take a message. Per extension.',
   },
   {
+    slug: 'quiet-hours',
     term: 'Quiet hours',
     body: 'A named schedule like school-night, referenced by any extension. Between 20:30 and 07:00 that line does not ring at all.',
   },
   {
+    slug: 'paging',
     term: 'Paging',
     body: 'Dial 500 and every handset opens at once. Dinner is ready without shouting up the stairs.',
   },
   {
+    slug: 'call-parking',
     term: 'Call parking',
     body: 'Park a call on 700 in the kitchen, pick it up from the office. The house behaves like a small hotel.',
   },
   {
+    slug: 'conference',
     term: 'Family conference',
     body: 'Dial 600 and everyone who joins is in the same room. An extension can drop an outside caller straight into it.',
   },
   {
+    slug: 'busy-lamps',
     term: 'Busy lamps',
     body: 'BLF hints, so the lamp on your handset tells you the office is already on a call before you pick up.',
   },
   {
+    slug: 'voicemail',
     term: 'Voicemail',
     body: 'Per-mailbox, with the message delivered to email. Message-waiting lamps follow whichever box you point a phone at.',
   },
   {
+    slug: 'hold-music',
     term: 'Hold music',
     body: 'Because a silent hold is indistinguishable from a dropped call.',
   },
@@ -200,7 +208,8 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
         <p>
           Once the handsets are registered, they get the toolkit a small office
           PBX has had for thirty years. It turns out to be a remarkably good fit
-          for a house.
+          for a house. Each one has <a href="/features/">its own page</a> — who
+          it is for, and what it replaces.
         </p>
       </div>
 
@@ -208,7 +217,7 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
         {
           features.map((f) => (
             <li>
-              <dfn>{f.term}</dfn>
+              <dfn>{f.slug ? <a href={`/features/${f.slug}/`}>{f.term}</a> : f.term}</dfn>
               <p>{f.body}</p>
             </li>
           ))

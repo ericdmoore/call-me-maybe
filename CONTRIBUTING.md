@@ -28,8 +28,8 @@ reach the logs.** It allows `len(digits)` and `tail(number)`, because logging
 a count or a redacted fragment is useful and safe; it rejects the value
 itself, including through `fmt.Sprint` or a slice expression. The analyzer
 lives in the nested `tools/` module so that `golang.org/x/tools` never enters
-the daemon's dependency graph — `doorman` still builds from exactly two
-dependencies.
+the daemon's dependency graph — the lint tooling adds nothing to the shipped
+binary.
 
 `make hooks` points `core.hooksPath` at the versioned `.githooks/`, so the
 pre-push gate travels with the repo. It refuses a push on unformatted code,
@@ -44,8 +44,11 @@ Asterisk, covered by `scripts/smoke.sh` on real hardware instead of unit
 tests. Floors live in `scripts/coverage.sh`. Raise them when you add tests;
 do not lower one to get a push through.
 
-- No new dependencies without a strong reason. There are two, both
-  permissive, and the stdlib covers the rest.
+- No new dependencies without a strong reason. There are three — `BurntSushi/toml`,
+  `gorilla/websocket`, and `gopkg.in/yaml.v3` — all permissive, and the stdlib
+  covers the rest. yaml.v3 earns its place by letting templates be authored in
+  the format their author prefers; it is used only by the template loader and
+  never on a call path.
 - Tests use stdlib `testing`, colocated with the code. State machine changes
   go through the fake-ARI harness in `internal/lobby` — never add a test that
   needs a live Asterisk.

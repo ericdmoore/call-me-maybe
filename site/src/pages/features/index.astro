@@ -1,0 +1,57 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import Divider from '../../components/Divider.astro';
+
+const features = (await getCollection('features')).sort(
+  (a, b) => a.data.order - b.data.order,
+);
+---
+
+<Base
+  title="Features — Call Me Maybe"
+  description="What a house phone can do when the switchboard is yours: ringer ladders, quiet hours, paging, parking, conference, and the rest of the PBX toolkit."
+>
+  <header class="lobby" style="padding-block:clamp(2.5rem,6vw,4rem) 0;">
+    <div class="wrap">
+      <p class="eyebrow">The switchboard</p>
+      <h1 class="wordmark" style="font-size:clamp(2rem,6vw,3.6rem);">Features</h1>
+      <p class="tagline">
+        Thirty years of office telephony, pointed at a house. Every one of these
+        is a mechanism &mdash; free, in the repository, and working completely
+        with the bundled pack.
+      </p>
+      <Divider />
+    </div>
+  </header>
+
+  <section class="panel">
+    <div class="wrap">
+      <ul class="features">
+        {
+          features.map((f) => (
+            <li>
+              <dfn>
+                <a href={`/features/${f.id}/`}>{f.data.title}</a>
+                {f.data.code && <span class="feat-code">{f.data.code}</span>}
+              </dfn>
+              <p>{f.data.tagline}</p>
+              <p class="feat-who">{f.data.audience}</p>
+            </li>
+          ))
+        }
+      </ul>
+
+      <div class="prose" style="margin-top:2.5rem;">
+        <p>
+          Not one of these is big enough to sell on its own, which is exactly
+          why households never got them. They existed for offices, behind a
+          five-figure switch and a maintenance contract. Once you own the
+          switchboard, a feature stops being a purchase order and becomes a few
+          lines of configuration &mdash; which is the entire argument for this
+          being free software rather than a product.
+        </p>
+      </div>
+    </div>
+  </section>
+</Base>

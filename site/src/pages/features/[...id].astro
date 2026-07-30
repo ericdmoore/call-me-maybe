@@ -1,0 +1,42 @@
+---
+import { getCollection, render } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import Divider from '../../components/Divider.astro';
+
+export async function getStaticPaths() {
+  const features = await getCollection('features');
+  return features.map((f) => ({ params: { id: f.id }, props: { f } }));
+}
+
+const { f } = Astro.props;
+const { Content } = await render(f);
+---
+
+<Base title={`${f.data.title} — Call Me Maybe`} description={f.data.tagline}>
+  <header class="lobby" style="padding-block:clamp(2.5rem,6vw,4rem) 0;">
+    <div class="wrap">
+      <p class="eyebrow">
+        <a href="/features/">Features</a>{f.data.code && ` · dial ${f.data.code}`}
+      </p>
+      <h1 class="wordmark" style="font-size:clamp(1.8rem,5vw,3rem);">{f.data.title}</h1>
+      <p class="tagline">{f.data.tagline}</p>
+      <Divider />
+    </div>
+  </header>
+
+  <section class="panel">
+    <div class="wrap">
+      <p class="feat-audience"><strong>Who it is for.</strong> {f.data.audience}</p>
+
+      <article class="prose feat-body">
+        <Content />
+      </article>
+
+      <p style="margin-top:2.5rem;">
+        <a href="/features/" class="display" style="font-size:var(--t-sm);"
+          >&larr; All features</a
+        >
+      </p>
+    </div>
+  </section>
+</Base>

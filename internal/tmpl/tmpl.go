@@ -27,32 +27,33 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"gopkg.in/yaml.v3"
 )
 
 // Template is the authored file.
 type Template struct {
-	Meta      Meta       `toml:"template" json:"template"`
-	Questions []Question `toml:"questions" json:"questions"`
-	Emit      Emit       `toml:"emit" json:"emit"`
+	Meta      Meta       `toml:"template" json:"template" yaml:"template"`
+	Questions []Question `toml:"questions" json:"questions" yaml:"questions"`
+	Emit      Emit       `toml:"emit" json:"emit" yaml:"emit"`
 }
 
 type Meta struct {
-	ID          string `toml:"id" json:"id"`
-	Name        string `toml:"name" json:"name"`
-	Version     string `toml:"version" json:"version"`
-	Description string `toml:"description" json:"description"`
-	Author      string `toml:"author" json:"author"`
+	ID          string `toml:"id" json:"id" yaml:"id"`
+	Name        string `toml:"name" json:"name" yaml:"name"`
+	Version     string `toml:"version" json:"version" yaml:"version"`
+	Description string `toml:"description" json:"description" yaml:"description"`
+	Author      string `toml:"author" json:"author" yaml:"author"`
 }
 
 // Question is one prompt. Type drives both the prompt style and validation;
 // the set is deliberately small, because every type is a promise to template
 // authors that has to keep working.
 type Question struct {
-	ID      string   `toml:"id" json:"id"`
-	Prompt  string   `toml:"prompt" json:"prompt"`
-	Type    string   `toml:"type" json:"type"`
-	Default any      `toml:"default" json:"default"`
-	Choices []string `toml:"choices" json:"choices"`
+	ID      string   `toml:"id" json:"id" yaml:"id"`
+	Prompt  string   `toml:"prompt" json:"prompt" yaml:"prompt"`
+	Type    string   `toml:"type" json:"type" yaml:"type"`
+	Default any      `toml:"default" json:"default" yaml:"default"`
+	Choices []string `toml:"choices" json:"choices" yaml:"choices"`
 }
 
 // Known question types.
@@ -73,58 +74,84 @@ var knownTypes = map[string]bool{
 // Emit is the allow-list of what a template may produce. Adding a field here
 // is a security decision, not a convenience one — see the package comment.
 type Emit struct {
-	Schedules  []EmitSchedule  `toml:"schedules" json:"schedules"`
-	Extensions []EmitExtension `toml:"extensions" json:"extensions"`
+	Schedules  []EmitSchedule  `toml:"schedules" json:"schedules" yaml:"schedules"`
+	Extensions []EmitExtension `toml:"extensions" json:"extensions" yaml:"extensions"`
 }
 
 type EmitSchedule struct {
-	ID    string `toml:"id" json:"id"`
-	Start string `toml:"start" json:"start"`
-	End   string `toml:"end" json:"end"`
-	Days  any    `toml:"days" json:"days"`
-	When  string `toml:"when" json:"when"`
+	ID    string `toml:"id" json:"id" yaml:"id"`
+	Start string `toml:"start" json:"start" yaml:"start"`
+	End   string `toml:"end" json:"end" yaml:"end"`
+	Days  any    `toml:"days" json:"days" yaml:"days"`
+	When  string `toml:"when" json:"when" yaml:"when"`
 }
 
 type EmitExtension struct {
-	Label          string     `toml:"label" json:"label"`
-	PIN            string     `toml:"pin" json:"pin"`
-	Handsets       any        `toml:"handsets" json:"handsets"`
-	Steps          []EmitStep `toml:"steps" json:"steps"`
-	Voicemail      string     `toml:"voicemail" json:"voicemail"`
-	Afterhours     string     `toml:"afterhours" json:"afterhours"`
-	AfterhoursRing any        `toml:"afterhours_ring" json:"afterhours_ring"`
-	When           string     `toml:"when" json:"when"`
+	Label          string     `toml:"label" json:"label" yaml:"label"`
+	PIN            string     `toml:"pin" json:"pin" yaml:"pin"`
+	Handsets       any        `toml:"handsets" json:"handsets" yaml:"handsets"`
+	Steps          []EmitStep `toml:"steps" json:"steps" yaml:"steps"`
+	Voicemail      string     `toml:"voicemail" json:"voicemail" yaml:"voicemail"`
+	Afterhours     string     `toml:"afterhours" json:"afterhours" yaml:"afterhours"`
+	AfterhoursRing any        `toml:"afterhours_ring" json:"afterhours_ring" yaml:"afterhours_ring"`
+	When           string     `toml:"when" json:"when" yaml:"when"`
 }
 
 type EmitStep struct {
-	Handsets any    `toml:"handsets" json:"handsets"`
-	Rings    int    `toml:"rings" json:"rings"`
-	Seconds  int    `toml:"seconds" json:"seconds"`
-	When     string `toml:"when" json:"when"`
+	Handsets any    `toml:"handsets" json:"handsets" yaml:"handsets"`
+	Rings    int    `toml:"rings" json:"rings" yaml:"rings"`
+	Seconds  int    `toml:"seconds" json:"seconds" yaml:"seconds"`
+	When     string `toml:"when" json:"when" yaml:"when"`
 }
 
-// Parse reads a template from TOML or JSON, choosing by content rather than by
-// file extension so a template served from a URL without one still works.
+// Parse reads a template from TOML, YAML, or JSON, choosing by content rather
+// than by file extension — so a template served from a URL without one, or piped
+// in on stdin, still works.
 //
-// YAML is deliberately absent: it would be this project's third dependency, and
-// CONTRIBUTING requires a strong reason for each. TOML matches the rest of the
-// configuration and JSON needs nothing at all.
+// The order is deliberate. JSON is unambiguous from its first character. TOML is
+// tried next because it matches the rest of this project's configuration, and it
+// is strict enough to reject YAML outright. YAML is last because it is permissive
+// enough to accept things that were meant to be TOML and quietly produce a
+// document with no fields set — so it must not get first refusal.
 func Parse(data []byte) (*Template, error) {
 	trimmed := strings.TrimSpace(string(data))
-	var t Template
+
 	if strings.HasPrefix(trimmed, "{") {
+		var t Template
 		if err := json.Unmarshal(data, &t); err != nil {
 			return nil, fmt.Errorf("template is not valid JSON: %w", err)
 		}
-	} else {
-		if _, err := toml.Decode(string(data), &t); err != nil {
-			return nil, fmt.Errorf("template is not valid TOML: %w", err)
-		}
+		return finish(&t)
 	}
+
+	var tomlT Template
+	tomlErr := func() error {
+		_, err := toml.Decode(string(data), &tomlT)
+		return err
+	}()
+	// A YAML document parsed as TOML usually errors; when it does not, it
+	// produces an empty struct. Require evidence that something was actually
+	// read before accepting it.
+	if tomlErr == nil && tomlT.Meta.ID != "" {
+		return finish(&tomlT)
+	}
+
+	var yamlT Template
+	if err := yaml.Unmarshal(data, &yamlT); err == nil && yamlT.Meta.ID != "" {
+		return finish(&yamlT)
+	}
+
+	if tomlErr != nil {
+		return nil, fmt.Errorf("template is not valid TOML, YAML, or JSON: %w", tomlErr)
+	}
+	return nil, fmt.Errorf("template parsed but declared no template.id — check the top-level keys against `doorman schema template`")
+}
+
+func finish(t *Template) (*Template, error) {
 	if err := t.Validate(); err != nil {
 		return nil, err
 	}
-	return &t, nil
+	return t, nil
 }
 
 // Validate checks a template before it is ever run, which is the whole reason

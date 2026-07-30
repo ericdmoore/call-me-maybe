@@ -1146,3 +1146,108 @@ samp {
   color: var(--text);
   font-weight: 400;
 }
+
+/* ── Feature pages ────────────────────────────────────────────────────────
+   The index reuses the .features grid from the home page; these are the extra
+   pieces a detail page needs. */
+
+.features dfn a {
+  text-decoration: none;
+}
+
+.features dfn a:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.feat-code {
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--text-soft);
+  margin-left: 0.6rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.feat-who {
+  margin-top: 0.6rem !important;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--rule);
+  font-size: var(--t-xs) !important;
+  font-style: italic;
+}
+
+.feat-audience {
+  max-width: var(--measure);
+  padding: 0.9rem 1.1rem;
+  border-left: 3px solid var(--accent-dim);
+  background: color-mix(in srgb, var(--raised) 50%, var(--ground) 50%);
+  font-size: var(--t-sm);
+  color: var(--text-soft);
+  margin: 0 0 2rem;
+}
+
+.feat-audience strong {
+  color: var(--accent);
+  font-weight: 400;
+}
+
+/* Markdown body. The prose class handles paragraphs; these are the elements
+   markdown adds that the home page never needed. */
+.feat-body h2 {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: var(--t-md);
+  color: var(--accent);
+  margin: 2.5rem 0 0.9rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.feat-body h2:first-child {
+  margin-top: 0;
+}
+
+.feat-body h3 {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: var(--t-sm);
+  margin: 1.8rem 0 0.6rem;
+}
+
+.feat-body ul {
+  padding-left: 1.2rem;
+  margin: 0 0 1.1em;
+}
+
+.feat-body li {
+  margin-bottom: 0.5em;
+}
+
+.feat-body strong {
+  color: var(--text);
+  font-weight: 400;
+  border-bottom: 1px solid var(--accent-dim);
+}
+
+.feat-body pre {
+  background: color-mix(in srgb, var(--ground) 70%, #000 25%);
+  border: 1px solid var(--rule);
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
+  font-size: var(--t-sm);
+  line-height: 1.7;
+}
+
+:root[data-theme="light"] .feat-body pre {
+  background: color-mix(in srgb, var(--raised) 80%, #000 6%);
+}
+
+.feat-body pre code {
+  color: var(--accent-lit);
+}
+
+.feat-body :not(pre) > code {
+  color: var(--accent);
+}
