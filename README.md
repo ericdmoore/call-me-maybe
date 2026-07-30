@@ -1,9 +1,13 @@
 # Call Me Maybe
 
+![Carly Rae Jepson](https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExcjhoaTRpN3EzaDVpbGF6eW1qMm5qbWRwMnNtb2h2NW1udWlzeTd3dSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/kGdRnb1kF4OmQ/giphy.gif)
+
 **A programmable home phone for a spare Raspberry Pi. Known callers ring the
 whole house; everyone else meets the bouncer.**
 
 [callmemaybe.cc](https://callmemaybe.cc)
+
+
 
 *The home phone my kids never saw coming.*
 
