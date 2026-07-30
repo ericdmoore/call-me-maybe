@@ -55,8 +55,18 @@ fi
 step "go vet"
 go vet ./... || fail "go vet found problems"
 
+# nilness, plus the rule that caller IDs and PINs never reach the logs. The
+# linter is built from the tools/ submodule; the build is cached after the
+# first run.
+step "cmmlint"
+(cd tools && go build -o ../bin/cmmlint ./cmd/cmmlint) || fail "could not build cmmlint"
+./bin/cmmlint ./... || fail "cmmlint found problems"
+
 step "go test"
 go test ./... || fail "tests are failing — not pushing"
+
+step "analyzer tests"
+(cd tools && go test ./...) >/dev/null || fail "tools/ tests are failing"
 
 # ── The shipped examples must stay valid ─────────────────────────────
 # A broken policy.example.toml is the first thing a new user copies.

@@ -14,9 +14,22 @@ breaks every transfer and every voicemail handoff).
 
 ```bash
 make hooks      # once, per clone — installs the pre-push gate
-make check      # gofmt + vet + test + build; must be green
+make check      # gofmt + vet + lint + test + build; must be green
 make cover      # tests with -race, plus per-package coverage floors
+make lint       # nilness, plus the no-secrets-in-logs rule
 ```
+
+`go vet` already runs 35 analyzers from `golang.org/x/tools/go/analysis`,
+including the ones that matter most here: `lostcancel`, `copylocks`,
+`atomic`, `waitgroup`, `testinggoroutine`, `loopclosure`. `make lint` adds
+what vet leaves out — `nilness`, which needs SSA — plus **`nologsecrets`,
+which mechanically enforces the rule below that caller IDs and PINs never
+reach the logs.** It allows `len(digits)` and `tail(number)`, because logging
+a count or a redacted fragment is useful and safe; it rejects the value
+itself, including through `fmt.Sprint` or a slice expression. The analyzer
+lives in the nested `tools/` module so that `golang.org/x/tools` never enters
+the daemon's dependency graph — `doorman` still builds from exactly two
+dependencies.
 
 `make hooks` points `core.hooksPath` at the versioned `.githooks/`, so the
 pre-push gate travels with the repo. It refuses a push on unformatted code,

@@ -16,7 +16,7 @@ else
 GOFLAGS := -trimpath -ldflags '-s -w -X main.version=$(VERSION)'
 endif
 
-.PHONY: build test vet check cross run clean fmt fmt-check cover hooks release-tag
+.PHONY: build test vet check cross run clean fmt fmt-check cover hooks release-tag lint lint-test
 
 build:
 	go build $(GOFLAGS) -o $(BIN) ./cmd/doorman
@@ -38,8 +38,22 @@ fmt-check:
 		echo "run: make fmt"; exit 1; \
 	fi
 
+## lint: the static analysis `go vet` does not do. vet already runs 35
+## analyzers from x/tools (lostcancel, copylocks, waitgroup, testinggoroutine
+## — the ones that matter for goroutine-per-call code). This adds nilness,
+## which needs SSA and so is not in vet's default set, plus nologsecrets: the
+## house rule that caller IDs and PINs never reach the logs. It lives in the
+## tools/ submodule so x/tools never enters the daemon's dependency graph.
+lint:
+	@cd tools && go build -o ../bin/cmmlint ./cmd/cmmlint
+	@./bin/cmmlint ./... && echo "✓ cmmlint clean"
+
+## lint-test: the analyzer's own tests
+lint-test:
+	cd tools && go test ./...
+
 ## check: everything that must be green before a commit
-check: fmt-check vet test build
+check: fmt-check vet lint test build
 
 ## cover: tests with -race plus the per-package coverage floors
 cover:

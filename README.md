@@ -292,8 +292,6 @@ Grandstream's Wi-Fi handsets are what this was built and tested against:
 #### Grandstream Cordless WiFi IP Phone WP826 SIP Phone
 [on Amazon](https://amzn.to/44YDPRP)
 
-#### Grandstream WiFi Phone, 2.8 in Screen, Bluetooth WP836
-
 #### Grandstream WP816 Compact Portable Wi-Fi Phone
 [on Amazon](https://amzn.to/4yMiB7h)
 
@@ -309,7 +307,6 @@ unchanged — the type column is the decision that matters, not the brand.
 | [Grandstream DP730](https://amzn.to/4vYvEzV) | DECT handset | Pairs to the DP752. Buy one per room. |
 | [Yealink W73P](https://amzn.to/4wyMO8q) | DECT bundle | W70B base + W73H handset. The straightforward place to start. |
 | [Yealink W73P + extra W73H](https://amzn.to/3TLJSXn) | DECT bundle | Same, second handset in the box — cheaper than adding one later. |
-| [Yealink W76P](https://amzn.to/3TNiR5X) | DECT bundle | Another base-and-handset pairing; check which handset ships in the box, as Yealink varies it by bundle. |
 | [Yealink W79P](https://amzn.to/4fMKbZx) | DECT bundle | W70B base + W59R, the ruggedised handset — the one to pick if it's going to get dropped. |
 | [Yealink W79P + 1 extra W59R](https://amzn.to/4h4kR3x) | DECT bundle | Two rugged handsets. |
 | [Yealink W79P + 2 extra W59R](https://amzn.to/4pMK04N) | DECT bundle | Three handsets — cheapest route to a whole-house cordless set. |
@@ -370,10 +367,17 @@ Three skills ship with the repo: `/diagnose-call`, `/add-person`, `/ship`.
 
 ```bash
 make hooks                # once per clone — installs the pre-push gate
-make check                # gofmt + vet + test + build
+make check                # gofmt + vet + lint + test + build
 make cover                # -race, plus per-package coverage floors
+make lint                 # nilness + the no-secrets-in-logs analyzer
 ./scripts/smoke.sh        # on the Pi — verifies the whole chain
 ```
+
+The invariant that caller IDs and PINs never reach the logs is enforced by a
+custom `go/analysis` pass rather than by review: `tools/nologsecrets` rejects
+a PIN or caller number passed to any `slog` call, while still allowing
+`len(digits)` and `tail(number)`. It lives in a nested module so
+`golang.org/x/tools` never enters the daemon's dependency graph.
 
 The pre-push hook (`.githooks/pre-push`, versioned with the code) blocks a
 push on unformatted code, vet findings, failing tests, an example config that

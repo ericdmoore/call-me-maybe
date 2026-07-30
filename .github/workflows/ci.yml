@@ -38,6 +38,16 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # vet already runs 35 x/tools analyzers. This adds nilness (needs SSA,
+      # so it is not in vet's default set) and nologsecrets, which enforces
+      # the CONTRIBUTING invariant that caller IDs and PINs never reach the
+      # logs — the kind of leak that keeps every test green.
+      - name: analyzer tests
+        run: cd tools && go test ./...
+
+      - name: lint (nilness + nologsecrets)
+        run: make lint
+
       # -race matters here: one call is one goroutine and the session state
       # machine is driven entirely by channel sends from the ARI event router.
       - name: test + coverage floors
