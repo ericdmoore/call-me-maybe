@@ -51,9 +51,9 @@ they do not.
 
 ## Environment
 
-Go, stdlib-first, three dependencies: `BurntSushi/toml`, `gopkg.in/yaml.v3`
-(templates may be authored in YAML), and
-`gorilla/websocket`. The deliverable is one static binary — no runtime on the
+Go, stdlib-first: `BurntSushi/toml` and `gopkg.in/yaml.v3` for configuration
+and templates, `gorilla/websocket` for the ARI event stream. The deliverable is
+one static binary — no runtime on the
 Pi, no node_modules, nothing to install but the file. This project is a
 deliberate exception to the owner's TypeScript-first standard: it is a leaf
 appliance, unrelated to the other product codebases, and boring-by-design.
@@ -132,9 +132,11 @@ Break these and the phone fails in ways that look like working software.
 
 ## Conventions
 
-- Stdlib unless there is a very strong reason: `log/slog` for logging,
-  `net/http` for REST, `flag` for subcommand flags. Adding a dependency to
-  this project needs a better justification than convenience.
+- Stdlib first because it is usually enough and never needs updating —
+  `log/slog` for logging, `net/http` for REST, `flag` for subcommand flags —
+  not because dependencies are suspect. Add one when it makes the thing more
+  useful, weighing maintenance, licence, and whether it runs on a call path.
+  Do not refuse a useful library to protect a dependency count.
 - The event router (`route` in main) runs on the websocket read goroutine and
   must never block; sessions consume through buffered channels and `post` is
   non-blocking by design.

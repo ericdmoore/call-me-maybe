@@ -400,8 +400,9 @@ make lint                 # nilness + the no-secrets-in-logs analyzer
 The invariant that caller IDs and PINs never reach the logs is enforced by a
 custom `go/analysis` pass rather than by review: `tools/nologsecrets` rejects
 a PIN or caller number passed to any `slog` call, while still allowing
-`len(digits)` and `tail(number)`. It lives in a nested module so
-`golang.org/x/tools` never enters the daemon's dependency graph.
+`len(digits)` and `tail(number)`. It lives in a nested module because a linter
+has no business in the binary that ships to an appliance — nothing about that
+separation is a comment on dependencies generally.
 
 ### Asking the binary instead of reading the source
 

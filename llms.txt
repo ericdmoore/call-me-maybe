@@ -64,5 +64,5 @@ Three files, three cadences. Do not merge them; the split is deliberate.
 - `make check` — gofmt, vet, lint, test, build. Must be green.
 - `make cover` — tests with `-race` plus per-package coverage floors.
 - `make hooks` — installs the pre-push gate (same checks as CI).
-- Three dependencies in the daemon, all permissive; the stdlib covers the rest. Lint tooling lives in a nested `tools/` module so it never enters the shipped binary's dependency graph.
+- Stdlib-first, with permissive dependencies where they earn it: TOML and YAML for configuration and templates, `gorilla/websocket` for the ARI event stream. The bar for a new one is maintenance, licence, and whether it runs on a call path — not a count. Lint tooling lives in a nested `tools/` module so it never enters the binary that ships to a Pi.
 - Tests use stdlib `testing`, colocated with the code.

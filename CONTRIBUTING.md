@@ -44,11 +44,22 @@ Asterisk, covered by `scripts/smoke.sh` on real hardware instead of unit
 tests. Floors live in `scripts/coverage.sh`. Raise them when you add tests;
 do not lower one to get a push through.
 
-- No new dependencies without a strong reason. There are three — `BurntSushi/toml`,
-  `gorilla/websocket`, and `gopkg.in/yaml.v3` — all permissive, and the stdlib
-  covers the rest. yaml.v3 earns its place by letting templates be authored in
-  the format their author prefers; it is used only by the template loader and
-  never on a call path.
+- **Dependencies are welcome when they make this more useful.** The bar is not
+  a count. Weigh three things: how much maintenance the library will cost you,
+  whether the licence is permissive, and whether it sits on a call path — code
+  that runs while someone is waiting for the phone to ring deserves more
+  scepticism than code that runs once in a CLI.
+
+  A well-maintained permissive library that removes real friction for a user is
+  a good trade. One that saves the author some typing is not. "We only have N
+  dependencies" is a number for a README, not a reason to say no to something
+  people need.
+
+  Today: `BurntSushi/toml` and `gopkg.in/yaml.v3` for configuration and
+  templates, `gorilla/websocket` for the ARI event stream. The lint tooling
+  lives in a nested `tools/` module because it has no business in the binary
+  that ships to a Pi — that separation is about what runs on the appliance, not
+  about keeping a count low.
 - Tests use stdlib `testing`, colocated with the code. State machine changes
   go through the fake-ARI harness in `internal/lobby` — never add a test that
   needs a live Asterisk.
