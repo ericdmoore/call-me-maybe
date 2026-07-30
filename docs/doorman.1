@@ -1,0 +1,273 @@
+.\" Manual page for doorman, the Call Me Maybe lobby daemon.
+.\" Render locally with:  man ./docs/doorman.1
+.TH DOORMAN 1 "2026-07-30" "Call Me Maybe" "User Commands"
+.SH NAME
+doorman \- lobby daemon and operations tool for a Call Me Maybe home phone
+.SH SYNOPSIS
+.B doorman
+.RI [ subcommand ]
+.RI [ flags ]
+.RI [ arguments ]
+.PP
+.B doorman
+.RI "# with no subcommand, runs the service"
+.SH DESCRIPTION
+.B doorman
+decides who gets connected. Asterisk handles SIP, RTP, and DTMF detection;
+.B doorman
+talks to it over ARI on loopback and applies policy. One call is one
+goroutine, and the caller hanging up cancels a context that unwinds
+everything.
+.PP
+Known callers hear a welcome prompt and ring the whole house. Everyone else
+meets the lobby: dial a 6\-digit extension within the dial window, or the
+bouncer says "Good day" and hangs up.
+.PP
+It is also its own operations tool. Every subcommand below runs against the
+same configuration and the same validator the daemon uses, so what
+.B doorman check
+accepts is exactly what the daemon will accept.
+.SH SUBCOMMANDS
+.TP
+.B doorman
+Run the service. Configuration comes from the environment; see
+.B ENVIRONMENT
+below and
+.IR examples/.env.example .
+Exits non\-zero if ARI is unreachable at startup, which is deliberate: a
+lobby daemon that cannot answer calls should fail loudly.
+.TP
+.BI "doorman check [\-handsets " path "] [" path ]
+Validate
+.I policy.toml
+and
+.I handsets.toml
+together and report what they add up to \(em allow\-list size, extension
+count, PIN length, the house ring group, and any afterhours window that is
+active right now. Exits 0 when valid, 1 when not, naming the offending key.
+This is the authority on whether a configuration is usable.
+.TP
+.BI "doorman schema [" name ]
+Print the configuration surface as JSON Schema (draft 2020\-12) on stdout:
+every key, type, pattern, default, and cross\-file reference for
+.IR policy.toml ,
+.IR handsets.toml ,
+and the environment.
+.I name
+is
+.BR policy ,
+.BR handsets ,
+or
+.BR env ;
+all three are emitted as one bundle when omitted.
+.IP
+This exists for tooling and for language models. It describes
+.IR shape ;
+it is not a validity oracle. JSON Schema cannot express cross\-file
+identifier references, mutually exclusive keys, or the roughly thirty
+semantic rules the validator applies \(em those appear as
+.B x\-cross\-references
+and
+.B x\-rules
+annotations, and the document says so itself. Run
+.B doorman check
+before relying on a config. See also
+.I llms.txt
+in the repository root.
+.TP
+.BI "doorman rotate [\-policy " path "] [\-handsets " path "] [" label ...]
+Generate new extension PINs with
+.IR crypto/rand ,
+rewriting
+.I policy.toml
+in place with comments intact. Rotates every extension when no labels are
+given, or only the named ones. A running daemon picks the change up within a
+second. New PINs are printed to stdout \(em the one place they are ever
+shown \(em and are never written to the logs.
+.TP
+.BI "doorman render [\-handsets " path "] [\-out " dir "] [\-env " path ]
+Generate the per\-handset Asterisk configuration from
+.IR handsets.toml :
+PJSIP endpoints, internal numbers, BLF hints, and the ring\-all and page\-all
+groups. This makes the inventory authoritative over the dialplan so the two
+cannot drift. Handset SIP passwords are read from the environment or
+.I .env
+via each handset's
+.B password_env
+key; the generated file contains real secrets and must be treated as such.
+.TP
+.B doorman lsp
+Run a language server over stdio for
+.I policy.toml
+and
+.IR handsets.toml .
+Diagnostics come from the same validator that guards the daemon, so unknown
+handset ids, bad schedule references, and duplicate PINs are underlined as
+you type, with completions for every cross\-reference. Works in Neovim over
+SSH on the Pi with no additional installation. See
+.IR docs/editor.md .
+.TP
+.BI "doorman e164 " number
+Show how a raw caller ID normalises to E.164. Use this when a known caller
+unexpectedly meets the bouncer: the carrier may be handing over a format
+that does not match what is written in the allow\-list.
+.TP
+.B doorman version
+Print the version. A release binary reports its git tag.
+.TP
+.B doorman help
+Print a usage summary.
+.SH FILES
+.TP
+.I policy.toml
+The rules: allow\-list, extensions, ringer ladders, schedules. Changes
+weekly and is safe to hand\-edit \(em when
+.B POLICY_WATCH
+is enabled, edits go live without a restart, and a file that fails
+validation is logged and discarded while the last good policy stays in
+service. Contains PINs; keep it mode 0600.
+.TP
+.I handsets.toml
+The hardware inventory: what phones exist, their ids, endpoints, internal
+numbers, and which
+.I .env
+variable holds each SIP password. Changes when hardware is bought.
+.TP
+.I .env
+Secrets and tuning. Loaded by systemd's
+.B EnvironmentFile
+in production. Contains the ARI password and every handset password; keep it
+mode 0600.
+.TP
+.I examples/
+Templates to copy for all three of the above.
+.TP
+.I /var/lib/asterisk/sounds/<prefix>/
+Pre\-rendered prompt audio, where
+.I <prefix>
+is
+.BR PROMPT_MEDIA_PREFIX .
+Prompts are built once with piper on a workstation and committed as WAVs, so
+the Pi never synthesises speech. Pointing the prefix at another directory is
+how a prompt pack is swapped in.
+.SH ENVIRONMENT
+.B doorman schema env
+prints all of these with types, defaults, and explanations. The frequently
+relevant ones:
+.TP
+.BR ARI_USERNAME ", " ARI_PASSWORD
+Required. Must match
+.IR asterisk/ari.conf .
+.TP
+.B ARI_BASE_URL
+Default
+.IR http://127.0.0.1:8088 .
+Keep ARI bound to loopback.
+.TP
+.B ARI_APP
+Default
+.IR doorman .
+Must match the
+.B Stasis()
+application named in
+.IR asterisk/extensions.conf .
+.TP
+.BR POLICY_PATH ", " HANDSETS_PATH ", " POLICY_WATCH
+Where the config files are, and whether to reload them on change.
+.TP
+.B FIRST_DIGIT_TIMEOUT_MS
+Default 10000. Time to dial the
+.I first
+digit, measured from the end of the greeting; a stranger reading a PIN off a
+card needs longer than a stopwatch allows.
+.B INTER_DIGIT_TIMEOUT_MS
+(default 3000) governs the gap between subsequent digits.
+.TP
+.BR RATELIMIT_ENABLED ", " RATELIMIT_MAX_FAILURES ", " RATELIMIT_WINDOW_MS
+After repeated failures, a caller skips the greeting entirely and goes
+straight to dismissal, leaving nothing to brute\-force against.
+.TP
+.BR LOG_LEVEL ", " LOG_FORMAT ", " LOG_REDACT_CALLER_ID
+.B trace|debug|info|warn|error
+,
+.B json|pretty
+, and whether to log only the last four digits of unknown callers.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+The operation failed \(em an invalid configuration, an unreachable ARI, an
+unwritable output directory.
+.TP
+.B 2
+The command line was wrong.
+.SH EXAMPLES
+Validate a configuration before trusting it:
+.PP
+.RS
+.EX
+doorman check \-\-handsets examples/handsets.example.toml \\
+              examples/policy.example.toml
+.EE
+.RE
+.PP
+Give a language model the whole configuration surface:
+.PP
+.RS
+.EX
+doorman schema > /tmp/doorman\-schema.json
+.EE
+.RE
+.PP
+Work out why a known caller met the bouncer:
+.PP
+.RS
+.EX
+doorman e164 "(512) 555\-0100"
+.EE
+.RE
+.PP
+Rotate one extension's PIN after it has been shared too widely:
+.PP
+.RS
+.EX
+doorman rotate Kids
+.EE
+.RE
+.SH SECURITY
+Extensions are credentials. A 6\-digit PIN reachable from the PSTN is a
+million combinations \(em ample against a person, thin against a machine that
+can redial \(em which is why the rate limiter exists and why
+.B doorman rotate
+generates PINs rather than letting you choose them.
+.PP
+Caller IDs and PINs never appear in the logs. That invariant is enforced
+mechanically by a static analysis pass in the repository
+.RI ( tools/nologsecrets ),
+not by convention: logging a digit
+.I count
+is allowed, logging the digits is not.
+.PP
+Withheld caller ID always meets the bouncer, and anonymous callers share a
+single rate\-limit bucket. One persistent blocked caller therefore makes the
+lobby stricter for every other withheld number. That is the intended trade.
+.SH SEE ALSO
+.IR asterisk (8),
+.IR journalctl (1)
+.PP
+.I llms.txt
+in the repository root \(em an orientation file for language models, leading
+with
+.BR "doorman schema" .
+.PP
+.IR docs/RUNBOOK.md
+for provisioning and a bottom\-up verification ladder,
+.I CLAUDE.md
+for the invariants, and
+.I https://callmemaybe.cc
+for the project.
+.SH LICENSE
+Apache 2.0. Bundled audio is CC BY\-SA 4.0; see
+.IR LICENSES.md .

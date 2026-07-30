@@ -16,11 +16,25 @@ prioritised backlog with acceptance criteria is `docs/TASKS.md`.
 
 ## Commands
 
+**Start with `./bin/doorman schema`.** It prints the entire configuration
+surface — every key, type, default, and cross-file reference for
+`policy.toml`, `handsets.toml`, and the environment — as JSON Schema. Faster
+and more reliable than reading `internal/policy` to work out what a valid
+config looks like. `doorman schema policy|handsets|env` narrows it. It
+describes *shape*; `doorman check` remains the authority on *validity*,
+because JSON Schema cannot express the cross-file references or the ~30
+semantic rules (those appear as `x-cross-references` and `x-rules`).
+
 ```bash
-make check                 # vet + test + build; must be green before any commit
+make check                 # gofmt + vet + lint + test + build; green before any commit
+make cover                 # -race plus per-package coverage floors
+make lint                  # nilness + the no-secrets-in-logs analyzer
+make hooks                 # install the pre-push gate (once per clone)
 make build                 # → bin/doorman for the host
 make cross                 # → bin/doorman-linux-{arm64,armv7} for the Pi
+make man                   # read the man page from the working tree
 make run                   # dev run with .env sourced (needs reachable Asterisk)
+./bin/doorman schema       # the config surface as JSON Schema — read this first
 ./bin/doorman check        # validate policy.toml, print what it resolves to
 ./bin/doorman rotate       # rotate extension PINs (all, or by label)
 ./bin/doorman render       # handsets.toml → generated Asterisk config
@@ -28,6 +42,12 @@ make run                   # dev run with .env sourced (needs reachable Asterisk
 ./bin/doorman e164 <num>   # show how a raw caller ID normalises
 ./scripts/smoke.sh         # full deployment verification, run ON the Pi
 ```
+
+`llms.txt` in the repo root is the orientation file for models arriving
+without this context; `docs/doorman.1` is the man page. Both lead with
+`doorman schema`. If you change the config surface, all three plus
+`internal/schema` need to agree — the tests in `internal/schema` fail when
+they do not.
 
 ## Environment
 

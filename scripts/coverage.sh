@@ -21,6 +21,7 @@ FLOORS="
 callmemaybe/internal/lobby         80
 callmemaybe/internal/policy        60
 callmemaybe/internal/render        88
+callmemaybe/internal/schema        90
 callmemaybe/internal/lsp           35
 "
 

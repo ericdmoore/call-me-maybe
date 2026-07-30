@@ -72,6 +72,23 @@ jobs:
       - name: build
         run: make build
 
+      # The schema is the documented contract for the config surface, so a
+      # wiring break must fail the build, not just be caught by unit tests.
+      - name: doorman schema emits valid JSON
+        run: |
+          for name in "" policy handsets env; do
+            ./bin/doorman schema $name | python3 -m json.tool >/dev/null \
+              || { echo "::error::doorman schema $name is not valid JSON"; exit 1; }
+          done
+          echo "schema ok: bundle + $(./bin/doorman schema | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["schemas"]))') documents"
+
+      # A man page that does not render is worse than none: the operator who
+      # needs it is on a Pi with no browser.
+      - name: man page lints
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq mandoc
+          mandoc -Tlint docs/doorman.1
+
   # Proves the Pi targets still compile. Cheap, and catches the 32-bit
   # breakage (int size, unaligned atomics) that amd64 tests never see.
   cross:

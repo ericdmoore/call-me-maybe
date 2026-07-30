@@ -16,7 +16,7 @@ else
 GOFLAGS := -trimpath -ldflags '-s -w -X main.version=$(VERSION)'
 endif
 
-.PHONY: build test vet check cross run clean fmt fmt-check cover hooks release-tag lint lint-test
+.PHONY: build test vet check cross run clean fmt fmt-check cover hooks release-tag lint lint-test man schema
 
 build:
 	go build $(GOFLAGS) -o $(BIN) ./cmd/doorman
@@ -51,6 +51,14 @@ lint:
 ## lint-test: the analyzer's own tests
 lint-test:
 	cd tools && go test ./...
+
+## man: read the man page straight from the working tree
+man:
+	@man ./docs/doorman.1
+
+## schema: the config surface as JSON Schema (see also llms.txt)
+schema: build
+	@./$(BIN) schema
 
 ## check: everything that must be green before a commit
 check: fmt-check vet lint test build

@@ -186,6 +186,21 @@ fi
 mv -f "${tmp}/${asset}" "$target" || die "could not install to $target"
 ok "installed $target"
 
+# ── Man page ─────────────────────────────────────────────────────────────
+# Best-effort: an operator SSH'd into a Pi with no browser wants `man doorman`
+# to work, but a missing man page must never fail the install. Derived from
+# PREFIX so it lands beside the binary: /usr/local/bin -> /usr/local/share/man.
+mandir="$(dirname "$PREFIX")/share/man/man1"
+if fetch_to "${base}/doorman.1" "${tmp}/doorman.1" 2>/dev/null; then
+	if mkdir -p "$mandir" 2>/dev/null && [ -w "$mandir" ]; then
+		if mv -f "${tmp}/doorman.1" "${mandir}/doorman.1" 2>/dev/null; then
+			ok "installed ${mandir}/doorman.1 (man doorman)"
+		fi
+	else
+		info "skipping man page: $mandir is not writable"
+	fi
+fi
+
 # ── PATH ─────────────────────────────────────────────────────────────
 case ":${PATH}:" in
 	*":${PREFIX}:"*) ;;

@@ -387,6 +387,38 @@ a PIN or caller number passed to any `slog` call, while still allowing
 `len(digits)` and `tail(number)`. It lives in a nested module so
 `golang.org/x/tools` never enters the daemon's dependency graph.
 
+### Asking the binary instead of reading the source
+
+`doorman schema` prints the whole configuration surface as JSON Schema — every
+key, type, pattern, default, and cross-file reference across `policy.toml`,
+`handsets.toml`, and the environment:
+
+```bash
+doorman schema             # all three, as one bundle
+doorman schema policy      # or just one
+```
+
+It exists because `policy.toml` is the real interface to this system, and the
+only machine-readable knowledge of its shape used to live inside the
+validator — which will tell you whether a file is valid but not what a valid
+file looks like. Handy for editor integration, for generating config, and for
+handing a language model the rules instead of hoping it infers them.
+
+It describes *shape*, not validity. JSON Schema cannot express "this ladder
+step names a handset that must exist in `handsets.toml`", `handsets` XOR
+`steps`, or the roughly thirty semantic checks behind `doorman check`; those
+are carried as `x-cross-references` and `x-rules` annotations, and the
+document says so about itself. `doorman check` is still the authority.
+
+Because it is hand-authored, `internal/schema`'s tests fail if a `toml` tag or
+an environment variable exists in Go without a matching schema entry — the
+schema cannot quietly fall behind the code.
+
+There is a man page at [`docs/doorman.1`](docs/doorman.1) (`make man` to read
+it from the working tree; `install.sh` installs it), and
+[`llms.txt`](llms.txt) orients a language model arriving with no other
+context. Both lead with `doorman schema`.
+
 The pre-push hook (`.githooks/pre-push`, versioned with the code) blocks a
 push on unformatted code, vet findings, failing tests, an example config that
 stopped validating, or a secret force-added past `.gitignore`. CI runs the

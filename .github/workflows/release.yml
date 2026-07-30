@@ -50,9 +50,13 @@ jobs:
 
       - name: Build every target
         id: build
+        env:
+          # Resolved above, because GITHUB_REF_NAME is the branch — not the
+          # tag — when this workflow is run by hand.
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${TAG#v}"
           echo "version=$VERSION" >>"$GITHUB_OUTPUT"
           mkdir -p dist
 
@@ -73,8 +77,12 @@ jobs:
           build darwin arm64 ""  darwin-arm64
           build darwin amd64 ""  darwin-amd64
 
+          # install.sh fetches the man page from the release alongside the
+          # binary, so it has to be published as an asset.
+          cp docs/doorman.1 dist/doorman.1
+
           cd dist
-          sha256sum doorman-* >checksums.txt
+          sha256sum doorman-* doorman.1 >checksums.txt
           cat checksums.txt
 
       # Confirm the stamped version matches the tag, so a release can never
@@ -88,9 +96,12 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
+          # doorman.1 is listed explicitly: the doorman-* glob does not match
+          # it, and install.sh fetches it by name.
+          gh release create "$TAG" \
+            --title "$TAG" \
             --generate-notes \
             --verify-tag \
-            dist/doorman-* dist/checksums.txt
+            dist/doorman-* dist/doorman.1 dist/checksums.txt

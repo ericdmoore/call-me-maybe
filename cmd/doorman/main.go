@@ -3,8 +3,11 @@
 //
 //	doorman                  run the service
 //	doorman check [path]     validate policy.toml and print what it resolves to
+//	doorman schema [name]    print the config surface as JSON Schema
 //	doorman rotate [flags] [label ...]
 //	                         rotate extension PINs (all, or by label)
+//	doorman render [flags]   generate per-handset Asterisk config
+//	doorman lsp              language server for policy.toml and handsets.toml
 //	doorman e164 <number>    show how a raw caller ID normalises
 //	doorman version
 package main
@@ -28,6 +31,7 @@ import (
 	"callmemaybe/internal/lsp"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/render"
+	"callmemaybe/internal/schema"
 )
 
 // version is the release identity. A release build stamps it from the git tag
@@ -48,6 +52,8 @@ func main() {
 			os.Exit(runLsp())
 		case "e164":
 			os.Exit(runE164(os.Args[2:]))
+		case "schema":
+			os.Exit(runSchema(os.Args[2:]))
 		case "version", "-v", "--version":
 			fmt.Println("doorman", version)
 			return
@@ -62,7 +68,15 @@ func main() {
 const usage = `doorman — the Call Me Maybe lobby daemon
 
   doorman                       run the service (configuration via env, see examples/.env.example)
-  doorman check [path]          validate a policy file
+  doorman check [flags] [path]  validate policy.toml and handsets.toml, and
+                                report what they add up to
+      -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
+  doorman schema [name]         print the configuration surface as JSON Schema:
+                                every key, type, default, and cross-file
+                                reference for policy.toml, handsets.toml, and
+                                the environment. name is policy, handsets, or
+                                env; all three when omitted. Written to be
+                                read by tooling and by LLMs — see llms.txt
   doorman rotate [flags] [label ...]
                                 rotate extension PINs; all extensions when no labels given
       -policy path              policy file (default $POLICY_PATH or ./policy.toml)
@@ -314,6 +328,43 @@ func runE164(args []string) int {
 	case policy.KindUnparseable:
 		fmt.Printf("%s  →  unparseable (never allow-listed, meets the bouncer)\n", args[0])
 	}
+	return 0
+}
+
+// ── doorman schema ───────────────────────────────────────────────────────
+
+// runSchema publishes the configuration surface as JSON Schema. The audience
+// is tooling and language models: policy.toml is the real interface to this
+// system, and until this existed the only machine-readable knowledge of its
+// shape was the validator itself — which will tell you whether a file is
+// valid, but not what a valid file looks like.
+func runSchema(args []string) int {
+	fs := flag.NewFlagSet("schema", flag.ExitOnError)
+	_ = fs.Parse(args)
+
+	var (
+		out []byte
+		err error
+	)
+	switch fs.NArg() {
+	case 0:
+		out, err = schema.Marshal(schema.All(version))
+	case 1:
+		s, gerr := schema.Get(fs.Arg(0))
+		if gerr != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", gerr)
+			return 2
+		}
+		out, err = schema.Marshal(s)
+	default:
+		fmt.Fprintf(os.Stderr, "usage: doorman schema [%s]\n", strings.Join(schema.Names, "|"))
+		return 2
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "could not render schema: %v\n", err)
+		return 1
+	}
+	os.Stdout.Write(out)
 	return 0
 }
 
