@@ -135,7 +135,7 @@ func RotatePinsSplit(path, handsetsPath string, labels []string) (*Rotation, err
 // that is not already taken. crypto/rand, not math/rand — extensions are
 // credentials exposed to the PSTN.
 func generatePIN(length int, taken map[string]bool) (string, error) {
-	if length < 4 {
+	if length < MinPINLength {
 		length = 6
 	}
 	ten := big.NewInt(10)

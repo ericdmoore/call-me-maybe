@@ -453,6 +453,7 @@ func runService() {
 			RingCycle:          6 * time.Second, // standard US cadence
 			MaxPinAttempts:     cfg.MaxPinAttempts,
 			RedactCallerID:     cfg.RedactCallerID,
+			MaxConcurrentCalls: cfg.MaxConcurrentCalls,
 		},
 		OnLegCreated: reg.addLeg,
 		OnFinished:   reg.remove,
@@ -496,7 +497,25 @@ func route(ev ari.Event, reg *registry, deps lobby.Deps, client *ari.Client, log
 		}
 
 		s := lobby.NewSession(ev.Channel.ID, ev.Channel.Caller.Number, deps)
-		reg.addCaller(s)
+		if !reg.admit(s, deps.Cfg.MaxConcurrentCalls) {
+			// The rate limiter counts PIN failures per caller; it has nothing
+			// to say about a flood from many different numbers. Without a
+			// ceiling, every handset in the house rings until the spammer
+			// stops. Refusing here costs the attacker the ring and costs the
+			// household nothing.
+			//
+			// The session never started, so cancel the context it allocated
+			// and hang up without originating a single handset leg.
+			s.CallerGone()
+			log.Warn("refused: at concurrent call limit",
+				"limit", deps.Cfg.MaxConcurrentCalls, "active", reg.callerCount())
+			go func(id string) {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = client.Hangup(ctx, id)
+			}(ev.Channel.ID)
+			return
+		}
 		go s.Run()
 
 	case "ChannelDtmfReceived":
@@ -558,6 +577,23 @@ func (r *registry) addCaller(s *lobby.Session) {
 	defer r.mu.Unlock()
 	r.channels[s.ChannelID] = s
 	r.callers[s.ChannelID] = s
+}
+
+// admit registers a caller only if the house is below max concurrent calls.
+// The count and the insert happen under one lock on purpose: checking
+// callerCount() and then calling addCaller() is a race that lets a burst of
+// simultaneous INVITEs all pass a capacity test none of them should have.
+//
+// max <= 0 means no limit.
+func (r *registry) admit(s *lobby.Session, max int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if max > 0 && len(r.callers) >= max {
+		return false
+	}
+	r.channels[s.ChannelID] = s
+	r.callers[s.ChannelID] = s
+	return true
 }
 
 func (r *registry) addLeg(legChannelID string, s *lobby.Session) {

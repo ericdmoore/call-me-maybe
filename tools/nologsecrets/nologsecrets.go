@@ -47,8 +47,7 @@ var sensitive = []string{
 	"pin",
 	"digit",
 	"entered",
-	"callere164",
-	"callerraw",
+	"caller", // covers callerE164, callerRaw, callerDisplay, callerNumber
 	"secret",
 	"password",
 	"passwd",
@@ -62,16 +61,23 @@ var sensitive = []string{
 var narrowing = []string{
 	"len",    // how many digits arrived, never which
 	"tail",   // policy.tail: last few characters only
-	"redact", // any explicit redactor
+	"redact", // policy.Redact and policy.RedactCaller
 	"mask",
 }
 
 // slogMethods are the logging entry points. Value and pointer receivers on
 // slog.Logger, plus the package-level functions.
+//
+// With and WithGroup are in here and it matters: attributes bound with With
+// ride on *every subsequent line* from that logger, so a caller ID smuggled in
+// there leaks far more than one that reaches a single Info call. This analyzer
+// originally checked only the emit methods, and that gap is exactly how a full
+// E.164 came to be attached to every session log line.
 var slogMethods = map[string]bool{
 	"Debug": true, "Info": true, "Warn": true, "Error": true, "Log": true,
 	"DebugContext": true, "InfoContext": true, "WarnContext": true,
 	"ErrorContext": true, "LogAttrs": true,
+	"With": true, "WithGroup": true,
 }
 
 func run(pass *analysis.Pass) (any, error) {

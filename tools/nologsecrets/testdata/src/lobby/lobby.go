@@ -62,3 +62,18 @@ func alsoFine(pin string) {
 	var n notALogger
 	n.Info("not slog", "pin", pin)
 }
+
+// Regression: attributes bound with With ride on every subsequent line from
+// that logger, so this leaks more than a single Info call would. The analyzer
+// originally ignored With entirely, which is how a full E.164 ended up attached
+// to every session log line in the real daemon.
+
+func redactCaller(e164, raw string, allowFull bool) string { return e164 }
+
+func bindLogger(base *slog.Logger, callerE164, callerRaw string) *slog.Logger {
+	_ = base.With("callId", "abc", "caller", callerE164) // want `callerE164 reaches the logs.*`
+	_ = base.With("caller", callerRaw)                   // want `callerRaw reaches the logs.*`
+
+	// The only acceptable form: routed through a redactor.
+	return base.With("callId", "abc", "caller", redactCaller(callerE164, callerRaw, false))
+}

@@ -224,6 +224,19 @@ else
   warn "no handsets.toml" "legacy single-file layout; see RUNBOOK: Config interfaces"
 fi
 
+# Rung 7b: placeholder credentials that ship in the examples. The comment in
+# voicemail.conf.example says to change these; a comment is not a check, and
+# *97 is reachable from any handset on the LAN.
+VM_CONF=/etc/asterisk/voicemail.conf
+if [ -f "$VM_CONF" ]; then
+  if grep -qE '=>[[:space:]]*4242,' "$VM_CONF"; then
+    fail "voicemail.conf still uses the placeholder PIN 4242" \
+      "any handset can read those mailboxes with *97 — set real PINs"
+  else
+    pass "voicemail PINs are not the shipped placeholder"
+  fi
+fi
+
 if [ -f "$REPO/.env" ]; then
   PERM=$(stat -c '%a' "$REPO/.env" 2>/dev/null)
   [ "$PERM" = "600" ] && pass ".env is 0600" \

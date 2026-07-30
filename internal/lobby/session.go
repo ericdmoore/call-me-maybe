@@ -55,6 +55,9 @@ type Config struct {
 	RingCycle      time.Duration
 	MaxPinAttempts int
 	RedactCallerID bool
+	// MaxConcurrentCalls is read by the event router, not the state machine,
+	// but lives here so there is one Config the daemon threads through.
+	MaxConcurrentCalls int
 }
 
 // Deps wires a Session to the world. Policy is a func so each session
@@ -130,17 +133,6 @@ func NewSession(channelID, callerNumber string, deps Deps) *Session {
 	pol := deps.Policy()
 	e164 := policy.E164OrEmpty(callerNumber, deps.Cfg.DefaultCountryCode)
 
-	display := e164
-	if display == "" {
-		display = callerNumber
-	}
-	if display == "" {
-		display = "anonymous"
-	}
-	if deps.Cfg.RedactCallerID && e164 != "" {
-		display = policy.Redact(e164)
-	}
-
 	id := shortID(channelID)
 	return &Session{
 		ID:         id,
@@ -148,10 +140,18 @@ func NewSession(channelID, callerNumber string, deps Deps) *Session {
 		callerRaw:  callerNumber,
 		callerE164: e164,
 		deps:       deps,
-		log:        deps.Log.With("callId", id, "caller", display),
-		pol:        pol,
-		ctx:        ctx,
-		cancel:     cancel,
+		// The caller attribute rides on every line this session ever logs, so
+		// redaction happens here and is the default; LOG_REDACT_CALLER_ID=false
+		// is an explicit opt-out for debugging, never the shipping state.
+		//
+		// Inlined rather than assigned to a variable on purpose: the narrowing
+		// has to be visible at the log site for tools/nologsecrets to verify it,
+		// and this attribute is precisely the one that got it wrong before.
+		log: deps.Log.With("callId", id, "caller",
+			policy.RedactCaller(e164, callerNumber, !deps.Cfg.RedactCallerID)),
+		pol:    pol,
+		ctx:    ctx,
+		cancel: cancel,
 		// Buffered so the event router never blocks on a busy session. 64 is
 		// far beyond anything a single call can generate in flight.
 		events: make(chan event, 64),

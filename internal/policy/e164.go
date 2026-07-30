@@ -111,6 +111,35 @@ func E164OrEmpty(raw, defaultCC string) string {
 	return ""
 }
 
+// RedactCaller produces the only caller string that may be attached to a
+// logger. It exists so the decision lives in one place rather than at every
+// call site: pass the normalised number, the raw one, and whether the operator
+// has explicitly opted out of redaction.
+//
+// The default is to redact. LOG_REDACT_CALLER_ID=false is a deliberate opt-out
+// for someone debugging, not a shipping default — see CLAUDE.md invariant 1.
+//
+// `tools/nologsecrets` recognises this as a narrowing function, so routing a
+// caller ID through here is what makes it loggable at all.
+func RedactCaller(e164, raw string, allowFull bool) string {
+	display := e164
+	if display == "" {
+		display = raw
+	}
+	if display == "" {
+		return "anonymous"
+	}
+	if allowFull {
+		return display
+	}
+	if e164 != "" {
+		return Redact(e164)
+	}
+	// A raw value we could not normalise is still a phone number someone dialled
+	// from. Redact it on its own terms rather than printing it whole.
+	return Redact(raw)
+}
+
 // Redact keeps enough of a number to identify a caller in logs without
 // printing it: +15125550100 -> +1512•••0100
 func Redact(e164 string) string {

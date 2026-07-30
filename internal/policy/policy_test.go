@@ -287,3 +287,55 @@ func TestGroupMayNotContainGroups(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// A hand-edited short PIN used to load fine: rotate refused to generate one,
+// but nothing stopped someone typing it. The lobby is a keypad on the PSTN, so
+// that is a credential with a hundred combinations.
+func TestShortPINIsRejectedOnLoad(t *testing.T) {
+	for _, pin := range []string{"1", "12", "123"} {
+		problems := LintSplit([]byte(`
+[house]
+handsets = ["kitchen"]
+
+[[extensions]]
+pin = "`+pin+`"
+label = "Kitchen"
+handsets = ["kitchen"]
+`), []byte(`
+[[handsets]]
+id = "kitchen"
+endpoint = "PJSIP/kitchen"
+`))
+		if len(problems) == 0 {
+			t.Errorf("pin %q (%d digits) loaded without complaint", pin, len(pin))
+			continue
+		}
+		joined := strings.Join(problems, " ")
+		if !strings.Contains(joined, "minimum") {
+			t.Errorf("pin %q: expected a minimum-length error, got %v", pin, problems)
+		}
+		// The offending PIN must not appear in the message.
+		if strings.Contains(joined, `"`+pin+`"`) {
+			t.Errorf("pin %q was echoed back in the error: %v", pin, problems)
+		}
+	}
+}
+
+func TestPINAtTheFloorIsAccepted(t *testing.T) {
+	problems := LintSplit([]byte(`
+[house]
+handsets = ["kitchen"]
+
+[[extensions]]
+pin = "4821"
+label = "Kitchen"
+handsets = ["kitchen"]
+`), []byte(`
+[[handsets]]
+id = "kitchen"
+endpoint = "PJSIP/kitchen"
+`))
+	if len(problems) != 0 {
+		t.Fatalf("a %d-digit pin should load, got %v", MinPINLength, problems)
+	}
+}

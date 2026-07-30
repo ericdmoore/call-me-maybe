@@ -406,6 +406,7 @@ func Env() *Schema {
 		"ARI_APP":              env("Stasis application name. Must match Stasis(...) in asterisk/extensions.conf.", "string", "doorman"),
 		"ARI_RECONNECT_MIN_MS": env("Minimum event-WebSocket reconnect backoff.", "duration (milliseconds)", 500),
 		"ARI_RECONNECT_MAX_MS": env("Maximum event-WebSocket reconnect backoff.", "duration (milliseconds)", 30000),
+		"ARI_ALLOW_REMOTE":     env("Permit a non-loopback ARI host. doorman refuses to start otherwise, because ARI is full call control behind a plaintext password. The one documented exception is running off-box over a tailnet — never the LAN.", "boolean", false),
 
 		"POLICY_PATH":   env("Path to policy.toml.", "path", "./policy.toml"),
 		"HANDSETS_PATH": env("Path to handsets.toml.", "path", "./handsets.toml"),
@@ -422,12 +423,13 @@ func Env() *Schema {
 		"RATELIMIT_ENABLED":      env("After repeated failures a caller skips the greeting entirely and goes straight to dismissal, leaving nothing to brute-force against.", "boolean", true),
 		"RATELIMIT_MAX_FAILURES": env("Failures from one number inside the window before that caller is dismissed without a greeting.", "positive integer", 3),
 		"RATELIMIT_WINDOW_MS":    env("Rate-limit window.", "duration (milliseconds)", 3600000),
+		"MAX_CONCURRENT_CALLS":   env("Ceiling on simultaneous inbound calls. The rate limit counts failures per caller and cannot see a flood from many numbers, which would keep every handset ringing. Excess calls are hung up without ringing anything. 0 disables.", "positive integer", 5),
 
 		"PROMPT_MEDIA_PREFIX": env("Asterisk media prefix, NOT a filesystem path. Files live in /var/lib/asterisk/sounds/<prefix>/. Also how a prompt pack is swapped in.", "string", "call-me-maybe"),
 
 		"LOG_LEVEL":            env("Verbosity.", "enum", "info"),
 		"LOG_FORMAT":           env("Structured lines or human-readable.", "enum", "json"),
-		"LOG_REDACT_CALLER_ID": env("Log only the last four digits of unknown callers.", "boolean", false),
+		"LOG_REDACT_CALLER_ID": env("Redact caller IDs in logs, keeping only a fragment. On by default: the caller attribute rides on every line a call produces, and journals get shipped and backed up. Setting this false is a deliberate debugging opt-out — see CLAUDE.md invariant 1.", "boolean", true),
 	}
 	props["LOG_LEVEL"].Enum = []any{"trace", "debug", "info", "warn", "error"}
 	props["LOG_FORMAT"].Enum = []any{"json", "pretty"}

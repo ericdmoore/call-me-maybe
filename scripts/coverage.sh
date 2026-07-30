@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
 PROFILE=${PROFILE:-coverage.out}
-TOTAL_FLOOR=${TOTAL_FLOOR:-45}
+TOTAL_FLOOR=${TOTAL_FLOOR:-49}
 
 # package                          floor%
 FLOORS="
@@ -22,6 +22,7 @@ callmemaybe/internal/lobby         80
 callmemaybe/internal/policy        60
 callmemaybe/internal/render        88
 callmemaybe/internal/schema        90
+callmemaybe/internal/config        70
 callmemaybe/internal/lsp           35
 "
 

@@ -526,3 +526,100 @@ $ journalctl -u doorman --since "7 days ago"  | grep "rate limited"
 Sustained invalid-extension attempts from one number mean someone is probing.
 The rate limiter handles it, but it is worth knowing about — and worth
 considering whether the PINs in circulation should be rotated.
+
+## 7. Threat model
+
+What this system actually defends against, and what it does not. Written down
+because a defence you believe in and do not have is worse than one you know you
+are missing.
+
+### Caller ID is presentation, not a credential
+
+A known caller skips the lobby and rings the house on the strength of their
+normalised caller ID alone. **On the PSTN, caller ID is asserted by the calling
+party, not proven.** Anyone who can spoof an allow-listed number gets the same
+welcome the real person gets — and, because a welcomed caller clears their
+failure budget, a spoofer also resets the rate limiter for that number.
+
+This is a trust boundary, not a bug. It is the same reason the phone network has
+spent a decade building STIR/SHAKEN. Live with it knowingly:
+
+- **The allow-list is a convenience, not an authorisation.** It decides who
+  skips the lobby. It should never be the only thing standing between a caller
+  and something consequential.
+- Anything that *acts* on a caller's behalf — remote control of the house, for
+  instance — needs a second factor. That is why the design in the remote-actions
+  work uses dial-back rather than trusting the number in front of it.
+- If your provider exposes STIR/SHAKEN attestation, treat a full-attestation
+  call as meaningfully better evidence than an unattested one. Do not treat an
+  unattested call as proof of anything.
+
+### The LAN is a softer target than the PSTN
+
+Guessing a six-digit extension over the phone is slow and rate-limited. Being on
+the house Wi-Fi is neither.
+
+Handsets register over SIP, in the shipped examples without TLS or SRTP, and a
+registered handset lands in the `internal` dialplan context. That context can
+dial the outbound trunk, page every phone in the house, join the conference, and
+reach voicemail. **A compromised handset password is therefore more powerful
+than any amount of PIN guessing from outside.**
+
+Mitigations, in the order they are worth doing:
+
+1. **Unique, generated passwords per handset.** `handsets.toml` names an
+   environment variable per phone precisely so they can differ. Generate them:
+   `openssl rand -base64 18`.
+2. **Change the voicemail PINs.** `asterisk/voicemail.conf.example` ships `4242`
+   for every mailbox as an obvious placeholder. It is still `4242` until you
+   change it, and voicemail is reachable from any handset with `*97`.
+3. **Keep SIP off the WAN.** Nothing in this design needs an inbound port. If
+   your router forwards 5060 anywhere, undo it.
+4. **Put handsets on a network guests do not share.** A guest Wi-Fi password
+   handed out at a party is a SIP registration attempt away from the dialplan.
+5. **Consider SIP TLS and SRTP** between handsets and Asterisk if your phones
+   support it. It costs some configuration and defeats passive sniffing of
+   registrations on the LAN.
+
+### The fallback trades security for availability
+
+`[inbound-fallback]` in `asterisk/extensions.conf` rings the house directly when
+Stasis is unavailable — doorman crashed, stopped, or unable to reach ARI. That
+is deliberate: a phone that fails to a dumb ATA still answers when a relative
+calls in an emergency.
+
+**Be clear about what it costs.** For the duration of that outage there is no
+lobby, no allow-list, and no rate limiting. Every caller rings the house. An
+attacker who can keep doorman down has removed the front door rather than picked
+it.
+
+Choose knowingly:
+
+- **Keep it** if availability matters more, which it usually does for a house
+  phone. Then treat "doorman is down" as an urgent alert rather than a
+  background annoyance.
+- **Replace it** if you would rather fail closed. Point the fallback at
+  `Congestion()`, or at voicemail, instead of the ring group:
+
+  ```
+  [inbound-fallback]
+  exten => _X.,1,NoOp(doorman unavailable — failing closed)
+   same => n,Answer()
+   same => n,Playback(vm-goodbye)
+   same => n,Hangup()
+  ```
+
+Either way, know which one you have. The failure mode is silent by design.
+
+### What is enforced mechanically
+
+Not everything here is a matter of discipline. These are checked by machine:
+
+| Invariant | Enforced by |
+|---|---|
+| Caller IDs and PINs never reach logs | `tools/nologsecrets`, in `make lint` and CI |
+| Caller IDs redacted unless explicitly opted out | default in `internal/config`, tested |
+| ARI host must be loopback | startup refusal, with `ARI_ALLOW_REMOTE` as the documented exception |
+| Extension PINs meet a minimum length | `policy.MinPINLength`, on load and in `doorman check` |
+| Concurrent calls are capped | admission control in the event router |
+| Config cross-references resolve | `doorman check`, the LSP, and the daemon share one validator |

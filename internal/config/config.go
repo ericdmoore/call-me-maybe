@@ -10,6 +10,8 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -24,6 +26,8 @@ type Config struct {
 	ARIApp       string
 	ReconnectMin time.Duration
 	ReconnectMax time.Duration
+	// AllowRemoteARI is the explicit opt-out from the loopback requirement.
+	AllowRemoteARI bool
 
 	PolicyPath   string
 	HandsetsPath string
@@ -40,6 +44,9 @@ type Config struct {
 	RateLimitEnabled     bool
 	RateLimitMaxFailures int
 	RateLimitWindow      time.Duration
+
+	// MaxConcurrentCalls caps simultaneous inbound sessions. 0 means no limit.
+	MaxConcurrentCalls int
 
 	PromptMediaPrefix string
 
@@ -114,10 +121,12 @@ func Load() (Config, error) {
 		RateLimitMaxFailures: integer("RATELIMIT_MAX_FAILURES", 3),
 		RateLimitWindow:      ms("RATELIMIT_WINDOW_MS", 3_600_000),
 
+		MaxConcurrentCalls: integer("MAX_CONCURRENT_CALLS", 5),
+
 		PromptMediaPrefix: str("PROMPT_MEDIA_PREFIX", "call-me-maybe"),
 
 		LogFormat:      str("LOG_FORMAT", "json"),
-		RedactCallerID: boolean("LOG_REDACT_CALLER_ID", false),
+		RedactCallerID: boolean("LOG_REDACT_CALLER_ID", true),
 	}
 
 	switch strings.ToLower(str("LOG_LEVEL", "info")) {
@@ -132,6 +141,27 @@ func Load() (Config, error) {
 	default:
 		issues = append(issues, "  LOG_LEVEL: must be one of trace|debug|info|warn|error")
 	}
+
+	// CLAUDE.md invariant 2: never widen the ARI bind past loopback. The
+	// shipped asterisk/http.conf is correct, but nothing stopped doorman being
+	// pointed at a LAN or WAN ARI — and ARI is effectively full call control
+	// (originate, bridge, hang up) behind a password that lives in a plaintext
+	// file. On the wire that is Basic Auth plus an api_key query parameter.
+	//
+	// So the binary now enforces what the docs assert. The escape hatch exists
+	// because the invariant itself allows one case: "if doorman ever moves
+	// off-box, it goes over the tailnet, never the LAN."
+	c.AllowRemoteARI = boolean("ARI_ALLOW_REMOTE", false)
+	if host, err := ariHost(c.ARIBaseURL); err != nil {
+		issues = append(issues, fmt.Sprintf("  ARI_BASE_URL: %v", err))
+	} else if !isLoopback(host) && !c.AllowRemoteARI {
+		issues = append(issues, fmt.Sprintf(
+			"  ARI_BASE_URL: host %q is not loopback.\n"+
+				"      ARI is full call control behind a plaintext password; keep it on\n"+
+				"      127.0.0.1. If you genuinely run doorman off-box, it must be over a\n"+
+				"      tailnet and never the LAN — set ARI_ALLOW_REMOTE=true to confirm.",
+			host))
+	}
 	if c.LogFormat != "json" && c.LogFormat != "pretty" {
 		issues = append(issues, "  LOG_FORMAT: must be json or pretty")
 	}
@@ -140,4 +170,33 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("invalid environment configuration:\n%s\n\nSee examples/.env.example", strings.Join(issues, "\n"))
 	}
 	return c, nil
+}
+
+// ariHost extracts the hostname from an ARI base URL.
+func ariHost(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("not a valid URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("scheme must be http or https, got %q", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("no host in %q", raw)
+	}
+	return host, nil
+}
+
+// isLoopback reports whether a host is the local machine. Names other than
+// "localhost" are not resolved: a DNS lookup at startup would make the check
+// depend on a resolver that could answer differently later.
+func isLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }

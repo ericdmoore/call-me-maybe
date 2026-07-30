@@ -111,6 +111,16 @@ type Step struct {
 	Seconds int `toml:"seconds"`
 }
 
+// MinPINLength is the shortest extension PIN the loader will accept.
+//
+// The lobby is a keypad on the PSTN, so an extension is a credential. The rate
+// limiter bounds brute force against a six-digit space; it does not save a
+// two-digit PIN from a curious teenager with a redial button. `doorman rotate`
+// has always refused to *generate* anything shorter, and this makes the load
+// path agree — otherwise a hand-edited `pin = "12"` sails straight past the
+// guard that rotation applies.
+const MinPINLength = 4
+
 var (
 	handsetIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 	endpointPattern  = regexp.MustCompile(`^[A-Za-z0-9]+/\S+$`)
@@ -452,6 +462,13 @@ func compileChecked(f File) (*Policy, []string) {
 	for _, e := range f.Extensions {
 		if !pinPattern.MatchString(e.PIN) {
 			fail("extension %q pin must be digits only", e.Label)
+			continue
+		}
+		if len(e.PIN) < MinPINLength {
+			// Never echo the PIN itself, even a bad one — it is still a
+			// credential someone chose, and may be reused elsewhere.
+			fail("extension %q pin is %d digits; the minimum is %d — run `doorman rotate %q`",
+				e.Label, len(e.PIN), MinPINLength, e.Label)
 			continue
 		}
 		if _, dup := exts[e.PIN]; dup {
