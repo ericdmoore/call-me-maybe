@@ -45,15 +45,20 @@ while IFS=$'\t' read -r name text; do
 
   printf '%s' "${text}" | "${PIPER_CMD}" --model "${PIPER_VOICE}" --output_file "${raw}"
 
+  # -nostdin is load-bearing, not tidiness: this loop reads the manifest on
+  # stdin, and ffmpeg without it consumes the remaining lines, so the build
+  # silently renders only the first prompt or two. A missing prompt degrades
+  # to silence at call time, which is the worst way for this to fail.
+
   # 8 kHz narrowband. -af loudnorm keeps every prompt at a consistent level;
   # nothing is worse than a greeting you can barely hear followed by a
   # "Good day" that peaks the line.
-  ffmpeg -loglevel error -y -i "${raw}" \
+  ffmpeg -nostdin -loglevel error -y -i "${raw}" \
     -af "loudnorm=I=-18:TP=-2:LRA=7" \
     -ar 8000 -ac 1 -acodec pcm_s16le "${OUT}/${name}.wav"
 
   # 16 kHz wideband for g722.
-  ffmpeg -loglevel error -y -i "${raw}" \
+  ffmpeg -nostdin -loglevel error -y -i "${raw}" \
     -af "loudnorm=I=-18:TP=-2:LRA=7" \
     -ar 16000 -ac 1 -acodec pcm_s16le "${OUT}/${name}.wav16"
 

@@ -18,9 +18,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # Single source of truth for the toolchain version.
           go-version-file: go.mod
@@ -43,7 +43,7 @@ jobs:
       - name: test + coverage floors
         run: bash scripts/coverage.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage
@@ -64,14 +64,23 @@ jobs:
   cross:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
       - name: cross-compile Pi binaries
         run: make cross
+      # --severity=warning gates on real defects (an ffmpeg that eats the
+      # loop's stdin) without enforcing style opinions: smoke.sh's
+      # `test && pass || fail` idiom is deliberate, and install.sh prints a
+      # literal $PATH for the user to paste. Both are info-level notes.
       - name: shellcheck the shipped scripts
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck install.sh scripts/smoke.sh scripts/coverage.sh prompts/build.sh .githooks/pre-push
+          shellcheck --severity=warning \
+            install.sh \
+            scripts/smoke.sh \
+            scripts/coverage.sh \
+            prompts/build.sh \
+            .githooks/pre-push
