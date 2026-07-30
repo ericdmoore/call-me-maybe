@@ -299,16 +299,26 @@ Grandstream's Wi-Fi handsets are what this was built and tested against:
 
 ### Other good-value options
 
-Prices move, so these are categories rather than quotes. Every one of them
-registers over SIP and drops into `handsets.toml` unchanged.
+Every one of these registers over SIP and drops into `handsets.toml`
+unchanged — the type column is the decision that matters, not the brand.
 
-| Want | Look at | Why |
+| Model | Type | Notes |
 |---|---|---|
-| **Cheapest desk phone** | Grandstream GRP2601/2602, Yealink T31P, Fanvil X3U | PoE, wired, one cable, nothing to charge. The most reliable phone per dollar. |
-| **Cordless done properly** | Grandstream DP752 base + DP722/DP730 handsets; Yealink W73P/W79P | DECT, not Wi-Fi: days of battery, and it roams between rooms without dropping the call. One base carries several handsets, each registering as its own SIP account — so one `[[handsets]]` entry per handset, exactly like a desk phone. |
-| **Reuse the phones you own** | Grandstream HT802 (2 FXS ports), Obihai OBi200 | An ATA turns your existing analog cordless base — or a 1950s rotary phone — into a SIP endpoint. Often the cheapest path in the house, and the most fun. |
-| **Nicest per dollar** | Used Poly VVX 250/350/450, Cisco SPA504G | Office decommissions flood the used market at a fraction of new. Budget an hour for factory-resetting units that were provisioned by their last owner. |
-| **Free** | Linphone, or Groundwire on a kid's phone | A softphone is a real endpoint. Good way to test a ladder before buying anything. |
+| [Grandstream HT812 V2](https://amzn.to/4yS8Wwc) | ATA · 2× FXS | Puts analog phones you already own on the lobby — an existing cordless base, or a 1950s rotary. Two ports, so two `[[handsets]]` entries. Usually the cheapest way to cover rooms, and the most fun. |
+| [Grandstream DP752](https://amzn.to/4ftcHAr) | DECT base | Carries several DP7xx handsets, each registering as its own SIP account — one `[[handsets]]` entry per handset, exactly like a desk phone. |
+| [Grandstream DP730](https://amzn.to/4vYvEzV) | DECT handset | Pairs to the DP752. Buy one per room. |
+| [Yealink W73P](https://amzn.to/4wyMO8q) | DECT bundle | W70B base + W73H handset. The straightforward place to start. |
+| [Yealink W73P + extra W73H](https://amzn.to/3TLJSXn) | DECT bundle | Same, second handset in the box — cheaper than adding one later. |
+| [Yealink W76P](https://amzn.to/3TNiR5X) | DECT bundle | Another base-and-handset pairing; check which handset ships in the box, as Yealink varies it by bundle. |
+| [Yealink W79P](https://amzn.to/4fMKbZx) | DECT bundle | W70B base + W59R, the ruggedised handset — the one to pick if it's going to get dropped. |
+| [Yealink W79P + 1 extra W59R](https://amzn.to/4h4kR3x) | DECT bundle | Two rugged handsets. |
+| [Yealink W79P + 2 extra W59R](https://amzn.to/4pMK04N) | DECT bundle | Three handsets — cheapest route to a whole-house cordless set. |
+| [Grandstream GRP2601P](https://amzn.to/4fLsxFy) | Desk · PoE | Entry desk phone. `P` = PoE, so one cable carries power and network. |
+| [Grandstream GRP2602P](https://amzn.to/4hEZPZm) | Desk · PoE | Same family, the higher tier of the two. |
+| [Grandstream GRP2602W](https://amzn.to/3S3jI1R) | Desk · Wi-Fi | `W` = built-in Wi-Fi, for a room with no Ethernet drop. Prefer the `P` anywhere you have a cable. |
+| [Yealink T31P](https://amzn.to/4pKnQAe) | Desk · PoE | Very common, well built, cheap. A safe default. |
+| [Fanvil X3U](https://amzn.to/4xbLUyA) | Desk · PoE | About as cheap as this gets while still being pleasant to use. |
+| [Cisco SPA504](https://amzn.to/44Ww1QC) | Desk · PoE | The classic four-line workhorse, and abundant secondhand. Factory-reset anything used — it may still be provisioned to its last owner. |
 
 **Wi-Fi vs DECT vs wired, honestly:** Wi-Fi handsets are convenient and give
 you one less base station, but they hand off between access points poorly —
@@ -317,11 +327,19 @@ technically better answer for cordless and its batteries last far longer.
 Wired PoE desk phones never surprise you at all. A sensible house is usually
 a couple of wired phones in fixed spots plus one cordless system.
 
-<sub>Amazon links above are affiliate links — if you buy through them the
-project earns a commission at no cost to you. They do not affect which
-hardware is recommended; nothing here is sponsored, and the alternatives
-table exists precisely so the recommendation isn't just the thing with a
-link.</sub>
+Two options with nothing to buy: **used Poly VVX and Cisco SPA units** flood
+the market from office decommissions at a fraction of new, and a **softphone**
+(Linphone is free; Groundwire on a kid's phone) is a real SIP endpoint — the
+easiest way to test a ringer ladder before spending anything.
+
+<sub>**Disclosure:** the Amazon links on this page are affiliate links — if you
+buy through one, the project earns a commission at no cost to you. Nothing
+here is sponsored and no vendor has been paid for placement. Be aware of the
+obvious bias anyway: everything with a link earns something, so the honest
+guidance is the part that doesn't — `doorman` works with *any* SIP endpoint,
+the ATA row means the phones already in your house may need nothing bought at
+all, and a free softphone will test your whole ladder before you spend a
+cent.</sub>
 
 ---
 
