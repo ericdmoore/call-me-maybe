@@ -111,6 +111,19 @@ type Step struct {
 	Seconds int `toml:"seconds"`
 }
 
+// PlaceholderPIN is the value the shipped examples carry where a real
+// extension PIN belongs.
+//
+// It is deliberately impossible rather than merely bad. The lobby only ever
+// accumulates keypad digits and compares them by exact map lookup, so a
+// non-digit PIN cannot be produced by any sequence of keypresses — it is
+// unreachable by construction, not just unlikely. A weak-but-valid placeholder
+// like "4242" works silently forever; this one can only fail, and fail loudly.
+//
+// The same reasoning gives us RFC 5737 documentation addresses, example.com,
+// and the 555-01xx numbers this project already uses in test fixtures.
+const PlaceholderPIN = "CHANGEME"
+
 // MinPINLength is the shortest extension PIN the loader will accept.
 //
 // The lobby is a keypad on the PSTN, so an extension is a credential. The rate
@@ -210,12 +223,22 @@ type Policy struct {
 // an unknown handset or group reference, a duplicate PIN, a number that
 // cannot be normalised, an afterhours window with nowhere to send callers —
 // is a hard error here, not a silent misbehaviour at call time.
+// Options control how strict a load is.
+type Options struct {
+	// AllowPlaceholders permits PlaceholderPIN where a real PIN belongs, so
+	// the shipped examples can be validated for *structure* — cross-file
+	// references, ladders, schedules — without pretending they are usable.
+	// Only `doorman check --allow-placeholders` and CI set this. An operator
+	// never does, which is what makes a freshly copied config fail loudly.
+	AllowPlaceholders bool
+}
+
 func FromTOML(data []byte) (*Policy, error) {
 	var f File
 	if _, err := toml.Decode(string(data), &f); err != nil {
 		return nil, fmt.Errorf("policy: %w", err)
 	}
-	return compile(f)
+	return compile(f, Options{})
 }
 
 // Load reads and compiles a single-file policy (the legacy layout, with
@@ -237,6 +260,11 @@ func Load(path string) (*Policy, error) {
 // When handsetsPath is empty or the file does not exist, this degrades to
 // the legacy single-file layout, so existing installs keep working.
 func LoadSplit(policyPath, handsetsPath string) (*Policy, error) {
+	return LoadSplitWith(policyPath, handsetsPath, Options{})
+}
+
+// LoadSplitWith is LoadSplit with explicit options.
+func LoadSplitWith(policyPath, handsetsPath string, o Options) (*Policy, error) {
 	pdata, err := os.ReadFile(policyPath)
 	if err != nil {
 		return nil, err
@@ -251,7 +279,7 @@ func LoadSplit(policyPath, handsetsPath string) (*Policy, error) {
 			return nil, err
 		}
 	}
-	return fromSplitTOML(pdata, hdata)
+	return fromSplitTOML(pdata, hdata, o)
 }
 
 // SplitLayout reports whether a handsets file is actually in play — used by
@@ -264,13 +292,13 @@ func SplitLayout(handsetsPath string) bool {
 	return err == nil
 }
 
-func fromSplitTOML(policyData, handsetsData []byte) (*Policy, error) {
+func fromSplitTOML(policyData, handsetsData []byte, o Options) (*Policy, error) {
 	var pf File
 	if _, err := toml.Decode(string(policyData), &pf); err != nil {
 		return nil, fmt.Errorf("policy: %w", err)
 	}
 	if handsetsData == nil {
-		return compile(pf)
+		return compile(pf, o)
 	}
 
 	var hf File
@@ -289,7 +317,7 @@ func fromSplitTOML(policyData, handsetsData []byte) (*Policy, error) {
 	}
 
 	pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
-	return compile(pf)
+	return compile(pf, o)
 }
 
 // LoadHandsets reads just the inventory — what `doorman render` consumes.
@@ -305,8 +333,8 @@ func LoadHandsets(path string) ([]Handset, []Group, error) {
 	return hf.Handsets, hf.Groups, nil
 }
 
-func compile(f File) (*Policy, error) {
-	p, problems := compileChecked(f)
+func compile(f File, o Options) (*Policy, error) {
+	p, problems := compileChecked(f, o)
 	if len(problems) > 0 {
 		return nil, fmt.Errorf("policy: %s", strings.Join(problems, "; "))
 	}
@@ -315,7 +343,7 @@ func compile(f File) (*Policy, error) {
 
 // compileChecked is compile with the problems individually addressable —
 // what the LSP consumes to place one diagnostic per issue.
-func compileChecked(f File) (*Policy, []string) {
+func compileChecked(f File, o Options) (*Policy, []string) {
 	var problems []string
 	fail := func(format string, args ...any) {
 		problems = append(problems, fmt.Sprintf(format, args...))
@@ -460,18 +488,35 @@ func compileChecked(f File) (*Policy, []string) {
 	exts := make(map[string]ResolvedExtension)
 	lengths := make(map[int]bool)
 	for _, e := range f.Extensions {
-		if !pinPattern.MatchString(e.PIN) {
+		// A placeholder PIN is diagnosed rather than described as a syntax
+		// error: "must be digits only" is true and unhelpful. When placeholders
+		// are permitted the PIN checks are skipped but everything structural —
+		// the handsets it rings, its ladder, its schedule reference — is still
+		// verified, which is exactly what CI needs from the shipped examples.
+		placeholder := e.PIN == PlaceholderPIN
+		if placeholder && !o.AllowPlaceholders {
+			fail("extension %q still has the placeholder PIN from the examples — run `doorman init` to generate real ones", e.Label)
+			continue
+		}
+		key := e.PIN
+		if placeholder {
+			// Keyed by label so several placeholder extensions do not read as
+			// duplicates of each other.
+			key = PlaceholderPIN + "\x00" + e.Label
+		}
+
+		if !placeholder && !pinPattern.MatchString(e.PIN) {
 			fail("extension %q pin must be digits only", e.Label)
 			continue
 		}
-		if len(e.PIN) < MinPINLength {
+		if !placeholder && len(e.PIN) < MinPINLength {
 			// Never echo the PIN itself, even a bad one — it is still a
 			// credential someone chose, and may be reused elsewhere.
 			fail("extension %q pin is %d digits; the minimum is %d — run `doorman rotate %q`",
 				e.Label, len(e.PIN), MinPINLength, e.Label)
 			continue
 		}
-		if _, dup := exts[e.PIN]; dup {
+		if _, dup := exts[key]; dup {
 			fail("duplicate pin %q", e.PIN)
 			continue
 		}
@@ -532,8 +577,10 @@ func compileChecked(f File) (*Policy, []string) {
 		if e.Enabled != nil && !*e.Enabled {
 			continue
 		}
-		lengths[len(e.PIN)] = true
-		exts[e.PIN] = ResolvedExtension{PIN: e.PIN, Label: e.Label, Plan: plan, Afterhours: ah}
+		if !placeholder {
+			lengths[len(e.PIN)] = true
+		}
+		exts[key] = ResolvedExtension{PIN: e.PIN, Label: e.Label, Plan: plan, Afterhours: ah}
 	}
 
 	if len(problems) > 0 {
@@ -561,6 +608,11 @@ func compileChecked(f File) (*Policy, []string) {
 // layout. Undecodable TOML comes back as a single problem (the LSP gets a
 // precise position for those from the decoder directly).
 func LintSplit(policyData, handsetsData []byte) []string {
+	return LintSplitWith(policyData, handsetsData, Options{})
+}
+
+// LintSplitWith is LintSplit with explicit options.
+func LintSplitWith(policyData, handsetsData []byte, o Options) []string {
 	var pf File
 	if _, err := toml.Decode(string(policyData), &pf); err != nil {
 		return []string{err.Error()}
@@ -582,7 +634,7 @@ func LintSplit(policyData, handsetsData []byte) []string {
 		}
 		pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
 	}
-	_, problems := compileChecked(pf)
+	_, problems := compileChecked(pf, o)
 	return problems
 }
 

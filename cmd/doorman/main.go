@@ -2,6 +2,7 @@
 // decides who gets connected. It is also its own operations tool:
 //
 //	doorman                  run the service
+//	doorman init             interview and write a working configuration
 //	doorman check [path]     validate policy.toml and print what it resolves to
 //	doorman schema [name]    print the config surface as JSON Schema
 //	doorman rotate [flags] [label ...]
@@ -42,6 +43,8 @@ var version = "0.4.1"
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "init":
+			os.Exit(runInit(os.Args[2:]))
 		case "check":
 			os.Exit(runCheck(os.Args[2:]))
 		case "rotate":
@@ -68,9 +71,17 @@ func main() {
 const usage = `doorman — the Call Me Maybe lobby daemon
 
   doorman                       run the service (configuration via env, see examples/.env.example)
+  doorman init [flags]          interview, generate every secret with crypto/rand,
+                                and write .env, policy.toml, and handsets.toml.
+                                The shipped examples carry placeholder PINs that
+                                cannot work on purpose; this is what replaces them
+      -rooms "A,B,C"            skip the interview
+      -dry-run                  show what would be written
+      -force                    replace existing config, backing it up first
   doorman check [flags] [path]  validate policy.toml and handsets.toml, and
                                 report what they add up to
       -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
+      -allow-placeholders       accept the example sentinels; for CI, not operators
   doorman schema [name]         print the configuration surface as JSON Schema:
                                 every key, type, default, and cross-file
                                 reference for policy.toml, handsets.toml, and
@@ -147,6 +158,10 @@ func loadDotEnv(path string) map[string]string {
 func runCheck(args []string) int {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
 	handsetsFlag := fs.String("handsets", "", "handsets file (default $HANDSETS_PATH or ./handsets.toml)")
+	// Structural validation of the shipped examples, whose PINs are the
+	// placeholder sentinel. CI uses this; an operator never should, which is
+	// what makes a freshly copied config fail loudly until `doorman init` runs.
+	allowPlaceholders := fs.Bool("allow-placeholders", false, "accept example placeholder PINs (for CI, not operators)")
 	_ = fs.Parse(args)
 	path := ""
 	if fs.NArg() > 0 {
@@ -155,7 +170,7 @@ func runCheck(args []string) int {
 	path = policyPathArg(path)
 	handsetsPath := handsetsPathArg(*handsetsFlag)
 
-	p, err := policy.LoadSplit(path, handsetsPath)
+	p, err := policy.LoadSplitWith(path, handsetsPath, policy.Options{AllowPlaceholders: *allowPlaceholders})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ configuration is not valid\n\n%v\n", err)
 		return 1
@@ -172,6 +187,11 @@ func runCheck(args []string) int {
 		pinLen = fmt.Sprintf("%d", p.PinLength)
 	}
 	fmt.Printf("✓ %s is valid\n\n", path)
+	if *allowPlaceholders {
+		fmt.Println("  note: placeholder PINs were accepted. This config cannot answer a")
+		fmt.Println("        call until `doorman init` replaces them.")
+		fmt.Println()
+	}
 	fmt.Printf("  allow-listed numbers : %d\n", p.AllowListCount())
 	fmt.Printf("  extensions           : %d\n", p.ExtensionCount())
 	fmt.Printf("  pin length           : %s\n", pinLen)

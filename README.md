@@ -251,10 +251,15 @@ scp bin/doorman-linux-arm64 pi@raspberrypi:/opt/call-me-maybe/bin/doorman
 On the Pi:
 
 ```bash
-cp examples/.env.example .env                    # set ARI_PASSWORD to match ari.conf
-cp examples/policy.example.toml policy.toml      # allow-list + extensions
-./bin/doorman check
+./bin/doorman init      # interview, generate every secret, write the three files
+./bin/doorman check     # confirm it resolves
 ```
+
+`init` exists because the examples **cannot** work: their PINs are a sentinel
+that no keypress can produce, so `doorman check` refuses to load them. A
+placeholder that merely looks wrong — `4242` — works silently forever. This one
+can only fail, loudly, until it is replaced with values from `crypto/rand`.
+PINs print to stdout once and are never logged.
 
 Then `sudo cp scripts/doorman.service /etc/systemd/system/` and enable it.
 

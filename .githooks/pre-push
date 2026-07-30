@@ -71,7 +71,9 @@ step "analyzer tests"
 # ── The shipped examples must stay valid ─────────────────────────────
 # A broken examples/policy.example.toml is the first thing a new user copies.
 step "validating example config"
-go run ./cmd/doorman check \
+# --allow-placeholders: the examples carry the sentinel PIN and cannot pass a
+# strict check by design. This still verifies every cross-reference in them.
+go run ./cmd/doorman check --allow-placeholders \
 	--handsets examples/handsets.example.toml \
 	examples/policy.example.toml >/dev/null \
 	|| fail "examples/policy.example.toml does not validate"

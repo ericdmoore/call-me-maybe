@@ -50,7 +50,7 @@ afterhours = "school-night"
 `
 
 func TestSplitLayoutMergesAndCompiles(t *testing.T) {
-	p, err := fromSplitTOML([]byte(splitPolicy), []byte(splitHandsets))
+	p, err := fromSplitTOML([]byte(splitPolicy), []byte(splitHandsets), Options{})
 	if err != nil {
 		t.Fatalf("fromSplitTOML: %v", err)
 	}
@@ -71,32 +71,32 @@ func TestSplitLayoutMergesAndCompiles(t *testing.T) {
 
 func TestSplitLayoutRejectsSectionsInTheWrongFile(t *testing.T) {
 	wrong := splitPolicy + "\n[[handsets]]\nid = \"rogue\"\nendpoint = \"PJSIP/rogue\"\n"
-	if _, err := fromSplitTOML([]byte(wrong), []byte(splitHandsets)); err == nil ||
+	if _, err := fromSplitTOML([]byte(wrong), []byte(splitHandsets), Options{}); err == nil ||
 		!strings.Contains(err.Error(), "handsets.toml") {
 		t.Errorf("err = %v, want move-to-handsets hint", err)
 	}
 
 	wrongH := splitHandsets + "\n[[extensions]]\npin = \"111111\"\nlabel = \"Rogue\"\nhandsets = [\"kitchen\"]\n"
-	if _, err := fromSplitTOML([]byte(splitPolicy), []byte(wrongH)); err == nil ||
+	if _, err := fromSplitTOML([]byte(splitPolicy), []byte(wrongH), Options{}); err == nil ||
 		!strings.Contains(err.Error(), "policy.toml") {
 		t.Errorf("err = %v, want move-to-policy hint", err)
 	}
 }
 
 func TestLegacySingleFileStillWorks(t *testing.T) {
-	if _, err := fromSplitTOML([]byte(ladderPolicy), nil); err != nil {
+	if _, err := fromSplitTOML([]byte(ladderPolicy), nil, Options{}); err != nil {
 		t.Fatalf("legacy layout broke: %v", err)
 	}
 }
 
 func TestHandsetNumberValidation(t *testing.T) {
 	dup := strings.Replace(splitHandsets, "number = 105", "number = 101", 1)
-	if _, err := fromSplitTOML([]byte(splitPolicy), []byte(dup)); err == nil ||
+	if _, err := fromSplitTOML([]byte(splitPolicy), []byte(dup), Options{}); err == nil ||
 		!strings.Contains(err.Error(), "share number") {
 		t.Errorf("err = %v", err)
 	}
 	oob := strings.Replace(splitHandsets, "number = 105", "number = 500", 1)
-	if _, err := fromSplitTOML([]byte(splitPolicy), []byte(oob)); err == nil ||
+	if _, err := fromSplitTOML([]byte(splitPolicy), []byte(oob), Options{}); err == nil ||
 		!strings.Contains(err.Error(), "100-199") {
 		t.Errorf("err = %v", err)
 	}

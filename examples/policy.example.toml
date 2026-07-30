@@ -55,23 +55,31 @@ days = ["SU", "MO", "TU", "WE", "TH"]
 
 # ── Extensions ───────────────────────────────────────────────
 # Unknown callers dial one of these in the lobby. The PIN *is* the
-# extension, so treat it like a password: pick 6 random digits, do not
-# use 100000/123456, and do not print them on anything public.
+# extension, so treat it like a password.
 #
-#   openssl rand -hex 8 | tr -dc '0-9' | head -c 6
+# Every PIN below is the CHANGEME sentinel, and that is deliberate: it is not
+# a weak PIN, it is an impossible one. The lobby only ever collects keypad
+# digits and compares them by exact match, so a non-digit PIN cannot be
+# entered by any sequence of keypresses. `doorman check` refuses to load this
+# file until they are replaced, which is the whole point — a placeholder that
+# merely *looks* wrong (4242) works silently forever.
+#
+# Replace them all at once:
+#
+#   doorman init
 
 [[extensions]]
-pin = "428917"
+pin = "CHANGEME"
 label = "Kitchen"
 handsets = ["kitchen"]
 
 [[extensions]]
-pin = "310244"
+pin = "CHANGEME"
 label = "Office"
 handsets = ["office"]
 
 [[extensions]]
-pin = "775301"
+pin = "CHANGEME"
 label = "Whole house"
 handsets = ["kitchen", "living-room", "office", "primary-bed"]
 voicemail = "family"
@@ -84,7 +92,7 @@ voicemail = "family"
 # [extensions.afterhours] to false for holidays.
 
 [[extensions]]
-pin = "902118"
+pin = "CHANGEME"
 label = "Kids"
 voicemail = "kids"
 afterhours = "school-night"

@@ -97,15 +97,14 @@ $ sudo systemctl restart asterisk
 
 ```bash
 $ cd /opt/call-me-maybe
-$ cp examples/.env.example .env
-$ cp examples/policy.example.toml policy.toml
-$ nano .env                            # ARI_PASSWORD must match ari.conf
-$ cp examples/handsets.example.toml handsets.toml
-$ nano handsets.toml                   # your phones: ids, numbers, page/MWI
-$ nano .env                            # one HANDSET_*_PASSWORD per phone:
-                                       #   openssl rand -base64 18
-$ nano policy.toml                     # your people and rules; leave the
-                                       # example PINs alone for one moment
+$ doorman init                         # interview: which rooms get a phone
+                                       # generates every secret with crypto/rand,
+                                       # writes .env, handsets.toml, policy.toml,
+                                       # and prints the PINs once. Write them down.
+$ nano policy.toml                     # add your people to the allow-list
+
+# Non-interactive, for a scripted build:
+$ doorman init --rooms "Kitchen,Living Room,Kids Room,Office"
 $ ./bin/doorman check
 
 # Generate the per-handset Asterisk config and install it:

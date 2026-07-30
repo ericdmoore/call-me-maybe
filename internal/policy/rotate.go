@@ -59,7 +59,7 @@ func RotatePinsSplit(path, handsetsPath string, labels []string) (*Rotation, err
 
 	// The starting point must itself be valid; rotating a broken file would
 	// hide the breakage behind a fresh mtime.
-	if _, err := fromSplitTOML(data, hdata); err != nil {
+	if _, err := fromSplitTOML(data, hdata, Options{}); err != nil {
 		return nil, fmt.Errorf("refusing to rotate an invalid policy: %w", err)
 	}
 
@@ -121,7 +121,7 @@ func RotatePinsSplit(path, handsetsPath string, labels []string) (*Rotation, err
 	}
 
 	// The edited file must compile before it may touch the disk.
-	if _, err := fromSplitTOML([]byte(text), hdata); err != nil {
+	if _, err := fromSplitTOML([]byte(text), hdata, Options{}); err != nil {
 		return nil, fmt.Errorf("rotation produced an invalid policy, aborting: %w", err)
 	}
 

@@ -63,11 +63,37 @@ jobs:
       # The examples are the first thing a new user copies, so a broken
       # cross-reference in them is a real defect. This runs the same
       # validator the daemon uses.
+      # The examples carry the placeholder PIN sentinel and CANNOT pass a
+      # strict check — that is the point. --allow-placeholders validates
+      # structure (cross-references, ladders, schedules) without pretending the
+      # config is usable.
       - name: validate shipped example config
         run: |
-          go run ./cmd/doorman check \
+          go run ./cmd/doorman check --allow-placeholders \
             --handsets examples/handsets.example.toml \
             examples/policy.example.toml
+
+      # And the inverse: copying the examples verbatim must fail, or the
+      # sentinel is not doing its job.
+      - name: examples must not pass a strict check
+        run: |
+          if go run ./cmd/doorman check \
+               --handsets examples/handsets.example.toml \
+               examples/policy.example.toml 2>/dev/null; then
+            echo "::error::the shipped examples passed a strict check — the placeholder sentinel is not working"
+            exit 1
+          fi
+          echo "examples correctly refuse to load without doorman init"
+
+      # init must produce something that passes the strict check.
+      - name: doorman init round-trip
+        run: |
+          tmp=$(mktemp -d)
+          mkdir -p "$tmp/examples"
+          cp examples/.env.example "$tmp/examples/"
+          go build -o "$tmp/doorman" ./cmd/doorman
+          (cd "$tmp" && ./doorman init --rooms "Kitchen,Office,Kids Room" >/dev/null)
+          (cd "$tmp" && ./doorman check)
 
       - name: build
         run: make build

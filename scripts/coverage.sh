@@ -23,6 +23,7 @@ callmemaybe/internal/policy        60
 callmemaybe/internal/render        88
 callmemaybe/internal/schema        90
 callmemaybe/internal/config        70
+callmemaybe/internal/setup         80
 callmemaybe/internal/lsp           35
 "
 

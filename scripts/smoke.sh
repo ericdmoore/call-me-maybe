@@ -237,6 +237,11 @@ if [ -f "$VM_CONF" ]; then
   fi
 fi
 
+if [ -f "$REPO/policy.toml" ] && grep -q 'CHANGEME' "$REPO/policy.toml"; then
+  fail "policy.toml still has placeholder PINs" \
+    "the lobby cannot admit anyone until these are real: doorman init"
+fi
+
 if [ -f "$REPO/.env" ]; then
   PERM=$(stat -c '%a' "$REPO/.env" 2>/dev/null)
   [ "$PERM" = "600" ] && pass ".env is 0600" \
