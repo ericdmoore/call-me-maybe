@@ -1,6 +1,9 @@
 package policy
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // The whole point is that people may choose. These are ordinary human choices
 // that must keep working, or the rule has overreached and everyone ends up with
@@ -8,8 +11,8 @@ import "testing"
 func TestChosenPINsAreAllowed(t *testing.T) {
 	fine := []string{
 		"428917", "902118", "310244", "775301",
-		"246810", // an arithmetic run, but not a consecutive one
-		"090317", // a date — weaker than random, undetectable without knowing the family
+		"090317",                     // a date — weaker than random, undetectable without knowing the family
+		"847203", "615492", "308176", // ordinary chosen numbers
 		"131313", // wait: this repeats, see the weak list; kept out deliberately
 		"800813",
 		"4821", "9137",
@@ -99,5 +102,93 @@ func TestRotationNeverGeneratesAWeakPIN(t *testing.T) {
 		if why, weak := WeakPIN(pin); weak {
 			t.Fatalf("rotation produced a weak PIN (%s) — the escape hatch cannot fail the rule", why)
 		}
+	}
+}
+
+// ── the near-miss rules ──────────────────────────────────────────────────
+
+func TestAllButOneSameIsRefused(t *testing.T) {
+	for _, pin := range []string{"111112", "111211", "011111", "999998", "222232"} {
+		why, weak := WeakPIN(pin)
+		if !weak {
+			t.Errorf("%s should be refused: one digit from all-identical", pin)
+		} else if why == "" {
+			t.Errorf("%s refused with no reason", pin)
+		}
+	}
+}
+
+func TestAllButOneRunIsRefused(t *testing.T) {
+	for _, pin := range []string{
+		"123457", // one past the end
+		"023456", // one at the start
+		"123356", // one in the middle
+		"654322", // descending, one off
+	} {
+		if _, weak := WeakPIN(pin); !weak {
+			t.Errorf("%s should be refused: one digit from a run", pin)
+		}
+	}
+}
+
+// Counting in twos only reaches five digits — 0,2,4,6,8 has nowhere to go — so
+// this rule is about short PINs, and 246810 is not a run at all: as digits it
+// is 2,4,6,8,1,0 and eight to one is not a step of two.
+func TestEvensAndOddsAreRefused(t *testing.T) {
+	for _, pin := range []string{"02468", "13579", "97531", "86420", "2468", "9753"} {
+		if _, weak := WeakPIN(pin); !weak {
+			t.Errorf("%s should be refused: it counts in twos", pin)
+		}
+	}
+	// And the near-miss rules must not reach down to four digits, where they
+	// refuse ordinary choices: 4821 is one substitution from 4321.
+	for _, pin := range []string{"4821", "9137", "3856"} {
+		if why, weak := WeakPIN(pin); weak {
+			t.Errorf("%s refused (%s) — near-miss rules should not apply at four digits", pin, why)
+		}
+	}
+}
+
+func TestPalindromesAreRefused(t *testing.T) {
+	for _, pin := range []string{"123321", "456654", "801108", "8228"} {
+		if _, weak := WeakPIN(pin); !weak {
+			t.Errorf("%s should be refused: it reads the same backwards", pin)
+		}
+	}
+}
+
+// The burden question, answered exhaustively rather than by estimate. Every
+// rule added here costs somebody a choice, so the total has to stay small
+// enough that "pick a number you'll remember" is still true in practice.
+//
+// If this number grows, the rules have overreached.
+func TestRefusalRateIsSmall(t *testing.T) {
+	const total = 1_000_000
+	refused := 0
+	byReason := map[string]int{}
+
+	for n := range total {
+		pin := fmt.Sprintf("%06d", n)
+		if why, weak := WeakPIN(pin); weak {
+			refused++
+			byReason[why]++
+		}
+	}
+
+	pct := float64(refused) * 100 / total
+	t.Logf("refused %d of %d six-digit PINs (%.3f%%)", refused, total, pct)
+	for why, n := range byReason {
+		t.Logf("    %-52s %6d", why, n)
+	}
+
+	// Generous ceiling: the rules as designed land near a third of a percent.
+	// This exists to catch a rule that quietly rejects a large slice.
+	if pct > 1.5 {
+		t.Errorf("refusing %.2f%% of the space is too burdensome — someone picking "+
+			"a memorable number will hit this by accident", pct)
+	}
+	// And a floor, so the rules cannot silently stop doing anything.
+	if refused < 2000 {
+		t.Errorf("only %d PINs refused — the rules are not catching the obvious ones", refused)
 	}
 }

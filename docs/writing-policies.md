@@ -158,13 +158,31 @@ nobody uses. Memorable is a feature.
 
 What the loader refuses is much narrower than "anything a human chose":
 
-| Refused | Because |
-|---|---|
-| Fewer than 4 digits | Too small a space to be worth anything |
-| `123456`, `654321`, `456789` | Sequences |
-| `111111`, `000000` | Every digit the same |
-| `121212`, `123123` | A short block repeated |
-| A handful of famous ones | They are the first thing anyone tries |
+| Refused | Example | Because |
+|---|---|---|
+| Fewer than 4 digits | `123` | Too small a space to be worth anything |
+| Every digit the same | `111111` | |
+| A run | `123456`, `654321` | Counting up or down, including in twos (`02468`) |
+| A short block repeated | `121212`, `123123` | |
+| A palindrome | `123321` | Reads the same backwards |
+| One digit off all-the-same | `111112`, `011111` | See below |
+| One digit off a run | `123457`, `023456` | See below |
+| A handful of famous ones | `696969`, `159753` | The first thing anyone tries |
+
+The last two are the ones worth explaining. A real guessing list is not just the
+patterns — it is **the patterns plus one typo**. `111112` and `123457` are the
+second and third things anyone tries, so they have to go with the first.
+
+Those two rules apply at **six digits and up only**. A four-digit PIN has three
+steps in it, so "one away from a run" leaves nothing recognisable — `4821` is one
+substitution from `4321` and looks like nothing at all. Applying the rule there
+would refuse ordinary choices for no benefit.
+
+**How much does this cost you?** All of the above together refuses **3,083 of
+the million** six-digit numbers — 0.31%, about one in every 325. Three quarters
+of those are palindromes and repeated blocks, which people rarely land on by
+accident. `TestRefusalRateIsSmall` measures it exhaustively on every run, so the
+number in this paragraph cannot quietly grow.
 
 Everything else is yours. `428917`, a date, the year you moved in, the number of
 the house — all fine.
@@ -173,12 +191,23 @@ the house — all fine.
 few failures an hour, which makes searching a million combinations hopeless. It
 does nothing at all against `123456`, because guessing that does not require
 searching — it requires one guess. So the rule is not *do not choose*, it is
-*not the ones everybody tries first*.
+*not the ones everybody tries first, and not the near-misses of those*.
 
-Dates are deliberately allowed. They are weaker than random, but there is no way
-to tell `090317` from any other number without knowing your family, and refusing
-every date-shaped PIN would reject a large slice of the memorable ones for a
-guess.
+Some things are deliberately **not** refused, because the rule would cost more
+than the guess it prevents:
+
+- **Dates.** There is no way to tell `090317` from any other number without
+  knowing your family, and date-shaped PINs are a large slice of the memorable
+  ones.
+- **Near-misses of a repeated block** — `121213` and friends. Correct in
+  principle, but it would refuse roughly six percent of the space, twenty times
+  everything else combined, and it would reject numbers that look arbitrary to
+  whoever picked them.
+- **Runs with a step of three or more.** `147036` is not a pattern anyone
+  recognises, so it is not on anybody's list.
+
+If a PIN is refused, `doorman check` says which rule caught it and why — the
+message names the pattern, so the fix is obvious rather than a guessing game.
 
 ### When to run `doorman rotate`
 
