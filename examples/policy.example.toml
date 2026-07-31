@@ -110,7 +110,7 @@ afterhours = "school-night"
 # Local channels let a "handset" be any dialplan destination: this PIN drops
 # a caller straight into the ConfBridge at 600. Uncomment to use.
 #[[extensions]]
-#pin = "000000"            # rotate immediately: doorman rotate "Conference"
+#pin = "CHANGEME"          # like every PIN here: doorman init, or pick your own
 #label = "Conference"
 #handsets = ["conference"]
 # (the "conference" pseudo-handset ships in handsets.example.toml)

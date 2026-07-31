@@ -530,9 +530,21 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		if !placeholder && len(e.PIN) < MinPINLength {
 			// Never echo the PIN itself, even a bad one — it is still a
 			// credential someone chose, and may be reused elsewhere.
-			fail("extension %q pin is %d digits; the minimum is %d — run `doorman rotate %q`",
+			fail("extension %q pin is %d digits; the minimum is %d — pick a longer one, or run `doorman rotate %q`",
 				e.Label, len(e.PIN), MinPINLength, e.Label)
 			continue
+		}
+		if !placeholder {
+			// Choosing your own extension is fine and good — a number you
+			// remember is a number you actually give out. What cannot be
+			// allowed is the handful anyone would try first: the rate limiter
+			// makes searching a million combinations hopeless, and does
+			// nothing at all against 123456, which takes one guess.
+			if why, weak := WeakPIN(e.PIN); weak {
+				fail("extension %q has a guessable pin — %s. Pick another, or run `doorman rotate %q`",
+					e.Label, why, e.Label)
+				continue
+			}
 		}
 		if _, dup := exts[key]; dup {
 			fail("duplicate pin %q", e.PIN)

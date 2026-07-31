@@ -149,6 +149,14 @@ func generatePIN(length int, taken map[string]bool) (string, error) {
 			b.WriteByte(byte('0' + n.Int64()))
 		}
 		pin := b.String()
+		// Randomness happily produces 800800 or 456789. Rotation is offered as
+		// the way *out* of a guessable PIN, so it must never hand back one the
+		// loader would refuse — a `doorman rotate` that writes an unloadable
+		// policy is the worst possible failure for the tool that is supposed to
+		// be the safe option.
+		if _, weak := WeakPIN(pin); weak {
+			continue
+		}
 		if !taken[pin] {
 			return pin, nil
 		}

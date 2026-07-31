@@ -96,9 +96,9 @@ func TestPolicyRejectsInvalidNumber(t *testing.T) {
 }
 
 func TestPolicyDisabledExtensionIsAbsent(t *testing.T) {
-	src := valid + "\n[[extensions]]\npin = \"999999\"\nlabel = \"Off\"\nhandsets = [\"kitchen\"]\nenabled = false\n"
+	src := valid + "\n[[extensions]]\npin = \"847203\"\nlabel = \"Off\"\nhandsets = [\"kitchen\"]\nenabled = false\n"
 	p := mustPolicy(t, src)
-	if _, ok := p.LookupExtension("999999"); ok {
+	if _, ok := p.LookupExtension("847203"); ok {
 		t.Error("disabled extension should not resolve")
 	}
 	if p.ExtensionCount() != 2 {

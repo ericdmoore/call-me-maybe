@@ -150,21 +150,59 @@ handsets = ["kitchen"]
 | `afterhours_ring` | list | Ring these during the window instead of taking a message. |
 | `enabled` | bool | Defaults true. |
 
-### The PIN is a credential
+### Choosing a PIN
 
-A six-digit code reachable from the public phone network is a password. It is a
-million combinations: ample against a person, thin against a machine that can
-redial.
+**Pick one you will remember.** An extension is meant to be given out — a kid
+tells a friend, a friend saves it — and a number nobody can recite is a number
+nobody uses. Memorable is a feature.
 
-- **Do not choose them.** `doorman rotate` generates with `crypto/rand`,
-  rewrites `policy.toml` in place with comments intact, and the running daemon
-  picks the change up within a second.
-- **Minimum length is enforced at load.** Anything shorter than four digits is
-  a startup error.
-- **They are never logged**, and that is enforced mechanically by a static
-  analysis pass, not by convention. `doorman rotate` prints them to stdout once,
-  which is the only place a PIN may ever appear.
-- **Rotate anything that leaks**, including anything committed to a repository.
+What the loader refuses is much narrower than "anything a human chose":
+
+| Refused | Because |
+|---|---|
+| Fewer than 4 digits | Too small a space to be worth anything |
+| `123456`, `654321`, `456789` | Sequences |
+| `111111`, `000000` | Every digit the same |
+| `121212`, `123123` | A short block repeated |
+| A handful of famous ones | They are the first thing anyone tries |
+
+Everything else is yours. `428917`, a date, the year you moved in, the number of
+the house — all fine.
+
+**Why that line and not "never choose"?** The rate limiter caps a caller at a
+few failures an hour, which makes searching a million combinations hopeless. It
+does nothing at all against `123456`, because guessing that does not require
+searching — it requires one guess. So the rule is not *do not choose*, it is
+*not the ones everybody tries first*.
+
+Dates are deliberately allowed. They are weaker than random, but there is no way
+to tell `090317` from any other number without knowing your family, and refusing
+every date-shaped PIN would reject a large slice of the memorable ones for a
+guess.
+
+### When to run `doorman rotate`
+
+Rotation is **manual and deliberate**. The daemon never rotates on its own,
+because changing a PIN breaks everyone who has the old one — which is exactly
+the population you gave it to on purpose.
+
+Run it when:
+
+- **A PIN has leaked.** Written on a whiteboard, forwarded in a group chat,
+  committed to a repository, or given to someone who should no longer have it.
+- **A social circle changed** and the old crowd should not keep access.
+- **You would rather not choose.** `doorman rotate "Kids"` picks one with
+  `crypto/rand`, and it will never generate something the loader would refuse.
+
+Do **not** run it on a schedule. Rotating a house extension every ninety days is
+security theatre with a real cost: everybody has to learn a new number, and the
+number is the whole point. Rotate on a reason, not on a calendar.
+
+It rewrites `policy.toml` in place with comments intact, validates before
+writing, writes atomically, and the running daemon picks the change up within a
+second. New PINs print to stdout once — the only place a PIN may ever appear.
+They are **never logged**, and that is enforced by a static analysis pass rather
+than by convention.
 
 ### Ladders: `[[extensions.steps]]`
 

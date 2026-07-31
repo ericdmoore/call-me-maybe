@@ -188,6 +188,12 @@ func PIN(length int, taken map[string]bool) (string, error) {
 			b.WriteByte(byte('0' + n.Int64()))
 		}
 		pin := b.String()
+		// Same obligation as policy.generatePIN: never generate something the
+		// loader refuses. `doorman init` producing an unloadable config would
+		// be a bad first five minutes.
+		if _, weak := policy.WeakPIN(pin); weak {
+			continue
+		}
 		if !taken[pin] {
 			taken[pin] = true
 			return pin, nil

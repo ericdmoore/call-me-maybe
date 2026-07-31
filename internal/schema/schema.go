@@ -333,7 +333,7 @@ func extension() *Schema {
 			"pin": {
 				Type:        "string",
 				Pattern:     `^\d+$`,
-				Description: "Digits only. Exposed to the PSTN, so treat it as a password: generate with `doorman rotate`, never pick 123456.",
+				Description: "Digits only, minimum 4. Choose one you will remember — a number nobody can recite is a number nobody gives out. Guessable ones are refused at load: sequences, repeated blocks, all-same digits, and the handful everyone tries. `doorman rotate` generates one when you would rather not choose.",
 				Rules:       []string{"Must be unique across extensions.", "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer."},
 			},
 			"label":   {Type: "string", Description: "Human name, used by `doorman rotate <label>` and shown in `doorman check`."},
