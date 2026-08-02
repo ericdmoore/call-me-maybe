@@ -526,6 +526,71 @@ Sustained invalid-extension attempts from one number mean someone is probing.
 The rate limiter handles it, but it is worth knowing about — and worth
 considering whether the PINs in circulation should be rotated.
 
+## 6a. The call log
+
+Off by default. Set `CALL_LOG_PATH` and restart:
+
+```bash
+# .env
+CALL_LOG_PATH=/var/lib/doorman/calls.jsonl
+```
+
+doorman creates it `0600` and appends one JSON line per completed call. If it
+cannot open the path it exits at startup rather than running without it — an
+operator who asked for a call log and did not get one should find out
+immediately, not a month later when they go looking for a call.
+
+```bash
+doorman calls                          # last 20, caller IDs redacted
+doorman calls --since 7d               # a duration (24h, 7d) or a date
+doorman calls --outcome dismissed      # answered|voicemail|dismissed|abandoned
+doorman calls --caller 0100            # match part of a number
+doorman calls --json | jq .            # JSON Lines for anything else
+doorman calls --no-redact              # full numbers
+```
+
+**Why this is worth having beyond curiosity.** The `stages` array is the ring
+ladder as actually walked, with per-rung timings. That is what tells you a
+stage expires before anybody can cross a room, or that the lobby's ten seconds
+is too short because most strangers are dismissed with `no-digits` rather than
+a wrong extension. Those are policy questions, and they are unanswerable from
+the operational log.
+
+### What it holds, and what it never holds
+
+Full caller IDs — that is the point of a call log on a telephone, and it is why
+the file is `0600` and `doorman calls` redacts unless you ask. Keep it on the
+box; the operational log (which redacts by default) is the one that gets
+shipped to a journal.
+
+Entered digits and PINs are **never** recorded, at any level. A record says a
+PIN was `valid` or `invalid` and how many attempts there were, never what was
+typed — a near-miss is almost a credential. There is no field one could go in.
+
+### Holes are reported, not hidden
+
+Writes happen off the call path through a buffered channel, so a slow disk can
+never delay a call. If that buffer fills, records are dropped and counted. A
+line torn by power loss is skipped on read and the count printed to stderr, so
+"skipped" never silently means "fine".
+
+The file rotates at `CALL_LOG_MAX_BYTES` (32 MB default) keeping one previous
+generation, and `doorman calls` reads across the rotation. Twenty calls a day
+is roughly 2 MB a year, so the cap is for the case that is not twenty calls a
+day — somebody redialling in a loop.
+
+### It is an output, never an input
+
+Nothing on the call path reads this file. If you want "this number has called
+five times, admit it", that is a policy change, not a log query — see
+CLAUDE.md invariant 10 for why, and note the import graph prevents it
+structurally.
+
+To turn it off, unset `CALL_LOG_PATH` and restart. The file stays where it is;
+delete it yourself if you mean to.
+
+---
+
 ## 7. Threat model
 
 What this system actually defends against, and what it does not. Written down

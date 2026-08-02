@@ -53,6 +53,14 @@ type Config struct {
 	LogLevel       slog.Level
 	LogFormat      string // "json" | "pretty"
 	RedactCallerID bool
+
+	// CallLogPath enables the per-call record log. Empty — the default —
+	// means no call log at all: it holds full caller IDs, so it is something
+	// an operator turns on deliberately rather than something that appears.
+	CallLogPath string
+	// CallLogMaxBytes caps the live file before it rotates. One previous
+	// generation is kept.
+	CallLogMaxBytes int64
 }
 
 var truthy = regexp.MustCompile(`^(?i)(1|true|yes|on)$`)
@@ -127,6 +135,9 @@ func Load() (Config, error) {
 
 		LogFormat:      str("LOG_FORMAT", "json"),
 		RedactCallerID: boolean("LOG_REDACT_CALLER_ID", true),
+
+		CallLogPath:     str("CALL_LOG_PATH", ""),
+		CallLogMaxBytes: int64(integer("CALL_LOG_MAX_BYTES", 32<<20)),
 	}
 
 	switch strings.ToLower(str("LOG_LEVEL", "info")) {

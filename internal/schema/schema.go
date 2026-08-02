@@ -442,6 +442,8 @@ func Env() *Schema {
 		"LOG_LEVEL":            env("Verbosity.", "enum", "info"),
 		"LOG_FORMAT":           env("Structured lines or human-readable.", "enum", "json"),
 		"LOG_REDACT_CALLER_ID": env("Redact caller IDs in logs, keeping only a fragment. On by default: the caller attribute rides on every line a call produces, and journals get shipped and backed up. Setting this false is a deliberate debugging opt-out — see CLAUDE.md invariant 1.", "boolean", true),
+		"CALL_LOG_PATH":        env("Enables the per-call record log, one JSON line per completed call. Empty (the default) means no call log. Unlike the operational log this file holds full caller IDs — which is what makes \"who called while I was out\" answerable — so it is created 0600 and belongs on the box. Read it with `doorman calls`, which redacts by default. Written off the call path: a full buffer drops records and counts them rather than delaying a call. Nothing on the call path ever reads it back; it is an output, not state.", "string", ""),
+		"CALL_LOG_MAX_BYTES":   env("Rotate the call log at this size, keeping one previous generation. Twenty calls a day is roughly 2 MB a year, so this cap is for the case that is not twenty calls a day.", "integer", 33554432),
 	}
 	props["LOG_LEVEL"].Enum = []any{"trace", "debug", "info", "warn", "error"}
 	props["LOG_FORMAT"].Enum = []any{"json", "pretty"}

@@ -107,6 +107,25 @@ you type, with completions for every cross\-reference. Works in Neovim over
 SSH on the Pi with no additional installation. See
 .IR docs/editor.md .
 .TP
+.B doorman calls
+.RS
+Read the call log: one line per completed call, with who called, what happened
+and why. Caller IDs are redacted unless
+.BR \-\-no\-redact ,
+so the default output is safe to paste into a bug report or hand to a model.
+Entered digits and PINs are never recorded at all \(em a record says whether a
+PIN was valid, never what it was. Requires
+.B CALL_LOG_PATH
+to be set; see
+.BR "doorman schema env" .
+.PP
+Filters:
+.BR \-\-since " (a duration like " 24h " or " 7d ", or a date), "
+.BR \-\-outcome ", " \-\-caller ", " \-n .
+.B \-\-json
+emits JSON Lines.
+.RE
+.PP
 .BI "doorman e164 " number
 Show how a raw caller ID normalises to E.164. Use this when a known caller
 unexpectedly meets the bouncer: the carrier may be handing over a format

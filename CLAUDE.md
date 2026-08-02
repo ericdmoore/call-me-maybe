@@ -125,6 +125,18 @@ Break these and the phone fails in ways that look like working software.
    lobby is deaf and every stranger is dismissed. No runtime symptom other
    than "nobody can ever get in".
 
+10. **The call log is never an input.** Nothing on the call path may read
+   `calls.jsonl` to decide anything. The moment something does — "this
+   number has called five times, admit it" — the rate limiter's
+   deliberately-in-memory design is undermined and doorman has acquired
+   persistent state that can be corrupt, stale, or disagree with
+   policy.toml. The import direction enforces it: `internal/calls`
+   imports `internal/policy`, so policy can never import calls without a
+   cycle. It also holds full caller IDs, which is the point of a call log
+   on a telephone — the file is 0600 and `doorman calls` redacts by
+   default. Entered digits and PINs are still absolute: a record says
+   whether a PIN was valid, never what was typed.
+
 9a. **Generated files are outputs.** `asterisk/generated/*` and the
    installed `*_handsets.conf` come from `doorman render`; never hand-edit
    them or commit them (the PJSIP one holds real passwords). Change

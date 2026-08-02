@@ -5,6 +5,7 @@
 //	doorman init             interview and write a working configuration
 //	doorman check [path]     validate policy.toml and print what it resolves to
 //	doorman schema [name]    print the config surface as JSON Schema
+//	doorman calls            read the call log
 //	doorman rotate [flags] [label ...]
 //	                         rotate extension PINs (all, or by label)
 //	doorman render [flags]   generate per-handset Asterisk config
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	"callmemaybe/internal/ari"
+	"callmemaybe/internal/calls"
 	"callmemaybe/internal/config"
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/lsp"
@@ -59,6 +61,8 @@ func main() {
 			os.Exit(runE164(os.Args[2:]))
 		case "schema":
 			os.Exit(runSchema(os.Args[2:]))
+		case "calls":
+			os.Exit(runCalls(os.Args[2:]))
 		case "version", "-v", "--version":
 			fmt.Println("doorman", version)
 			return
@@ -84,6 +88,9 @@ const usage = `doorman — the Call Me Maybe lobby daemon
                                 report what they add up to
       -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
       -allow-placeholders       accept the example sentinels; for CI, not operators
+  doorman calls                 read the call log: who called, what happened,
+                                and why. Caller IDs redacted unless
+                                --no-redact. Needs CALL_LOG_PATH set.
   doorman schema [name]         print the configuration surface as JSON Schema:
                                 every key, type, default, and cross-file
                                 reference for policy.toml, handsets.toml, and
@@ -463,6 +470,22 @@ func runService() {
 	prompts := lobby.NewPrompts(cfg.PromptMediaPrefix)
 	reg := newRegistry()
 
+	// The call log is off unless a path is configured. A failure to open it
+	// is fatal at startup rather than silent: an operator who asked for a
+	// call log and did not get one should find out now, not in a month when
+	// they go looking for a call.
+	var callLog *calls.Writer
+	if cfg.CallLogPath != "" {
+		var err error
+		callLog, err = calls.Open(cfg.CallLogPath, cfg.CallLogMaxBytes)
+		if err != nil {
+			log.Error("could not open the call log", "err", err)
+			os.Exit(1)
+		}
+		defer func() { _ = callLog.Close() }()
+		log.Info("call log open", "path", cfg.CallLogPath)
+	}
+
 	deps := lobby.Deps{
 		ARI:     ariAdapter{client},
 		Policy:  store.Current,
@@ -482,6 +505,11 @@ func runService() {
 		},
 		OnLegCreated: reg.addLeg,
 		OnFinished:   reg.remove,
+	}
+	// A typed nil in an interface is not nil, so the field is only set when
+	// there is a real writer — the state machine's nil check depends on it.
+	if callLog != nil {
+		deps.Calls = callLog
 	}
 
 	client.Connect(func(ev ari.Event) { route(ev, reg, deps, client, log) })

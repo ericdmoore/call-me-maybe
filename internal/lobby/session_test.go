@@ -38,6 +38,7 @@ type harness struct {
 	finished chan struct{}
 	legs     chan string
 	now      time.Time
+	rec      *testRecorder
 }
 
 // start builds a session against the fake and runs it. Timeouts are real but
@@ -60,6 +61,7 @@ func startWith(t *testing.T, policySrc, callerNumber string, limiter *RateLimite
 		fake:     newFakeARI(),
 		finished: make(chan struct{}),
 		legs:     make(chan string, 8),
+		rec:      &testRecorder{},
 		// A school-night Wednesday at 14:00 — safely outside any afterhours
 		// window in the fixtures.
 		now: time.Date(2026, 7, 8, 14, 0, 0, 0, time.Local),
@@ -70,6 +72,7 @@ func startWith(t *testing.T, policySrc, callerNumber string, limiter *RateLimite
 		Limiter: limiter,
 		Prompts: NewPrompts("call-me-maybe"),
 		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Calls:   h.rec,
 		Cfg: Config{
 			DefaultCountryCode: "1",
 			ExtensionLength:    6,

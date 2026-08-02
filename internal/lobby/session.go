@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"callmemaybe/internal/calls"
 	"callmemaybe/internal/policy"
 )
 
@@ -63,6 +64,11 @@ type Config struct {
 // Deps wires a Session to the world. Policy is a func so each session
 // captures the store's current policy exactly once at call start — a mid-call
 // reload never changes the rules under a caller.
+// A Recorder is the call log sink. An interface rather than *calls.Writer
+// for the same reason ARI is one: the state machine has to be drivable by a
+// test that can see what it recorded.
+type Recorder interface{ Post(calls.Record) }
+
 type Deps struct {
 	ARI     ARI
 	Policy  func() *policy.Policy
@@ -70,6 +76,10 @@ type Deps struct {
 	Prompts *Prompts
 	Log     *slog.Logger
 	Cfg     Config
+	// Calls receives one record per completed call. Nil disables the call
+	// log entirely, which is why every use is behind a nil check rather
+	// than a config flag.
+	Calls Recorder
 
 	// OnLegCreated lets the event router map an originated leg's channel ID
 	// back to this session.
@@ -125,6 +135,12 @@ type Session struct {
 	bridgeID string
 	legs     map[string]bool
 	pbSeq    int
+
+	// rec accumulates the call log entry. Written from the session
+	// goroutine only, and never read back by the state machine — it is an
+	// output, not state. Cancellation remains the only state there is.
+	rec       calls.Record
+	startedAt time.Time
 }
 
 func NewSession(channelID, callerNumber string, deps Deps) *Session {
@@ -134,6 +150,13 @@ func NewSession(channelID, callerNumber string, deps Deps) *Session {
 	e164 := policy.E164OrEmpty(callerNumber, deps.Cfg.DefaultCountryCode)
 
 	id := shortID(channelID)
+	// The clock is read here rather than in Run: a call begins when it
+	// arrives, not when its goroutine happens to be scheduled.
+	started := time.Now()
+	if deps.Now != nil {
+		started = deps.Now()
+	}
+
 	return &Session{
 		ID:         id,
 		ChannelID:  channelID,
@@ -156,6 +179,15 @@ func NewSession(channelID, callerNumber string, deps Deps) *Session {
 		// far beyond anything a single call can generate in flight.
 		events: make(chan event, 64),
 		legs:   make(map[string]bool),
+		// Abandoned is the zero outcome, so a caller who hangs up mid-lobby
+		// is recorded truthfully with nobody having to remember to set it.
+		startedAt: started,
+		rec: calls.Record{
+			ID:      id,
+			Start:   started,
+			Caller:  e164,
+			Outcome: calls.OutcomeAbandoned,
+		},
 	}
 }
 
@@ -239,6 +271,7 @@ func (s *Session) Run() {
 
 	if known, ok := s.pol.LookupCaller(s.callerE164); ok {
 		s.log.Info("known caller, welcoming", "name", known.Name)
+		s.rec.Known = known.Name
 		s.deps.Limiter.Success(s.limitKey())
 		s.play(PromptWelcomeKnown, false)
 		if s.ctx.Err() != nil {
@@ -379,6 +412,8 @@ func (s *Session) evaluate(digits *string, attempts *int, reset func(time.Durati
 
 	if ext, ok := s.pol.LookupExtension(entered); ok {
 		s.deps.Limiter.Success(s.limitKey())
+		// The label and the verdict, never `entered`.
+		s.rec.Extension, s.rec.PIN = ext.Label, "valid"
 		if ext.Afterhours.Active(s.now()) {
 			// Quiet hours. Either the call is redirected somewhere that is
 			// awake — homework hours sending the kids' line to the adults, a
@@ -401,6 +436,7 @@ func (s *Session) evaluate(digits *string, attempts *int, reset func(time.Durati
 	}
 
 	*attempts++
+	s.rec.PIN, s.rec.Attempts = "invalid", *attempts
 	failures := s.deps.Limiter.Failure(s.limitKey(), time.Now())
 	// The entered digits are never logged — a near-miss is almost a
 	// credential.
@@ -473,6 +509,19 @@ func (s *Session) runPlan(plan policy.RingPlan, label string) {
 // ringStep rings one stage. Returns true when a leg answered (the call is
 // now bridged and over when this returns); false means escalate.
 func (s *Session) ringStep(endpoints []string, label, callerID string, timeout time.Duration, stage int) bool {
+	stageStart := s.now()
+	dialled := make(map[string]string, len(endpoints)) // legID -> endpoint
+	// rang records this rung for the call log. Every exit below takes it, so
+	// a ladder in the log is the ladder as actually walked, with the timings
+	// that say whether a stage expires before anyone can cross a room.
+	rang := func(result string) {
+		s.rec.Stages = append(s.rec.Stages, calls.Stage{
+			Handsets: endpoints,
+			MS:       s.now().Sub(stageStart).Milliseconds(),
+			Result:   result,
+		})
+	}
+
 	// Escalation is a handoff, not a pile-on: the previous stage has already
 	// been hung up, so s.legs holds only this stage.
 	for _, endpoint := range endpoints {
@@ -491,11 +540,13 @@ func (s *Session) ringStep(endpoints []string, label, callerID string, timeout t
 			continue
 		}
 		s.legs[legID] = true
+		dialled[legID] = endpoint
 		s.deps.OnLegCreated(legID, s)
 	}
 
 	if len(s.legs) == 0 {
 		s.log.Warn("no legs could be originated", "stage", stage+1)
+		rang("failed")
 		return false
 	}
 	s.log.Info("ringing", "label", label, "stage", stage+1, "legs", len(s.legs))
@@ -508,20 +559,25 @@ func (s *Session) ringStep(endpoints []string, label, callerID string, timeout t
 		case ev := <-s.events:
 			switch ev.kind {
 			case evLegAnswered:
+				s.rec.Outcome, s.rec.AnsweredBy = calls.OutcomeAnswered, dialled[ev.value]
+				rang("answered")
 				s.bridged(ev.value)
 				return true
 			case evLegGone:
 				delete(s.legs, ev.value)
 				if len(s.legs) == 0 {
 					s.log.Info("every leg failed before answer", "stage", stage+1)
+					rang("failed")
 					return false
 				}
 			}
 		case <-timer.C:
 			s.log.Info("stage timed out", "stage", stage+1)
+			rang("timeout")
 			s.hangupLegs()
 			return false
 		case <-s.ctx.Done():
+			rang("abandoned")
 			return true // session over; runPlan checks ctx and stops
 		}
 	}
@@ -550,6 +606,7 @@ func (s *Session) fallback(mailbox string) {
 // channel belongs to Asterisk's VoiceMail() and killing it would cut the
 // caller off mid-greeting.
 func (s *Session) sendToVoicemail(mailbox string) {
+	s.rec.Outcome, s.rec.Mailbox = calls.OutcomeVoicemail, mailbox
 	if s.ctx.Err() != nil {
 		return
 	}
@@ -617,6 +674,7 @@ func (s *Session) dismiss(reason string) {
 		return
 	}
 	s.log.Info("dismissing caller", "reason", reason)
+	s.rec.Outcome, s.rec.Reason = calls.OutcomeDismissed, reason
 
 	for legID := range s.legs {
 		_ = s.deps.ARI.Hangup(s.ctx, legID)
@@ -651,6 +709,18 @@ func (s *Session) cleanup() {
 	}
 	if !s.detached.Load() {
 		_ = s.deps.ARI.Hangup(ctx, s.ChannelID)
+	}
+
+	// Posted from the single teardown path, so there is exactly one record
+	// per call however the call ended — including the caller hanging up,
+	// which reaches here by cancellation and no other route.
+	//
+	// Before OnFinished, not after: OnFinished is what tells the rest of the
+	// system this session is done, so anything sequenced behind it would be
+	// racing a caller who is already gone.
+	if s.deps.Calls != nil {
+		s.rec.MS = s.now().Sub(s.startedAt).Milliseconds()
+		s.deps.Calls.Post(s.rec)
 	}
 
 	s.deps.OnFinished(s)
