@@ -26,6 +26,7 @@ callmemaybe/internal/config        70
 callmemaybe/internal/setup         80
 callmemaybe/internal/tmpl          70
 callmemaybe/internal/lsp           35
+callmemaybe/internal/awssig        95
 "
 
 echo "→ go test -race -coverprofile=$PROFILE"
