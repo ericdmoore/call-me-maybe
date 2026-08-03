@@ -32,6 +32,7 @@ paid one, is a project people will contribute to. Concretely:
 | Sound board extension | Sound effect packs |
 | Joke/riddle rotation | Joke and riddle packs |
 | Voicemail greetings | Greeting packs |
+| Story interpreter | Story packs (`story`) |
 
 If you find yourself designing a feature that is useless without buying
 something, you have put the line in the wrong place.
@@ -195,6 +196,10 @@ copyright.
 - **`sfx`** — numbered clips for the sound board.
 - **`rotation`** — numbered clips played at random (jokes, riddles, facts).
 - **`greeting`** — voicemail greetings.
+- **`story`** — an interactive audio story the caller steers by keypad,
+  written as one Markdown file. Its own specification, because it is the one
+  kind whose clip names are defined by the pack rather than by the binary:
+  see **[STORY-PACKS.md](STORY-PACKS.md)**.
 
 The last three need mechanisms that do not exist yet — see `docs/TASKS.md`.
 The rotation mechanism in particular is small (a `RAND()` in the dialplan)

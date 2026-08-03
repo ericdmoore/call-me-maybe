@@ -9,8 +9,9 @@ The project's home is <https://callmemaybe.cc>.
 
 Read `README.md` for the architecture diagrams and `docs/architecture.md` for
 the reasoning behind the big choices. `docs/PACKS.md` is the pack format and
-the mechanisms/content line; `docs/SUSTAINABILITY.md` is the honest read on
-what can and cannot pay for itself. Operational procedures — provisioning,
+the mechanisms/content line, with `docs/STORY-PACKS.md` for the one kind whose
+clip names come from the pack rather than the binary; `docs/SUSTAINABILITY.md`
+is the honest read on what can and cannot pay for itself. Operational procedures — provisioning,
 verification, troubleshooting, day-2 tasks — are in `docs/RUNBOOK.md`. The
 prioritised backlog with acceptance criteria is `docs/TASKS.md`.
 
