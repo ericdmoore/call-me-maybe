@@ -6,6 +6,7 @@
 //	doorman check [path]     validate policy.toml and print what it resolves to
 //	doorman schema [name]    print the config surface as JSON Schema
 //	doorman calls            read the call log
+//	doorman pack             build and check prompt packs
 //	doorman rotate [flags] [label ...]
 //	                         rotate extension PINs (all, or by label)
 //	doorman render [flags]   generate per-handset Asterisk config
@@ -63,6 +64,8 @@ func main() {
 			os.Exit(runSchema(os.Args[2:]))
 		case "calls":
 			os.Exit(runCalls(os.Args[2:]))
+		case "pack":
+			os.Exit(runPack(os.Args[2:]))
 		case "version", "-v", "--version":
 			fmt.Println("doorman", version)
 			return
@@ -88,6 +91,11 @@ const usage = `doorman — the Call Me Maybe lobby daemon
                                 report what they add up to
       -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
       -allow-placeholders       accept the example sentinels; for CI, not operators
+  doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
+                                "build" renders audio through piper, ElevenLabs,
+                                OpenAI or Polly, "voices" lists what a backend
+                                offers. Rendering is content-addressed, so
+                                editing one line re-renders one clip.
   doorman calls                 read the call log: who called, what happened,
                                 and why. Caller IDs redacted unless
                                 --no-redact. Needs CALL_LOG_PATH set.
