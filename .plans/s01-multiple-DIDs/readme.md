@@ -85,21 +85,54 @@ exten => _X.,1,Answer()
 **Deliverable:** the home line dismisses strangers, the business line takes a
 message. Same binary, opposite defaults.
 
-## M1.3 · Outbound caller ID
+## M1.3 · Outbound line selection
 
 *Do not ship M1.1 without this.* Today `Dial(PJSIP/1${EXTEN}@voipms,60)` sets
 no caller ID at all, so every outbound call presents the trunk default. With
 several lines, every customer you ring back saves the wrong number.
 
+Two mechanisms, not three.
+
+**Per-handset default** — the common case, zero friction. The office phone
+calls as Venture A and never sees a menu.
+
+**`*4`, the outbound console** — dial it, doorman answers and reads the lines,
+press a digit, dial the number, doorman places the call and bridges you in.
+
+This is the lobby state machine running backwards: answer, play, collect,
+originate, bridge, all of which already exist. A stranger dials in and is
+connected to a handset; here a handset dials in and is connected to a stranger.
+No new service — one more dialplan hook into the Stasis app.
+
+**Rejected: a dial prefix (`*3` then the number).** One keypress, and it works
+from a handset's own phonebook, which the console does not. But it needs `*1`–`*9`
+reserved forever, fighting `*97` and every feature code anyone adds later, and
+with five ventures nobody remembers which digit is which. A menu that says the
+names out loud beats a mapping you have to memorise. Revisit only if someone
+actually misses storing contacts with a line baked in.
+
 **Build**
 
-- `[line] outbound_cid`.
-- A dial prefix picks the line for one call (`*3` then the number).
-- Per-handset default line, for the common case of not prefixing.
-- `doorman check` catches a prefix colliding with an extension or feature code.
+- `[line] outbound_cid`, and a per-handset default line.
+- `*4` console: line menu, then a variable-length `#`-terminated number.
+  (Same collection primitive the Line 2 callback-number capture needs — second
+  customer for one piece of work.)
+- Confirmation before dialling: "calling as Venture A". Catches the wrong
+  choice *before* the customer's phone rings.
+- Outbound records in the call log, carrying the line.
 
-**Verify:** place a call with each prefix and read the number off a real
-handset. Not from logs — logs show what we sent, not what arrived.
+**Keep the plain dialplan path working.** Routing outbound through Stasis puts
+doorman on the outbound path, so a crash would stop you *making* calls as well
+as receiving them. `_NXXNXXXXXX` must keep working with a house default caller
+ID, exactly as `[inbound-fallback]` keeps inbound alive. `*4` is the enhanced
+path, not the only one.
+
+A handset with no default that dials a number directly uses the house default
+caller ID rather than being refused. A call that goes out with a slightly wrong
+number beats a call that does not go out.
+
+**Verify:** place a call each way and read the number off a real handset. Not
+from logs — logs show what was sent, not what arrived.
 
 ## M1.4 · Per-line observability
 
@@ -225,17 +258,49 @@ selection a lookup, not a hardcode.**
 ## Emergency calling — settle before Phase 2 ships
 
 **The highest-stakes detail in the feature.** Today `_911` leaves by the only
-trunk there is. With several:
+trunk there is. With several, something has to choose.
 
-- Which trunk carries 911, and is it the one whose DID has a registered address?
-- Does every provider offer E911 here at all? Several do not.
-- If that trunk is unregistered, does the call fail *loudly*?
+### The rule
 
-The decision: one **designated emergency trunk**, named explicitly in config
-rather than inferred from whichever line the caller happens to be on, plus a
-startup warning when it has no registered address. A house phone that cannot
-reach emergency services is something the people in that house must be told
-about — in the runbook and on the site, not in a comment.
+**There is always an answer, and the CLI always says what it is.**
+
+1. `emergency_trunk` in config wins if set.
+2. Unset, it defaults to the **first trunk declared in `trunks.toml`** —
+   declaration order, which is what a human sees on opening the file, not map
+   order. In the worked example that is `Home`.
+3. Either way `doorman check` prints it prominently, and says whether it was
+   **chosen or inferred**. So does the startup log, every boot.
+
+Defaulting rather than requiring means there is no state where somebody forgot
+to designate a trunk and 911 has no route. Announcing the inference means the
+default can never be a surprise — and it is order-dependent, so a trunk added
+at the top of the file silently moves the most safety-critical route unless
+doorman is loud about it.
+
+Not inferred from the line the caller is on: whoever grabs the nearest handset
+has no idea which line they are on, and E911 is registered per DID against a
+street address, so the trunk carrying it must be the one whose address is
+filed.
+
+### When it is not registered
+
+If the designated trunk is down at the moment of the call, **911 falls over to
+any registered trunk.** This is a deliberate trade and it deserves stating
+plainly: the location data the dispatcher receives may then be wrong, which is
+genuinely bad — but a connected call lets a human say their address out loud,
+and a failed call gives them nothing at all. Connection first.
+
+### What has to be said out loud
+
+- `doorman check`: which trunk, chosen or inferred, and whether it has a
+  registered address.
+- Startup: the same, every boot.
+- RUNBOOK and the site: that some providers do not offer E911 in every area, so
+  a wrong choice of provider means a phone that cannot call for help.
+- And the honest framing: **this is a supplementary phone.** Nobody should make
+  it the household's only route to emergency services. Saying so is not a
+  disclaimer, it is the accurate description of a hobbyist phone on a
+  consumer internet connection that stops working in a power cut.
 
 ## Testing
 
@@ -276,10 +341,10 @@ No migration, no persistent state, nothing to un-migrate.
 
 | Risk | Mitigation |
 |---|---|
-| **911 leaves by the wrong trunk** | Designated emergency trunk, explicit in config, warned at startup. Blocks Phase 2 |
+| **911 leaves by the wrong trunk** | Designated trunk, defaulting to the first declared. `doorman check` and every startup say which, and whether it was chosen or inferred. Blocks Phase 2 |
+| **doorman down takes out outbound calling** | The plain `_NXXNXXXXXX` dialplan path keeps working with a house default CID. `*4` is enhancement, not dependency |
 | Outbound CID rejected by a provider that does not own the number | Validate `outbound_cid` against its trunk at check time |
 | Dialplan typo in a line name | Falls back to default and logs. Cannot be caught at startup — doorman cannot read the dialplan. Accepted |
-| Prefix collisions (`*3` vs `*97`) | Validated; the numbering scheme wants thought before it is published |
 | Generated PJSIP hand-edited | Same rule as handsets: it is an output. Header comment says so |
 | Scope creep toward tenancy | Every one is a no — per-line users, per-line auth, per-line concurrency caps, a web UI |
 

@@ -233,15 +233,27 @@ it in policy would duplicate host, codecs and credentials per line and make
 With one trunk, `911` has one way out. With several, something must choose —
 and the wrong choice is the most consequential bug this project could ship.
 
-**Chosen: a designated emergency trunk, named explicitly in configuration.**
-Not inferred from the line the caller is on, because a caller picks up whatever
-handset is nearest and has no idea which line they are on; and because E911 is
-registered per DID with a street address, so the trunk that carries it must be
-the one whose address is on file.
+**Chosen: a designated trunk that always resolves, and a CLI that never lets
+you wonder which one.** `emergency_trunk` wins when set; unset, it is the first
+trunk declared in `trunks.toml`. `doorman check` and every startup print which
+trunk carries 911 and whether that was **chosen or inferred**.
 
-Startup warns when the designated trunk has no registered address, and the
-runbook has to say plainly that a provider without E911 in your area means a
-phone that cannot call for help.
+Requiring an explicit setting was the first instinct and it is wrong: it
+creates a state where somebody forgot and 911 has no route. Defaulting fixes
+that, but a default derived from file order is exactly the kind of thing that
+moves silently when a trunk is added at the top of a file — so the announcement
+is not politeness, it is the mitigation.
+
+Not inferred from the line the caller is on, for two reasons. Whoever grabs the
+nearest handset has no idea which line they are on. And E911 is registered per
+DID against a street address, so the trunk carrying it must be the one whose
+address is filed.
+
+**When the designated trunk is unregistered, 911 falls over to any registered
+one.** The location data may then be wrong, which is genuinely bad — but a
+connected call lets a human say their address, and a failed call gives them
+nothing. Connection first, and say so in the runbook rather than leaving it as
+an accident of the code.
 
 ## Failure modes and what happens
 
