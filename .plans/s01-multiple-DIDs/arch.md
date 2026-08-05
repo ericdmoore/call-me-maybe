@@ -233,16 +233,23 @@ it in policy would duplicate host, codecs and credentials per line and make
 With one trunk, `911` has one way out. With several, something must choose —
 and the wrong choice is the most consequential bug this project could ship.
 
-**Chosen: a designated trunk that always resolves, and a CLI that never lets
-you wonder which one.** `emergency_trunk` wins when set; unset, it is the first
-trunk declared in `trunks.toml`. `doorman check` and every startup print which
-trunk carries 911 and whether that was **chosen or inferred**.
+**Chosen: the primary line is the default for everything unqualified, and the
+CLI never lets you wonder which it is.** `policy.toml` — the unsuffixed file —
+carries 911 *and* supplies the caller ID for a handset that just picks up and
+dials. `emergency_trunk` and a per-handset default override each half; neither
+must be set, and unset is never undefined.
 
-Requiring an explicit setting was the first instinct and it is wrong: it
-creates a state where somebody forgot and 911 has no route. Defaulting fixes
-that, but a default derived from file order is exactly the kind of thing that
-moves silently when a trunk is added at the top of a file — so the announcement
-is not politeness, it is the mitigation.
+Requiring an explicit emergency trunk was the first instinct and it is wrong:
+it creates a state where somebody forgot and 911 has no route.
+
+Defaulting to *the first declared trunk* was the second, and it is also wrong,
+because a default derived from file order moves silently when a block is added
+at the top of a file. Naming `policy.toml` removes the ordering question
+entirely — it is the file that already means default, so `policy.aaa.toml`
+cannot steal the most safety-critical route by sorting early.
+
+One rule serving both defaults is the point. "Which line am I on when I have
+not said" has one answer rather than two that can drift apart.
 
 Not inferred from the line the caller is on, for two reasons. Whoever grabs the
 nearest handset has no idea which line they are on. And E911 is registered per

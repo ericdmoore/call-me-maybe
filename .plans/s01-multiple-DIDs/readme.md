@@ -127,9 +127,10 @@ as receiving them. `_NXXNXXXXXX` must keep working with a house default caller
 ID, exactly as `[inbound-fallback]` keeps inbound alive. `*4` is the enhanced
 path, not the only one.
 
-A handset with no default that dials a number directly uses the house default
-caller ID rather than being refused. A call that goes out with a slightly wrong
-number beats a call that does not go out.
+A handset with no default that dials a number directly presents the **primary
+line** — `policy.toml`, the same file that carries 911. Same rule, one concept
+to learn. A call that goes out with a slightly wrong number beats a call that
+does not go out.
 
 **Verify:** place a call each way and read the number off a real handset. Not
 from logs — logs show what was sent, not what arrived.
@@ -264,18 +265,35 @@ trunk there is. With several, something has to choose.
 
 **There is always an answer, and the CLI always says what it is.**
 
-1. `emergency_trunk` in config wins if set.
-2. Unset, it defaults to the **first trunk declared in `trunks.toml`** —
-   declaration order, which is what a human sees on opening the file, not map
-   order. In the worked example that is `Home`.
-3. Either way `doorman check` prints it prominently, and says whether it was
-   **chosen or inferred**. So does the startup log, every boot.
+**`policy.toml` — the unsuffixed file — is the primary line, and the primary
+line is the default for everything unqualified.** One concept, two jobs:
 
-Defaulting rather than requiring means there is no state where somebody forgot
-to designate a trunk and 911 has no route. Announcing the inference means the
-default can never be a surprise — and it is order-dependent, so a trunk added
-at the top of the file silently moves the most safety-critical route unless
-doorman is loud about it.
+- **911 leaves by its trunk.**
+- **Pick up and dial** with no `*4` and no per-handset default presents its
+  caller ID.
+
+`emergency_trunk` overrides the first if someone needs it; a per-handset
+default overrides the second. Neither has to be set, and unset is never
+undefined.
+
+```
+911            emergency_trunk  →  primary line's trunk
+outbound CID   *4 selection     →  handset default  →  primary line
+```
+
+Both chains bottom out in the same place, so "which line am I on by default"
+is one answer rather than two that can disagree.
+
+**Not "whichever sorts first".** The primary line is `policy.toml` by name —
+the file that already means *default* — so adding `policy.aaa.toml` cannot
+silently steal 911 or your outbound identity. That kills the order-dependence
+worry outright: nothing about the most safety-critical route depends on
+filesystem ordering or on where a block sits in a file.
+
+`doorman check` prints both, prominently, and says whether each was **chosen or
+inferred**. So does the startup log, every boot. Defaulting rather than
+requiring means there is no state where somebody forgot; announcing means the
+default is never a surprise.
 
 Not inferred from the line the caller is on: whoever grabs the nearest handset
 has no idea which line they are on, and E911 is registered per DID against a
