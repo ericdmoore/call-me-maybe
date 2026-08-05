@@ -15,6 +15,7 @@ otherwise have to be reconstructed from a commit log.
 | **s01** | [Multiple lines](s01-multiple-DIDs/) — several numbers, then several providers | planned | — |
 | **s02** | [Home and office config examples](s02-home-and-office-config-examples/) — worked, tested, published starting points | planned | s01 for two of five |
 | **s03** | [Provider balance checking](s03-provider-balalnce-checking/) — know the trunk is dying before the phone stops | planned | s01 Phase 2 for per-trunk |
+| **s04** | [Network helpers](s04-standarddize-network-helpers/) — TTS, STT and LLM addressed by URL, wherever they run | planned | — |
 
 s01 has an [`arch.md`](s01-multiple-DIDs/arch.md); s03's reasoning is short
 enough to live in its plan.
