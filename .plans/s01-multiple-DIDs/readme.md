@@ -135,6 +135,33 @@ does not go out.
 **Verify:** place a call each way and read the number off a real handset. Not
 from logs — logs show what was sent, not what arrived.
 
+## Design principle · Nobody learns a feature they do not need
+
+The measure of this working is that **most of the household never presses
+`*4`**, and the kids never learn it exists.
+
+| Who | What they do | What they get |
+|---|---|---|
+| A kid on the kitchen phone | picks up, dials | the primary line — the home number |
+| A parent on the office phone | picks up, dials | that handset's default — Venture A |
+| A parent who needs another identity | `*4`, pick, dial | whichever line they chose |
+
+Complexity is opt-in. You meet the console only when you have a reason to, and
+a handset default means even the person with five ventures rarely presses it.
+That is the inverse of most PBX features, where the configuration surface leaks
+into everyday use and everyone in the house has to learn a code.
+
+**It is also the safe arrangement, which is the real argument.** Because the
+primary line is both the default outbound identity *and* the 911 route, a child
+who picks up the nearest phone and dials 911 goes out the trunk whose
+registered address is this house. There is no arrangement of keypresses that
+puts a kid one digit away from an emergency call leaving by a business trunk
+with somebody else's address on file. The two defaults being one rule is what
+guarantees that.
+
+**Use this as a filter on later work.** If a multi-line feature forces itself on
+someone who only has one line, it is designed wrong.
+
 ## M1.4 · Per-line observability
 
 **Build**
