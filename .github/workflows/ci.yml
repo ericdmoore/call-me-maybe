@@ -115,6 +115,16 @@ jobs:
 
       # A man page that does not render is worse than none: the operator who
       # needs it is on a Pi with no browser.
+      # Everything the site serves to models is generated, not hand-copied:
+      # llms.txt, llms-policy.txt, and the JSON Schema this binary emits.
+      # Regenerating and diffing catches the schema drifting from the code as
+      # well as a copy going stale — the old check compared one file by hand
+      # and missed four pushes' worth of drift.
+      - name: site assets are current
+        run: |
+          make site-assets
+          git diff --exit-code -- site/public \
+            || { echo "::error::site/public is stale — run 'make site-assets' and commit"; exit 1; }
       - name: man page lints
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq mandoc
@@ -135,12 +145,6 @@ jobs:
           cache-dependency-path: site/package-lock.json
       - run: npm ci
       - run: npm run build
-      # llms.txt is served by the site but authored at the repo root. Catch the
-      # copy going stale rather than serving two different answers.
-      - name: public/llms.txt matches the root copy
-        run: |
-          diff ../llms.txt public/llms.txt \
-            || { echo "::error::site/public/llms.txt has drifted from llms.txt — copy it across"; exit 1; }
 
   # Proves the Pi targets still compile. Cheap, and catches the 32-bit
   # breakage (int size, unaligned atomics) that amd64 tests never see.

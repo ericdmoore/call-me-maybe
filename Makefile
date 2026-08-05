@@ -60,6 +60,19 @@ man:
 schema: build
 	@./$(BIN) schema
 
+## site-assets: generate everything the site serves to models
+##   Generated, not copied: llms.txt drifted from site/public once already and
+##   only CI caught it, after the push.
+.PHONY: site-assets
+site-assets: build
+	@mkdir -p site/public/schema
+	@cp llms.txt site/public/llms.txt
+	@cp llms-policy.txt site/public/llms-policy.txt
+	@for n in policy handsets env; do \
+		./bin/doorman schema $$n > site/public/schema/$$n.json; \
+	done
+	@echo "✓ site/public: llms.txt, llms-policy.txt, schema/{policy,handsets,env}.json"
+
 ## check: everything that must be green before a commit
 check: fmt-check vet lint test build
 

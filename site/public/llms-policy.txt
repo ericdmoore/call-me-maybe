@@ -1,0 +1,231 @@
+# Writing policy.toml — a guide for models
+
+You are probably helping someone configure Call Me Maybe, a programmable home
+phone. This file is the complete, current `policy.toml` surface plus the rules
+a JSON Schema cannot express. Machine-readable schema:
+
+    https://callmemaybe.cc/schema/policy.json
+    https://callmemaybe.cc/schema/handsets.json
+    https://callmemaybe.cc/schema/env.json
+
+**Everything below describes what the binary accepts today.** The project's
+planning docs discuss features that do not exist yet — multiple lines, per-line
+prompts, outbound caller ID selection, per-person ring overrides.
+
+**Do not emit configuration for any of them, and understand why it matters: an
+unknown key is silently ignored, not rejected.** A policy containing
+`on_no_input = "voicemail"` passes `doorman check` with a clean bill of health
+and then does nothing. The person you are helping will believe the feature is
+on. That is a worse outcome than an error, and it is entirely avoidable — there
+is a list of what is *not* available at the end of this file. Read it before
+you invent a key.
+
+The same trap catches typos. `handets = ["kitchen"]` validates and rings
+nobody. If a config is not behaving, misspelling is the first thing to check.
+
+Authoritative check, always: `doorman check` validates a real config and prints
+what it resolves to. `doorman schema policy` prints the schema from the binary
+in hand, which beats this file if they ever disagree.
+
+## Three files, each owning its sections exclusively
+
+The loader **rejects** a section that appears in the wrong file rather than
+merging it. This is the most common mistake.
+
+    policy.toml     [house], [[people]], [[extensions]], [[schedules]]
+    handsets.toml   [[handsets]], [[groups]]        — hardware inventory
+    .env            secrets and tuning              — timeouts, lengths, keys
+
+Handset *ids* are defined in handsets.toml and referenced by name from
+policy.toml. A reference to a handset that does not exist fails validation at
+load time.
+
+## The complete surface
+
+    [house]
+    handsets = ["kitchen", "office"]   # ids from handsets.toml, or a group id
+    voicemail = "family"               # mailbox for unanswered house calls
+    caller_id_format = "..."           # optional; how the caller is presented
+
+    [[people]]                         # the allow-list: these ring the house
+    name = "Grandma"                   # directly, no lobby, no extension
+    numbers = ["512-555-0100"]         # any format; normalised to E.164 at load
+    notes = "..."                      # optional, for humans
+
+    [[extensions]]                     # what a stranger can dial to get in
+    label = "Kitchen"                  # human name; used by `doorman rotate`
+    pin = "428917"                     # a credential — see PIN rules below
+    handsets = ["kitchen"]             # simple form: one ring stage
+    # steps = [...]                    # ladder form — MUTUALLY EXCLUSIVE with handsets
+    voicemail = "family"               # where an unanswered call lands
+    afterhours = "quiet-hours"         # a [[schedules]] id
+    afterhours_ring = [...]            # ring these during the window instead of voicemail
+    enabled = true                      # default true
+
+    [[extensions.steps]]               # ladder form: escalating stages
+    handsets = ["kids-room"]
+    seconds = 20                        # how long this rung rings
+    # rings = 3                        # alternative to seconds
+
+    [[schedules]]
+    id = "quiet-hours"
+    start = "20:30"                    # 24-hour, local time
+    end = "07:00"                      # wraps midnight correctly
+    days = ["SU","MO","TU","WE","TH"]  # start-day semantics for a wrapping window
+    enabled = true
+
+## Rules a schema cannot express
+
+1. `handsets` and `steps` on one extension are **mutually exclusive**. Pick the
+   simple form or the ladder form.
+2. Every handset id must exist in handsets.toml. Group ids work anywhere a
+   handset id does.
+3. `afterhours` must name a `[[schedules]]` id that exists.
+4. PINs must be unique across extensions, and are matched exact — no prefixes,
+   no fuzzy fallback.
+5. An invalid policy.toml is **rejected on reload and the last good one stays in
+   service**. You cannot take the phone down with a bad edit, but you also will
+   not get the change you wanted — check the logs, or run `doorman check`.
+6. Allow-listed numbers may be written any way; they normalise to E.164. An
+   unparseable number is a validation error, not a silent skip.
+
+## PIN rules
+
+Extensions are credentials reachable from the public phone network. People
+*should* choose their own — a number nobody can recite is a number nobody gives
+out — but the loader refuses the guessable ones.
+
+Refused: all digits the same; a run up or down, including in twos (`123456`,
+`02468`); a short block repeated (`121212`); a palindrome (`123321`); a handful
+of famous ones; and, at six digits and up, anything one digit away from
+all-same or from a run (`111112`, `123457`) — because a real guessing list is
+the patterns plus one typo.
+
+Allowed: essentially everything else, including dates. The rules refuse about
+0.31% of the six-digit space, roughly one in 325.
+
+`doorman rotate` generates one with crypto/rand and never emits something the
+loader would refuse. Suggest it for someone who would rather not choose; do not
+suggest it on a schedule, because rotating breaks everyone who has the number
+and that is the population it was given to on purpose.
+
+**Never put a real PIN in an example, a commit message, or a test fixture.**
+Use `555-01xx` numbers, which are reserved for fiction.
+
+## A worked home line
+
+    [house]
+    handsets = ["kitchen", "living-room", "primary-bed"]
+    voicemail = "family"
+
+    [[people]]
+    name = "Grandma"
+    numbers = ["512-555-0100"]
+
+    [[people]]
+    name = "School"
+    numbers = ["+15125550142"]
+
+    [[extensions]]
+    label = "Kids"
+    pin = "739104"
+    voicemail = "kids"
+    afterhours = "school-nights"
+    [[extensions.steps]]
+    handsets = ["kids-room"]
+    seconds = 20
+    [[extensions.steps]]
+    handsets = ["kitchen", "primary-bed"]
+    seconds = 25
+
+    [[schedules]]
+    id = "school-nights"
+    start = "20:30"
+    end = "07:00"
+    days = ["SU","MO","TU","WE","TH"]
+
+Grandma and the school ring the house directly. A stranger hears the lobby and
+needs `739104`, which rings the kids' room for 20 seconds, then escalates to
+the kitchen and main bedroom, then goes to the kids' mailbox. On school nights
+it skips straight to voicemail.
+
+## A worked business-ish line
+
+There is no separate "business mode" today. What you can do is choose a
+permissive shape: put the working handset in `[house]`, allow-list known
+clients so they never meet the lobby, and give each concern an extension whose
+ladder ends in a mailbox rather than a dismissal.
+
+    [house]
+    handsets = ["office"]
+    voicemail = "main"
+
+    [[people]]
+    name = "Acme (client)"
+    numbers = ["512-555-0177"]
+
+    [[extensions]]
+    label = "Sales"
+    pin = "614297"
+    voicemail = "sales"
+    [[extensions.steps]]
+    handsets = ["office"]
+    seconds = 25
+
+    [[extensions]]
+    label = "Support"
+    pin = "830516"
+    voicemail = "support"
+    [[extensions.steps]]
+    handsets = ["office"]
+    seconds = 25
+
+    [[schedules]]
+    id = "office-hours"
+    start = "09:00"
+    end = "17:00"
+    days = ["MO","TU","WE","TH","FR"]
+
+**Be honest with the person about the limit here.** An unknown caller who dials
+nothing still hears the dismissal prompt and is hung up on. There is currently
+no way to make the lobby fall through to a mailbox for callers who do not dial
+an extension. If they need "never drop a lead", say so plainly rather than
+writing config that implies otherwise.
+
+## Common mistakes
+
+- Putting `[[handsets]]` in policy.toml. It belongs in handsets.toml.
+- Setting both `handsets` and `steps` on one extension.
+- Naming a handset that does not exist, or a schedule id that does not exist.
+- Reusing a PIN across two extensions.
+- Choosing a memorable-but-refused PIN (`123456`, `111111`, `121212`).
+- **A misspelled key.** It is ignored silently — `voicmail`, `handets`,
+  `afterhous` all validate and all do nothing.
+- Assuming a change applied. Hot reload keeps the last good policy on failure —
+  always confirm with `doorman check`.
+
+## Not available yet — do not emit these
+
+These appear in the project's planning documents. They are not implemented, and
+because unknown keys are ignored rather than rejected, emitting one produces a
+config that validates and silently misbehaves:
+
+- `[line]` sections, multiple policy files, or any per-line configuration.
+  There is one policy and one number today.
+- `outbound_cid`, outbound caller-ID selection, or dial prefixes.
+- `ring` on `[[people]]` (per-person routing overrides).
+- `on_no_input` or any lobby disposition setting.
+- `[house.afterhours]` — afterhours exists per-extension only.
+- Conference rooms, DND, queues, IVR menus, SMS.
+
+If someone asks for one of these, say it is planned rather than writing config
+that appears to deliver it. `docs/TASKS.md` has the current state.
+
+## Where to go next
+
+- `https://callmemaybe.cc/llms.txt` — what the whole system is
+- `https://callmemaybe.cc/schema/policy.json` — the machine-readable surface
+- `doorman schema policy` — the same, from the binary in hand
+- `doorman check` — the authority on whether a file is valid
+- `doorman init` — generate a starting config whose placeholders cannot
+  silently work
