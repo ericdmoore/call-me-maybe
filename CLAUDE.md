@@ -184,8 +184,12 @@ live trunk; never add integration tests requiring a real Asterisk to CI.
   surface we use, and owning it keeps the interface small enough to fake.
 - No separate lobby and bouncer services. They are two branches of one state
   machine.
-- No voicemail yet. The `.env` keys exist and are deliberately unread so the
-  config shape is settled. See `docs/roadmap.md`.
+- No voicemail *in doorman*. Asterisk's `app_voicemail` does the recording,
+  storage, WAV-attached email and MWI; doorman only releases the caller into
+  `[voicemail-drop]` via ContinueToDialplan with `MAILBOX` set. The
+  `VOICEMAIL_*`/`STT_*`/`SMTP_*` keys in `.env` are read by Asterisk and the
+  notify hook, never by doorman — which is why they look unused here. See
+  `docs/TASKS.md` §2; transcription is the only piece still open.
 
 ## Licensing and packs
 

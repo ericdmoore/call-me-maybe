@@ -52,13 +52,19 @@ problem with a values question inside it.
 | **VIP escalation / follow-me** | Per-person ring order: house → mobile → spouse → voicemail | **built** ladder; **doc'd** `ring` on `[[people]]` (TASKS:173) + #15 | Partial — outbound | **9** |
 | **Attended transfer clarity** | Document transfers; restricted transfer context against toll fraud | **built** (invariant 8 already protects it); dialplan context + docs | No | **9** |
 | **Multi-DID** | Personal vs business line, each with its own lobby | **new** — DID→policy mapping; policy.toml is singular today | Yes — but cleanly | **9** |
+| **Outbound caller ID per line** | Call a customer back and they see *that venture's* number | **new** — the outbound dialplan sets no CID at all today; needs `[line] outbound_cid` + a dial prefix to select | Partial — small | **9** |
+| **Per-line voicemail** | Each number gets its own mailbox and greeting | **built** — mailboxes are already per-extension/house policy; needs line scope | No | **9** |
+| **Provider balance as a metric** | Prepaid trunk hits zero and the phone silently stops ringing | **doc'd** metrics endpoint (TASKS §4); **new** — an optional `Balance` capability per provider, same shape as the voice backends | Partial | **9** |
+| **Low-balance notification** | Tell someone before the trunk dies | **new** — but should not be built: emit the gauge and let existing alerting decide thresholds and delivery | Yes | **6** |
+| **Softphone over Tailscale** | The six numbers on your mobile, no app to write | **built** — handsets register today; **doc'd** partially on the site | No | **8** |
+| **SMS / MMS** | Customers text small businesses; for many it is the primary channel | **new** — poll the VoIP.ms API (no inbound port, no invariant collision); delivery to email or a chat bridge. No thread UI | Yes | **6** |
 | **Shallow day IVR** | Depth one or two: 1 house, 2 mailbox, 3 conference, 0 attendant | **built** graph interpreter (`internal/story`) — but needs routing verbs the story sandbox deliberately lacks | Partial | **8** |
 | **Distinctive ring / per-person routing** | Client A rings differently from school | **doc'd** TASKS + roadmap; SIP `Alert-Info` on originate (page already uses it) | Partial — small | **8** |
 | **Per-handset DND** | "In a meeting" → voicemail or soft reject | **doc'd** TASKS; **new** — mutable runtime handset state (the second such state after the rate limiter) | Partial | **8** |
 | **Remote actions + dial-back (#16)** | Contractor opens a gate; ceremony matches consequence | **doc'd** #16; **new** — action registry, dial-back auth | Yes | **8** |
 | **Pack store / briefings** | Content SKUs on free mechanisms | **built** — voice + story kinds, `pack build`, four backends | No | **8** |
 | **Named conference rooms** | Host PIN + guest PIN so clients join without ringing the house | **built** ConfBridge 600 + PIN matching; **new** — a room *object* with two credential tiers | Partial | **8** |
-| **Voicemail email + transcript** | Message lands in a mailbox and an inbox | **doc'd** roadmap phase 2 (env keys exist, deliberately unread); **new** — off-box STT | Partial | **7** |
+| **Voicemail email + transcript** | Message lands in a mailbox and an inbox | **built** — app_voicemail records, stores, emails the WAV, lights MWI; doorman hands off via `[voicemail-drop]`. **doc'd** — transcription via `externnotify` (TASKS §2) | No | **9** |
 | **Nominate to allow-list (#6)** | Handset flow to add a caller, with parent approval | **built** atomic validated policy.toml writes (`RotatePins`); **doc'd** #6 | Partial | **7** |
 | **Allow-list step-up + taint (#12)** | Partial trust for spoofable caller ID, messaged loudly | **doc'd** #12; **new** — a trust tier and taint that has to persist | Yes | **7** |
 | **Mute / moderator basics** | Make a recurring meeting usable | **new** — per-participant ConfBridge control over ARI | Yes | **6** |
@@ -75,9 +81,11 @@ problem with a values question inside it.
 
 ## What the grading says
 
-**Six things are already built and only need documenting or exposing.** Park,
-page, hold beds, call history, the pack pipeline, and the graph interpreter are
-all in the tree. Park and page in particular are described in
+**Seven things are already built and only need documenting or exposing.** Park,
+page, hold beds, call history, the pack pipeline, the graph interpreter — and
+voicemail, which `CLAUDE.md` described as absent until this pass. Asterisk's
+`app_voicemail` has been recording, storing, emailing the WAV and lighting MWI
+since the handset-features work; only transcription is open (TASKS §2). Park and page in particular are described in
 `product-extensions.md` as needing "polish" — they need a paragraph in the
 RUNBOOK, not code.
 
@@ -113,6 +121,21 @@ graph types differ by **provenance, not shape**: story graphs come from packs
 (downloaded, untrusted, sandboxed), IVR graphs come from `policy.toml`
 (operator-authored, trusted, may route). Same interpreter, different verb set
 selected by where the graph came from. That is a small change and a sharp line.
+
+**The multi-line operator is a real persona and it reorders things.** Someone
+supporting several small ventures alone wants six numbers on one box — which
+multi-DID gives them — but the feature that actually makes it work is one
+nobody had written down: **outbound caller ID per line**. The outbound dialplan
+sets no CID today, so every call out presents the trunk default. For one
+household that is invisible; across five ventures it means every customer you
+ring back saves the wrong number. It is small, and without it the rest does not
+land.
+
+The honest limit for that persona is SMS. It scores 6 not because it is hard
+but because there is no app at the end of it: polling the VoIP.ms API avoids
+every invariant problem, and then the messages have to go somewhere a person
+reads. See `SUSTAINABILITY.md` — for a venture whose customers primarily text,
+this is a complement to a hosted service, not a replacement.
 
 **The bottom of the table is bottom for values reasons, not difficulty.**
 Recording is not hard; it is a consent and retention problem in a house with

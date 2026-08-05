@@ -145,9 +145,25 @@ func stub(t *testing.T, body string) string {
 	return path
 }
 
+// bytesFile writes exact bytes to a temp file and returns its path, so a
+// shell stub can emit them with cat rather than through printf escapes that
+// differ between bash and dash.
+func bytesFile(t *testing.T, b []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "pcm.raw")
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestExecBackendTakesTextOnStdinAndPCMOnStdout(t *testing.T) {
-	// Echo four samples of raw PCM regardless of input.
-	sh := stub(t, `cat > /dev/null; printf '\x00\x00\x10\x00\x20\x00\x30\x00'`)
+	// Four samples of raw PCM, written from Go and cat'd by the stub.
+	//
+	// Not printf with \x escapes: that is a bash extension, and on a runner
+	// where /bin/sh is dash it emits the literal characters instead of bytes.
+	// The test then passes on macOS and fails on Linux.
+	sh := stub(t, "cat > /dev/null; cat "+bytesFile(t, []byte{0, 0, 0x10, 0, 0x20, 0, 0x30, 0}))
 
 	r, err := New("exec", Config{Command: sh, SampleRate: 16000})
 	if err != nil {
@@ -607,7 +623,7 @@ func TestExecEstimatesFreeAndNamesTheCommand(t *testing.T) {
 }
 
 func TestExecRejectsHalfASample(t *testing.T) {
-	r, _ := New("exec", Config{Command: stub(t, `cat > /dev/null; printf '\x00\x00\x10'`)})
+	r, _ := New("exec", Config{Command: stub(t, "cat > /dev/null; cat "+bytesFile(t, []byte{0, 0, 0x10}))})
 	if _, err := r.Render(context.Background(), "x", Voice{}); err == nil {
 		t.Error("an odd byte count is not whole 16-bit samples and must not be accepted")
 	}

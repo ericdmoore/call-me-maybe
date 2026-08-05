@@ -38,6 +38,8 @@ Three files, three cadences. Do not merge them; the split is deliberate.
 - **`handsets.toml`** — the hardware: what phones exist. Changes when hardware is bought. `doorman render` generates the per-handset Asterisk config from it, so the inventory and the dialplan cannot drift. Template: [examples/handsets.example.toml](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/handsets.example.toml)
 - **`policy.toml`** — the rules: who gets in, what rings, when. Changes weekly and is safe to hand-edit; an invalid file is rejected on reload and the last good policy stays in service. Template: [examples/policy.example.toml](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/policy.example.toml)
 
+**Helping someone write a `policy.toml`? Read <https://callmemaybe.cc/llms-policy.txt> first.** It is the complete current key surface, two worked examples, the rules a JSON Schema cannot express, and — the part that matters — an explicit list of keys that appear in the planning docs but do not load. Machine-readable schema at <https://callmemaybe.cc/schema/policy.json>.
+
 ## Docs
 
 - [README](https://github.com/ericdmoore/call-me-maybe/blob/main/README.md): architecture, diagrams, setup, suggested hardware

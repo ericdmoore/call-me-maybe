@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://callmemaybe.cc/schema/policy.json",
+  "title": "policy.toml — who gets in, what rings, and when",
+  "description": "The rules. Safe to hand-edit: a file that fails validation is logged and discarded on reload, and the last good policy stays in service. Handset and group ids referenced here must exist in handsets.toml.",
+  "type": "object",
+  "properties": {
+    "extensions": {
+      "description": "What an unknown caller may dial in the lobby.",
+      "type": "array",
+      "items": {
+        "description": "One dialable destination. The PIN is the credential; there is no separate username.",
+        "type": "object",
+        "properties": {
+          "afterhours": {
+            "description": "Id of a [[schedules]] entry. During the window the line does not ring normally: it either redirects to afterhours_ring, or goes to voicemail.",
+            "type": "string",
+            "x-cross-references": [
+              "policy.toml [[schedules]].id"
+            ],
+            "x-rules": [
+              "The inline-table form is retired; use a named schedule id.",
+              "Requires either voicemail or afterhours_ring, so the caller has somewhere to go."
+            ]
+          },
+          "afterhours_ring": {
+            "description": "Ring these instead of taking a message during the afterhours window. Without it, quiet hours can only mean \"voicemail\", which cannot express homework hours, a rotating night shift, or forwarding to a babysitter. If nobody answers the redirect, the caller still lands in voicemail.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "x-cross-references": [
+              "handsets.toml [[handsets]].id",
+              "handsets.toml [[groups]].id"
+            ],
+            "x-rules": [
+              "Requires afterhours — there must be a window for it to apply to."
+            ]
+          },
+          "enabled": {
+            "description": "False disables the extension without deleting it.",
+            "type": "boolean",
+            "default": true
+          },
+          "handsets": {
+            "description": "Simple form: one ring stage at the default timeout. Mutually exclusive with steps.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "x-cross-references": [
+              "handsets.toml [[handsets]].id",
+              "handsets.toml [[groups]].id"
+            ]
+          },
+          "label": {
+            "description": "Human name, used by `doorman rotate \u003clabel\u003e` and shown in `doorman check`.",
+            "type": "string"
+          },
+          "pin": {
+            "description": "Digits only, minimum 4. Choose one you will remember — a number nobody can recite is a number nobody gives out. Guessable ones are refused at load: all-same digits, runs (including in twos), repeated blocks, palindromes, the handful everyone tries, and — at six digits and up — anything one digit away from all-same or from a run, since a guessing list is the patterns plus one typo. That is 0.31% of the six-digit space; everything else, dates included, is allowed. `doorman rotate` generates one when you would rather not choose.",
+            "type": "string",
+            "pattern": "^\\d+$",
+            "x-rules": [
+              "Must be unique across extensions.",
+              "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer."
+            ]
+          },
+          "steps": {
+            "description": "Ringer ladder: ring each stage in order, escalating on no-answer. Mutually exclusive with handsets.",
+            "type": "array",
+            "items": {
+              "description": "One stage of a ladder.",
+              "type": "object",
+              "properties": {
+                "handsets": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "x-cross-references": [
+                    "handsets.toml [[handsets]].id",
+                    "handsets.toml [[groups]].id"
+                  ]
+                },
+                "rings": {
+                  "description": "Stage duration in ring cycles of roughly six seconds.",
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "seconds": {
+                  "description": "Exact stage duration, overriding rings.",
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "handsets"
+              ],
+              "additionalProperties": false,
+              "x-rules": [
+                "Needs rings or seconds; seconds overrides rings when both are set."
+              ]
+            },
+            "minItems": 1
+          },
+          "voicemail": {
+            "description": "Mailbox when every stage goes unanswered, and the afterhours destination. Absent means a polite dismissal.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-cross-references": [
+              "asterisk/voicemail.conf [household] context"
+            ]
+          }
+        },
+        "required": [
+          "pin",
+          "label"
+        ],
+        "additionalProperties": false,
+        "x-rules": [
+          "handsets and steps are mutually exclusive: use handsets for a single ring stage, steps for an escalating ladder.",
+          "Exactly one of them must be present.",
+          "afterhours requires voicemail — an afterhours caller needs somewhere to go."
+        ]
+      }
+    },
+    "house": {
+      "description": "What rings when a known caller is welcomed.",
+      "type": "object",
+      "properties": {
+        "caller_id_format": {
+          "description": "Handset display format. {name} is the caller or extension label; {number} is the normalised caller.",
+          "type": "string",
+          "default": "Lobby: {name} \u003c{number}\u003e"
+        },
+        "handsets": {
+          "description": "Handset or group ids that ring together.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "x-cross-references": [
+            "handsets.toml [[handsets]].id",
+            "handsets.toml [[groups]].id"
+          ]
+        },
+        "voicemail": {
+          "description": "Mailbox for callers nobody answers. Absent means 'nobody's available' and a hangup.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "x-cross-references": [
+            "asterisk/voicemail.conf [household] context"
+          ]
+        }
+      },
+      "required": [
+        "handsets"
+      ],
+      "additionalProperties": false
+    },
+    "people": {
+      "description": "The allow-list. These callers hear the welcome prompt and ring the house.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "Who this is. Appears on the handset display and in logs.",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Free text for whoever edits this next.",
+            "type": "string"
+          },
+          "numbers": {
+            "description": "Any format: 512-555-0100, (512) 555-0100, +15125550100. Normalised to E.164 at load. Probe a value with `doorman e164 \u003cnumber\u003e`.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "x-rules": [
+              "An unparseable number fails the load rather than never matching."
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "numbers"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "schedules": {
+      "description": "Named time windows, defined once and referenced by id from extensions.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "description": "Days the window STARTS on. Empty means every day.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "SU",
+                "MO",
+                "TU",
+                "WE",
+                "TH",
+                "FR",
+                "SA"
+              ]
+            },
+            "x-rules": [
+              "A window crossing midnight belongs to the day it starts: 20:30-07:00 on MO covers Monday night into Tuesday morning."
+            ]
+          },
+          "enabled": {
+            "description": "False makes every reference inert without deleting the definition — one edit turns bedtime off for a school holiday.",
+            "type": "boolean",
+            "default": true
+          },
+          "end": {
+            "description": "Local time, HH:MM. May be earlier than start, which means the window crosses midnight.",
+            "type": "string",
+            "pattern": "^\\d{1,2}:\\d{2}$"
+          },
+          "id": {
+            "description": "Referenced as afterhours = \"\u003cid\u003e\" from an extension.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$"
+          },
+          "start": {
+            "description": "Local time, HH:MM.",
+            "type": "string",
+            "pattern": "^\\d{1,2}:\\d{2}$"
+          }
+        },
+        "required": [
+          "id",
+          "start",
+          "end"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "x-rules": [
+    "Reloaded live when POLICY_WATCH is true; an invalid file is rejected, never applied.",
+    "Extensions are credentials. Treat a PIN like a password and prefer `doorman rotate` over choosing one.",
+    "Allow-listed numbers may be written in any format; they normalise to E.164 at load time. An unparseable number is a load error, not a silent never-match."
+  ]
+}

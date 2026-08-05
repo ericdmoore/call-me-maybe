@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://callmemaybe.cc/schema/handsets.json",
+  "title": "handsets.toml — the hardware inventory",
+  "description": "The phone plant: what physically exists. `doorman render` generates the per-handset Asterisk config from this file, so ids, endpoints, and dialplan cannot drift apart. Changes when you buy hardware. Rules live in policy.toml.",
+  "type": "object",
+  "properties": {
+    "groups": {
+      "description": "Named sets of handsets, usable anywhere a handset id is.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "handsets": {
+            "description": "Member handset ids.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "x-cross-references": [
+              "handsets.toml [[handsets]].id"
+            ]
+          },
+          "id": {
+            "description": "Group identifier.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-rules": [
+              "May not collide with any handset id.",
+              "Must be unique."
+            ]
+          },
+          "label": {
+            "description": "Human name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "handsets"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "handsets": {
+      "description": "Every physical phone or dialplan destination.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "description": "Asterisk endpoint. Must be PJSIP/\u003cid\u003e — `doorman render` enforces the match so the generated config cannot disagree with the inventory.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]+/\\S+$"
+          },
+          "id": {
+            "description": "Stable identifier, referenced from policy.toml.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-rules": [
+              "Must be unique across handsets and groups."
+            ]
+          },
+          "label": {
+            "description": "Human name, shown in `doorman check` output.",
+            "type": "string"
+          },
+          "mailbox": {
+            "description": "Mailbox whose message-waiting lamp this phone follows.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-cross-references": [
+              "asterisk/voicemail.conf [household] context"
+            ]
+          },
+          "number": {
+            "description": "Internal extension for handset-to-handset dialling and BLF hints. 0 or absent means not directly dialable.",
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 199,
+            "x-rules": [
+              "Two handsets may not share a number.",
+              "0 is allowed and means not dialable."
+            ]
+          },
+          "page": {
+            "description": "Include in the page-all group reached by dialling 500.",
+            "type": "boolean",
+            "default": false
+          },
+          "password_env": {
+            "description": "Name of the .env variable holding this handset's SIP password. The secret itself never appears in this file. `doorman render` substitutes it and fails if unset.",
+            "type": "string",
+            "x-rules": [
+              "Required by `doorman render`, which reports it as an error when missing.",
+              "Names a variable; never put the password here."
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "endpoint"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "handsets"
+  ],
+  "additionalProperties": false,
+  "x-rules": [
+    "At least one [[handsets]] entry is required.",
+    "A group id may appear anywhere a handset id may, and expands at load time.",
+    "Groups may contain handsets only, never other groups — no cycles."
+  ]
+}

@@ -74,6 +74,29 @@ not the user, the user cannot configure anything, and it must be hosted with a
 phone-based setup flow. Worth noting that the good idea transfers; it should
 not distort this repository's design.
 
+## Where this is a complement, not a replacement
+
+Worth writing down before someone is disappointed. A person running several
+small ventures can put every number on this box and pay a fraction of a hosted
+service — the voice side is genuinely solved and genuinely cheaper.
+
+**SMS is not.** Customers text small businesses, and for many ventures it is
+now the primary channel. Asterisk does not do SMS at all; it is out of band,
+and while polling a provider's API avoids every architectural problem, there is
+no thread UI at the end of it. Messages land in email or a chat bridge.
+
+So the honest sentence is: **for a venture whose customers mostly text, this is
+a complement to a hosted service, not a replacement.** Voice comes home, texting
+stays where it is.
+
+The second honest sentence is that cost is not the argument. Six numbers here
+run maybe a third of what a hosted plan costs, but for someone juggling five
+things, paying more for something that Just Works with an app is a rational
+trade. The argument is ownership, programmability, real handsets in a real
+house, and never paying per seat. Cost is a tiebreaker.
+
+---
+
 ## Design lines worth keeping
 
 **The parent stays the admin.** A child's extension having its own PIN,

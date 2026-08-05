@@ -198,6 +198,128 @@ flash a light.
 
 ---
 
+## 7. Multi-DID — one box, several numbers
+
+**Why:** the single change that turns a house phone into a house phone *plus*
+however many business lines the household needs, without becoming a carrier.
+It multiplies office hours, IVR, distinctive ring and voicemail — each of those
+gets more useful once there is a second number. See
+`docs/product-extensions.md` §9.
+
+The design is settled: **the dialplan names the line, one policy file per line,
+the router multiplexes.** Asterisk already knows the dialled number
+(`${EXTEN}`, currently logged and discarded), and `route` already branches on
+`ev.Args[0] == "leg"` — the line arrives the same way.
+
+Ordered into four groups. **7a is a hard prerequisite for the rest; 7b–7d are
+independent of each other.**
+
+---
+
+### 7a. The routing spine
+
+One context per DID in the dialplan passes the line name:
+
+```
+exten => _X.,1,Answer()
+ same => n,Stasis(${DOORMAN_APP},line,biz)
+```
+
+Named in the dialplan rather than parsed out of SIP headers, because what a
+provider puts in the To header varies (see #5) and the dialplan is the one file
+that already knows which number is which.
+
+- [ ] `policy.<line>.toml` per line; bare `policy.toml` is the default line.
+- [ ] **No app arg → today's behaviour, byte for byte.** Existing installs do
+      not change.
+- [ ] One `policy.Store` per line, so a syntax error in the business policy
+      cannot take down the home line — invariant 4, generalised. This is the
+      reason for separate files rather than `[[lines]]` sections.
+- [ ] An unknown line name falls back to the default line and logs loudly. It
+      must never drop the call: doorman cannot read the dialplan, so it cannot
+      validate the set at startup.
+- [ ] `internal/lobby` unchanged. `Deps.Policy` is already
+      `func() *policy.Policy`; the router picks per-line `Deps` at StasisStart.
+- [ ] Rate-limit key includes the line — two lines with opposite dispositions
+      must not share a budget.
+- [ ] `doorman check` prints the lines it found and what each resolves to.
+
+**Files:** `cmd/doorman/main.go`, `internal/config`, `internal/policy`,
+`asterisk/extensions.conf`, `internal/schema`.
+
+### 7b. Line identity
+
+A `[line]` section carrying what makes a line feel like itself:
+
+```toml
+[line]
+label   = "Mertaugh Enterprises"
+number  = "+15125550142"
+prompts = "concierge"
+on_no_input = "voicemail"   # dismiss | ring-house | voicemail
+```
+
+- [ ] Per-line prompt prefix, overriding `PROMPT_MEDIA_PREFIX`.
+- [ ] `on_no_input` — the disposition knob. A curt doorman and a courteous
+      concierge are the same engine with opposite defaults; today the lobby can
+      only dismiss.
+- [ ] Known callers can reach the collect loop, with timeout meaning *admit*
+      rather than *dismiss* (the home line's "no dial → ring all").
+- [ ] Schedules usable at line scope, not only per-extension (relates to §3).
+
+### 7c. Outbound identity — **do not ship 7a without this**
+
+The outbound dialplan sets **no caller ID at all** today
+(`Dial(PJSIP/1${EXTEN}@voipms,60)`), so every outbound call presents the trunk
+default. Invisible with one number; across several lines every customer you
+ring back saves the wrong one.
+
+- [ ] `[line] outbound_cid`.
+- [ ] A dial prefix selects the line for one call (`*3` + number).
+- [ ] Per-handset default line, for the common case of not prefixing.
+- [ ] The prefix cannot be confused with an extension or a feature code, and
+      `doorman check` catches a collision.
+
+**Files:** `asterisk/extensions.conf`, `internal/policy`, `internal/render`.
+
+### 7d. Per-line observability
+
+- [ ] `line` field on the call record (one log, not one per line, so a whole
+      day still reads in order).
+- [ ] `doorman calls --line biz`.
+- [ ] If §4 metrics land, a `line` label — and still **no caller identifiers
+      in labels**.
+
+---
+
+## 8. Provider account health
+
+**Why:** a prepaid trunk that hits zero stops the phone ringing with no error
+anywhere. "Nobody called today" is indistinguishable from a quiet Tuesday —
+the same silent-failure shape as a fetch loop that dies while still reporting
+healthy. With several lines it is every business's inbound at once.
+
+Balance is a **capability, not a provider feature**: the same optional-interface
+shape as the voice backends, so prepaid providers implement it and invoiced
+ones cleanly say they have none. Ties to #5.
+
+- [ ] `doorman balance` prints it; exit non-zero below a threshold so cron can
+      use it directly.
+- [ ] A provider without the capability says so, rather than reporting zero.
+- [ ] Exposed as a gauge for §4 rather than doorman growing SMTP, webhooks and
+      threshold config. Thresholds and delivery are operator decisions.
+- [ ] **The alert path must not be the phone.** If the balance is zero an
+      outbound call cannot report it, so the threshold fires well before empty
+      and the notification leaves by another route.
+- [ ] The API credential is documented as higher-privilege than the SIP
+      sub-account password — it usually manages DIDs and sub-accounts — and the
+      check is recommended to run wherever alerting already lives rather than
+      on the Pi. RUNBOOK §1 already says not to put the main login there.
+
+**Files:** `internal/provider` (new), `cmd/doorman`, `docs/RUNBOOK.md`.
+
+---
+
 ## Known rough edges
 
 Project direction: code is Apache 2.0 as of v0.4.1, with audio licensed
