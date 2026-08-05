@@ -15,6 +15,13 @@
  * Deliberately id-free (like Divider.astro) so it can appear more than once on
  * a page, and `flip` mirrors it rather than a second hand-drawn variant, so
  * there is one thing to change.
+ *
+ * SIZING LIVES ON A WRAPPER, NOT HERE. Astro scopes styles per component: a
+ * rule written in a page's <style> block carries that page's scope attribute
+ * and will never match this <svg>, which carries this component's. Passing a
+ * layout class in through `class` therefore does nothing, and the svg falls
+ * back to width:100% — full width, in flow, enormous. Wrap it in a div the
+ * page owns and size that instead.
  */
 interface Props {
   flip?: boolean;

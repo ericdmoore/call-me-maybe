@@ -1,11 +1,14 @@
-# s01 · Multiple DIDs — architecture
+# s01 · Multiple lines — architecture
 
 How one box serves several phone numbers, each with its own rules, without
 becoming a carrier or a multi-tenant anything.
 
-Companion to [`readme.md`](readme.md), which is the ordered plan. This file is
+Companion to [`readme.md`](readme.md), which is the phased plan. This file is
 the reasoning: what was chosen, what was rejected, and which invariant each
-decision is protecting.
+decision protects.
+
+Phase 1 is several numbers on one provider. Phase 2 is several providers, which
+changes the outbound path and is treated separately below.
 
 ---
 
@@ -167,6 +170,79 @@ Selection is per call, because one desk phone serves every line:
 
 ---
 
+## Phase 2 · What changes when providers multiply
+
+Phase 1 assumes one trunk, so "which line" only ever selected *policy*. With
+several providers it also selects *a path out of the building*, and that is a
+different kind of decision.
+
+### Outbound is the hard part
+
+A provider will not let you present a caller ID it does not own. So if the
+business line is a Telnyx number, a call presenting that number has to leave
+via Telnyx — over VoIP.ms it is rejected or silently rewritten. The mapping
+becomes:
+
+```
+line ──► outbound_cid   (what the callee sees)
+     └─► trunk ──► endpoint   (how it gets there)
+```
+
+Both halves are mandatory and they must agree. `doorman check` validating
+`outbound_cid` against its trunk is not tidiness — a mismatch produces calls
+that either fail or present the wrong number, and both look like someone else's
+bug.
+
+### Inbound barely changes
+
+The line still arrives as a Stasis argument. What changes is that each
+registration binds to its own endpoint with its own `context=`, so instead of
+one `[inbound-trunk]` there is one context per provider. The dialplan grows as
+providers × numbers, with one line each.
+
+That growth is the argument for **generating** trunk configuration rather than
+hand-writing it, which is why `trunks.toml` exists.
+
+### Why trunks become an inventory
+
+**Chosen: `trunks.toml`, rendered like `handsets.toml`.**
+
+The symmetry is the point. Handsets are hardware inventory that becomes
+generated PJSIP with secrets substituted from the environment at render time.
+Trunks are the same shape of thing: an inventory, provider-specific fields,
+credentials that must never sit in a committed file. Reusing the pattern means
+reusing `internal/render`, its golden tests, and the rule that generated files
+are outputs.
+
+It also turns issue #5 — supporting more providers — from a documentation
+problem into a data problem. A new provider is a TOML block, not a wiki page.
+
+**Rejected: leaving trunks in hand-written `pjsip.conf`.** Workable for one, and
+it is what exists today. But doorman needs the line → trunk mapping anyway for
+outbound routing, so the information has to enter the Go side regardless. Having
+it in two places, one of them hand-maintained, is the drift that
+`site/public/llms.txt` already demonstrated.
+
+**Rejected: trunk settings inside each policy file.** A trunk is shared
+infrastructure that several lines point at, not a property of one line. Putting
+it in policy would duplicate host, codecs and credentials per line and make
+"change the POP" an edit in N files.
+
+### Emergency calling is a design decision, not a detail
+
+With one trunk, `911` has one way out. With several, something must choose —
+and the wrong choice is the most consequential bug this project could ship.
+
+**Chosen: a designated emergency trunk, named explicitly in configuration.**
+Not inferred from the line the caller is on, because a caller picks up whatever
+handset is nearest and has no idea which line they are on; and because E911 is
+registered per DID with a street address, so the trunk that carries it must be
+the one whose address is on file.
+
+Startup warns when the designated trunk has no registered address, and the
+runbook has to say plainly that a provider without E911 in your area means a
+phone that cannot call for help.
+
 ## Failure modes and what happens
 
 | Situation | Behaviour | Why |
@@ -206,3 +282,8 @@ Selection is per call, because one desk phone serves every line:
 
 No invariant is weakened. One is generalised: *an invalid policy must never
 take down **any** line it does not belong to.*
+
+Phase 2 adds one of its own, worth stating in the same terms once it ships:
+*a call must never leave by a trunk that does not own the number it presents* —
+and its safety-critical sibling, *emergency calls leave by the designated
+trunk, or fail loudly.*

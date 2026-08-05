@@ -14,8 +14,8 @@ const features = (await getCollection('features')).sort(
   description="What a house phone can do when the switchboard is yours: ringer ladders, quiet hours, paging, parking, conference, and the rest of the PBX toolkit."
 >
   <header class="lobby feat-hero" style="padding-block:clamp(2.5rem,6vw,4rem) 0;">
-    <Switchboard class="feat-tangle feat-tangle--l" />
-    <Switchboard class="feat-tangle feat-tangle--r" flip />
+    <div class="feat-tangle feat-tangle--l"><Switchboard /></div>
+    <div class="feat-tangle feat-tangle--r"><Switchboard flip /></div>
     <div class="wrap">
       <p class="eyebrow">The switchboard</p>
       <h1 class="wordmark" style="font-size:clamp(2rem,6vw,3.6rem);">Features</h1>
