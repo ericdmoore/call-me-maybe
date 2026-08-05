@@ -17,6 +17,8 @@ doorman schema policy     # just policy.toml
 doorman schema handsets   # just handsets.toml
 doorman schema env        # just the environment variables
 doorman check             # validate a real config and report what it resolves to
+doorman calls --json      # the call log as JSON Lines: one record per call,
+                          # caller IDs redacted unless --no-redact
 doorman help              # every subcommand
 ```
 
