@@ -60,6 +60,7 @@ const steps = [
   {
     title: 'Grab a number',
     body: 'A sub-account with a VoIP provider, a DID pointed at it, and E911 switched on. A couple of dollars a month, and E911 is the one line item worth not skipping on a phone your family will reach for in a hurry.',
+      link: { href: '/providers/', text: 'Compare providers' },
   },
   {
     title: 'Install some software',
@@ -249,6 +250,11 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
               <div>
                 <h3>{s.title}</h3>
                 <p>{s.body}</p>
+                {s.link && (
+                  <p class="step-link">
+                    <a href={s.link.href}>{s.link.text} &rarr;</a>
+                  </p>
+                )}
               </div>
             </li>
           ))
@@ -333,7 +339,17 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
       <a href={repo}>Source</a>
       <a href={`${repo}/blob/main/docs/RUNBOOK.md`}>Runbook</a>
       <a href={`${repo}/blob/main/docs/PACKS.md`}>Build a pack</a>
+      <a href="/providers/">Providers</a>
       <a href="/llms.txt">llms.txt</a>
     </nav>
   </footer>
 </Base>
+
+<style>
+  .step-link {
+    margin-top: 0.6rem;
+    font-family: var(--display);
+    font-size: var(--t-sm);
+    letter-spacing: 0.05em;
+  }
+</style>

@@ -1,0 +1,287 @@
+---
+import Base from '../layouts/Base.astro';
+import Divider from '../components/Divider.astro';
+import Switchboard from '../components/Switchboard.astro';
+import { providers, track } from '../data/providers';
+---
+
+<Base
+  title="Phone providers — Call Me Maybe"
+  description="An honest comparison of SIP trunk providers that work with a home phone behind NAT: VoIP.ms, Telnyx, Flowroute. No affiliate links."
+>
+  <header class="lobby prov-hero" style="padding-block:clamp(2.5rem,6vw,4rem) 0;">
+    <Switchboard class="prov-tangle prov-tangle--l" />
+    <Switchboard class="prov-tangle prov-tangle--r" flip />
+    <div class="wrap">
+      <p class="eyebrow">Getting a number</p>
+      <h1 class="wordmark" style="font-size:clamp(2rem,6vw,3.6rem);">Providers</h1>
+      <p class="tagline">
+        You bring the number. Here is who to buy it from, what each one is good
+        at, and where each one will annoy you.
+      </p>
+      <Divider />
+    </div>
+  </header>
+
+  <section class="panel">
+    <div class="wrap">
+      <div class="prose">
+        <h2>One requirement decides everything</h2>
+        <p>
+          This phone lives behind your router with <strong>no ports open</strong>.
+          It opens the connection outward and calls arrive back down that same
+          pipe. So the only question that matters when shopping is:
+        </p>
+        <p class="prov-rule">
+          <strong>Does the provider accept an outbound SIP registration?</strong>
+        </p>
+        <p>
+          If yes, it will work. If the provider only authenticates by pushing
+          calls at a fixed IP address, it cannot work here without opening your
+          network up — which is the thing this design exists to avoid. That
+          rules out Twilio&rsquo;s Elastic SIP Trunking for this architecture,
+          and it is not a criticism of Twilio; it is a different shape of
+          product.
+        </p>
+
+        <h2 class="prov-h">Nobody is paying for this placement</h2>
+        <p>
+          There are no affiliate or referral links on this page. The programs
+          exist and the traffic would be worth money, but the advice is worth
+          more &mdash; the moment a recommendation carries a commission you have
+          to wonder which it is. The links carry
+          <code>utm_</code> parameters so we can see which providers people
+          actually choose, and nothing else. If that ever changes it will say so
+          here, in this paragraph, before anything else on the page.
+        </p>
+        <p>
+          Rates move constantly, so no prices are quoted below. Every card links
+          to the provider&rsquo;s own pricing page. Check it &mdash; a stale
+          number on a page about honesty would be a poor joke.
+        </p>
+      </div>
+
+      <ul class="prov-list">
+        {
+          providers.map((p) => (
+            <li class="prov-card">
+              <div class="prov-head">
+                <h3>{p.name}</h3>
+                <span class="prov-tags">
+                  {p.weUseThis && <span class="prov-tag prov-tag--ours">what we run</span>}
+                  <span
+                    class:list={[
+                      'prov-tag',
+                      p.registration === 'yes' ? 'prov-tag--ok' : 'prov-tag--todo',
+                    ]}
+                  >
+                    {p.registration === 'yes' ? 'registration ✓' : 'unverified'}
+                  </span>
+                  <span class="prov-tag">{p.billing}</span>
+                </span>
+              </div>
+
+              <p class="prov-summary">{p.summary}</p>
+
+              <div class="prov-cols">
+                <div>
+                  <h4>Good</h4>
+                  <ul>{p.pros.map((x) => <li>{x}</li>)}</ul>
+                </div>
+                <div>
+                  <h4>Less good</h4>
+                  <ul>{p.cons.map((x) => <li>{x}</li>)}</ul>
+                </div>
+              </div>
+
+              <p class="prov-links">
+                <a href={track(p.url, p.name.toLowerCase())} rel="noopener nofollow">
+                  Open an account &rarr;
+                </a>
+                <a
+                  href={track(p.pricingUrl, `${p.name.toLowerCase()}-pricing`)}
+                  rel="noopener nofollow"
+                >
+                  Their rates &rarr;
+                </a>
+              </p>
+            </li>
+          ))
+        }
+      </ul>
+
+      <div class="prose" style="margin-top:2.5rem;">
+        <h2>Evaluating one that is not listed</h2>
+        <p>
+          The list does not need to be exhaustive to be useful. Ask a prospective
+          provider these, in order:
+        </p>
+        <ol>
+          <li>
+            <strong>Registration or IP auth?</strong> If they cannot do
+            registration, stop here.
+          </li>
+          <li>
+            <strong>Sub-accounts?</strong> The credential on the Pi should never
+            be your portal login &mdash; if the Pi is compromised, you want to
+            revoke one thing rather than everything.
+          </li>
+          <li>
+            <strong>Several numbers on one registration?</strong> This is what
+            makes a second line cheap instead of a second trunk.
+          </li>
+          <li>
+            <strong>Prepaid or postpaid?</strong> Prepaid fails silently: the
+            balance reaches zero and the phone simply stops ringing, which is
+            indistinguishable from a quiet week. If prepaid, set up a balance
+            alert on day one.
+          </li>
+          <li>
+            <strong>E911?</strong> Decide deliberately. A house phone that
+            cannot reach emergency services is a thing the people in that house
+            should know about.
+          </li>
+        </ol>
+        <p>
+          Found one that works? The runbook has a worked configuration, and a
+          pull request adding a provider block is genuinely welcome &mdash; but
+          please verify it against a live trunk first. A wrong example costs
+          more than a missing one.
+        </p>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .prov-hero {
+    position: relative;
+    overflow: hidden;
+  }
+  .prov-hero > .wrap {
+    position: relative;
+    z-index: 1;
+  }
+  .prov-tangle {
+    position: absolute;
+    top: -2%;
+    width: clamp(150px, 19vw, 290px);
+    z-index: 0;
+  }
+  .prov-tangle--l {
+    left: max(-3rem, -4vw);
+  }
+  .prov-tangle--r {
+    right: max(-3rem, -4vw);
+  }
+  @media (max-width: 60rem) {
+    .prov-tangle {
+      display: none;
+    }
+  }
+
+  .prov-rule {
+    border-left: 3px solid var(--accent);
+    padding-left: 1rem;
+    font-size: var(--t-lg, 1.2rem);
+  }
+
+  .prov-h {
+    margin-top: 2.5rem;
+  }
+
+  .prov-list {
+    list-style: none;
+    padding: 0;
+    margin: 2.5rem 0 0;
+    display: grid;
+    gap: 1.5rem;
+  }
+
+  .prov-card {
+    border: 1px solid var(--rule);
+    padding: clamp(1.1rem, 3vw, 1.75rem);
+    background: var(--raised);
+  }
+
+  .prov-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .prov-head h3 {
+    font-family: var(--display);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+
+  .prov-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .prov-tag {
+    font-family: var(--display);
+    font-size: var(--t-xs);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border: 1px solid var(--rule);
+    padding: 0.15rem 0.5rem;
+    color: var(--text-soft);
+    white-space: nowrap;
+  }
+  .prov-tag--ok {
+    border-color: var(--jade);
+    color: var(--jade);
+  }
+  .prov-tag--todo {
+    border-color: var(--accent-dim);
+    color: var(--accent-dim);
+  }
+  .prov-tag--ours {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .prov-summary {
+    margin: 0.75rem 0 1.25rem;
+    color: var(--text-soft);
+  }
+
+  .prov-cols {
+    display: grid;
+    gap: 1.25rem 2rem;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  }
+  .prov-cols h4 {
+    font-family: var(--display);
+    font-size: var(--t-xs);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+    margin: 0 0 0.5rem;
+  }
+  .prov-cols ul {
+    margin: 0;
+    padding-left: 1.1rem;
+  }
+  .prov-cols li + li {
+    margin-top: 0.4rem;
+  }
+
+  .prov-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    margin: 1.5rem 0 0;
+    padding-top: 1rem;
+    border-top: 1px solid var(--rule);
+    font-family: var(--display);
+    font-size: var(--t-sm);
+    letter-spacing: 0.05em;
+  }
+</style>
