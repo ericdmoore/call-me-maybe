@@ -140,9 +140,7 @@ General Shape:
 - **Hold / ringback packs** — already in `docs/PACKS.md`; “office” themed bundle
   is an easy SKU.
   - Rotating Voice Messages During HOLD
-- **Multi-DID** — personal vs business line, different lobby or IVR; still a
-  registration trunk, not a carrier.
-  - THIS ONE IS HUGE
+- **Multi-DID** — see §9; it outgrew this list.
 - **Click-to-dial from HA or a tiny local UI** — optional originate; rate-capped.
   - Very interesting (not sure I understand the use case)
 - **Voicemail email + off-box transcript** — `docs/roadmap.md` phase 2.
@@ -151,7 +149,74 @@ General Shape:
 
 ---
 
-## 9. Do not chase
+## 9. The multi-line operator
+
+A distinct persona from the household and from "a business": one person
+supporting several small ventures, each with few customers, who wants one
+number per venture plus a home line. Six DIDs, one trunk registration, one Pi.
+This is the strongest SOHO case because it needs no team features at all — the
+per-seat collaboration that hosted services charge for is exactly what a solo
+operator is paying for and not using.
+
+Technically it is cheaper than it looks: **one registration carries many DIDs**,
+and the dialled number arrives as `${EXTEN}`, which is the discriminator
+multi-DID keys on.
+
+| Piece | Why |
+|---|---|
+| **Line → policy mapping** | The spine. Everything below depends on it |
+| **Outbound caller ID per line** | Ring a customer back and they see *that venture's* number |
+| Per-line prompts, hours, disposition | A curt doorman on the home line, a courteous concierge on the business ones — same engine, opposite defaults |
+| Per-line voicemail | Already policy (`voicemail = "kids"`); needs line scope |
+| Per-line call history | The `line` field in the call log |
+| Softphone over the tailnet | All six numbers on a mobile without writing an app |
+
+**Outbound caller ID is the sleeper.** The outbound dialplan sets no CID today
+(`Dial(PJSIP/1${EXTEN}@voipms,60)`), so every call out presents the trunk
+default. Invisible for one household; across five ventures it means every
+customer you call back saves the wrong number. Small to build, and the rest
+does not land without it.
+
+**The honest limit is SMS.** Customers text small businesses, and for many
+ventures it is now the primary channel. Asterisk does not do SMS at all — it is
+out of band. VoIP.ms has an API, and polling it avoids an inbound port
+entirely (no collision with the ARI bind rule), but there is no thread UI at
+the end: messages land in email or a chat bridge. For a venture whose customers
+mostly text, this is a complement to a hosted service, not a replacement. See
+`SUSTAINABILITY.md`.
+
+**Not** a reason to become a carrier or grow a per-seat plan. The pitch is
+ownership, programmability, real handsets in a real house, and no per-seat
+pricing — cost is a tiebreaker, not the argument.
+
+---
+
+## 10. Provider account health
+
+Prepaid trunks fail in the worst way this project has: **the balance hits zero
+and the phone simply stops ringing.** Nothing errors, nothing lights up, and
+"nobody called today" is indistinguishable from a quiet Tuesday. It is the same
+silent-failure shape as an IMAP loop that dies while still reporting connected.
+
+For a multi-line operator it is five businesses' inbound at once.
+
+- **Balance is a capability, not a provider feature.** The same optional-interface
+  shape as the voice backends: providers that are prepaid implement it, invoiced
+  ones do not and say so. Ties to #5 (more providers).
+- **Expose it as a gauge, do not build notification.** Metrics (§4 in TASKS) plus
+  whatever alerting already exists beats teaching doorman SMTP, webhooks, retry
+  and threshold config. Thresholds are an operator decision.
+- **The irony that sets the design:** if the balance is zero, an outbound alert
+  cannot call you to say so. The alert path must not be the phone, and the
+  threshold must fire well before empty.
+- **Where the credential lives matters.** A provider's API key usually manages
+  DIDs and sub-accounts, not just reads a number — higher privilege than the SIP
+  sub-account password the RUNBOOK already says to keep off the Pi. Prefer
+  running the check from wherever alerting already lives.
+
+---
+
+## 11. Do not chase
 
 - FreePBX feature parity, large hunt groups, call-centre wallboards, CRM hubs
 - Hosted multi-tenant PBX (regulated; contradicts the premise)
@@ -164,13 +229,25 @@ General Shape:
 
 ## Suggested sequence if SOHO is a goal
 
-1. **Named conference rooms** + guest PIN + docs (productise `600`)
-2. **Office hours + shallow IVR**
-3. **Follow-me** (after #15)
-4. **Per-handset DND + sibling intercom**
-5. **Call history**
-6. **Stand-up facilitator mode** on the conference engine
-7. Remote actions / alerts / allow-list step-up for workshop-and-house crowd
+Revised after the grading pass in `product-extensions-grades.md`, which found
+that call history and voicemail are already built and that multi-DID multiplies
+everything under it:
+
+1. **Multi-DID** (TASKS §7a) — the spine; everything below is better with it
+2. **Outbound caller ID per line** (§7c) — do not ship 1 without this
+3. **Office hours at line scope + shallow IVR** — the IVR is the existing graph
+   interpreter plus routing verbs
+4. **Provider balance as a metric** (TASKS §8) — cheap, and it closes a silent
+   failure
+5. **Named conference rooms** + guest PIN (productise `600`) — design the
+   derived-code scheme first
+6. **Follow-me** (after #15)
+7. **Per-handset DND + sibling intercom**
+8. **Stand-up facilitator mode** on the conference engine
+9. Remote actions / alerts / allow-list step-up for the workshop-and-house crowd
+
+~~Call history~~ shipped — `internal/calls`, `doorman calls`.
+~~Voicemail~~ shipped — only transcription remains (TASKS §2).
 
 Packs, games, and offline AI briefings stay on the #7 track; they monetise
 personality and ritual, not SMB checkbox parity.
