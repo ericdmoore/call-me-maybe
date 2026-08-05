@@ -1,0 +1,110 @@
+---
+/**
+ * Structured chaos: the tangle of patch cords across a switchboard jack field.
+ *
+ * Every path is a closed circuit of straight runs and 45° turns — no curves.
+ * A patch cord hangs in a catenary, but this is a *diagram* of routing rather
+ * than a drawing of cable, and the rest of the page is Deco: orthogonals and
+ * diagonals only. Curves here would read as decoration; angles read as wiring.
+ *
+ * Overlapping is the whole point. One circuit is a schematic; six crossing
+ * each other at unrelated angles is what an operator actually faced, and it is
+ * the visual argument for the product — that mess is what doorman does for
+ * you.
+ *
+ * Deliberately id-free (like Divider.astro) so it can appear more than once on
+ * a page, and `flip` mirrors it rather than a second hand-drawn variant, so
+ * there is one thing to change.
+ */
+interface Props {
+  flip?: boolean;
+  class?: string;
+}
+const { flip = false, class: klass = '' } = Astro.props;
+---
+
+<svg
+  class:list={['switchboard', klass, { 'is-flipped': flip }]}
+  viewBox="0 0 300 420"
+  fill="none"
+  stroke="currentColor"
+  stroke-linejoin="round"
+  stroke-linecap="round"
+  preserveAspectRatio="xMidYMid meet"
+  aria-hidden="true"
+  focusable="false"
+>
+  <!-- Long runs first: these read as the cords that cross the whole field. -->
+  <g stroke-width="3.5" opacity="0.9">
+    <path d="M46 84 L150 40 L232 96 L214 190 L120 214 L58 168 Z" />
+    <path d="M96 150 L206 118 L262 206 L192 286 L104 262 L74 200 Z" />
+  </g>
+
+  <!-- Middle weight: the tangle proper. -->
+  <g stroke-width="2.5" opacity="0.75">
+    <path d="M28 214 L128 186 L182 250 L156 340 L64 356 L20 288 Z" />
+    <path d="M132 268 L238 250 L276 322 L206 392 L124 374 L104 316 Z" />
+  </g>
+
+  <!-- Thin: short jumpers between adjacent jacks. -->
+  <g stroke-width="1.6" opacity="0.55">
+    <path d="M74 46 L138 26 L176 58 L152 100 L92 104 L62 78 Z" />
+    <path d="M170 330 L232 316 L258 358 L226 404 L172 396 L156 362 Z" />
+  </g>
+
+  <!-- The jacks themselves: where a cord terminates. Sparse on purpose —
+       enough to say "these are plugged into something". -->
+  <g stroke-width="1.6" opacity="0.65">
+    <circle cx="46" cy="84" r="4.5" />
+    <circle cx="232" cy="96" r="4.5" />
+    <circle cx="104" cy="262" r="4.5" />
+    <circle cx="276" cy="322" r="4.5" />
+    <circle cx="20" cy="288" r="4.5" />
+  </g>
+</svg>
+
+<style>
+  .switchboard {
+    display: block;
+    width: 100%;
+    height: auto;
+    color: var(--accent-dim);
+    /* Behind the words, always. The tangle is atmosphere, not content. */
+    pointer-events: none;
+  }
+
+  .switchboard.is-flipped {
+    transform: scaleX(-1);
+  }
+
+  /* Draw itself in on arrival — an operator patching the board. Cheap:
+     one property, no layout, and it settles into a static image. */
+  @media (prefers-reduced-motion: no-preference) {
+    .switchboard path {
+      stroke-dasharray: 1400;
+      stroke-dashoffset: 1400;
+      animation: patch 2.4s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+    }
+    .switchboard g:nth-of-type(2) path {
+      animation-delay: 0.25s;
+    }
+    .switchboard g:nth-of-type(3) path {
+      animation-delay: 0.5s;
+    }
+    .switchboard circle {
+      opacity: 0;
+      animation: seat 0.4s ease-out 1.6s forwards;
+    }
+  }
+
+  @keyframes patch {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+  @keyframes seat {
+    to {
+      opacity: 0.65;
+    }
+  }
+</style>

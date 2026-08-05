@@ -2,6 +2,7 @@
 import { getCollection } from 'astro:content';
 import Base from '../../layouts/Base.astro';
 import Divider from '../../components/Divider.astro';
+import Switchboard from '../../components/Switchboard.astro';
 
 const features = (await getCollection('features')).sort(
   (a, b) => a.data.order - b.data.order,
@@ -12,7 +13,9 @@ const features = (await getCollection('features')).sort(
   title="Features — Call Me Maybe"
   description="What a house phone can do when the switchboard is yours: ringer ladders, quiet hours, paging, parking, conference, and the rest of the PBX toolkit."
 >
-  <header class="lobby" style="padding-block:clamp(2.5rem,6vw,4rem) 0;">
+  <header class="lobby feat-hero" style="padding-block:clamp(2.5rem,6vw,4rem) 0;">
+    <Switchboard class="feat-tangle feat-tangle--l" />
+    <Switchboard class="feat-tangle feat-tangle--r" flip />
     <div class="wrap">
       <p class="eyebrow">The switchboard</p>
       <h1 class="wordmark" style="font-size:clamp(2rem,6vw,3.6rem);">Features</h1>
@@ -52,4 +55,37 @@ const features = (await getCollection('features')).sort(
       </div>
     </div>
   </section>
+
+  <style>
+    /* The tangle flanks the title without ever fighting it: absolutely
+       positioned, behind, and gone entirely once there is no room. */
+    .feat-hero {
+      position: relative;
+      overflow: hidden;
+    }
+    .feat-hero > .wrap {
+      position: relative;
+      z-index: 1;
+    }
+    .feat-tangle {
+      position: absolute;
+      top: -2%;
+      width: clamp(150px, 19vw, 290px);
+      z-index: 0;
+    }
+    .feat-tangle--l {
+      left: max(-3rem, -4vw);
+    }
+    .feat-tangle--r {
+      right: max(-3rem, -4vw);
+    }
+
+    /* Below this the hero is a single column and the art would sit under the
+       words. Nothing is lost — it was never carrying meaning. */
+    @media (max-width: 60rem) {
+      .feat-tangle {
+        display: none;
+      }
+    }
+  </style>
 </Base>
