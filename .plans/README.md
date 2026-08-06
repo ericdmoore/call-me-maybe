@@ -58,6 +58,61 @@ Wanted by: screened answer ("press 1 to accept, 2 for the answering service").
 `Play(channelID, …)` already takes a channel, so whispering to one leg needs no
 ARI additions — only this.
 
+### Value-or-reference fields
+
+A field that accepts either the thing itself or the name of something defined
+elsewhere. Most config languages land here — Compose, Kubernetes, Terraform,
+ESPHome — because it is how people actually think about reuse: inline it when
+it is used once, name it when it is shared.
+
+**Precedent already in the tree.** `pack.json`'s `voice` accepts a bare string
+(a piper model) or an object naming a backend; `Manifest.Resolve()` tries
+string-then-object. The polymorphism is not foreign here, it was chosen once
+already.
+
+Wanted first by `afterhours`, which today is only ever a reference to a
+`[[schedules]]` id:
+
+```toml
+afterhours = "school-nights"      # reference — defined once, reused
+
+[extensions.afterhours]           # inline — this extension only
+start = "20:30"
+end   = "07:00"
+days  = ["SU","MO","TU","WE","TH"]
+```
+
+The same shape already exists unnamed elsewhere: `handsets = ["kitchen"]`
+takes a handset id *or* a group id, both plain strings.
+
+**It also shrinks the typo surface.** An inline schedule has no id to
+misspell — no dangling reference, no defined-but-unused block, nothing in the
+silent-failure class below. Not a substitute for `Undecoded()`, but pushing the
+same direction.
+
+**Consequence to accept up front:** `doorman check` has to print the resolved
+schedule identically whichever form produced it. That is the same output work
+as showing applied defaults, so one change, two payoffs.
+
+#### Rejected: a general reference syntax
+
+ESPHome-style `!secret` / `!include` / `!lambda` — YAML tag machinery for
+referencing values across and within documents — is the obvious next step and
+should not be taken.
+
+Once there is a general resolver it needs cycle detection; then `!include` for
+splitting files; then interpolation; then somebody wants a conditional, and the
+configuration is a programming language with none of the tooling of one.
+
+The line is already drawn elsewhere in this project and should stay in the same
+place: `internal/tmpl` uses **references, not interpolation**, specifically so a
+template cannot inject anything, and the docs say "templates as data, not text."
+
+| | |
+|---|---|
+| A field accepts two shapes | bounded, per-field, a `oneOf` in the schema. **Yes** |
+| A general `!ref` / `!include` | unbounded, needs a resolver, invites the next four features. **No** |
+
 ### Graph interpreter: routing verbs by provenance
 
 `internal/story` parses, validates and interprets a node graph against a
