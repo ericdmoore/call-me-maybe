@@ -116,7 +116,13 @@ const DefaultMaxBytes int64 = 32 << 20
 // drops the record and counts it, because a call log must never be able to
 // delay a call — the same reason the event router never blocks.
 type Writer struct {
-	ch   chan Record
+	ch chan Record
+	// quit signals shutdown. The record channel is deliberately never
+	// closed: a send on a closed channel panics *even inside a select with
+	// a default*, so closing it would make Post panic for any session still
+	// tearing down — which is reachable, because the daemon's deferred
+	// Close runs while session goroutines are still live.
+	quit chan struct{}
 	done chan struct{}
 
 	path     string
@@ -149,6 +155,7 @@ func Open(path string, maxBytes int64) (*Writer, error) {
 
 	w := &Writer{
 		ch:       make(chan Record, 64),
+		quit:     make(chan struct{}),
 		done:     make(chan struct{}),
 		path:     path,
 		maxBytes: maxBytes,
@@ -157,10 +164,21 @@ func Open(path string, maxBytes int64) (*Writer, error) {
 	return w, nil
 }
 
-// Post records a call. Never blocks; never panics after Close.
+// Post records a call. Never blocks, and never panics — including after
+// Close, which a caller cannot always avoid: the daemon's deferred Close runs
+// while sessions are still tearing down, and one of them reaching cleanup in
+// that window would otherwise crash the process on its way out.
 func (w *Writer) Post(r Record) {
 	if w == nil {
 		return
+	}
+	select {
+	case <-w.quit:
+		// Shutting down. Count it rather than dropping it into a buffer
+		// nobody will drain, so the hole is still reported.
+		w.dropped.Add(1)
+		return
+	default:
 	}
 	select {
 	case w.ch <- r:
@@ -181,7 +199,7 @@ func (w *Writer) Close() error {
 		return nil
 	}
 	w.closeOnce.Do(func() {
-		close(w.ch)
+		close(w.quit)
 		<-w.done
 	})
 	return nil
@@ -196,11 +214,11 @@ func (w *Writer) run(f *os.File) {
 		size = st.Size()
 	}
 
-	for r := range w.ch {
+	write := func(r Record) {
 		line, err := json.Marshal(r)
 		if err != nil {
 			w.failed.Add(1)
-			continue
+			return
 		}
 		line = append(line, '\n')
 
@@ -213,9 +231,27 @@ func (w *Writer) run(f *os.File) {
 		n, err := f.Write(line)
 		if err != nil {
 			w.failed.Add(1)
-			continue
+			return
 		}
 		size += int64(n)
+	}
+
+	for {
+		select {
+		case r := <-w.ch:
+			write(r)
+		case <-w.quit:
+			// Drain what is already buffered, then stop. Close promises the
+			// records in hand are written.
+			for {
+				select {
+				case r := <-w.ch:
+					write(r)
+				default:
+					return
+				}
+			}
+		}
 	}
 }
 

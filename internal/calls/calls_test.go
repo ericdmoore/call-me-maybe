@@ -357,3 +357,62 @@ func TestOpenRejectsAnUnusablePath(t *testing.T) {
 		t.Error("expected an error for an empty path")
 	}
 }
+
+// Post must survive Close, and the daemon is the reason: runService's deferred
+// callLog.Close() runs while session goroutines are still tearing down, so a
+// call finishing in that window reaches cleanup → Post. Closing the record
+// channel would make that a panic on the way out — a send on a closed channel
+// panics even inside a select with a default, which is exactly the trap this
+// avoids by never closing it.
+func TestPostAfterCloseDoesNotPanic(t *testing.T) {
+	path := tmp(t)
+	w, err := calls.Open(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Post(rec("+15125550100", calls.OutcomeAnswered))
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Post panicked after Close: %v", r)
+		}
+	}()
+	for range 200 { // well past the buffer, to catch the full-buffer path too
+		w.Post(rec("+15125550101", calls.OutcomeAbandoned))
+	}
+
+	// The record posted before Close is still on disk — Close promises to
+	// drain what it has in hand.
+	got, _, err := calls.Read(path, calls.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Errorf("read %d records, want the 1 posted before Close", len(got))
+	}
+	// And the ones after are counted rather than silently vanishing.
+	if w.Dropped() == 0 {
+		t.Error("records posted after Close should be counted as dropped")
+	}
+}
+
+// Close must be safe from several goroutines and safe to call twice.
+func TestCloseIsIdempotentAndConcurrent(t *testing.T) {
+	w, err := calls.Open(tmp(t), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() { defer wg.Done(); _ = w.Close() }()
+	}
+	for range 8 {
+		wg.Add(1)
+		go func() { defer wg.Done(); w.Post(rec("+15125550100", calls.OutcomeAnswered)) }()
+	}
+	wg.Wait()
+}
