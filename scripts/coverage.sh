@@ -28,6 +28,7 @@ callmemaybe/internal/tmpl          70
 callmemaybe/internal/lsp           35
 callmemaybe/internal/awssig        95
 callmemaybe/internal/calls         85
+callmemaybe/internal/notify        85
 callmemaybe/internal/voice         80
 callmemaybe/internal/story         85
 callmemaybe/internal/pack          80

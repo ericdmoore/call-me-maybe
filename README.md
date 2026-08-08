@@ -77,8 +77,11 @@ Beyond the lobby, the handsets get the classic PBX toolkit — paging/intercom
 (500), call parking (700), a family conference (600), BLF busy lamps, hold
 music, voicemail with email delivery (*97), ringer ladders that escalate
 kids → adults → voicemail, per-extension afterhours windows, and an optional
-dial-555 hook into Home Assistant's Assist. Details in
-[`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+dial-555 hook into Home Assistant's Assist. There is also an optional webhook
+that fires when the house starts ringing and again when a call ends, so Home
+Assistant can announce "call from Grandma" on a speaker — doorman sends an
+event and knows nothing about speakers, so every target HA supports comes
+free. Details in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
 ### A call, end to end
 

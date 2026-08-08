@@ -77,6 +77,10 @@ Layout:
   never print to it in lsp mode.
 - `internal/render` — generates per-handset Asterisk config from
   handsets.toml; secrets substituted from env, never stored in the file.
+- `internal/notify` — the event webhook. One endpoint, one JSON event per
+  ring and per completed call, so Home Assistant can announce or flash
+  something. Same non-blocking shape as `internal/calls`, and doorman
+  deliberately knows nothing about speakers — HA decides who hears it.
 - `internal/config` — env parsing; names match `examples/.env.example` exactly.
 
 Config interfaces: `.env` (secrets + tuning), `handsets.toml` (hardware

@@ -33,6 +33,7 @@ import (
 	"callmemaybe/internal/config"
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/lsp"
+	"callmemaybe/internal/notify"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/render"
 	"callmemaybe/internal/schema"
@@ -494,6 +495,28 @@ func runService() {
 		log.Info("call log open", "path", cfg.CallLogPath)
 	}
 
+	// The event webhook, same shape and same reasoning: off unless a URL is
+	// configured, and a URL that cannot work is fatal now rather than a warn
+	// line after the first call nobody heard announced. Only the host is
+	// logged — the URL is a credential.
+	var hook *notify.Webhook
+	if cfg.WebhookURL != "" {
+		var err error
+		hook, err = notify.Open(notify.Options{
+			URL:              cfg.WebhookURL,
+			Token:            cfg.WebhookToken,
+			Timeout:          cfg.WebhookTimeout,
+			SendFullCallerID: !cfg.WebhookRedactCallerID,
+			Log:              log,
+		})
+		if err != nil {
+			log.Error("could not start the event webhook", "err", err)
+			os.Exit(1)
+		}
+		defer func() { _ = hook.Close() }()
+		log.Info("event webhook enabled", "host", hook.Host(), "redacted", cfg.WebhookRedactCallerID)
+	}
+
 	deps := lobby.Deps{
 		ARI:     ariAdapter{client},
 		Policy:  store.Current,
@@ -514,10 +537,13 @@ func runService() {
 		OnLegCreated: reg.addLeg,
 		OnFinished:   reg.remove,
 	}
-	// A typed nil in an interface is not nil, so the field is only set when
-	// there is a real writer — the state machine's nil check depends on it.
+	// A typed nil in an interface is not nil, so these fields are only set
+	// when there is a real sink — the state machine's nil checks depend on it.
 	if callLog != nil {
 		deps.Calls = callLog
+	}
+	if hook != nil {
+		deps.Notify = hook
 	}
 
 	client.Connect(func(ev ari.Event) { route(ev, reg, deps, client, log) })

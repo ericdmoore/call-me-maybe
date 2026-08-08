@@ -591,6 +591,104 @@ delete it yourself if you mean to.
 
 ---
 
+## 6b. The event webhook
+
+Off by default. Set `WEBHOOK_URL` and restart:
+
+```bash
+# .env
+WEBHOOK_URL=http://homeassistant.local:8123/api/webhook/call-me-maybe
+```
+
+doorman then POSTs one JSON object when the house starts ringing and one when
+a call ends. If the URL cannot work it refuses to start, for the same reason
+the call log does: an operator who asked for announcements and did not get
+them should find out now.
+
+**The URL is a credential.** A Home Assistant webhook id is the entire secret
+— anyone who has it can trigger the automation. Keep it in `.env`, not in
+`policy.toml`, and note that doorman never prints it: log lines and startup
+errors carry the host only.
+
+### The two events
+
+```json
+{"event":"ringing","at":"2026-08-08T18:04:11Z","call_id":"1754680",
+ "caller":"+1512•••0100","known":"Grandma"}
+
+{"event":"completed","at":"2026-08-08T18:04:29Z","call_id":"1754680",
+ "caller":"+1512•••0100","known":"Grandma","outcome":"answered",
+ "answered_by":"PJSIP/kitchen","ms":18420}
+```
+
+`ringing` fires the moment handsets start ringing — for a welcomed known
+caller, and for a stranger who dialled a valid extension (`extension` and
+`pin: "valid"` instead of `known`). That timing is the point: "call from
+Grandma" is useful while somebody can still reach a handset and useless once
+the ringing has stopped. A caller who is dismissed rings nothing and produces
+only a `completed` event.
+
+`completed` fires once per call from the session's single teardown path,
+however the call ended. `outcome` is `answered`, `voicemail`, `dismissed` or
+`abandoned`, with `reason` on a dismissal (`no-digits`, `rate-limited`,
+`too-many-attempts`, `no-answer`).
+
+Add `WEBHOOK_TOKEN` if the receiver wants `Authorization: Bearer`. HA's
+`/api/webhook/<id>` endpoints do not.
+
+### doorman does not know what a speaker is
+
+The payload names no `media_player` entity, no speaker, and no routing — only
+what happened and to whom. Which speakers hear it is a Home Assistant
+automation, because HA already models the house's devices and doorman would
+only duplicate that badly. That is what makes Sonos, Cast, MQTT and everything
+else HA supports work without doorman learning about any of them. The design
+argument is in `.plans/s06-speaker-page-targets`.
+
+A minimal automation, to be filled in with your own speakers:
+
+```yaml
+automation:
+  - trigger:
+      - platform: webhook
+        webhook_id: call-me-maybe
+    condition: "{{ trigger.json.event == 'ringing' and trigger.json.known }}"
+    action:
+      - service: tts.speak
+        data:
+          message: "Call from {{ trigger.json.known }}"
+```
+
+### What it never sends, and what it redacts
+
+Entered digits and PINs, never, at any setting — a payload says a PIN was
+`valid` or `invalid` and never what was typed. There is no field one could go
+in: the event is built from the call record, which has no such field either.
+
+Caller IDs are **redacted by default**, which is the opposite of the call log
+and deliberate. The call log is a `0600` file that stays on the box; this
+payload is handed to another program over the network. Set
+`WEBHOOK_REDACT_CALLER_ID=false` when the receiver genuinely needs the number
+— announcing an unknown caller, say — and understand that you have decided the
+number may leave doorman.
+
+### A dead Home Assistant is invisible
+
+Events are queued and delivered off the call path, so a slow, wedged or
+switched-off endpoint can never delay a greeting or a ring. A full buffer
+drops events and counts them; failures are logged at `warn` with the host and
+counted. `WEBHOOK_TIMEOUT_MS` (3 s default) bounds one attempt and also bounds
+shutdown — past that grace period doorman abandons the backlog rather than
+holding a restart open.
+
+```bash
+$ journalctl -u doorman --since "24 hours ago" | grep "webhook post failed"
+```
+
+To turn it off, unset `WEBHOOK_URL` and restart.
+
+---
+
 ## 7. Threat model
 
 What this system actually defends against, and what it does not. Written down

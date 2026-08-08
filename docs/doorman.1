@@ -211,6 +211,19 @@ straight to dismissal, leaving nothing to brute\-force against.
 ,
 .B json|pretty
 , and whether to log only the last four digits of unknown callers.
+.TP
+.BR WEBHOOK_URL ", " WEBHOOK_REDACT_CALLER_ID
+Unset by default. With a URL,
+.B doorman
+POSTs one JSON event when the house starts ringing and one when a call ends,
+so Home Assistant can announce the caller or flash a light. The payload names
+no speaker and no routing \(em Home Assistant decides who hears it. Delivery
+is off the call path and can never delay a call. Caller IDs are redacted
+unless the second variable is set false; entered digits and PINs are never
+sent at any setting. Treat the URL as a credential: a Home Assistant webhook
+id is the whole secret, and
+.B doorman
+logs only its host.
 .SH EXIT STATUS
 .TP
 .B 0
