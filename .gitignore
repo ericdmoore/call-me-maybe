@@ -19,3 +19,6 @@ coverage.out
 
 *.log
 .DS_Store
+
+# Agent worktrees — transient, and gitlinks if they get staged.
+.claude/worktrees/
