@@ -88,7 +88,12 @@ const usage = `doorman — the Call Me Maybe lobby daemon
       -dry-run                  show what would be written
       -force                    replace existing config, backing it up first
   doorman check [flags] [path]  validate policy.toml and handsets.toml, and
-                                report what they add up to
+                                report what they add up to — every extension
+                                with every setting, including the defaults it
+                                fell back to. A key the schema does not know
+                                is an error here (with a "did you mean"); the
+                                daemon only warns about the same key, because
+                                a bad edit must never take the phone down
       -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
       -allow-placeholders       accept the example sentinels; for CI, not operators
   doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
@@ -190,7 +195,13 @@ func runCheck(args []string) int {
 	path = policyPathArg(path)
 	handsetsPath := handsetsPathArg(*handsetsFlag)
 
-	p, err := policy.LoadSplitWith(path, handsetsPath, policy.Options{AllowPlaceholders: *allowPlaceholders})
+	// StrictUnknownKeys is set here and nowhere else that loads a policy. An
+	// operator is reading this output and a typo is exactly what they came to
+	// find; the daemon, which cannot afford to refuse a file, only warns.
+	p, err := policy.LoadSplitWith(path, handsetsPath, policy.Options{
+		AllowPlaceholders: *allowPlaceholders,
+		StrictUnknownKeys: true,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ configuration is not valid\n\n%v\n", err)
 		return 1
@@ -215,31 +226,107 @@ func runCheck(args []string) int {
 	fmt.Printf("  allow-listed numbers : %d\n", p.AllowListCount())
 	fmt.Printf("  extensions           : %d\n", p.ExtensionCount())
 	fmt.Printf("  pin length           : %s\n", pinLen)
+	fmt.Printf("  caller id format     : %s\n", withDefault(
+		p.CallerIDFormat(), p.CallerIDFormat() == policy.DefaultCallerIDFormat))
 	fmt.Printf("  house ring group     : %s\n", strings.Join(p.HouseEndpoints(), ", "))
-	if mb := p.HousePlan().Mailbox; mb != "" {
-		fmt.Printf("  house voicemail      : %s\n", mb)
-	}
-	now := time.Now()
-	for _, e := range p.Extensions() {
-		var notes []string
-		if n := len(e.Plan.Steps); n > 1 {
-			notes = append(notes, fmt.Sprintf("%d-stage ladder", n))
-		}
-		if e.Plan.Mailbox != "" {
-			notes = append(notes, "voicemail:"+e.Plan.Mailbox)
-		}
-		if e.Afterhours != nil {
-			state := "afterhours configured"
-			if e.Afterhours.Active(now) {
-				state = "afterhours ACTIVE NOW — this line goes straight to voicemail"
+	fmt.Printf("  house voicemail      : %s\n", orDefault(p.HousePlan().Mailbox, noMailbox))
+
+	// Every extension, every setting — including the ones nobody wrote down.
+	// A default rendered as "(none — ...)" is what catches the mistake the
+	// validator structurally cannot: a key that was silently misspelled reads
+	// here as a feature you configured and did not get.
+	exts := p.Extensions()
+	if len(exts) > 0 {
+		fmt.Println("\n  Extensions, with the defaults they fell back to:")
+		now := time.Now()
+		for _, e := range exts {
+			fmt.Printf("\n  %s\n", e.Label)
+			fmt.Printf("      pin          %s\n", maskedPIN(e.PIN))
+			fmt.Printf("      rings        %s\n", describePlan(e.Plan))
+			fmt.Printf("      voicemail    %s\n", orDefault(e.Plan.Mailbox, noMailbox))
+			fmt.Printf("      afterhours   %s\n", describeAfterhours(e, now))
+			if e.AfterhoursID != "" {
+				fmt.Printf("      during it    %s\n", describeAfterhoursPlan(e))
 			}
-			notes = append(notes, state)
-		}
-		if len(notes) > 0 {
-			fmt.Printf("  %-20s : %s\n", e.Label, strings.Join(notes, ", "))
 		}
 	}
 	return 0
+}
+
+const (
+	noMailbox    = "(none — an unanswered caller is dismissed)"
+	noAfterhours = "(none — this line rings at any hour)"
+)
+
+func orDefault(value, whenEmpty string) string {
+	if value == "" {
+		return whenEmpty
+	}
+	return value
+}
+
+func withDefault(value string, isDefault bool) string {
+	if isDefault {
+		return value + "   (default)"
+	}
+	return value
+}
+
+// maskedPIN shows that a PIN exists and how long it is, never what it is —
+// invariant 1. `doorman rotate` remains the only thing that prints one.
+func maskedPIN(pin string) string {
+	if pin == policy.PlaceholderPIN {
+		return "(placeholder — run `doorman init` to generate a real one)"
+	}
+	return fmt.Sprintf("%s   (%d digits)", strings.Repeat("•", len(pin)), len(pin))
+}
+
+// describePlan spells out each stage and where its duration came from, so a
+// stage running on the configured default is visibly doing that rather than
+// looking like a stage with no timing at all.
+func describePlan(plan policy.RingPlan) string {
+	if len(plan.Steps) == 0 {
+		return "(nothing — this extension rings no handsets)"
+	}
+	stages := make([]string, 0, len(plan.Steps))
+	for _, s := range plan.Steps {
+		where := strings.Join(s.Endpoints, " + ")
+		switch {
+		case s.Timeout > 0:
+			where += fmt.Sprintf(" for %s", s.Timeout)
+		case s.Rings > 0:
+			where += fmt.Sprintf(" for %d rings", s.Rings)
+		default:
+			where += " (default ring time)"
+		}
+		stages = append(stages, where)
+	}
+	return strings.Join(stages, ", then ")
+}
+
+func describeAfterhours(e policy.ResolvedExtension, now time.Time) string {
+	if e.AfterhoursID == "" {
+		return noAfterhours
+	}
+	if e.Afterhours == nil {
+		// The schedule exists but carries enabled = false. Identical to "no
+		// schedule" at call time, and completely different to whoever is
+		// reading the file wondering why quiet hours stopped working.
+		return fmt.Sprintf("%s — switched off (enabled = false), so this line rings at any hour", e.AfterhoursID)
+	}
+	state := ""
+	if e.Afterhours.Active(now) {
+		state = "  ← ACTIVE NOW"
+	}
+	return fmt.Sprintf("%s — %s%s", e.AfterhoursID, e.Afterhours.Describe(), state)
+}
+
+func describeAfterhoursPlan(e policy.ResolvedExtension) string {
+	if len(e.AfterhoursPlan.Steps) == 0 {
+		return "(no afterhours_ring — callers in the window go straight to " +
+			orDefault(e.Plan.Mailbox, "a polite dismissal, there being no mailbox") + ")"
+	}
+	return describePlan(e.AfterhoursPlan)
 }
 
 // ── doorman rotate ───────────────────────────────────────────────────────
@@ -427,7 +514,20 @@ func runService() {
 	}
 	log := slog.New(handler)
 
-	store, err := policy.OpenStore(cfg.PolicyPath, cfg.HandsetsPath, cfg.PolicyWatch,
+	// Unknown keys warn here and refuse in `doorman check`. The daemon must
+	// keep answering the phone (invariant 4), so a key it does not recognise
+	// is something to say loudly and then ignore — which is what the decoder
+	// was already doing, minus the saying. Only names are logged; a key's
+	// value never is.
+	loadOpts := policy.Options{
+		OnUnknownKey: func(u policy.UnknownKey) {
+			log.Warn("unrecognised key in config, ignoring it",
+				"file", u.File, "key", u.Path, "didYouMean", u.Suggest,
+				"hint", "run `doorman check` for the full report")
+		},
+	}
+
+	store, err := policy.OpenStoreWith(cfg.PolicyPath, cfg.HandsetsPath, cfg.PolicyWatch, loadOpts,
 		func(p *policy.Policy) {
 			log.Info("policy reloaded",
 				"allowList", p.AllowListCount(), "extensions", p.ExtensionCount())

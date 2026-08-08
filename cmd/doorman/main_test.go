@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/policy"
@@ -268,5 +269,149 @@ func TestUnknownTemplateIsReported(t *testing.T) {
 		t.Fatal("expected an error for an unknown template id")
 	} else if !strings.Contains(err.Error(), "template list") {
 		t.Errorf("the error should point at `doorman template list`: %v", err)
+	}
+}
+
+// ── `doorman check`: the defaults it applied, made visible ───────────────
+//
+// This is the other half of the unknown-key defect. A misspelled key is
+// invisible in the file but obvious in the output — provided the output says
+// what each setting actually resolved to, rather than staying silent when it
+// resolved to nothing.
+
+func TestCheckShowsWhereADefaultWasApplied(t *testing.T) {
+	if got := orDefault("", noMailbox); got != noMailbox {
+		t.Errorf("orDefault empty = %q, want the explanatory default", got)
+	}
+	if got := orDefault("family", noMailbox); got != "family" {
+		t.Errorf("orDefault set = %q", got)
+	}
+	if got := withDefault(policy.DefaultCallerIDFormat, true); !strings.Contains(got, "(default)") {
+		t.Errorf("withDefault = %q, want it marked", got)
+	}
+	if got := withDefault("Lobby: {name}", false); strings.Contains(got, "(default)") {
+		t.Errorf("withDefault = %q, want a configured value left alone", got)
+	}
+}
+
+// Invariant 1: `doorman rotate` is the only thing that may print a PIN.
+func TestCheckNeverPrintsAPIN(t *testing.T) {
+	const pin = "428917"
+	got := maskedPIN(pin)
+	if strings.Contains(got, pin) {
+		t.Fatalf("maskedPIN leaked the PIN: %q", got)
+	}
+	if !strings.Contains(got, "6 digits") {
+		t.Errorf("maskedPIN = %q, want the length shown", got)
+	}
+	if !strings.Contains(maskedPIN(policy.PlaceholderPIN), "doorman init") {
+		t.Errorf("placeholder should say what to do: %q", maskedPIN(policy.PlaceholderPIN))
+	}
+}
+
+func TestCheckDescribesEveryRingStage(t *testing.T) {
+	pol, err := policy.FromTOML([]byte(`
+[house]
+handsets = ["kitchen"]
+
+[[handsets]]
+id = "kitchen"
+endpoint = "PJSIP/kitchen"
+
+[[handsets]]
+id = "kids-room"
+endpoint = "PJSIP/kids-room"
+
+[[schedules]]
+id = "school-night"
+start = "20:30"
+end = "07:00"
+days = ["SU", "MO"]
+
+[[extensions]]
+pin = "428917"
+label = "Flat"
+handsets = ["kitchen"]
+
+[[extensions]]
+pin = "310244"
+label = "Ladder"
+voicemail = "kids"
+afterhours = "school-night"
+
+  [[extensions.steps]]
+  handsets = ["kids-room"]
+  rings = 3
+
+  [[extensions.steps]]
+  handsets = ["kitchen"]
+  seconds = 24
+`))
+	if err != nil {
+		t.Fatalf("policy: %v", err)
+	}
+
+	for _, e := range pol.Extensions() {
+		switch e.Label {
+		case "Flat":
+			// A stage with no explicit timing runs on the configured default,
+			// and must say so rather than reading as "no timing at all".
+			if got := describePlan(e.Plan); !strings.Contains(got, "default ring time") {
+				t.Errorf("flat plan = %q, want the default named", got)
+			}
+			if got := describeAfterhours(e, time.Now()); got != noAfterhours {
+				t.Errorf("afterhours = %q, want the explanatory default", got)
+			}
+		case "Ladder":
+			got := describePlan(e.Plan)
+			for _, want := range []string{"PJSIP/kids-room", "for 3 rings", "then", "PJSIP/kitchen", "for 24s"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("ladder plan = %q, want it to mention %q", got, want)
+				}
+			}
+			ah := describeAfterhours(e, time.Now())
+			if !strings.Contains(ah, "school-night") || !strings.Contains(ah, "20:30–07:00 SU MO") {
+				t.Errorf("afterhours = %q, want the schedule and its window", ah)
+			}
+			// No afterhours_ring: say where a caller in the window ends up.
+			if got := describeAfterhoursPlan(e); !strings.Contains(got, "kids") {
+				t.Errorf("afterhours plan = %q, want the mailbox named", got)
+			}
+		}
+	}
+}
+
+func TestCheckDistinguishesNoScheduleFromASwitchedOffOne(t *testing.T) {
+	// Identical at call time, entirely different to whoever wrote the file.
+	pol, err := policy.FromTOML([]byte(`
+[house]
+handsets = ["kitchen"]
+
+[[handsets]]
+id = "kitchen"
+endpoint = "PJSIP/kitchen"
+
+[[schedules]]
+id = "school-night"
+enabled = false
+start = "20:30"
+end = "07:00"
+
+[[extensions]]
+pin = "428917"
+label = "Kids"
+handsets = ["kitchen"]
+afterhours = "school-night"
+`))
+	if err != nil {
+		t.Fatalf("policy: %v", err)
+	}
+	e, ok := pol.LookupExtension("428917")
+	if !ok {
+		t.Fatal("extension missing")
+	}
+	got := describeAfterhours(e, time.Now())
+	if !strings.Contains(got, "school-night") || !strings.Contains(got, "switched off") {
+		t.Errorf("afterhours = %q, want the disabled schedule still named", got)
 	}
 }

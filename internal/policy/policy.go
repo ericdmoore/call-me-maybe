@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -143,6 +144,11 @@ const PlaceholderPIN = "CHANGEME"
 // guard that rotation applies.
 const MinPINLength = 4
 
+// DefaultCallerIDFormat is what [house] caller_id_format resolves to when it
+// is not set. Named rather than inline so `doorman check` can say which of
+// the two it is showing.
+const DefaultCallerIDFormat = "{name} <{number}>"
+
 var (
 	handsetIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 	endpointPattern  = regexp.MustCompile(`^[A-Za-z0-9]+/\S+$`)
@@ -207,12 +213,40 @@ func (a *Afterhours) Active(t time.Time) bool {
 	return a.Days[prev] && m < a.EndMin
 }
 
+// Describe renders the window the way an operator wrote it —
+// "20:30–07:00 SU MO TU WE TH", or "20:30–07:00 every day" — for `doorman
+// check`. A nil window has no description; the caller says what that means.
+func (a *Afterhours) Describe() string {
+	if a == nil {
+		return ""
+	}
+	clock := func(m int) string { return fmt.Sprintf("%02d:%02d", m/60, m%60) }
+
+	days := "every day"
+	if a.Days != ([7]bool{true, true, true, true, true, true, true}) {
+		names := make([]string, 0, 7)
+		for _, d := range []string{"SU", "MO", "TU", "WE", "TH", "FR", "SA"} {
+			if a.Days[dayIndex[d]] {
+				names = append(names, d)
+			}
+		}
+		days = strings.Join(names, " ")
+	}
+	return fmt.Sprintf("%s–%s %s", clock(a.StartMin), clock(a.EndMin), days)
+}
+
 // ResolvedExtension is an extension compiled into a runnable plan.
 type ResolvedExtension struct {
 	PIN        string
 	Label      string
 	Plan       RingPlan
 	Afterhours *Afterhours
+	// AfterhoursID is the schedule this extension named, retained for display
+	// only. It is set even when Afterhours is nil, which is how `doorman
+	// check` can tell "no schedule" from "a schedule that is switched off" —
+	// two states that behave identically at call time and mean very different
+	// things to whoever wrote the file.
+	AfterhoursID string
 	// AfterhoursPlan is what rings during the window. Zero steps means the
 	// historical behaviour: straight to voicemail.
 	AfterhoursPlan RingPlan
@@ -249,14 +283,43 @@ type Options struct {
 	// Only `doorman check --allow-placeholders` and CI set this. An operator
 	// never does, which is what makes a freshly copied config fail loudly.
 	AllowPlaceholders bool
+
+	// StrictUnknownKeys makes a key that matched no field a hard error rather
+	// than something to warn about.
+	//
+	// `doorman check` sets it and the daemon does not, and the split is the
+	// whole design. check is a linting tool with an operator reading its
+	// output, and staying quiet about a typo is precisely the defect it
+	// exists to catch. The daemon has the opposite duty: invariant 4 says an
+	// invalid policy must never take the phone down, and a reload that
+	// suddenly started refusing a file which loaded yesterday would mean an
+	// operator's edit silently stops applying after an upgrade — its own kind
+	// of confusion, and a worse one, because nobody is watching. It warns and
+	// carries on.
+	StrictUnknownKeys bool
+
+	// OnUnknownKey, when set, is called once per unrecognised key found,
+	// whether or not StrictUnknownKeys is on. This is how the daemon logs
+	// them. Never pass a key's *value* to it — the callback receives names.
+	OnUnknownKey func(UnknownKey)
+}
+
+// decode is the single TOML entry point for both config files: it fills a
+// File and reports whatever the decoder could not place. Every load path goes
+// through it so that no config is ever parsed without the leftovers being
+// looked at. file is "policy" or "handsets", and prefixes errors the way the
+// rest of this package does.
+func decode(data []byte, file string) (File, []UnknownKey, error) {
+	var f File
+	md, err := toml.Decode(string(data), &f)
+	if err != nil {
+		return File{}, nil, fmt.Errorf("%s: %w", file, err)
+	}
+	return f, unknownKeys(md, file), nil
 }
 
 func FromTOML(data []byte) (*Policy, error) {
-	var f File
-	if _, err := toml.Decode(string(data), &f); err != nil {
-		return nil, fmt.Errorf("policy: %w", err)
-	}
-	return compile(f, Options{})
+	return fromSplitTOML(data, nil, Options{})
 }
 
 // Load reads and compiles a single-file policy (the legacy layout, with
@@ -311,56 +374,89 @@ func SplitLayout(handsetsPath string) bool {
 }
 
 func fromSplitTOML(policyData, handsetsData []byte, o Options) (*Policy, error) {
-	var pf File
-	if _, err := toml.Decode(string(policyData), &pf); err != nil {
-		return nil, fmt.Errorf("policy: %w", err)
-	}
-	if handsetsData == nil {
-		return compile(pf, o)
-	}
-
-	var hf File
-	if _, err := toml.Decode(string(handsetsData), &hf); err != nil {
-		return nil, fmt.Errorf("handsets: %w", err)
-	}
-
-	// Each file owns its sections exclusively; anything in the wrong file is
-	// an error, not a merge — silent precedence is how two sources of truth
-	// drift apart.
-	if len(pf.Handsets) > 0 || len(pf.Groups) > 0 {
-		return nil, fmt.Errorf("policy: handsets/groups belong in handsets.toml now — move them there")
-	}
-	if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 || len(hf.House.Handsets) > 0 {
-		return nil, fmt.Errorf("handsets: extensions/people/schedules/house belong in policy.toml — move them there")
-	}
-
-	pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
-	return compile(pf, o)
-}
-
-// LoadHandsets reads just the inventory — what `doorman render` consumes.
-func LoadHandsets(path string) ([]Handset, []Group, error) {
-	data, err := os.ReadFile(path)
+	pf, unknown, err := decode(policyData, "policy")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	var hf File
-	if _, err := toml.Decode(string(data), &hf); err != nil {
-		return nil, nil, fmt.Errorf("handsets: %w", err)
-	}
-	return hf.Handsets, hf.Groups, nil
-}
 
-func compile(f File, o Options) (*Policy, error) {
-	p, problems := compileChecked(f, o)
+	if handsetsData != nil {
+		hf, hUnknown, err := decode(handsetsData, "handsets")
+		if err != nil {
+			return nil, err
+		}
+		unknown = append(unknown, hUnknown...)
+
+		// Each file owns its sections exclusively; anything in the wrong file
+		// is an error, not a merge — silent precedence is how two sources of
+		// truth drift apart.
+		if len(pf.Handsets) > 0 || len(pf.Groups) > 0 {
+			return nil, fmt.Errorf("policy: handsets/groups belong in handsets.toml now — move them there")
+		}
+		if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 || len(hf.House.Handsets) > 0 {
+			return nil, fmt.Errorf("handsets: extensions/people/schedules/house belong in policy.toml — move them there")
+		}
+
+		pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
+	}
+
+	// Reported before the strictness decision, so the daemon still hears
+	// about every one of them on the way to loading the file anyway.
+	if o.OnUnknownKey != nil {
+		for _, u := range unknown {
+			o.OnUnknownKey(u)
+		}
+	}
+
+	p, problems := compileChecked(pf, o)
+	if o.StrictUnknownKeys && len(unknown) > 0 {
+		// Unknown keys lead: when a key was dropped, much of what the
+		// semantic rules go on to complain about is downstream of that same
+		// typo. One per line, since there may be several and they are the
+		// kind of thing you fix by working down a list.
+		msgs := make([]string, 0, len(unknown)+len(problems))
+		for _, u := range unknown {
+			msgs = append(msgs, u.File+": "+u.String())
+		}
+		for _, problem := range problems {
+			msgs = append(msgs, "policy: "+problem)
+		}
+		return nil, errors.New(strings.Join(msgs, "\n"))
+	}
 	if len(problems) > 0 {
 		return nil, fmt.Errorf("policy: %s", strings.Join(problems, "; "))
 	}
 	return p, nil
 }
 
-// compileChecked is compile with the problems individually addressable —
-// what the LSP consumes to place one diagnostic per issue.
+// LoadHandsets reads just the inventory — what `doorman render` consumes.
+//
+// Unknown keys are refused outright here rather than warned about, unlike the
+// daemon's load path: render's audience is an operator at a terminal who is
+// about to overwrite the Asterisk config, and a dropped `page` or `mailbox`
+// produces a phone that never pages or a lamp that never lights, with nothing
+// at runtime to suggest why. Nothing on the call path calls this.
+func LoadHandsets(path string) ([]Handset, []Group, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	hf, unknown, err := decode(data, "handsets")
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(unknown) > 0 {
+		msgs := make([]string, 0, len(unknown))
+		for _, u := range unknown {
+			msgs = append(msgs, u.File+": "+u.String())
+		}
+		return nil, nil, errors.New(strings.Join(msgs, "\n"))
+	}
+	return hf.Handsets, hf.Groups, nil
+}
+
+// compileChecked validates and compiles with the problems individually
+// addressable — what the LSP consumes to place one diagnostic per issue, and
+// what fromSplitTOML joins into a single error.
 func compileChecked(f File, o Options) (*Policy, []string) {
 	var problems []string
 	fail := func(format string, args ...any) {
@@ -481,7 +577,7 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 
 	format := f.House.CallerIDFormat
 	if format == "" {
-		format = "{name} <{number}>"
+		format = DefaultCallerIDFormat
 	}
 
 	allow := make(map[string]KnownCaller)
@@ -560,9 +656,11 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		}
 
 		var ah *Afterhours
+		var ahID string
 		switch ref := e.Afterhours.(type) {
 		case nil:
 		case string:
+			ahID = ref
 			window, known := schedules[ref]
 			if !known {
 				fail("%s references unknown schedule %q", where, ref)
@@ -623,7 +721,10 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		if !placeholder {
 			lengths[len(e.PIN)] = true
 		}
-		exts[key] = ResolvedExtension{PIN: e.PIN, Label: e.Label, Plan: plan, Afterhours: ah, AfterhoursPlan: ahPlan}
+		exts[key] = ResolvedExtension{
+			PIN: e.PIN, Label: e.Label, Plan: plan,
+			Afterhours: ah, AfterhoursID: ahID, AfterhoursPlan: ahPlan,
+		}
 	}
 
 	if len(problems) > 0 {
@@ -663,16 +764,24 @@ func LintSplit(policyData, handsetsData []byte) []string {
 }
 
 // LintSplitWith is LintSplit with explicit options.
+//
+// Unknown keys are always among the problems here, whatever the options say:
+// everything that lints is an authoring tool — the language server, `doorman
+// init`, `doorman template lint` — and every one of them has a person looking
+// at the result who would rather know. Options.StrictUnknownKeys governs the
+// *load* path, where the daemon's duty to stay up cuts the other way.
 func LintSplitWith(policyData, handsetsData []byte, o Options) []string {
-	var pf File
-	if _, err := toml.Decode(string(policyData), &pf); err != nil {
+	pf, unknown, err := decode(policyData, "policy")
+	if err != nil {
 		return []string{err.Error()}
 	}
 	if handsetsData != nil {
-		var hf File
-		if _, err := toml.Decode(string(handsetsData), &hf); err != nil {
+		hf, hUnknown, err := decode(handsetsData, "handsets")
+		if err != nil {
 			return []string{err.Error()}
 		}
+		unknown = append(unknown, hUnknown...)
+
 		var problems []string
 		if len(pf.Handsets) > 0 || len(pf.Groups) > 0 {
 			problems = append(problems, "handsets/groups belong in handsets.toml now — move them there")
@@ -685,8 +794,13 @@ func LintSplitWith(policyData, handsetsData []byte, o Options) []string {
 		}
 		pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
 	}
-	_, problems := compileChecked(pf, o)
-	return problems
+
+	var problems []string
+	for _, u := range unknown {
+		problems = append(problems, u.String())
+	}
+	_, semantic := compileChecked(pf, o)
+	return append(problems, semantic...)
 }
 
 func compileWindow(where, startStr, endStr string, dayList []string, fail func(string, ...any)) *Afterhours {
@@ -785,6 +899,10 @@ func (p *Policy) Extensions() []ResolvedExtension {
 
 func (p *Policy) AllowListCount() int { return len(p.allow) }
 func (p *Policy) ExtensionCount() int { return len(p.exts) }
+
+// CallerIDFormat is the resolved format string — the configured one, or
+// DefaultCallerIDFormat when [house] left it out. For display.
+func (p *Policy) CallerIDFormat() string { return p.callerIDFormat }
 
 // FormatCallerID renders the caller ID shown on ringing handsets.
 func (p *Policy) FormatCallerID(name, number string) string {
