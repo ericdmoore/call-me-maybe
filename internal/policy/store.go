@@ -21,6 +21,7 @@ type Store struct {
 
 	policyPath   string
 	handsetsPath string
+	opts         Options
 	onReload     func(*Policy)
 	onError      func(error)
 
@@ -33,7 +34,18 @@ type Store struct {
 // recompile, since extensions cross-reference handsets. onReload and onError
 // may be nil.
 func OpenStore(policyPath, handsetsPath string, watch bool, onReload func(*Policy), onError func(error)) (*Store, error) {
-	p, err := LoadSplit(policyPath, handsetsPath)
+	return OpenStoreWith(policyPath, handsetsPath, watch, Options{}, onReload, onError)
+}
+
+// OpenStoreWith is OpenStore with explicit options, which the daemon uses to
+// route unknown-key warnings into its log. The options apply to the initial
+// load and to every reload, so a typo introduced at 2am is reported then and
+// not only at the next restart.
+//
+// Do not set Options.StrictUnknownKeys here: this is the call path invariant
+// 4 protects, and refusing a file that loaded yesterday takes the phone down.
+func OpenStoreWith(policyPath, handsetsPath string, watch bool, o Options, onReload func(*Policy), onError func(error)) (*Store, error) {
+	p, err := LoadSplitWith(policyPath, handsetsPath, o)
 	if err != nil {
 		return nil, err
 	}
@@ -41,6 +53,7 @@ func OpenStore(policyPath, handsetsPath string, watch bool, onReload func(*Polic
 		policy:       p,
 		policyPath:   policyPath,
 		handsetsPath: handsetsPath,
+		opts:         o,
 		onReload:     onReload,
 		onError:      onError,
 		stop:         make(chan struct{}),
@@ -96,7 +109,7 @@ func (s *Store) poll() {
 			}
 			last = now
 
-			next, err := LoadSplit(s.policyPath, s.handsetsPath)
+			next, err := LoadSplitWith(s.policyPath, s.handsetsPath, s.opts)
 			if err != nil {
 				if s.onError != nil {
 					s.onError(err)

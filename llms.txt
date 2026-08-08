@@ -30,6 +30,15 @@ roughly thirty semantic rules the validator applies. Those appear in the
 schema as `x-cross-references` and `x-rules` annotations, but a config is only
 known-good once `doorman check` exits 0.
 
+**Every key must be one the schema names.** `doorman check` rejects a key it
+does not recognise and suggests the nearest real one, so `voicmail` and
+`afterhous` are caught rather than silently ignored — this is the loader
+finally honouring the `additionalProperties: false` the schema always
+declared. The running daemon only warns about the same key, because a policy
+that loaded yesterday must never start taking the phone down. `doorman check`
+also prints every extension's settings including the defaults it applied, so a
+key that was dropped reads as a feature you configured and did not get.
+
 ## Configuration model
 
 Three files, three cadences. Do not merge them; the split is deliberate.

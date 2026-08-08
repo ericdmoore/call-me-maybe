@@ -43,8 +43,23 @@ Validate
 and
 .I handsets.toml
 together and report what they add up to \(em allow\-list size, extension
-count, PIN length, the house ring group, and any afterhours window that is
-active right now. Exits 0 when valid, 1 when not, naming the offending key.
+count, PIN length, the house ring group, and then every extension with each
+of its settings spelled out, including the ones left at their default. A
+setting shown as
+.RB \(lq (none\ \(em\ ...) \(rq
+resolved to nothing, which is how a misspelled optional key becomes visible:
+you configured quiet hours and the output says there are none. PINs are shown
+only as their length, never their value.
+.IP
+A key that matches no field in the schema is an error here, and only here.
+The daemon warns about the same key and carries on, because a policy it
+loaded yesterday must not start taking the phone down today; this command is
+a linting tool with an operator reading its output, where silence about a
+typo is the whole defect. Suggestions are offered \(em
+.B afterhous
+is told about
+.BR afterhours .
+Exits 0 when valid, 1 when not, naming the offending key.
 This is the authority on whether a configuration is usable.
 .TP
 .BI "doorman schema [" name ]

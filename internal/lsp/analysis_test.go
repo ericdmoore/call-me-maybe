@@ -72,6 +72,45 @@ func TestUnknownHandsetIsPlacedOnItsLine(t *testing.T) {
 	}
 }
 
+func TestUnknownKeyIsSquiggledOnTheTypoNotTheCorrectSpelling(t *testing.T) {
+	// policyDoc already contains two correctly spelled `voicemail` keys, which
+	// is the trap: the diagnostic has to land on the misspelling, so only the
+	// offending name may be quoted in the message.
+	broken := strings.Replace(policyDoc, `voicemail = "family"`, `voicmail = "family"`, 1)
+	h := handsetsDoc
+	pDiags, hDiags := Analyse(broken, &h)
+	if len(pDiags) != 1 || len(hDiags) != 0 {
+		t.Fatalf("policy=%v handsets=%v", pDiags, hDiags)
+	}
+	d := pDiags[0]
+	if !strings.Contains(d.Message, `unknown key "voicmail"`) ||
+		!strings.Contains(d.Message, "did you mean voicemail?") {
+		t.Errorf("message = %q", d.Message)
+	}
+
+	wantLine := -1
+	for i, line := range strings.Split(broken, "\n") {
+		if strings.Contains(line, "voicmail") {
+			wantLine = i
+			break
+		}
+	}
+	if d.Range.Start.Line != wantLine {
+		t.Errorf("diagnostic on line %d, want %d (the misspelt key)", d.Range.Start.Line, wantLine)
+	}
+}
+
+func TestUnknownKeyInTheHandsetsDocLandsThere(t *testing.T) {
+	brokenH := strings.Replace(handsetsDoc, "password_env = ", "passwrd_env = ", 1)
+	pDiags, hDiags := Analyse(policyDoc, &brokenH)
+	if len(hDiags) != 1 || len(pDiags) != 0 {
+		t.Fatalf("policy=%v handsets=%v — an inventory typo belongs to the handsets doc", pDiags, hDiags)
+	}
+	if !strings.Contains(hDiags[0].Message, `unknown key "passwrd_env"`) {
+		t.Errorf("message = %q", hDiags[0].Message)
+	}
+}
+
 func TestSyntaxErrorGetsDecoderPosition(t *testing.T) {
 	broken := policyDoc + "\nthis is not toml\n"
 	h := handsetsDoc

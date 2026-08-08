@@ -399,6 +399,14 @@ important one — whether afterhours is **ACTIVE NOW**, which is the first
 thing to look at when "the kids' line goes straight to voicemail" is either
 the bug or the feature.
 
+It prints the settings you *didn't* write too, as `(none — ...)`. That is
+deliberate and it is how you catch a misspelled key: `voicmail = "kids"` is a
+legal TOML key that no field claims, so before it was reported the mailbox
+simply never existed and the file looked fine. Check now rejects a key it
+does not recognise and suggests the nearest real one; if you would rather see
+it than be stopped by it, that is what the daemon's log does — it warns and
+keeps the phone up (see *An invalid policy must never take the phone down*).
+
 ### Home Assistant Assist (optional)
 
 HA's native VoIP integration answers SIP calls and runs them through an
@@ -465,6 +473,11 @@ $ journalctl -u doorman -n 5     # want: "policy reloaded"
 A file that fails validation is rejected and the previous version stays live,
 so a typo cannot take the phone down — but check the log to confirm the reload
 actually happened rather than silently failing.
+
+Also worth a look: `unrecognised key in config, ignoring it`. The daemon warns
+rather than refusing, so an edit that misspelled a key *does* reload — it just
+does not do what you meant. `doorman check` turns the same warning into an
+error and tells you which key it should have been.
 
 ### Add a handset
 
@@ -687,3 +700,4 @@ Not everything here is a matter of discipline. These are checked by machine:
 | Extension PINs meet a minimum length | `policy.MinPINLength`, on load and in `doorman check` |
 | Concurrent calls are capped | admission control in the event router |
 | Config cross-references resolve | `doorman check`, the LSP, and the daemon share one validator |
+| Every config key is one the schema names | `doorman check` and the LSP reject an unknown key; the daemon warns and keeps running |
