@@ -234,6 +234,7 @@ func Policy() *Schema {
 		Description: "The rules. Safe to hand-edit: a file that fails validation is logged and discarded on reload, and the last good policy stays in service. Handset and group ids referenced here must exist in handsets.toml.",
 		Rules: []string{
 			"Reloaded live when POLICY_WATCH is true; an invalid file is rejected, never applied.",
+			"One file per phone number. A box answering several numbers puts each extra line in policy.<line>.toml beside policy.toml, and the dialplan names the line with Stasis(app,line,<name>). Bare policy.toml is the default line and serves every call that names none. The schema is the same for all of them; handsets.toml is shared.",
 			"Extensions are credentials. Treat a PIN like a password and prefer `doorman rotate` over choosing one.",
 			"Allow-listed numbers may be written in any format; they normalise to E.164 at load time. An unparseable number is a load error, not a silent never-match.",
 		},

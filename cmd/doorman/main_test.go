@@ -1,7 +1,10 @@
 package main
 
 import (
+	"errors"
+	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -378,6 +381,139 @@ afterhours = "school-night"
 				t.Errorf("afterhours plan = %q, want the mailbox named", got)
 			}
 		}
+	}
+}
+
+// ── `doorman check`: the lines it found ──────────────────────────────────
+
+// capture runs f with stdout redirected. `doorman check` is output, so its
+// output is what there is to test.
+func capture(t *testing.T, f func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stdout
+	os.Stdout = w
+	done := make(chan string, 1)
+	go func() {
+		var b strings.Builder
+		_, _ = io.Copy(&b, r)
+		done <- b.String()
+	}()
+	f()
+	os.Stdout = saved
+	_ = w.Close()
+	out := <-done
+	_ = r.Close()
+	return out
+}
+
+func TestCheckListsEveryLineAndWhatItResolvesTo(t *testing.T) {
+	results := []checkedLine{
+		{LineFile: policy.LineFile{Name: policy.DefaultLine, Path: "./policy.toml"}},
+		{LineFile: policy.LineFile{Name: "biz", Path: "./policy.biz.toml"}},
+		{LineFile: policy.LineFile{Name: "kids", Path: "./policy.kids.toml"},
+			err: errors.New("policy: toml: line 2")},
+	}
+	out := capture(t, func() { printLineSummary(results) })
+
+	for _, want := range []string{
+		"default", "./policy.toml", "the default line",
+		"biz", "./policy.biz.toml",
+		"kids", "./policy.kids.toml", "will not load",
+		// Whoever reads this has to learn where an unrecognised name goes,
+		// because it is the one behaviour they cannot discover from the files.
+		"Stasis(${DOORMAN_APP},line,<name>)", "default line",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the line summary should mention %q:\n%s", want, out)
+		}
+	}
+}
+
+// Separate namespaces are the design, so this is a note and not an error —
+// but invariant 1 still holds: the labels are named, the digits never are.
+func TestCheckFlagsAPINSharedBetweenLinesWithoutPrintingIt(t *testing.T) {
+	const shared = "428917"
+	pol := func(t *testing.T, label string) *policy.Policy {
+		t.Helper()
+		p, err := policy.FromTOML([]byte(`
+[house]
+handsets = ["kitchen"]
+
+[[handsets]]
+id = "kitchen"
+endpoint = "PJSIP/kitchen"
+
+[[extensions]]
+pin = "` + shared + `"
+label = "` + label + `"
+handsets = ["kitchen"]
+`))
+		if err != nil {
+			t.Fatalf("policy: %v", err)
+		}
+		return p
+	}
+	results := []checkedLine{
+		{LineFile: policy.LineFile{Name: policy.DefaultLine}, pol: pol(t, "Kitchen")},
+		{LineFile: policy.LineFile{Name: "biz"}, pol: pol(t, "Front Desk")},
+	}
+	out := capture(t, func() { printSharedPINs(results) })
+
+	if strings.Contains(out, shared) {
+		t.Fatalf("the shared-PIN note printed the PIN:\n%s", out)
+	}
+	for _, want := range []string{"Kitchen", "Front Desk", "share a PIN"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the note should mention %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestCheckSaysNothingAboutPINsThatDoNotClash(t *testing.T) {
+	one, err := policy.FromTOML([]byte(`
+[house]
+handsets = ["kitchen"]
+
+[[handsets]]
+id = "kitchen"
+endpoint = "PJSIP/kitchen"
+
+[[extensions]]
+pin = "428917"
+label = "Kitchen"
+handsets = ["kitchen"]
+`))
+	if err != nil {
+		t.Fatalf("policy: %v", err)
+	}
+	two, err := policy.FromTOML([]byte(`
+[house]
+handsets = ["kitchen"]
+
+[[handsets]]
+id = "kitchen"
+endpoint = "PJSIP/kitchen"
+
+[[extensions]]
+pin = "310244"
+label = "Front Desk"
+handsets = ["kitchen"]
+`))
+	if err != nil {
+		t.Fatalf("policy: %v", err)
+	}
+	out := capture(t, func() {
+		printSharedPINs([]checkedLine{
+			{LineFile: policy.LineFile{Name: policy.DefaultLine}, pol: one},
+			{LineFile: policy.LineFile{Name: "biz"}, pol: two},
+		})
+	})
+	if out != "" {
+		t.Errorf("distinct PINs should produce no note, got:\n%s", out)
 	}
 }
 

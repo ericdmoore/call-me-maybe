@@ -254,6 +254,7 @@
   "additionalProperties": false,
   "x-rules": [
     "Reloaded live when POLICY_WATCH is true; an invalid file is rejected, never applied.",
+    "One file per phone number. A box answering several numbers puts each extra line in policy.\u003cline\u003e.toml beside policy.toml, and the dialplan names the line with Stasis(app,line,\u003cname\u003e). Bare policy.toml is the default line and serves every call that names none. The schema is the same for all of them; handsets.toml is shared.",
     "Extensions are credentials. Treat a PIN like a password and prefer `doorman rotate` over choosing one.",
     "Allow-listed numbers may be written in any format; they normalise to E.164 at load time. An unparseable number is a load error, not a silent never-match."
   ]
