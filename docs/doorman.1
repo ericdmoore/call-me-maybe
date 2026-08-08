@@ -30,6 +30,21 @@ window, or get whatever
 .B [line] on_no_input
 says \(em by default the bouncer says "Good day" and hangs up.
 .PP
+Outbound, a handset presents the caller ID of the line it belongs to:
+.B [line] outbound_cid
+on the policy file whose
+.B [line] outbound_handsets
+claims it, or on plain
+.I policy.toml
+\(em the primary line \(em for a handset no line claims. Dialling
+.B *4
+answers with a menu of the numbers this box can call as and places one call as
+whichever is chosen. That path refuses emergency numbers outright: E911 is
+registered per DID against a street address, so
+.B 911
+is dialled directly from a handset and always leaves with the trunk's own
+caller ID.
+.PP
 It is also its own operations tool. Every subcommand below runs against the
 same configuration and the same validator the daemon uses, so what
 .B doorman check
@@ -112,7 +127,7 @@ given, or only the named ones. A running daemon picks the change up within a
 second. New PINs are printed to stdout \(em the one place they are ever
 shown \(em and are never written to the logs.
 .TP
-.BI "doorman render [\-handsets " path "] [\-out " dir "] [\-env " path ]
+.BI "doorman render [\-handsets " path "] [\-policy " path "] [\-out " dir "] [\-env " path ]
 Generate the per\-handset Asterisk configuration from
 .IR handsets.toml :
 PJSIP endpoints, internal numbers, BLF hints, and the ring\-all and page\-all
@@ -122,6 +137,21 @@ cannot drift. Handset SIP passwords are read from the environment or
 via each handset's
 .B password_env
 key; the generated file contains real secrets and must be treated as such.
+.IP
+Each endpoint also carries the outbound caller ID that phone presents, read
+from every line's
+.B [line] outbound_cid
+and
+.BR "outbound_handsets" .
+It is generated rather than configured because a handset that picks up and
+dials never reaches
+.BR doorman ,
+which is exactly what keeps outbound calling working when the daemon is not.
+Changing a caller ID therefore takes a re\-render and a
+.BR "pjsip reload" ;
+the
+.B *4
+console picks the same change up on the next policy reload.
 .TP
 .B doorman lsp
 Run a language server over stdio for

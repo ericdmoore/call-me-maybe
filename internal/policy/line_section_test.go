@@ -205,3 +205,112 @@ func TestTheDaemonWarnsAboutALineTypoAndKeepsAnswering(t *testing.T) {
 		t.Error("`doorman check` must refuse the same key the daemon warns about")
 	}
 }
+
+// ── outbound identity ────────────────────────────────────────────────────
+
+// A house with two phones and a group, for the claims below.
+const outboundHouse = `
+[house]
+handsets = ["kitchen", "office"]
+
+[[handsets]]
+id = "kitchen"
+endpoint = "PJSIP/kitchen"
+
+[[handsets]]
+id = "office"
+endpoint = "PJSIP/office"
+
+[[groups]]
+id = "workspaces"
+handsets = ["office", "kitchen"]
+`
+
+func outboundFrom(t *testing.T, section string) LineIdentity {
+	t.Helper()
+	p, err := FromTOML([]byte(section + outboundHouse))
+	if err != nil {
+		t.Fatalf("FromTOML: %v", err)
+	}
+	return p.Line()
+}
+
+func outboundError(t *testing.T, section string) string {
+	t.Helper()
+	if _, err := FromTOML([]byte(section + outboundHouse)); err != nil {
+		return err.Error()
+	}
+	t.Fatalf("expected %q to be refused", section)
+	return ""
+}
+
+// Same treatment as an allow-listed number: written any way you like, stored
+// as E.164. A caller ID nobody can parse is one every customer you ring back
+// saves wrongly, and nothing about the call looks wrong from this end.
+func TestOutboundCIDNormalisesToE164(t *testing.T) {
+	for _, written := range []string{"512-555-0142", "(512) 555-0142", "+15125550142", "15125550142"} {
+		l := outboundFrom(t, "[line]\noutbound_cid = \""+written+"\"\n")
+		if l.OutboundCID != "+15125550142" {
+			t.Errorf("%q compiled to %q, want +15125550142", written, l.OutboundCID)
+		}
+	}
+}
+
+func TestOutboundCIDMustBeANumber(t *testing.T) {
+	msg := outboundError(t, "[line]\noutbound_cid = \"the business line\"\n")
+	if !strings.Contains(msg, "outbound_cid") {
+		t.Errorf("error should name the key: %s", msg)
+	}
+}
+
+// The compatibility gate for this half of the section: no outbound keys means
+// the trunk decides, which is what every outbound call did before they
+// existed.
+func TestNoOutboundKeysMeansTheTrunkDecides(t *testing.T) {
+	l := outboundFrom(t, "")
+	if l.OutboundCID != "" || len(l.OutboundHandsets) != 0 {
+		t.Errorf("outbound identity = %+v, want it empty", l)
+	}
+}
+
+// Claims resolve against handsets.toml exactly as ring targets do, groups
+// included — the same cross-file check, the same error when it is wrong.
+func TestOutboundHandsetsResolveHandsetsAndGroups(t *testing.T) {
+	l := outboundFrom(t, "[line]\noutbound_cid = \"+15125550142\"\noutbound_handsets = [\"office\"]\n")
+	if len(l.OutboundHandsets) != 1 || l.OutboundHandsets[0] != "office" {
+		t.Errorf("claims = %v, want [office]", l.OutboundHandsets)
+	}
+
+	l = outboundFrom(t, "[line]\noutbound_cid = \"+15125550142\"\noutbound_handsets = [\"workspaces\"]\n")
+	// Sorted, so `doorman check` and the generated config read the same way
+	// twice running.
+	if len(l.OutboundHandsets) != 2 || l.OutboundHandsets[0] != "kitchen" || l.OutboundHandsets[1] != "office" {
+		t.Errorf("claims = %v, want the group expanded and sorted", l.OutboundHandsets)
+	}
+}
+
+func TestOutboundHandsetsMustExist(t *testing.T) {
+	msg := outboundError(t,
+		"[line]\noutbound_cid = \"+15125550142\"\noutbound_handsets = [\"shed\"]\n")
+	if !strings.Contains(msg, "shed") {
+		t.Errorf("error should name the missing handset: %s", msg)
+	}
+}
+
+// Claiming phones without saying what they present is config that reads like a
+// feature and does nothing: an unclaimed handset already presents the primary
+// line, and so would these.
+func TestOutboundHandsetsWithoutACallerIDIsRefused(t *testing.T) {
+	msg := outboundError(t, "[line]\noutbound_handsets = [\"office\"]\n")
+	if !strings.Contains(msg, "outbound_cid") {
+		t.Errorf("error should say what is missing: %s", msg)
+	}
+}
+
+func TestOutboundHandsetsRefusesADuplicate(t *testing.T) {
+	msg := outboundError(t,
+		"[line]\noutbound_cid = \"+15125550142\"\noutbound_handsets = [\"office\", \"workspaces\"]\n")
+	if !strings.Contains(msg, "office") {
+		t.Errorf("error should name the handset claimed twice: %s", msg)
+	}
+}

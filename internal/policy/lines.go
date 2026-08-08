@@ -3,6 +3,7 @@ package policy
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -48,7 +49,23 @@ type Line struct {
 	Number    string `toml:"number"`
 	Prompts   string `toml:"prompts"`
 	OnNoInput string `toml:"on_no_input"`
+	// OutboundCID is what a callee sees when this line places a call.
+	OutboundCID string `toml:"outbound_cid"`
+	// OutboundHandsets are the phones that call as this line without being
+	// asked. The claim is written here, in the line's own file, rather than as
+	// a `line = "biz"` key on each handset: handsets.toml is one shared
+	// hardware inventory and cannot say something that is only true of one
+	// line, and a claim written here disappears when the line's file is
+	// deleted. It also makes "two lines claim the same phone" a question
+	// `doorman check` can answer, because it is the only thing that reads
+	// every line at once.
+	OutboundHandsets []string `toml:"outbound_handsets"`
 }
+
+// empty reports a [line] section nobody wrote. Not `l == Line{}`: the slice
+// field makes Line uncomparable, and the loader needs this to reject a [line]
+// section that turned up in handsets.toml.
+func (l Line) empty() bool { return reflect.DeepEqual(l, Line{}) }
 
 // NoInput is what happens to a caller who reaches the end of the dial window
 // having entered nothing at all. It is the disposition knob: a curt doorman
@@ -85,6 +102,15 @@ type LineIdentity struct {
 	Prompts string
 	// OnNoInput is never empty once compiled; unset resolves to NoInputDismiss.
 	OnNoInput NoInput
+	// OutboundCID is the caller ID a call placed as this line presents,
+	// normalised to E.164. Empty means whatever the trunk defaults to, which
+	// is what every call did before this key existed.
+	OutboundCID string
+	// OutboundHandsets are the handset ids that call as this line by default,
+	// with groups already expanded and sorted. Ids rather than endpoints:
+	// `doorman render` writes one set_var per handset id, and `doorman check`
+	// names them.
+	OutboundHandsets []string
 }
 
 // promptPrefix is what an Asterisk media prefix may look like: path segments
@@ -97,8 +123,9 @@ var promptPrefix = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*(/[A-Za-z0-9][A
 // compileLine validates and compiles the [line] section. houseMailbox is
 // [house] voicemail: on_no_input = "voicemail" has nowhere to send a caller
 // without one, which is the same rule afterhours already applies per
-// extension, for the same reason.
-func compileLine(l Line, houseMailbox string, fail func(string, ...any)) LineIdentity {
+// extension, for the same reason. handsetIDs resolves a mixed list of handset
+// and group ids to handset ids, reporting the ones that do not exist.
+func compileLine(l Line, houseMailbox string, handsetIDs func(where string, ids []string) []string, fail func(string, ...any)) LineIdentity {
 	out := LineIdentity{Label: l.Label, Prompts: l.Prompts, OnNoInput: NoInputDismiss}
 
 	if l.Number != "" {
@@ -131,6 +158,39 @@ func compileLine(l Line, houseMailbox string, fail func(string, ...any)) LineIde
 	if out.OnNoInput == NoInputVoicemail && houseMailbox == "" {
 		fail("[line] on_no_input = %q but [house] has no voicemail — "+
 			"a caller who says nothing needs a mailbox to land in", NoInputVoicemail)
+	}
+
+	if l.OutboundCID != "" {
+		// Same treatment as number and as an allow-listed caller. A caller ID
+		// nobody can parse is one every customer you ring back saves wrongly,
+		// and the failure is invisible from this end — the phone works, the
+		// call connects, and the number on the other handset is not yours.
+		n := NormaliseCallerID(l.OutboundCID, "1")
+		if n.Kind != KindE164 {
+			fail("[line] outbound_cid %q is not a valid phone number", l.OutboundCID)
+		} else {
+			out.OutboundCID = n.Value
+		}
+	}
+
+	if len(l.OutboundHandsets) > 0 {
+		if l.OutboundCID == "" {
+			// Claiming phones without saying what they should present is a
+			// config that reads like a feature and is a no-op: an unclaimed
+			// handset already presents the primary line, and so would these.
+			fail("[line] outbound_handsets needs outbound_cid — without one these " +
+				"handsets present the trunk default, which is what they do already")
+		}
+		seen := make(map[string]bool, len(l.OutboundHandsets))
+		for _, id := range handsetIDs("[line] outbound_handsets", l.OutboundHandsets) {
+			if seen[id] {
+				fail("[line] outbound_handsets names handset %q twice", id)
+				continue
+			}
+			seen[id] = true
+			out.OutboundHandsets = append(out.OutboundHandsets, id)
+		}
+		sort.Strings(out.OutboundHandsets)
 	}
 	return out
 }

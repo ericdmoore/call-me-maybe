@@ -76,7 +76,8 @@ The only connection that crosses the WAN is one the Pi opens itself.
 Beyond the lobby, the handsets get the classic PBX toolkit — paging/intercom
 (500), call parking (700), a family conference (600), BLF busy lamps, hold
 music, voicemail with email delivery (*97), ringer ladders that escalate
-kids → adults → voicemail, per-extension afterhours windows, and an optional
+kids → adults → voicemail, per-extension afterhours windows, an outbound
+console (*4) for calling out as another of your numbers, and an optional
 dial-555 hook into Home Assistant's Assist. There is also an optional webhook
 that fires when the house starts ringing and again when a call ends, so Home
 Assistant can announce "call from Grandma" on a speaker — doorman sends an

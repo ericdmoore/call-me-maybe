@@ -9,13 +9,13 @@ a JSON Schema cannot express. Machine-readable schema:
     https://callmemaybe.cc/schema/env.json
 
 **Everything below describes what the binary accepts today.** The project's
-planning docs discuss features that do not exist yet — outbound caller ID
-selection, per-person ring overrides, house-wide quiet hours.
+planning docs discuss features that do not exist yet — several trunks,
+per-person ring overrides, house-wide quiet hours.
 
 **Do not emit configuration for any of them.** `doorman check` now rejects a
 key it does not recognise, and suggests the nearest real one:
 
-    policy: unknown key "outbound_cid" in [line]
+    policy: unknown key "trunk" in [line]
     policy: unknown key "afterhous" in [[extensions]] — did you mean afterhours?
 
 So an invented key is a loud failure rather than a silent one. There is a list
@@ -67,6 +67,8 @@ If someone has one number, write one `policy.toml` and do not mention lines.
     number      = "+15125550142"           # the DID; any format, stored E.164
     prompts     = "concierge"              # prompt pack, overrides PROMPT_MEDIA_PREFIX
     on_no_input = "voicemail"              # dismiss | ring-house | voicemail
+    outbound_cid      = "+15125550142"     # what a call placed as this line shows
+    outbound_handsets = ["office"]         # phones that call as it without asking
 
     [house]
     handsets = ["kitchen", "office"]   # ids from handsets.toml, or a group id
@@ -122,7 +124,16 @@ If someone has one number, write one `policy.toml` and do not mention lines.
    the house whatever it says, because they were admitted the moment their
    number matched.
 10. `[line] number` is identity, not routing. Nothing matches against it — the
-    dialplan already said which line a call arrived on.
+    dialplan already said which line a call arrived on. `outbound_cid` is the
+    one that appears on somebody else's phone.
+11. `outbound_handsets` requires `outbound_cid` on the same line, and every id
+    must exist in handsets.toml. A handset may be claimed by one line only.
+12. **A handset no line claims presents `policy.toml`'s `outbound_cid`** — the
+    primary line, which is also the route 911 leaves by. One rule, two jobs, so
+    "which line am I on when I have not said" has a single answer.
+13. `outbound_cid` never appears on a 911 call. E911 is registered per DID
+    against a street address, so emergency calls leave with the trunk's own
+    caller ID and the `*4` console refuses to dial them at all.
 
 ## `on_no_input` — the difference between a doorman and a concierge
 
@@ -256,11 +267,16 @@ greeting, and either dials Sales or Support or says nothing and lands in the
 bundled pack uses. Omit the key and the line speaks with the house voice,
 which is a perfectly good business line. See `docs/PACKS.md`.
 
-**Be honest about what is still missing.** Outbound calls from the office
-handset present the trunk's default caller ID, not this line's `number` —
-per-line outbound identity is not built yet. If the person's requirement is
-"customers I ring back see the business number", say so plainly rather than
-writing config that implies otherwise.
+`outbound_cid` and `outbound_handsets` are what make the office phone ring
+customers back *as* the business. Everything not claimed here keeps presenting
+`policy.toml`'s `outbound_cid`, so adding a business line cannot change what
+the kitchen phone shows. Two things to say out loud when writing this:
+
+- The caller ID reaches the plain dial path through `doorman render`, so tell
+  them to re-render and reload PJSIP. Editing the file alone changes what `*4`
+  offers and nothing else.
+- Emergency calls are not affected and must not be made to be. 911 leaves with
+  the trunk's own caller ID whatever any line says.
 
 ## Common mistakes
 
@@ -270,6 +286,11 @@ writing config that implies otherwise.
 - `on_no_input` on an `[[extensions]]` entry. It is a `[line]` key — the
   disposition belongs to the number, not to one extension on it.
 - `on_no_input = "voicemail"` with no `[house] voicemail`.
+- `outbound_handsets` with no `outbound_cid` on the same line.
+- A handset in `outbound_handsets` on two different lines. A phone presents one
+  number; `doorman check` refuses it.
+- Putting `outbound_handsets` in handsets.toml. It is a `[line]` key — the
+  inventory is shared by every line and cannot say something true of one.
 - Setting both `handsets` and `steps` on one extension.
 - Naming a handset that does not exist, or a schedule id that does not exist.
 - Reusing a PIN across two extensions.
@@ -284,9 +305,12 @@ writing config that implies otherwise.
 These appear in the project's planning documents. They are not implemented, and
 `doorman check` rejects them by name:
 
-- `outbound_cid` on `[line]`, outbound caller-ID selection, or dial prefixes.
-  Outbound calls present the trunk default whatever line the policy came from.
-- `trunk` on `[line]`, or a `trunks.toml`. One provider, one registration.
+- A dial prefix that selects a line for one call (`*3` then the number). The
+  console is `*4` and it asks; there is no prefix and there is not going to be
+  one. Per-line outbound caller ID itself IS available — `outbound_cid` and
+  `outbound_handsets`, above.
+- `trunk` on `[line]`, or a `trunks.toml`. One provider, one registration —
+  which is also why `outbound_cid` is not validated against a trunk yet.
 - `ring` on `[[people]]` (per-person routing overrides).
 - `[house.afterhours]` — afterhours exists per-extension only.
 - `[[schedules]]` at line scope. A schedule is referenced from an extension.

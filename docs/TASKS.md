@@ -324,18 +324,44 @@ on_no_input = "voicemail"   # dismiss | ring-house | voicemail
 
 ### 7c. Outbound identity — **do not ship 7a without this**
 
-The outbound dialplan sets **no caller ID at all** today
-(`Dial(PJSIP/1${EXTEN}@voipms,60)`), so every outbound call presents the trunk
+The outbound dialplan set **no caller ID at all**
+(`Dial(PJSIP/1${EXTEN}@voipms,60)`), so every outbound call presented the trunk
 default. Invisible with one number; across several lines every customer you
 ring back saves the wrong one.
 
-- [ ] `[line] outbound_cid`.
-- [ ] A dial prefix selects the line for one call (`*3` + number).
-- [ ] Per-handset default line, for the common case of not prefixing.
-- [ ] The prefix cannot be confused with an extension or a feature code, and
-      `doorman check` catches a collision.
+**Done.** `[line] outbound_cid` + `outbound_handsets`; `cmd/doorman/outbound.go`
+resolves them; `internal/lobby/console.go` is `*4`.
 
-**Files:** `asterisk/extensions.conf`, `internal/policy`, `internal/render`.
+- [x] `[line] outbound_cid`, normalised to E.164 and validated at check time.
+- [x] Per-handset default line, for the common case. Written as
+      `[line] outbound_handsets` in the *line's* file rather than as a key on
+      each handset: `handsets.toml` is one shared inventory and cannot hold
+      something true of only one line, deleting the file removes the claim, and
+      "two lines claim the same phone" becomes a question `doorman check` can
+      answer. It reaches the phone through `doorman render` as a `set_var` on
+      the endpoint, because the plain dial path never touches doorman.
+- [x] **A handset no line claims presents the primary line** — plain
+      `policy.toml`, the same file 911 leaves by. One rule, two jobs.
+- [x] `*4`, the outbound console: menu, confirmation, then a variable-length
+      `#`-terminated number. A sibling of `Session` in `internal/lobby`, not a
+      mode of it — everything `Session` is built around is inbound. It sets the
+      caller ID and releases the handset into `[outbound-console]` rather than
+      originating and bridging, so the trunk dial string stays in the dialplan
+      and both outbound paths dial through the same lines.
+- [x] **`*4` refuses emergency numbers**, and `[outbound-console]` contains no
+      emergency pattern for a bug to reach. `_911` in `[internal]` is untouched
+      and sets no caller ID.
+- [x] The plain `_NXXNXXXXXX` path keeps working with doorman down.
+- [x] **Rejected: a dial prefix** (`*3` + number). It needs `*1`–`*9` reserved
+      forever, fights `*97` and every future feature code, and with five
+      ventures nobody remembers which digit is which. A menu that says the
+      numbers out loud beats a mapping you have to memorise.
+      See `.plans/s01-multiple-DIDs/readme.md`.
+- [ ] Outbound calls in the call log. Deferred to 7d with the rest of per-line
+      observability: it wants a direction on the record, not just a line.
+
+**Files:** `asterisk/extensions.conf`, `internal/policy`, `internal/render`,
+`internal/lobby`, `cmd/doorman`.
 
 ### 7d. Per-line observability
 

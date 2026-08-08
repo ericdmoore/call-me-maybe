@@ -258,6 +258,7 @@ func line() *Schema {
 		Rules: []string{
 			"An allow-listed caller is never dismissed by on_no_input: they reach the house whatever it says.",
 			"Nothing routes on number. The dialplan already named the line — this is identity, for `doorman check` and for the handset display.",
+			"outbound_cid and outbound_handsets are the outbound half. A handset no line claims presents policy.toml's outbound_cid — the primary line, which is also 911's route, so there is one answer to \"which line am I on when I have not said\".",
 		},
 		Properties: map[string]*Schema{
 			"label": {
@@ -277,6 +278,34 @@ func line() *Schema {
 				Description: "Prompt pack for this line, overriding PROMPT_MEDIA_PREFIX. An Asterisk media prefix under " +
 					"/var/lib/asterisk/sounds/, not a filesystem path. Two lines with different packs are the same engine with different voices.",
 				CrossRefs: []string{"/var/lib/asterisk/sounds/<prefix>/", "PROMPT_MEDIA_PREFIX in the environment"},
+			},
+			"outbound_cid": {
+				Type: "string",
+				Description: "What a call placed as this line presents to the person being called. Any format; normalised to E.164 at load. " +
+					"Absent means whatever the trunk sends, which is what every outbound call did before this key existed. " +
+					"It reaches a call two ways: `doorman render` writes it into the generated PJSIP config for the handsets this line claims, " +
+					"and the *4 console sets it per call for a line chosen at the keypad.",
+				Rules: []string{
+					"An unparseable number fails the load rather than being kept as written.",
+					"policy.toml's value is the house default: any handset no line claims presents it.",
+					"Changing it takes effect on the *4 console at the next reload, and on the plain dialplan path at the next `doorman render`.",
+					"911 never presents it. Emergency calls leave with the trunk's own caller ID, because E911 is registered per DID against a street address.",
+				},
+				CrossRefs: []string{"asterisk/extensions.conf [internal] OUTBOUND_CID", "the DID this line answers, at your provider"},
+			},
+			"outbound_handsets": {
+				Type:     "array",
+				MinItems: one,
+				Items:    &Schema{Type: "string"},
+				Description: "Handsets that call as this line without being asked: pick one of these up, dial a number, and the callee sees this line's outbound_cid. " +
+					"The claim is written here rather than in handsets.toml because that file is one shared inventory and cannot hold something true of only one line.",
+				CrossRefs: []string{"handsets.toml [[handsets]].id", "handsets.toml [[groups]].id"},
+				Rules: []string{
+					"Requires outbound_cid — without one these handsets would present the trunk default, which is what they do already.",
+					"A handset may be claimed by one line only. `doorman check` and `doorman render` refuse a handset claimed twice; the daemon warns and the primary line wins.",
+					"A handset no line claims presents policy.toml's outbound_cid.",
+					"Takes effect at the next `doorman render` — a phone that just picks up and dials never reaches doorman, which is why outbound calling survives doorman being down.",
+				},
 			},
 			"on_no_input": {
 				Type:    "string",

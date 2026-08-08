@@ -34,6 +34,32 @@
 # patient enough to say nothing reaches the house, so the allow-list becomes a
 # shortcut past the lobby rather than a gate — a real choice, worth making
 # deliberately. Somebody on the allow-list is never dismissed by this setting.
+#
+# ── Outbound identity ────────────────────────────────────────
+# What the person you ring back sees. Leave it out and outbound calls present
+# whatever the trunk sends, which is what they have always done.
+#
+# outbound_cid      = "+15125550142"  # what a call placed as this line shows
+# outbound_handsets = ["office"]      # phones that call as it without asking
+#
+# This file — plain policy.toml, with no line name in it — is the PRIMARY
+# line, and its outbound_cid is the house default: any handset no line claims
+# presents it. That is the same file 911 leaves by, deliberately, so there is
+# one answer to "which line am I on when I have not said" rather than two that
+# can disagree.
+#
+# Dial *4 from any handset to choose a different line for one call. It reads
+# the numbers out, takes the one you want, and places the call — and it
+# refuses 911, because an emergency call has to leave by the trunk whose
+# street address is registered. Dial 911 directly; that path is untouched.
+#
+# outbound_handsets is written HERE rather than in handsets.toml because that
+# file is one shared inventory and cannot say something true of only one line.
+# Two lines claiming the same phone is an error `doorman check` reports.
+#
+# Changing outbound_cid reaches *4 on the next reload and the plain dial path
+# on the next `doorman render` — it is baked into the generated PJSIP config,
+# because a handset that just picks up and dials never reaches doorman at all.
 
 # What rings when a known caller is welcomed.
 [house]
