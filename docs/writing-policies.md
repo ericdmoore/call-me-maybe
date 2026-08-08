@@ -38,6 +38,79 @@ never rings.
 
 ---
 
+## `[line]` — what this number is, and how it treats a stranger
+
+Optional, and every key in it is optional. **A file with no `[line]` section
+behaves exactly as it did before the section existed**, so nothing here is
+something you have to learn to keep a working phone working.
+
+```toml
+[line]
+label       = "Mertaugh Enterprises"
+number      = "+15125550142"
+prompts     = "concierge"
+on_no_input = "voicemail"
+```
+
+| Key | Type | Meaning |
+|---|---|---|
+| `label` | string | Human name for this number. Shown by `doorman check`, and displayed on the ringing handset when a caller reaches the house without dialling an extension — so whoever picks up knows which line to answer as. |
+| `number` | string | The DID this line answers, in any format; normalised to E.164 at load. **Identity, not routing** — the dialplan already said which line a call arrived on, so nothing matches against this. |
+| `prompts` | string | Prompt pack for this line, overriding `PROMPT_MEDIA_PREFIX`. An Asterisk media prefix under `/var/lib/asterisk/sounds/`, not a filesystem path. |
+| `on_no_input` | enum | What a caller who dials nothing gets: `dismiss` (default), `voicemail`, or `ring-house`. |
+
+This is the section that makes one number a curt doorman and another a
+courteous concierge on the same binary. On a box answering several numbers it
+goes in each `policy.<line>.toml`; see "Add a second number" in the runbook.
+
+### `on_no_input`
+
+```
+dismiss      (default)  the parting prompt, then a hangup — today's behaviour
+voicemail               they land in the [house] mailbox: never drop a lead
+ring-house              the house rings for a caller who dialled nothing
+```
+
+`voicemail` requires `[house] voicemail`, for the same reason `afterhours`
+requires one: a caller you send to a mailbox needs a mailbox to land in.
+`doorman check` refuses the combination rather than discovering it mid-call.
+
+**`ring-house` is worth pausing over.** It means anybody patient enough to say
+nothing reaches the house, so on that line the allow-list is a shortcut past
+the lobby rather than a gate in front of it. That is exactly what some
+households want — a home line where a caller who is confused by the menu still
+gets a human — and it should be a decision rather than a surprise. `doorman
+check` prints the consequence next to the setting.
+
+Two things it deliberately does **not** do:
+
+- **It is not a rate-limit bypass.** A caller who has burned their failure
+  budget is dismissed before the lobby opens, so the disposition never gets a
+  say.
+- **It does not apply to exhausted PIN attempts.** Someone guessing wrong
+  until their attempts run out is still dismissed. The key governs an empty
+  dial window, which is what its name says.
+
+### Known callers and the dial window
+
+Someone on the allow-list hears the welcome prompt and rings the house, and
+that has not changed — including the timing. What is new is that **the
+greeting is now a dial window**: press a digit over it and you land in the
+extension collector, so Grandma can reach the kids' room directly instead of
+ringing every phone in the house.
+
+Press nothing and the house rings the instant the prompt ends, with nothing
+added. The greeting is the whole window and there is no tail of silence after
+it, because a pause on a phone call is indistinguishable from a dead line and
+every known caller would pay for it to serve the rare one who dials.
+
+**Nothing at the keypad can cost an allow-listed caller the house.** Dial
+nothing, dial half an extension and stop, or get it wrong until the attempts
+run out — every one of those ends with the house ringing. They were admitted
+the moment their number matched; `on_no_input` does not apply to them.
+
+---
+
 ## `[house]` — what a known caller gets
 
 ```toml

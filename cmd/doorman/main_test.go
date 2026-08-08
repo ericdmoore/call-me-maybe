@@ -433,6 +433,113 @@ func TestCheckListsEveryLineAndWhatItResolvesTo(t *testing.T) {
 	}
 }
 
+// ── `doorman check`: the [line] section ──────────────────────────────────
+
+// The disposition is the one policy value whose default is invisible in the
+// file and audible on the phone, so `check` says what it resolved to whether
+// or not anybody wrote it down. Same reasoning as every other "(none — …)"
+// here: a silently misspelled key reads as a feature you configured and did
+// not get.
+func TestCheckAlwaysSaysWhatASilentCallerGets(t *testing.T) {
+	unset := describeNoInput(policy.LineIdentity{OnNoInput: policy.NoInputDismiss}, "")
+	if !strings.Contains(unset, "(default)") || !strings.Contains(unset, "dismiss") {
+		t.Errorf("unset disposition = %q, want it marked as the default", unset)
+	}
+
+	vm := describeNoInput(policy.LineIdentity{OnNoInput: policy.NoInputVoicemail}, "family")
+	if !strings.Contains(vm, "family") {
+		t.Errorf("voicemail disposition = %q, want the mailbox named", vm)
+	}
+
+	// ring-house makes the allow-list a shortcut rather than a gate. Nobody
+	// should discover that from a phone call.
+	rh := describeNoInput(policy.LineIdentity{OnNoInput: policy.NoInputRingHouse}, "")
+	if !strings.Contains(rh, "allow-list") {
+		t.Errorf("ring-house disposition = %q, want the consequence spelled out", rh)
+	}
+}
+
+func TestCheckDescribesTheLineIdentity(t *testing.T) {
+	pol, err := policy.FromTOML([]byte(`
+[line]
+label       = "Mertaugh Enterprises"
+number      = "512-555-0142"
+prompts     = "concierge"
+on_no_input = "voicemail"
+
+[house]
+handsets = ["kitchen"]
+voicemail = "main"
+
+[[handsets]]
+id = "kitchen"
+endpoint = "PJSIP/kitchen"
+`))
+	if err != nil {
+		t.Fatalf("policy: %v", err)
+	}
+
+	out := capture(t, func() { describeLine("./policy.biz.toml", pol, false) })
+	for _, want := range []string{
+		"Mertaugh Enterprises", "+15125550142", "concierge", "voicemail", "main",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the description should mention %q:\n%s", want, out)
+		}
+	}
+
+	// And a file that says none of it still says so, rather than going quiet.
+	bare, err := policy.FromTOML([]byte(`
+[house]
+handsets = ["kitchen"]
+
+[[handsets]]
+id = "kitchen"
+endpoint = "PJSIP/kitchen"
+`))
+	if err != nil {
+		t.Fatalf("policy: %v", err)
+	}
+	out = capture(t, func() { describeLine("./policy.toml", bare, false) })
+	for _, want := range []string{noLineLabel, noLineNumber, noLinePrompts} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the description should carry %q:\n%s", want, out)
+		}
+	}
+}
+
+// On a box answering several numbers, "which of these is the business one" is
+// the question the summary exists to answer — and a filename only answers it
+// if whoever named the file was careful.
+func TestTheLineSummaryCarriesTheIdentity(t *testing.T) {
+	pol, err := policy.FromTOML([]byte(`
+[line]
+label  = "Mertaugh Enterprises"
+number = "+15125550142"
+
+[house]
+handsets = ["kitchen"]
+
+[[handsets]]
+id = "kitchen"
+endpoint = "PJSIP/kitchen"
+`))
+	if err != nil {
+		t.Fatalf("policy: %v", err)
+	}
+	out := capture(t, func() {
+		printLineSummary([]checkedLine{
+			{LineFile: policy.LineFile{Name: policy.DefaultLine, Path: "./policy.toml"}},
+			{LineFile: policy.LineFile{Name: "biz", Path: "./policy.biz.toml"}, pol: pol},
+		})
+	})
+	for _, want := range []string{"Mertaugh Enterprises", "+15125550142"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the summary should mention %q:\n%s", want, out)
+		}
+	}
+}
+
 // Separate namespaces are the design, so this is a note and not an error —
 // but invariant 1 still holds: the labels are named, the digits never are.
 func TestCheckFlagsAPINSharedBetweenLinesWithoutPrintingIt(t *testing.T) {

@@ -74,11 +74,27 @@ func openLines(files []policy.LineFile, handsetsPath string, watch bool, log *sl
 		opened = append(opened, openLine{lf.Name, store, lineLog})
 
 		pol := store.Current()
+		// onNoInput is on the startup line because it is the one policy value
+		// whose default is invisible in the file and audible on the phone: a
+		// line that was meant to take messages and silently dismisses instead
+		// looks exactly like a line nobody has called yet. The prompt pack is
+		// here for the same reason — a missing pack degrades to silence.
 		lineLog.Info("policy loaded", "path", lf.Path,
 			"allowList", pol.AllowListCount(), "extensions", pol.ExtensionCount(),
-			"pinLength", pol.PinLength)
+			"pinLength", pol.PinLength, "onNoInput", pol.Line().OnNoInput,
+			"prompts", orEnvPrompts(pol.Line().Prompts))
 	}
 	return opened, nil
+}
+
+// orEnvPrompts names the pack a line actually speaks from. An empty [line]
+// prompts is not "no pack" — it is PROMPT_MEDIA_PREFIX — and a log line saying
+// "" would read as the former.
+func orEnvPrompts(prefix string) string {
+	if prefix == "" {
+		return "(PROMPT_MEDIA_PREFIX)"
+	}
+	return prefix
 }
 
 // lineSet is the whole of multi-line routing: a map from the name the dialplan

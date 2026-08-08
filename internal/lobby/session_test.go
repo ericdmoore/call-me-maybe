@@ -50,6 +50,14 @@ func start(t *testing.T, callerNumber string, limiter *RateLimiter) *harness {
 }
 
 func startWith(t *testing.T, policySrc, callerNumber string, limiter *RateLimiter) *harness {
+	return startTuned(t, policySrc, callerNumber, limiter, nil)
+}
+
+// startTuned is startWith with the clock adjustable. Only latency assertions
+// need it: pinning "the house rings with no dial window in front of it" means
+// making the dial window long enough that waiting one out would be obvious,
+// which is the opposite of what the rest of the suite wants.
+func startTuned(t *testing.T, policySrc, callerNumber string, limiter *RateLimiter, tune func(*Config)) *harness {
 	t.Helper()
 	pol, err := policy.FromTOML([]byte(policySrc))
 	if err != nil {
@@ -68,23 +76,27 @@ func startWith(t *testing.T, policySrc, callerNumber string, limiter *RateLimite
 		// window in the fixtures.
 		now: time.Date(2026, 7, 8, 14, 0, 0, 0, time.Local),
 	}
+	cfg := Config{
+		DefaultCountryCode: "1",
+		ExtensionLength:    6,
+		FirstDigitTimeout:  80 * time.Millisecond,
+		InterDigitTimeout:  40 * time.Millisecond,
+		RingTimeout:        150 * time.Millisecond,
+		RingCycle:          40 * time.Millisecond,
+		MaxPinAttempts:     2,
+	}
+	if tune != nil {
+		tune(&cfg)
+	}
 	h.sess = NewSession("ch-caller-1", callerNumber, Deps{
-		ARI:     h.fake,
-		Policy:  func() *policy.Policy { return pol },
-		Limiter: limiter,
-		Prompts: NewPrompts("call-me-maybe"),
-		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Calls:   h.rec,
-		Notify:  h.hook,
-		Cfg: Config{
-			DefaultCountryCode: "1",
-			ExtensionLength:    6,
-			FirstDigitTimeout:  80 * time.Millisecond,
-			InterDigitTimeout:  40 * time.Millisecond,
-			RingTimeout:        150 * time.Millisecond,
-			RingCycle:          40 * time.Millisecond,
-			MaxPinAttempts:     2,
-		},
+		ARI:          h.fake,
+		Policy:       func() *policy.Policy { return pol },
+		Limiter:      limiter,
+		Prompts:      NewPrompts("call-me-maybe"),
+		Log:          slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Calls:        h.rec,
+		Notify:       h.hook,
+		Cfg:          cfg,
 		Now:          func() time.Time { return h.now },
 		OnLegCreated: func(legID string, _ *Session) { h.legs <- legID },
 		OnFinished:   func(*Session) { close(h.finished) },

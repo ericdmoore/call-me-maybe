@@ -115,7 +115,9 @@ sequenceDiagram
         end
         alt Valid 6-digit extension
             D->>H: ring that handset/group
-        else Timeout, or PIN attempts exhausted
+        else Timeout — whatever [line] on_no_input says
+            D->>C: ▶ "Good day." / take a message / ring the house
+        else PIN attempts exhausted
             D->>C: ▶ "Good day."
             D->>A: hangup
         end
@@ -131,22 +133,38 @@ stateDiagram-v2
     starting --> greeting_lobby: unknown
     starting --> dismissing: rate limited
 
-    greeting_known --> ringing
+    greeting_known --> ringing: greeting ends
+    greeting_known --> collecting: caller barges in
 
     greeting_lobby --> collecting: greeting ends
     greeting_lobby --> collecting: caller barges in
 
     collecting --> ringing: valid PIN
     collecting --> collecting: wrong PIN, attempts left
-    collecting --> dismissing: 10s silence
+    collecting --> ringing: silence, known caller
+    collecting --> ringing: silence, on_no_input = ring-house
+    collecting --> voicemail: silence, on_no_input = voicemail
+    collecting --> dismissing: silence, on_no_input = dismiss
+    collecting --> ringing: attempts exhausted, known caller
     collecting --> dismissing: attempts exhausted
 
     ringing --> bridged: handset answers
+    ringing --> voicemail: nobody home, mailbox configured
     ringing --> dismissing: nobody home
 
     bridged --> [*]: hangup
+    voicemail --> [*]: released to the dialplan
     dismissing --> [*]: "Good day"
 ```
+
+Two edges are worth reading twice. **The known-caller greeting is a dial
+window** — press a digit over it to reach one room rather than the whole
+house — and pressing nothing rings the house the moment it ends, with no
+silence added. And **nothing at the keypad can cost an allow-listed caller
+the house**: every one of their exits from `collecting` rings it.
+
+Which of the three `silence` edges applies is `[line] on_no_input`, and it
+defaults to `dismiss` — what the lobby has always done.
 
 ---
 

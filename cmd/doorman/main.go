@@ -293,6 +293,15 @@ func printLineSummary(results []checkedLine) {
 		if r.Name == policy.DefaultLine {
 			suffix = "   (the default line)"
 		}
+		// The [line] identity, when there is one: on a box answering several
+		// numbers, "which of these is the business one" is the question this
+		// block exists to answer, and a filename only answers it if whoever
+		// named the file was careful.
+		if r.pol != nil {
+			if ident := strings.TrimSpace(r.pol.Line().Label + "  " + r.pol.Line().Number); ident != "" {
+				suffix += "   " + ident
+			}
+		}
 		fmt.Printf("  %-*s  %-28s %s%s\n", width, r.Name, r.Path, state, suffix)
 	}
 	fmt.Println()
@@ -351,6 +360,11 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 		fmt.Println("        call until `doorman init` replaces them.")
 		fmt.Println()
 	}
+	line := p.Line()
+	fmt.Printf("  line label           : %s\n", orDefault(line.Label, noLineLabel))
+	fmt.Printf("  line number          : %s\n", orDefault(line.Number, noLineNumber))
+	fmt.Printf("  prompt pack          : %s\n", orDefault(line.Prompts, noLinePrompts))
+	fmt.Printf("  no-input disposition : %s\n", describeNoInput(line, p.HousePlan().Mailbox))
 	fmt.Printf("  allow-listed numbers : %d\n", p.AllowListCount())
 	fmt.Printf("  extensions           : %d\n", p.ExtensionCount())
 	fmt.Printf("  pin length           : %s\n", pinLen)
@@ -381,9 +395,35 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 }
 
 const (
-	noMailbox    = "(none — an unanswered caller is dismissed)"
-	noAfterhours = "(none — this line rings at any hour)"
+	noMailbox     = "(none — an unanswered caller is dismissed)"
+	noAfterhours  = "(none — this line rings at any hour)"
+	noLineLabel   = "(none — set [line] label to give this number a name)"
+	noLineNumber  = "(none — set [line] number to write down which DID this is)"
+	noLinePrompts = "(none — PROMPT_MEDIA_PREFIX from the environment)"
 )
+
+// describeNoInput spells out what a caller who dials nothing gets, and says so
+// even when nobody configured it — the default here is the whole difference
+// between a doorman and a concierge, and it is exactly the kind of thing an
+// operator assumes they changed.
+//
+// ring-house earns a warning of its own. It is a legitimate choice and a
+// deliberate one, but it means the allow-list stops being the thing that
+// decides who reaches the house, and nobody should discover that from a phone
+// call.
+func describeNoInput(line policy.LineIdentity, houseMailbox string) string {
+	switch line.OnNoInput {
+	case policy.NoInputVoicemail:
+		return fmt.Sprintf("%s — they land in the %q mailbox", line.OnNoInput, houseMailbox)
+	case policy.NoInputRingHouse:
+		return fmt.Sprintf("%s — the house rings for a caller who dialled nothing.\n"+
+			"                         Anyone patient enough to say nothing gets through, so on this\n"+
+			"                         line the allow-list is a shortcut past the lobby, not a gate.",
+			line.OnNoInput)
+	default:
+		return fmt.Sprintf("%s   (default) — the parting prompt, then a hangup", policy.NoInputDismiss)
+	}
+}
 
 func orDefault(value, whenEmpty string) string {
 	if value == "" {

@@ -9,13 +9,13 @@ a JSON Schema cannot express. Machine-readable schema:
     https://callmemaybe.cc/schema/env.json
 
 **Everything below describes what the binary accepts today.** The project's
-planning docs discuss features that do not exist yet — multiple lines, per-line
-prompts, outbound caller ID selection, per-person ring overrides.
+planning docs discuss features that do not exist yet — outbound caller ID
+selection, per-person ring overrides, house-wide quiet hours.
 
 **Do not emit configuration for any of them.** `doorman check` now rejects a
 key it does not recognise, and suggests the nearest real one:
 
-    policy: unknown key "on_no_input" in [[extensions]]
+    policy: unknown key "outbound_cid" in [line]
     policy: unknown key "afterhous" in [[extensions]] — did you mean afterhours?
 
 So an invented key is a loud failure rather than a silent one. There is a list
@@ -38,7 +38,7 @@ in hand, which beats this file if they ever disagree.
 The loader **rejects** a section that appears in the wrong file rather than
 merging it. This is the most common mistake.
 
-    policy.toml     [house], [[people]], [[extensions]], [[schedules]]
+    policy.toml     [line], [house], [[people]], [[extensions]], [[schedules]]
     handsets.toml   [[handsets]], [[groups]]        — hardware inventory
     .env            secrets and tuning              — timeouts, lengths, keys
 
@@ -46,7 +46,27 @@ Handset *ids* are defined in handsets.toml and referenced by name from
 policy.toml. A reference to a handset that does not exist fails validation at
 load time.
 
+## One policy file per phone number
+
+A box answering several numbers has one policy file per number:
+`policy.<line>.toml` beside `policy.toml`, the same schema for all of them.
+The dialplan names the line — `Stasis(${DOORMAN_APP},line,biz)` — and bare
+`policy.toml` is the **default line**, which is what every call gets on an
+install with one number.
+
+Each file is its own failure domain: a broken `policy.biz.toml` cannot stop
+the house phone ringing. `handsets.toml` is shared; allow-lists, extensions,
+PINs, schedules and rate-limit budgets are per line.
+
+If someone has one number, write one `policy.toml` and do not mention lines.
+
 ## The complete surface
+
+    [line]                             # optional; identity + disposition
+    label       = "Mertaugh Enterprises"   # human name for this number
+    number      = "+15125550142"           # the DID; any format, stored E.164
+    prompts     = "concierge"              # prompt pack, overrides PROMPT_MEDIA_PREFIX
+    on_no_input = "voicemail"              # dismiss | ring-house | voicemail
 
     [house]
     handsets = ["kitchen", "office"]   # ids from handsets.toml, or a group id
@@ -94,6 +114,35 @@ load time.
    not get the change you wanted — check the logs, or run `doorman check`.
 6. Allow-listed numbers may be written any way; they normalise to E.164. An
    unparseable number is a validation error, not a silent skip.
+7. `on_no_input = "voicemail"` needs `[house] voicemail`. A caller you send to
+   a mailbox has to have one to land in — same rule as `afterhours`.
+8. `on_no_input` governs an **empty** dial window only. A caller who dials a
+   wrong extension until their attempts run out is still dismissed.
+9. **An allow-listed caller is never dismissed by `on_no_input`.** They reach
+   the house whatever it says, because they were admitted the moment their
+   number matched.
+10. `[line] number` is identity, not routing. Nothing matches against it — the
+    dialplan already said which line a call arrived on.
+
+## `on_no_input` — the difference between a doorman and a concierge
+
+This is the one setting that changes what an unknown caller experiences, so
+choose it with the person rather than for them.
+
+    dismiss      (default)  the parting prompt, then a hangup. What the lobby
+                            has always done, and right for a home line
+    voicemail               they land in the [house] mailbox. What a business
+                            line wants: never drop a lead
+    ring-house              the house ring group rings for a caller who dialled
+                            nothing at all
+
+**Say this out loud before writing `ring-house`:** it means anybody patient
+enough to say nothing reaches the house, so on that line the allow-list is a
+shortcut past the lobby rather than a gate in front of it. That is a real
+choice some households want and nobody should discover it from a phone call.
+
+A silent caller is never rate-limited for it. The limiter counts wrong PINs,
+and saying nothing is not a guess.
 
 ## PIN rules
 
@@ -155,12 +204,18 @@ needs `739104`, which rings the kids' room for 20 seconds, then escalates to
 the kitchen and main bedroom, then goes to the kids' mailbox. On school nights
 it skips straight to voicemail.
 
-## A worked business-ish line
+## A worked business line
 
-There is no separate "business mode" today. What you can do is choose a
-permissive shape: put the working handset in `[house]`, allow-list known
-clients so they never meet the lobby, and give each concern an extension whose
-ladder ends in a mailbox rather than a dismissal.
+This goes in `policy.biz.toml` beside the home line's `policy.toml`, with the
+dialplan sending the business DID to `Stasis(${DOORMAN_APP},line,biz)`. Same
+binary, opposite disposition: the home line dismisses a stranger who dials
+nothing, this one takes a message.
+
+    [line]
+    label       = "Mertaugh Enterprises"
+    number      = "+15125550142"
+    prompts     = "concierge"
+    on_no_input = "voicemail"
 
     [house]
     handsets = ["office"]
@@ -192,15 +247,29 @@ ladder ends in a mailbox rather than a dismissal.
     end = "17:00"
     days = ["MO","TU","WE","TH","FR"]
 
-**Be honest with the person about the limit here.** An unknown caller who dials
-nothing still hears the dismissal prompt and is hung up on. There is currently
-no way to make the lobby fall through to a mailbox for callers who do not dial
-an extension. If they need "never drop a lead", say so plainly rather than
+Acme rings the office directly. Anyone else hears the concierge pack's
+greeting, and either dials Sales or Support or says nothing and lands in the
+`main` mailbox — no lead is dropped.
+
+`prompts = "concierge"` needs the pack to actually be installed at
+`/var/lib/asterisk/sounds/concierge/`, with the same six clip names the
+bundled pack uses. Omit the key and the line speaks with the house voice,
+which is a perfectly good business line. See `docs/PACKS.md`.
+
+**Be honest about what is still missing.** Outbound calls from the office
+handset present the trunk's default caller ID, not this line's `number` —
+per-line outbound identity is not built yet. If the person's requirement is
+"customers I ring back see the business number", say so plainly rather than
 writing config that implies otherwise.
 
 ## Common mistakes
 
 - Putting `[[handsets]]` in policy.toml. It belongs in handsets.toml.
+- Putting `[line]` in handsets.toml. That file is shared by every line, so a
+  line identity in it cannot be true; the loader refuses it.
+- `on_no_input` on an `[[extensions]]` entry. It is a `[line]` key — the
+  disposition belongs to the number, not to one extension on it.
+- `on_no_input = "voicemail"` with no `[house] voicemail`.
 - Setting both `handsets` and `steps` on one extension.
 - Naming a handset that does not exist, or a schedule id that does not exist.
 - Reusing a PIN across two extensions.
@@ -215,12 +284,12 @@ writing config that implies otherwise.
 These appear in the project's planning documents. They are not implemented, and
 `doorman check` rejects them by name:
 
-- `[line]` sections, multiple policy files, or any per-line configuration.
-  There is one policy and one number today.
-- `outbound_cid`, outbound caller-ID selection, or dial prefixes.
+- `outbound_cid` on `[line]`, outbound caller-ID selection, or dial prefixes.
+  Outbound calls present the trunk default whatever line the policy came from.
+- `trunk` on `[line]`, or a `trunks.toml`. One provider, one registration.
 - `ring` on `[[people]]` (per-person routing overrides).
-- `on_no_input` or any lobby disposition setting.
 - `[house.afterhours]` — afterhours exists per-extension only.
+- `[[schedules]]` at line scope. A schedule is referenced from an extension.
 - Conference rooms, DND, queues, IVR menus, SMS.
 
 If someone asks for one of these, say it is planned rather than writing config
