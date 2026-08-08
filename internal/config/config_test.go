@@ -94,3 +94,60 @@ func TestCallerIDRedactionDefaultsOn(t *testing.T) {
 		t.Error("an explicit false should still turn redaction off")
 	}
 }
+
+// Absent config means the feature is off. This is the property that keeps a
+// household that never asked for a webhook from ever making one.
+func TestTheWebhookIsOffWithoutAURL(t *testing.T) {
+	withEnv(t, nil)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if c.WebhookURL != "" {
+		t.Errorf("WebhookURL = %q with nothing configured", c.WebhookURL)
+	}
+	// And the payload defaults to redacted, unlike the call log: this one goes
+	// to another program over the network rather than a 0600 file on the box.
+	if !c.WebhookRedactCallerID {
+		t.Error("WEBHOOK_REDACT_CALLER_ID must default to redacting")
+	}
+	if c.WebhookTimeout <= 0 {
+		t.Errorf("WebhookTimeout = %v; a webhook with no bound can hold a shutdown open", c.WebhookTimeout)
+	}
+}
+
+func TestMalformedWebhookURLIsRefused(t *testing.T) {
+	for _, url := range []string{"ws://ha.local/hook", "ha.local/hook", "://nope", "http://"} {
+		withEnv(t, map[string]string{"WEBHOOK_URL": url})
+		if _, err := Load(); err == nil {
+			t.Errorf("%q was accepted as a webhook URL", url)
+		} else if strings.Contains(err.Error(), url) && url != "" {
+			// The URL is a credential — a Home Assistant webhook id is the
+			// whole secret — and this text reaches journald under systemd.
+			t.Errorf("the rejection echoed the URL back: %v", err)
+		}
+	}
+}
+
+func TestAWebhookURLIsAcceptedAndNotLoopbackChecked(t *testing.T) {
+	// Unlike ARI, the webhook legitimately points at another machine: Home
+	// Assistant is rarely on the Pi.
+	withEnv(t, map[string]string{
+		"WEBHOOK_URL":              "http://homeassistant.local:8123/api/webhook/abc",
+		"WEBHOOK_TIMEOUT_MS":       "1500",
+		"WEBHOOK_REDACT_CALLER_ID": "false",
+	})
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if c.WebhookURL == "" {
+		t.Error("the URL did not survive the load")
+	}
+	if c.WebhookTimeout.Milliseconds() != 1500 {
+		t.Errorf("timeout = %v, want 1.5s", c.WebhookTimeout)
+	}
+	if c.WebhookRedactCallerID {
+		t.Error("an explicit false should still turn redaction off")
+	}
+}

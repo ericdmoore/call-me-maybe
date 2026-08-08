@@ -61,6 +61,19 @@ type Config struct {
 	// CallLogMaxBytes caps the live file before it rotates. One previous
 	// generation is kept.
 	CallLogMaxBytes int64
+
+	// WebhookURL enables the event webhook. Empty — the default — means no
+	// webhook at all. Treat the value as a secret: a Home Assistant webhook
+	// id is the whole credential, which is why doorman logs only its host.
+	WebhookURL string
+	// WebhookToken, when set, is sent as `Authorization: Bearer`.
+	WebhookToken string
+	// WebhookTimeout bounds one delivery attempt.
+	WebhookTimeout time.Duration
+	// WebhookRedactCallerID narrows the caller ID in the payload. On by
+	// default, unlike the call log: the destination is another program on the
+	// network rather than a 0600 file on the box.
+	WebhookRedactCallerID bool
 }
 
 var truthy = regexp.MustCompile(`^(?i)(1|true|yes|on)$`)
@@ -138,6 +151,11 @@ func Load() (Config, error) {
 
 		CallLogPath:     str("CALL_LOG_PATH", ""),
 		CallLogMaxBytes: int64(integer("CALL_LOG_MAX_BYTES", 32<<20)),
+
+		WebhookURL:            str("WEBHOOK_URL", ""),
+		WebhookToken:          str("WEBHOOK_TOKEN", ""),
+		WebhookTimeout:        ms("WEBHOOK_TIMEOUT_MS", 3_000),
+		WebhookRedactCallerID: boolean("WEBHOOK_REDACT_CALLER_ID", true),
 	}
 
 	switch strings.ToLower(str("LOG_LEVEL", "info")) {
@@ -163,7 +181,7 @@ func Load() (Config, error) {
 	// because the invariant itself allows one case: "if doorman ever moves
 	// off-box, it goes over the tailnet, never the LAN."
 	c.AllowRemoteARI = boolean("ARI_ALLOW_REMOTE", false)
-	if host, err := ariHost(c.ARIBaseURL); err != nil {
+	if host, err := httpHost(c.ARIBaseURL); err != nil {
 		issues = append(issues, fmt.Sprintf("  ARI_BASE_URL: %v", err))
 	} else if !isLoopback(host) && !c.AllowRemoteARI {
 		issues = append(issues, fmt.Sprintf(
@@ -176,6 +194,16 @@ func Load() (Config, error) {
 	if c.LogFormat != "json" && c.LogFormat != "pretty" {
 		issues = append(issues, "  LOG_FORMAT: must be json or pretty")
 	}
+	// A typo here must fail at startup, where an operator is looking, rather
+	// than as a warn line after the first call nobody heard announced. The
+	// message is deliberately terse and never repeats the value: a Home
+	// Assistant webhook id is the whole credential, and under systemd this
+	// text goes to journald.
+	if c.WebhookURL != "" {
+		if _, err := httpHost(c.WebhookURL); err != nil {
+			issues = append(issues, "  WEBHOOK_URL: must be an http or https URL with a host")
+		}
+	}
 
 	if len(issues) > 0 {
 		return Config{}, fmt.Errorf("invalid environment configuration:\n%s\n\nSee examples/.env.example", strings.Join(issues, "\n"))
@@ -183,8 +211,9 @@ func Load() (Config, error) {
 	return c, nil
 }
 
-// ariHost extracts the hostname from an ARI base URL.
-func ariHost(raw string) (string, error) {
+// httpHost extracts the hostname from an http(s) URL, rejecting anything that
+// is not one. Shared by ARI_BASE_URL and WEBHOOK_URL.
+func httpHost(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", fmt.Errorf("not a valid URL: %w", err)

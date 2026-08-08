@@ -12,16 +12,22 @@ a JSON Schema cannot express. Machine-readable schema:
 planning docs discuss features that do not exist yet — multiple lines, per-line
 prompts, outbound caller ID selection, per-person ring overrides.
 
-**Do not emit configuration for any of them, and understand why it matters: an
-unknown key is silently ignored, not rejected.** A policy containing
-`on_no_input = "voicemail"` passes `doorman check` with a clean bill of health
-and then does nothing. The person you are helping will believe the feature is
-on. That is a worse outcome than an error, and it is entirely avoidable — there
-is a list of what is *not* available at the end of this file. Read it before
-you invent a key.
+**Do not emit configuration for any of them.** `doorman check` now rejects a
+key it does not recognise, and suggests the nearest real one:
 
-The same trap catches typos. `handets = ["kitchen"]` validates and rings
-nobody. If a config is not behaving, misspelling is the first thing to check.
+    policy: unknown key "on_no_input" in [[extensions]]
+    policy: unknown key "afterhous" in [[extensions]] — did you mean afterhours?
+
+So an invented key is a loud failure rather than a silent one. There is a list
+of what is *not* available at the end of this file; read it before inventing a
+key, and the person you are helping gets working configuration instead of an
+error to debug.
+
+One asymmetry worth knowing: **the running daemon warns rather than refuses.**
+A reload that started rejecting a file which loaded yesterday would mean an
+operator's edit silently stops applying after an upgrade, so the daemon logs
+the unknown key and carries on with everything it did understand. `check` is
+the strict one, because a human is reading its output. Always run it.
 
 Authoritative check, always: `doorman check` validates a real config and prints
 what it resolves to. `doorman schema policy` prints the schema from the binary
@@ -199,16 +205,15 @@ writing config that implies otherwise.
 - Naming a handset that does not exist, or a schedule id that does not exist.
 - Reusing a PIN across two extensions.
 - Choosing a memorable-but-refused PIN (`123456`, `111111`, `121212`).
-- **A misspelled key.** It is ignored silently — `voicmail`, `handets`,
-  `afterhous` all validate and all do nothing.
+- **A misspelled key.** `doorman check` catches these now and suggests the
+  right one, but only if it is actually run — the daemon merely warns.
 - Assuming a change applied. Hot reload keeps the last good policy on failure —
   always confirm with `doorman check`.
 
 ## Not available yet — do not emit these
 
 These appear in the project's planning documents. They are not implemented, and
-because unknown keys are ignored rather than rejected, emitting one produces a
-config that validates and silently misbehaves:
+`doorman check` rejects them by name:
 
 - `[line]` sections, multiple policy files, or any per-line configuration.
   There is one policy and one number today.

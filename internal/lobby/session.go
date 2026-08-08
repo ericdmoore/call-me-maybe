@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"callmemaybe/internal/calls"
+	"callmemaybe/internal/notify"
 	"callmemaybe/internal/policy"
 )
 
@@ -69,6 +70,18 @@ type Config struct {
 // test that can see what it recorded.
 type Recorder interface{ Post(calls.Record) }
 
+// A Notifier is the event webhook sink.
+//
+// Two interfaces rather than one with two implementations, because the two
+// sinks are not the same shape and forcing them together would cost something
+// real. A Recorder is posted to exactly once, from the single teardown path —
+// that is what makes "one record per call" true, and a Recorder that also
+// fired at ring time would break it. A Notifier fires at both ends, because a
+// notification is only useful while the phone is still ringing. They also
+// carry different payloads: a record is a full history for an operator, an
+// event is a small statement of fact for another program.
+type Notifier interface{ Post(notify.Event) }
+
 type Deps struct {
 	ARI     ARI
 	Policy  func() *policy.Policy
@@ -80,6 +93,9 @@ type Deps struct {
 	// log entirely, which is why every use is behind a nil check rather
 	// than a config flag.
 	Calls Recorder
+	// Notify receives call events for the house to react to. Nil disables
+	// the webhook, same as Calls — absent config means the feature is off.
+	Notify Notifier
 
 	// OnLegCreated lets the event router map an originated leg's channel ID
 	// back to this session.
@@ -252,6 +268,20 @@ func (s *Session) now() time.Time {
 		return s.deps.Now()
 	}
 	return time.Now()
+}
+
+// notify hands one event to the webhook. It is a projection of the call
+// record rather than a payload assembled here, so the webhook cannot carry
+// anything the record could not — which is what keeps entered digits out of
+// it structurally instead of by memory.
+//
+// Post never blocks and this is the only thing that touches the network on
+// the call path, so a dead Home Assistant is invisible to the caller.
+func (s *Session) notify(kind string) {
+	if s.deps.Notify == nil {
+		return
+	}
+	s.deps.Notify.Post(notify.FromRecord(kind, s.now(), s.rec))
 }
 
 func (s *Session) callerNumberForDisplay() string {
@@ -479,6 +509,16 @@ func (s *Session) runPlan(plan policy.RingPlan, label string) {
 	// Inject ringback so the caller does not sit in silence. It spans the
 	// whole ladder — escalation is invisible to the caller.
 	_ = s.deps.ARI.Ring(s.ctx, s.ChannelID)
+
+	// The house is ringing now, which is the moment an announcement is worth
+	// anything: "call from Grandma" while somebody can still reach a handset
+	// beats the same sentence after it stopped. Fired here rather than at
+	// StasisStart because this is the single point both routes through — a
+	// welcomed known caller and a stranger who dialled a valid extension —
+	// and by now the record carries the name or the label that makes the
+	// event useful. A caller who is dismissed rings nothing and gets no
+	// ringing event, which is the truth.
+	s.notify(notify.EventRinging)
 
 	callerID := s.pol.FormatCallerID(label, s.callerNumberForDisplay())
 
@@ -711,17 +751,20 @@ func (s *Session) cleanup() {
 		_ = s.deps.ARI.Hangup(ctx, s.ChannelID)
 	}
 
-	// Posted from the single teardown path, so there is exactly one record
-	// per call however the call ended — including the caller hanging up,
-	// which reaches here by cancellation and no other route.
+	// Both sinks are fed from the single teardown path, so there is exactly
+	// one record and one completed event per call however the call ended —
+	// including the caller hanging up, which reaches here by cancellation and
+	// no other route.
 	//
 	// Before OnFinished, not after: OnFinished is what tells the rest of the
 	// system this session is done, so anything sequenced behind it would be
-	// racing a caller who is already gone.
+	// racing a caller who is already gone. Neither Post blocks, so this costs
+	// the teardown nothing.
+	s.rec.MS = s.now().Sub(s.startedAt).Milliseconds()
 	if s.deps.Calls != nil {
-		s.rec.MS = s.now().Sub(s.startedAt).Milliseconds()
 		s.deps.Calls.Post(s.rec)
 	}
+	s.notify(notify.EventCompleted)
 
 	s.deps.OnFinished(s)
 	s.log.Info("session finished")

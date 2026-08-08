@@ -182,19 +182,51 @@ overriding `[house]` for that caller.
 
 ---
 
-## 6. Home Assistant notification
+## 6. Home Assistant notification — DONE
 
-**Why:** cheap, and makes the system feel present in the house.
+Landed as `internal/notify`: doorman POSTs one JSON object when the house
+starts ringing and one when a call ends. This is the single integration point
+that makes everything downstream — Sonos, Cast, MQTT, Alexa via HA — work
+without doorman knowing any of them exist. See
+`.plans/s06-speaker-page-targets` for why that indirection is deliberate.
 
-Fire a webhook on known-caller arrival so HA can announce over speakers or
-flash a light.
+- [x] Fire-and-forget: `Post` hands off to a buffered channel drained by one
+      goroutine, exactly as `internal/calls` does. A full buffer drops and
+      counts. Proven by `TestPostNeverBlocks`.
+- [x] Failures logged at `warn` and counted (`Failed()`); the call is
+      unaffected. A dead endpoint is also bounded at shutdown rather than
+      holding the process open for buffer-depth × timeout.
+- [x] Off by default. `WEBHOOK_URL` unset means the sink is nil and no code
+      runs; a URL that cannot work is fatal at startup, where an operator sees
+      it, rather than a warn line after the first call nobody heard announced.
 
-- [ ] Fire-and-forget with a short timeout. **A slow webhook must never delay
-      the greeting** — dispatch it without awaiting on the call path.
-- [ ] Failures are logged at `warn` and never affect the call.
-- [ ] Off by default; URL from config.
+**Two events, not one.** `ringing` fires from `runPlan` the moment handsets
+start ringing — for a welcomed known caller *and* for a stranger who dialled a
+valid extension — because "call from Grandma" is worth announcing while
+somebody can still reach a handset and worth nothing afterwards. `completed`
+fires from the deferred `cleanup`, the single teardown path, so there is
+exactly one per call however it ended. A caller who is dismissed rings nothing
+and gets no `ringing` event.
 
-**Files:** new `internal/notify/`, `internal/lobby/session.go`.
+**What it never carries.** No `media_player` entities, speaker names, or
+routing: the payload is an event and HA decides who hears it. No entered
+digits or PINs — structurally, because `notify.FromRecord` is the only
+constructor and a `calls.Record` has no field one could occupy. Caller IDs are
+**redacted by default**, the opposite of the call log and deliberately so: the
+call log is a 0600 file that stays on the box, this is handed to another
+program over the network. `WEBHOOK_REDACT_CALLER_ID=false` opts in.
+
+**Keys:** `WEBHOOK_URL`, `WEBHOOK_TOKEN`, `WEBHOOK_TIMEOUT_MS`,
+`WEBHOOK_REDACT_CALLER_ID`. The URL is a credential — an HA webhook id is the
+whole secret — so doorman logs only its host, and `TestTheURLNeverReachesTheLog`
+guards the `net/url` error path that would otherwise leak it.
+
+**Files:** `internal/notify/`, `internal/lobby/session.go`,
+`internal/config/config.go`, `internal/schema/schema.go`,
+`cmd/doorman/main.go`, `docs/RUNBOOK.md` §6b.
+
+**Remaining, and it belongs to s06 M3 rather than here:** worked HA automations
+for Sonos and Cast in the runbook, including the ducking difference.
 
 ---
 
