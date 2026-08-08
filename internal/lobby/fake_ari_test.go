@@ -14,6 +14,15 @@ import (
 type fakeARI struct {
 	calls  chan fakeCall
 	legSeq atomic.Int64
+
+	// failPlay makes every playback fail to start, which is what a missing
+	// sound file looks like from here. The documented behaviour is silence and
+	// a call that carries on, so it is worth being able to provoke.
+	failPlay atomic.Bool
+	// failContinue makes the release into the dialplan fail, which is the one
+	// error a caller cannot be left in: the channel is neither ours nor the
+	// dialplan's until somebody decides.
+	failContinue atomic.Bool
 }
 
 type fakeCall struct {
@@ -33,6 +42,9 @@ func (f *fakeARI) AppName() string { return "doorman" }
 
 func (f *fakeARI) Play(_ context.Context, channelID, media, playbackID string) error {
 	f.record("Play", channelID, media, playbackID)
+	if f.failPlay.Load() {
+		return fmt.Errorf("no such sound: %s", media)
+	}
 	return nil
 }
 
@@ -69,6 +81,9 @@ func (f *fakeARI) SetChannelVar(_ context.Context, channelID, name, value string
 
 func (f *fakeARI) ContinueToDialplan(_ context.Context, channelID, dpContext, extension string, priority int) error {
 	f.record("Continue", channelID, dpContext, extension)
+	if f.failContinue.Load() {
+		return fmt.Errorf("no such context: %s", dpContext)
+	}
 	return nil
 }
 

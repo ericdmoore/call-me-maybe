@@ -46,10 +46,12 @@ something you have to learn to keep a working phone working.
 
 ```toml
 [line]
-label       = "Mertaugh Enterprises"
-number      = "+15125550142"
-prompts     = "concierge"
-on_no_input = "voicemail"
+label             = "Mertaugh Enterprises"
+number            = "+15125550142"
+prompts           = "concierge"
+on_no_input       = "voicemail"
+outbound_cid      = "+15125550142"
+outbound_handsets = ["office"]
 ```
 
 | Key | Type | Meaning |
@@ -58,6 +60,8 @@ on_no_input = "voicemail"
 | `number` | string | The DID this line answers, in any format; normalised to E.164 at load. **Identity, not routing** — the dialplan already said which line a call arrived on, so nothing matches against this. |
 | `prompts` | string | Prompt pack for this line, overriding `PROMPT_MEDIA_PREFIX`. An Asterisk media prefix under `/var/lib/asterisk/sounds/`, not a filesystem path. |
 | `on_no_input` | enum | What a caller who dials nothing gets: `dismiss` (default), `voicemail`, or `ring-house`. |
+| `outbound_cid` | string | What a call *placed as this line* shows the person being rung. Any format; normalised to E.164. Absent means whatever the trunk sends. |
+| `outbound_handsets` | list | Handsets (or groups) that call as this line without being asked. Requires `outbound_cid`. |
 
 This is the section that makes one number a curt doorman and another a
 courteous concierge on the same binary. On a box answering several numbers it
@@ -90,6 +94,68 @@ Two things it deliberately does **not** do:
 - **It does not apply to exhausted PIN attempts.** Someone guessing wrong
   until their attempts run out is still dismissed. The key governs an empty
   dial window, which is what its name says.
+
+### `outbound_cid` and `outbound_handsets`
+
+The first four keys are about calls coming *in*. These two are about calls
+going *out*, and without them every outbound call presents whatever the trunk
+sends — invisible with one number, and with several it means every customer
+you ring back saves the wrong one.
+
+```toml
+# policy.toml — the primary line
+[line]
+outbound_cid = "+15125550100"
+
+# policy.biz.toml
+[line]
+outbound_cid      = "+15125550142"
+outbound_handsets = ["office"]
+```
+
+That is the whole configuration. The office phone picks up, dials, and the
+callee sees the business number. Every other phone in the house presents
+`+15125550100`, because **a handset no line claims presents the primary line**
+— plain `policy.toml`, the file with no line name in it.
+
+**One rule, two jobs.** The primary line is also the route 911 leaves by. So a
+child who picks up the nearest phone and dials 911 goes out by the trunk whose
+registered address is this house, and there is no arrangement of keypresses
+that puts them one digit from an emergency call leaving as a business line
+with somebody else's address on file. The two defaults being one rule is what
+guarantees that.
+
+**Why the claim lives here** and not as a `line = "biz"` key on each handset:
+`handsets.toml` is one shared hardware inventory and cannot hold something that
+is true of only one line. Writing it in the line's own file also means deleting
+the file removes the claim, and it makes "two lines claim the same phone" a
+question something can answer — `doorman check` reports it as an error, and so
+does `doorman render`. The daemon warns instead and gives the phone to the
+primary line, because a bad edit must never take a phone down.
+
+**When it takes effect.** `outbound_cid` reaches the `*4` console on the next
+policy reload, like any other policy edit. It reaches the plain dial path at
+the next `doorman render`, because that path never touches doorman at all — a
+handset dialling a number talks to Asterisk and nothing else, which is exactly
+what keeps outbound calling working when doorman is down.
+
+### `*4` — calling as another line
+
+Dial `*4` from any handset. It reads out the numbers this box can call as
+("one … five one two five five five zero one zero zero; two …"), takes a
+digit, reads back the number you will present, then takes the number to dial —
+`#` to finish, or just stop dialling. It speaks with Asterisk's own sounds
+rather than a prompt pack, so no pack has to supply anything for it to work.
+
+You will rarely press it. A handset default covers the common case, and the
+measure of this working is that most of the household never learns `*4` exists.
+
+**It refuses 911, and always will.** E911 is registered per DID against a
+street address, so an emergency call placed as another line would reach a
+dispatcher with the wrong address on screen. The console beeps once and lets
+go of the handset so you can dial 911 directly, which is untouched and correct.
+The dialplan context it hands calls to contains no emergency pattern either, so
+two independent things would have to be wrong.
 
 ### Known callers and the dial window
 

@@ -28,7 +28,7 @@ var secrets = map[string]string{
 }
 
 func TestRenderGeneratesAllThreePlacesFromOneFile(t *testing.T) {
-	f, err := Build(fixture(), env(secrets))
+	f, err := Build(fixture(), env(secrets), nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestRenderRefusesMissingSecrets(t *testing.T) {
 	_, err := Build(fixture(), env(map[string]string{
 		"HANDSET_KITCHEN_PASSWORD": "x",
 		// kids-room secret absent
-	}))
+	}), nil)
 	if err == nil || !strings.Contains(err.Error(), "HANDSET_KIDS_ROOM_PASSWORD") {
 		t.Errorf("err = %v, want the missing variable named", err)
 	}
@@ -71,14 +71,14 @@ func TestRenderRefusesMissingSecrets(t *testing.T) {
 func TestRenderRefusesEndpointIdMismatch(t *testing.T) {
 	h := fixture()
 	h[0].Endpoint = "PJSIP/cocina"
-	_, err := Build(h, env(secrets))
+	_, err := Build(h, env(secrets), nil)
 	if err == nil || !strings.Contains(err.Error(), "PJSIP/kitchen") {
 		t.Errorf("err = %v, want naming-rule violation", err)
 	}
 }
 
 func TestGeneratedFilesCarryTheDoNotEditHeader(t *testing.T) {
-	f, err := Build(fixture(), env(secrets))
+	f, err := Build(fixture(), env(secrets), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,5 +86,60 @@ func TestGeneratedFilesCarryTheDoNotEditHeader(t *testing.T) {
 		if !strings.Contains(body, "DO NOT EDIT") {
 			t.Errorf("%s fragment missing the generated-file header", name)
 		}
+	}
+}
+
+// Outbound identity reaches the phone plant through the generated PJSIP
+// config, because the plain dialplan path never touches doorman.
+func TestRenderWritesOutboundCallerIDPerHandset(t *testing.T) {
+	f, err := Build(fixture(), env(secrets), map[string]string{
+		"kitchen":   "+15125550142",
+		"kids-room": "+15125550100",
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	for _, want := range []string{
+		"set_var=OUTBOUND_CID=+15125550142",
+		"set_var=OUTBOUND_CID=+15125550100",
+	} {
+		if !strings.Contains(f.PJSIP, want) {
+			t.Errorf("pjsip missing %q", want)
+		}
+	}
+}
+
+// The compatibility gate: with no outbound identity configured anywhere, the
+// generated endpoint is what it always was. A set_var nobody asked for would
+// be a channel variable the dialplan reads, and an empty one at that.
+func TestRenderWithoutOutboundIdentityIsUnchanged(t *testing.T) {
+	with, err := Build(fixture(), env(secrets), map[string]string{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	without, err := Build(fixture(), env(secrets), nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if with.PJSIP != without.PJSIP {
+		t.Error("an empty outbound map changed the generated PJSIP")
+	}
+	if strings.Contains(without.PJSIP, "OUTBOUND_CID") {
+		t.Error("OUTBOUND_CID appears with nothing configured")
+	}
+}
+
+// A handset the map does not name gets nothing, even when its neighbours do:
+// this is what makes "the primary line has no outbound_cid" mean "the trunk
+// decides" rather than "an empty caller ID".
+func TestRenderLeavesUnclaimedHandsetsAlone(t *testing.T) {
+	f, err := Build(fixture(), env(secrets), map[string]string{"kitchen": "+15125550142"})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	kids := f.PJSIP[strings.Index(f.PJSIP, "[kids-room]"):]
+	kids = kids[:strings.Index(kids, "[kids-room-auth]")]
+	if strings.Contains(kids, "OUTBOUND_CID") {
+		t.Errorf("unclaimed handset got an outbound caller id:\n%s", kids)
 	}
 }

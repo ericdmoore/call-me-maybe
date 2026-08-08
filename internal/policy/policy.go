@@ -398,7 +398,7 @@ func fromSplitTOML(policyData, handsetsData []byte, o Options) (*Policy, error) 
 			return nil, fmt.Errorf("policy: handsets/groups belong in handsets.toml now — move them there")
 		}
 		if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 ||
-			len(hf.House.Handsets) > 0 || hf.Line != (Line{}) {
+			len(hf.House.Handsets) > 0 || !hf.Line.empty() {
 			return nil, fmt.Errorf("handsets: extensions/people/schedules/house/line belong in policy.toml — move them there")
 		}
 
@@ -525,6 +525,8 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 	}
 
 	groups := make(map[string][]string, len(f.Groups))
+	// groupMembers is the same expansion in handset ids rather than endpoints.
+	groupMembers := make(map[string][]string, len(f.Groups))
 	for _, g := range f.Groups {
 		if !handsetIDPattern.MatchString(g.ID) {
 			fail("group id %q must be lowercase alphanumeric/dash/underscore", g.ID)
@@ -541,7 +543,7 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		if len(g.Handsets) == 0 {
 			fail("group %q has no handsets", g.ID)
 		}
-		var endpoints []string
+		var endpoints, members []string
 		for _, id := range g.Handsets {
 			h, ok := handsets[id]
 			if !ok {
@@ -549,8 +551,31 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 				continue
 			}
 			endpoints = append(endpoints, h.Endpoint)
+			members = append(members, id)
 		}
 		groups[g.ID] = endpoints
+		groupMembers[g.ID] = members
+	}
+
+	// expandIDs resolves a mixed list of handset and group ids to handset ids.
+	// The sibling below resolves the same list to endpoints; this one exists
+	// because outbound identity is written per handset in the generated PJSIP
+	// config, and an endpoint string cannot be looked back up to the entry
+	// that owns it.
+	expandIDs := func(where string, ids []string) []string {
+		var out []string
+		for _, id := range ids {
+			if _, ok := handsets[id]; ok {
+				out = append(out, id)
+				continue
+			}
+			if members, ok := groupMembers[id]; ok {
+				out = append(out, members...)
+				continue
+			}
+			fail("%s references unknown handset or group %q", where, id)
+		}
+		return out
 	}
 
 	// expand resolves a mixed list of handset and group ids to endpoints.
@@ -588,7 +613,7 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 
 	// After the house, because on_no_input = "voicemail" is only meaningful
 	// with a house mailbox to land in.
-	line := compileLine(f.Line, f.House.Voicemail, fail)
+	line := compileLine(f.Line, f.House.Voicemail, expandIDs, fail)
 
 	allow := make(map[string]KnownCaller)
 	for _, p := range f.People {
@@ -798,7 +823,7 @@ func LintSplitWith(policyData, handsetsData []byte, o Options) []string {
 			problems = append(problems, "handsets/groups belong in handsets.toml now — move them there")
 		}
 		if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 ||
-			len(hf.House.Handsets) > 0 || hf.Line != (Line{}) {
+			len(hf.House.Handsets) > 0 || !hf.Line.empty() {
 			problems = append(problems, "extensions/people/schedules/house/line belong in policy.toml — move them there")
 		}
 		if len(problems) > 0 {
@@ -950,6 +975,13 @@ func (p *Policy) RingTargetIDs() []string {
 	sort.Strings(out)
 	return out
 }
+
+// HandsetEndpoint resolves a handset id to its Asterisk endpoint, or "" when
+// there is no such handset. Used to tell a real phone from a pseudo-handset
+// (Local/600@internal and friends), which is a distinction that matters
+// wherever the answer is about hardware — outbound caller ID is carried by a
+// PJSIP endpoint, and a Local channel has nowhere to put one.
+func (p *Policy) HandsetEndpoint(id string) string { return p.handsets[id].Endpoint }
 
 // HandsetLabel resolves an id to its human label, falling back to the id.
 func (p *Policy) HandsetLabel(id string) string {

@@ -345,7 +345,8 @@ Asterisk config is not in the deploy path — roll it back separately by editing
 ## Handset features
 
 Everything here lives in the `internal` dialplan context — doorman never sees
-any of it, and every number below is also a valid **transfer target**.
+any of it (the one exception is noted below), and every number below is also a
+valid **transfer target**.
 
 | Dial | What happens |
 |---|---|
@@ -355,6 +356,7 @@ any of it, and every number below is also a valid **transfer target**.
 | 600 | **Family conference** bridge |
 | 700 | (as a transfer target) **park** the call; Asterisk announces a slot |
 | 701–720 | Pick up a parked call from any handset |
+| *4 | **Outbound console**: call as another one of your numbers. Only interesting with more than one line, and it refuses 911 — see "Outbound caller ID" below. This is the one that goes through doorman |
 | *97 | Check **voicemail** (prompts for mailbox + password) |
 | 9196 | Echo test — your voice comes straight back; isolates RTP problems |
 | 9197 | Speaking clock — proves audio path without a second person |
@@ -636,9 +638,116 @@ bracket in the business policy cannot stop the house phone ringing.
 **Rolling back** is deleting the `Goto` line from `[inbound-trunk]`, or
 deleting `policy.biz.toml`. There is no migration and no stored state.
 
-Outbound calls still present the trunk's default caller ID whichever line the
-policy came from — per-line outbound identity is a separate piece of work
-(`docs/TASKS.md` §7c).
+That covers calls coming *in*. Calls going out still present the trunk's
+default until you set an outbound caller ID — next section.
+
+### Outbound caller ID, and the `*4` console
+
+Without this, every outbound call presents whatever the trunk sends. Invisible
+with one number; with several it means every customer you ring back saves the
+wrong one.
+
+Two mechanisms, and most of the household only ever meets the first.
+
+**1. A default per phone.** Set what each line presents, and say which phones
+call as it:
+
+```toml
+# policy.toml — the primary line
+[line]
+outbound_cid = "+15125550100"
+
+# policy.biz.toml
+[line]
+outbound_cid      = "+15125550142"
+outbound_handsets = ["office"]
+```
+
+Then re-render and reload, because this half is baked into the generated PJSIP
+config rather than read at call time:
+
+```bash
+$ ./bin/doorman check            # prints what each line presents, and where
+                                 # an unclaimed phone ends up
+$ ./bin/doorman render
+$ sudo cp asterisk/generated/pjsip_handsets.conf /etc/asterisk/
+$ sudo chown asterisk:asterisk /etc/asterisk/pjsip_handsets.conf
+$ sudo asterisk -rx 'pjsip reload'
+```
+
+The office phone now rings customers back as the business number. **Every
+phone no line claims presents `policy.toml`'s `outbound_cid`** — the primary
+line — so adding a business line cannot change what the kitchen phone shows.
+
+`outbound_handsets` is written in the *line's* file and not in
+`handsets.toml`, because the inventory is shared by every line and cannot say
+something that is true of only one. A handset claimed by two lines is an error
+in `doorman check` and in `doorman render`; the running daemon warns instead
+and gives the phone to the primary line, because a bad edit must never take a
+phone down.
+
+**2. `*4`, for the call that is not the usual one.** Dial it from any handset.
+doorman answers, reads out the numbers this box can call as, takes a digit,
+reads back the number you will present, then takes the number to dial — `#` to
+finish, or just stop dialling and it goes.
+
+It speaks with Asterisk's own sound files rather than a prompt pack, so no
+pack has to supply anything and swapping packs cannot break it. The menu says
+numbers rather than names for the same reason: there is no recording of
+anybody saying "Mertaugh Enterprises", and the number is what the person you
+ring is going to see anyway.
+
+The clips it uses are `vm-enter-num-to-call`, `vm-then-pound`, `vm-num-i-have`,
+`pbx-invalid`, `vm-goodbye` and `beep`, from `asterisk-core-sounds-en`. If your
+sounds package names them differently you will hear the digits and the beep and
+none of the words — the console still works, because the digits carry the
+meaning and the words are glue. Check what you have with
+`ls /var/lib/asterisk/sounds/en/`.
+
+```bash
+$ journalctl -u doorman | grep console
+# line chosen line=biz presents=+1512•••0142
+# placing an outbound call line=biz number=+1512•••0199
+```
+
+**`*4` cannot dial 911, by design.** E911 is registered per DID against a
+street address, so an emergency call placed as another line would reach a
+dispatcher with somebody else's address on screen. The console beeps once and
+releases the handset so you can dial 911 directly — which is untouched, and
+leaves with the trunk's own caller ID as it always has. Two things guard this:
+doorman refuses the number, and `[outbound-console]` in the dialplan contains
+no emergency pattern for it to reach.
+
+**`*4` inherits whatever trust the LAN handsets have** (see issue #13). It is
+not new exposure — a compromised handset can already dial `_NXXNXXXXXX`
+straight out — but it is one more thing on the other side of a SIP password.
+The threat-model section below is the fuller version.
+
+**Verify it on a real handset, not from the logs.** Logs show what was sent;
+only the phone in your hand shows what arrived:
+
+```bash
+# From the office phone, ring a mobile. It should show the business number.
+# From the kitchen phone, ring the same mobile. It should show the home one.
+# Then *4, press the home line's digit from the office phone, ring again.
+```
+
+**When it goes wrong.** The most common cause is a render that never made it
+to `/etc/asterisk`: `doorman check` and the `*4` console read the policy file
+live, but the plain dial path reads the generated PJSIP config, so the two can
+disagree until you re-render. Check what the endpoint actually carries:
+
+```bash
+$ sudo asterisk -rx 'pjsip show endpoint office' | grep -i set_var
+```
+
+If your provider rejects the caller ID or silently replaces it, it is because
+the account does not own that number — providers do this as anti-spoofing.
+Buy the DID on the same account, or present a number you own.
+
+**Rolling back** is removing the two keys and re-rendering. With no
+`outbound_cid` anywhere, nothing is generated and every outbound call presents
+the trunk default again, exactly as before.
 
 ### Rotate a PIN
 
@@ -885,6 +994,13 @@ registered handset lands in the `internal` dialplan context. That context can
 dial the outbound trunk, page every phone in the house, join the conference, and
 reach voicemail. **A compromised handset password is therefore more powerful
 than any amount of PIN guessing from outside.**
+
+`*4` inherits exactly that trust and adds none of its own: anything that can
+reach the console can already dial `_NXXNXXXXXX` straight out, so the toll-fraud
+exposure is the handset password either way. What the console does add is the
+choice of which of your numbers a fraudulent call presents — worth knowing
+about, and one more reason the handset passwords are the thing to get right.
+See issue #13.
 
 Mitigations, in the order they are worth doing:
 

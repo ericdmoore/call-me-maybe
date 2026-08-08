@@ -97,7 +97,9 @@ const usage = `doorman — the Call Me Maybe lobby daemon
                                 a bad edit must never take the phone down.
                                 On a box answering several numbers it lists
                                 every line it found — policy.<line>.toml
-                                beside policy.toml — and what each resolves to
+                                beside policy.toml — and what each resolves to,
+                                including what each presents on an outbound
+                                call and which phones default to it
       -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
       -allow-placeholders       accept the example sentinels; for CI, not operators
   doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
@@ -120,8 +122,14 @@ const usage = `doorman — the Call Me Maybe lobby daemon
   doorman rotate [flags] [label ...]
                                 rotate extension PINs; all extensions when no labels given
       -policy path              policy file (default $POLICY_PATH or ./policy.toml)
-  doorman render [flags]        generate per-handset Asterisk config from handsets.toml
+  doorman render [flags]        generate per-handset Asterisk config from
+                                handsets.toml, including the outbound caller ID
+                                each phone presents — read from every line's
+                                [line] outbound_cid and outbound_handsets,
+                                because a handset that picks up and dials never
+                                reaches doorman at all
       -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
+      -policy path              policy file, for outbound caller ID (default $POLICY_PATH or ./policy.toml)
       -out dir                  output directory (default ./asterisk/generated)
       -env path                 secrets file for handset passwords (default ./.env)
   doorman e164 <number>         show how a raw caller ID normalises
@@ -260,7 +268,63 @@ func runCheck(args []string) int {
 	if multi {
 		printSharedPINs(results)
 	}
+	if !printOutbound(results) {
+		rc = 1
+	}
 	return rc
+}
+
+// printOutbound reports what each line presents on an outbound call and which
+// phones default to it. Returns false when the configuration is ambiguous.
+//
+// Quiet unless there is something to say: an install with one number and no
+// outbound_cid gets nothing here, because it has nothing to choose between and
+// should never have to read the word "line" to check its config.
+func printOutbound(results []checkedLine) bool {
+	ids := make([]lineIdentity, 0, len(results))
+	var handsetIDs []string
+	for _, r := range results {
+		if r.err != nil {
+			continue
+		}
+		ids = append(ids, lineIdentity{Name: r.Name, LineIdentity: r.pol.Line()})
+		if r.Name == policy.DefaultLine {
+			// One shared inventory, so the default line's view of it is every
+			// line's view of it. Pseudo-handsets are left out: a caller ID is
+			// carried by a PJSIP endpoint, and a Local channel into the
+			// conference has nowhere to put one, so listing it here would
+			// claim something untrue about it.
+			for _, id := range r.pol.HandsetIDs() {
+				if strings.HasPrefix(r.pol.HandsetEndpoint(id), "PJSIP/") {
+					handsetIDs = append(handsetIDs, id)
+				}
+			}
+		}
+	}
+	plan := newOutboundPlan(ids)
+	if !plan.anyCID() && !plan.claims() {
+		return true
+	}
+
+	fmt.Println()
+	fmt.Print(plan.describe(handsetIDs))
+
+	if len(plan.Conflicts) == 0 {
+		return true
+	}
+	// An error rather than a note. A phone presents one number, so two lines
+	// claiming it means somebody's customers see somebody else's number — and
+	// which of them depends on nothing an operator can see. The daemon keeps
+	// answering with the primary line's claim; this is where it gets fixed.
+	fmt.Println("\n✗ a handset is claimed by more than one line")
+	for _, c := range plan.Conflicts {
+		fmt.Printf("    %s is in [line] outbound_handsets on both %s and %s\n",
+			c.Handset, c.Winner, c.Loser)
+	}
+	fmt.Printf("\n  A phone presents one number. Remove it from one of them.\n"+
+		"  Until then the daemon uses %s and `doorman render` refuses to generate.\n",
+		plan.Conflicts[0].Winner)
+	return false
 }
 
 // checkedLine is one line and whatever loading its policy produced. Both
@@ -363,6 +427,7 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 	line := p.Line()
 	fmt.Printf("  line label           : %s\n", orDefault(line.Label, noLineLabel))
 	fmt.Printf("  line number          : %s\n", orDefault(line.Number, noLineNumber))
+	fmt.Printf("  outbound caller id   : %s\n", orDefault(line.OutboundCID, noOutboundCID))
 	fmt.Printf("  prompt pack          : %s\n", orDefault(line.Prompts, noLinePrompts))
 	fmt.Printf("  no-input disposition : %s\n", describeNoInput(line, p.HousePlan().Mailbox))
 	fmt.Printf("  allow-listed numbers : %d\n", p.AllowListCount())
@@ -535,6 +600,7 @@ func runRotate(args []string) int {
 func runRender(args []string) int {
 	fs := flag.NewFlagSet("render", flag.ExitOnError)
 	handsetsFlag := fs.String("handsets", "", "inventory file (default $HANDSETS_PATH or ./handsets.toml)")
+	policyFlag := fs.String("policy", "", "policy file, for outbound caller ID (default $POLICY_PATH or ./policy.toml)")
 	outFlag := fs.String("out", "./asterisk/generated", "output directory")
 	envFlag := fs.String("env", "./.env", "secrets file for handset passwords")
 	_ = fs.Parse(args)
@@ -555,7 +621,34 @@ func runRender(args []string) int {
 		return v, ok && v != ""
 	}
 
-	frags, err := render.Build(handsets, env)
+	// Outbound identity is the one thing render needs from the *rules* rather
+	// than the inventory: [line] outbound_cid says what a line presents, and
+	// [line] outbound_handsets says which phones call as it. It has to be
+	// baked into the endpoint here because a handset that picks up and dials
+	// never reaches doorman — which is precisely why outbound calling survives
+	// doorman being down.
+	plan, err := renderOutbound(policyPathArg(*policyFlag), handsetsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 1
+	}
+	if len(plan.Conflicts) > 0 {
+		// Refused rather than resolved: this file decides what every customer
+		// sees, and a guess baked into it is invisible from this end.
+		fmt.Fprintln(os.Stderr, "✗ a handset is claimed by more than one line")
+		for _, c := range plan.Conflicts {
+			fmt.Fprintf(os.Stderr, "  %s is in [line] outbound_handsets on both %s and %s\n",
+				c.Handset, c.Winner, c.Loser)
+		}
+		fmt.Fprintln(os.Stderr, "\n  A phone presents one number. Remove it from one of them.")
+		return 1
+	}
+
+	ids := make([]string, 0, len(handsets))
+	for _, h := range handsets {
+		ids = append(ids, h.ID)
+	}
+	frags, err := render.Build(handsets, env, plan.callerIDs(ids))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return 1
@@ -814,6 +907,8 @@ func runService() {
 		}
 	}()
 
+	announceOutbound(lines, log)
+
 	client.Connect(func(ev ari.Event) { route(ev, reg, lines, client, log) })
 	log.Info("doorman is on duty", "app", cfg.ARIApp, "version", version)
 	if len(lines.byName) > 1 {
@@ -835,10 +930,11 @@ func runService() {
 // buffered channels and never block this path.
 //
 // The Stasis application arguments are the dialplan talking to the router.
-// There are two things it can say and they are both a first argument: "leg"
-// (an originated handset leg answered, correlation id follows) and "line"
-// (this call arrived on the named line). Saying nothing is the third case and
-// the one every existing install uses.
+// There are three things it can say and they are all a first argument: "leg"
+// (an originated handset leg answered, correlation id follows), "line" (this
+// call arrived on the named line), and "console" (a handset dialled *4 and
+// wants to choose which line to call as). Saying nothing is the fourth case
+// and the one every existing install uses.
 func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log *slog.Logger) {
 	switch ev.Type {
 	case "StasisStart":
@@ -858,6 +954,27 @@ func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log 
 				defer cancel()
 				_ = client.Hangup(ctx, id)
 			}(ev.Channel.ID)
+			return
+		}
+
+		// A handset at the outbound console. Deliberately outside the
+		// concurrent-call ceiling: that limit exists to stop a flood of
+		// strangers ringing every phone in the house, and refusing the
+		// household its own phone during one would be the wrong way round.
+		if len(ev.Args) > 0 && ev.Args[0] == "console" {
+			c := lobby.NewConsole(ev.Channel.ID, lobby.ConsoleDeps{
+				ARI: ariAdapter{client},
+				Log: log,
+				// The timeouts, and nothing line-specific: the console belongs
+				// to no line, which is the whole reason it exists.
+				Cfg: lines.deflt.Cfg,
+				// Called on the console's own goroutine, so reading every
+				// line's current policy never happens on this one.
+				Lines:      func() []lobby.ConsoleLine { return lines.outbound().consoleLines() },
+				OnFinished: reg.removeConsole,
+			})
+			reg.addConsole(c)
+			go c.Run()
 			return
 		}
 
@@ -890,6 +1007,10 @@ func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log 
 		}
 		if s := reg.caller(ev.Channel.ID); s != nil {
 			s.Dtmf(ev.Digit)
+			return
+		}
+		if c := reg.console(ev.Channel.ID); c != nil {
+			c.Dtmf(ev.Digit)
 		}
 
 	case "PlaybackFinished":
@@ -899,6 +1020,10 @@ func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log 
 		channelID := strings.TrimPrefix(ev.Playback.TargetURI, "channel:")
 		if s := reg.caller(channelID); s != nil {
 			s.PlaybackFinished(ev.Playback.ID)
+			return
+		}
+		if c := reg.console(channelID); c != nil {
+			c.PlaybackFinished(ev.Playback.ID)
 		}
 
 	case "StasisEnd", "ChannelDestroyed":
@@ -919,22 +1044,42 @@ func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log 
 			default:
 				s.CallerGone()
 			}
+			return
+		}
+		// The same distinction decides the same thing for a console, and it
+		// matters more here than anywhere: StasisEnd on a console channel is
+		// the *successful* ending — the handset is in [outbound-console]
+		// dialling a trunk — and treating it as a death would hang up every
+		// outbound call at the moment it was placed.
+		if c := reg.console(ev.Channel.ID); c != nil {
+			if ev.Type == "StasisEnd" {
+				c.CallerLeft()
+			} else {
+				c.CallerGone()
+			}
 		}
 	}
 }
 
 // registry maps channel IDs — inbound callers and originated legs alike — to
-// their owning session.
+// their owning session, plus the handsets currently at the outbound console.
+//
+// Consoles get their own map rather than an interface both types satisfy.
+// They overlap in four methods and in nothing else: a console has no legs, no
+// bridge, and no ring plan, and the one thing the router must never get wrong
+// is which of the two it is talking to.
 type registry struct {
 	mu       sync.Mutex
 	channels map[string]*lobby.Session
 	callers  map[string]*lobby.Session
+	consoles map[string]*lobby.Console
 }
 
 func newRegistry() *registry {
 	return &registry{
 		channels: make(map[string]*lobby.Session),
 		callers:  make(map[string]*lobby.Session),
+		consoles: make(map[string]*lobby.Console),
 	}
 }
 
@@ -989,6 +1134,24 @@ func (r *registry) remove(s *lobby.Session) {
 			delete(r.channels, id)
 		}
 	}
+}
+
+func (r *registry) addConsole(c *lobby.Console) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.consoles[c.ChannelID] = c
+}
+
+func (r *registry) console(id string) *lobby.Console {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.consoles[id]
+}
+
+func (r *registry) removeConsole(c *lobby.Console) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.consoles, c.ChannelID)
 }
 
 func (r *registry) callerCount() int {

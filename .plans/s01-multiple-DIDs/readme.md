@@ -6,7 +6,7 @@ first on one provider, then across several.
 Reasoning and rejected alternatives: [`arch.md`](arch.md).
 Backlog with acceptance criteria: `docs/TASKS.md` §7.
 
-**Status:** M1.1 and M1.2 landed. M1.3 onwards planned.
+**Status:** M1.1, M1.2 and M1.3 landed. M1.4 onwards planned.
 
 ---
 
@@ -107,7 +107,7 @@ number matched, so `on_no_input` does not apply to them at all; it is the
 stranger disposition, and its name means what it says (an empty dial window,
 not exhausted attempts, and never a rate-limit failure).
 
-## M1.3 · Outbound line selection
+## M1.3 · Outbound line selection — **done**
 
 *Do not ship M1.1 without this.* Today `Dial(PJSIP/1${EXTEN}@voipms,60)` sets
 no caller ID at all, so every outbound call presents the trunk default. With
@@ -142,6 +142,39 @@ actually misses storing contacts with a line baked in.
 - Confirmation before dialling: "calling as Venture A". Catches the wrong
   choice *before* the customer's phone rings.
 - Outbound records in the call log, carrying the line.
+
+**What landed, and where it differs from the sketch above.**
+
+The per-handset default is `[line] outbound_handsets` — the line claims the
+phones, rather than each handset naming a line. `handsets.toml` is one shared
+inventory and cannot hold something true of only one line; the claim disappears
+when the line's file is deleted, which is the rollback story everything else
+here has; and it makes a contested handset a question `doorman check` can
+answer, because the check is the only thing that reads every line at once.
+
+The console **does not originate and bridge.** It sets `OUTBOUND_CID` on the
+handset's own channel and releases it into `[outbound-console]`, exactly as
+`sendToVoicemail` releases a caller into `[voicemail-drop]`. That keeps the
+trunk dial string in the dialplan where Phase 2 will make it vary, makes the
+console and the plain path dial through the same lines rather than two
+implementations that can drift, and takes doorman out of the call the moment it
+is placed. Invariant 8 applies identically: StasisEnd after the release is the
+*successful* ending and must not hang the channel up.
+
+The confirmation is spoken **between the choice and the number**, not after
+both. "Calling as this number" is only useful while there is still time to act
+on it, and hearing it before you have dialled means a wrong choice costs a
+keypress rather than a call.
+
+It says the *number*, not the label, and it speaks with Asterisk's own sounds
+rather than the prompt pack. There is no recording of anyone saying "Mertaugh
+Enterprises" and there cannot be one that ships — but `digits:` reads a number
+natively, and the number is what the callee will see anyway. Using the pack
+would have meant a seventh prompt name, which breaks every pack in existence
+for a mechanism the pack has no business voicing.
+
+Outbound call-log records are **not** in this milestone. They want a direction
+field on the record rather than only a line, which is M1.4's shape.
 
 **Keep the plain dialplan path working.** Routing outbound through Stasis puts
 doorman on the outbound path, so a crash would stop you *making* calls as well
@@ -270,7 +303,8 @@ config half of issue #5.
 - Outbound routing selects the endpoint from the line's trunk.
 - `outbound_cid` validated against the trunk that will carry it. Presenting a
   number the provider does not own is a support ticket, not a feature.
-- The M1.3 dial prefix now selects a trunk as well as a caller ID.
+- M1.3's line selection — the `*4` console and each line's
+  `outbound_handsets` — now chooses a trunk as well as a caller ID.
 
 **Verify:** place a call on each line and confirm **both** that the receiving
 phone shows the right number *and* that the provider's own CDR shows the call

@@ -114,6 +114,12 @@ func orEnvPrompts(prefix string) string {
 type lineSet struct {
 	deflt  lobby.Deps
 	byName map[string]lobby.Deps
+	// order is the sequence lines were added in, which is DiscoverLines'
+	// order: the default line first, then the rest sorted. The outbound
+	// console offers them in exactly this order, so the digit that reaches a
+	// line is stable across restarts and cannot move when a policy file is
+	// added beside the others.
+	order []string
 }
 
 func newLineSet() *lineSet {
@@ -123,10 +129,29 @@ func newLineSet() *lineSet {
 // add registers a line. The default line is held separately as well, because
 // it is the answer to every question this type cannot otherwise answer.
 func (l *lineSet) add(name string, deps lobby.Deps) {
+	if _, dup := l.byName[name]; !dup {
+		l.order = append(l.order, name)
+	}
 	l.byName[name] = deps
 	if name == policy.DefaultLine {
 		l.deflt = deps
 	}
+}
+
+// outbound assembles the outbound plan from every line's *current* policy.
+//
+// Read per console call rather than resolved once at startup, for the same
+// reason Deps.Policy is a func: editing outbound_cid in a policy file is an
+// ordinary policy edit and goes live on the next reload. The plain dialplan
+// path is the exception and cannot be — that caller ID is baked into the
+// generated PJSIP config, so it changes when `doorman render` runs. The
+// runbook says so where an operator will read it.
+func (l *lineSet) outbound() outboundPlan {
+	ids := make([]lineIdentity, 0, len(l.order))
+	for _, name := range l.order {
+		ids = append(ids, lineIdentity{Name: name, LineIdentity: l.byName[name].Policy().Line()})
+	}
+	return newOutboundPlan(ids)
 }
 
 func (l *lineSet) names() []string {

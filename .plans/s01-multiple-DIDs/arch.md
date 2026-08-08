@@ -163,10 +163,32 @@ wrong number and the whole arrangement leaks.
 
 Selection is per call, because one desk phone serves every line:
 
-- a dial prefix (`*3` then the number) chooses a line for one call
-- a per-handset default covers the common case of not prefixing
-- `doorman check` must catch a prefix that collides with an extension or a
-  feature code
+- a per-handset default covers the common case, which is most of them
+- `*4` answers, reads the numbers out, and places one call as whichever is
+  chosen
+- a handset no line claims presents the primary line — `policy.toml`, the same
+  file 911 leaves by
+
+**Rejected: a dial prefix** (`*3` then the number). One keypress, and it works
+from a handset's own phonebook, which the console does not. But it reserves
+`*1`–`*9` forever, fights `*97` and every feature code anyone adds later, and
+with five ventures nobody remembers which digit is which.
+
+**The claim lives in the line's file, not on the handset.** `[line]
+outbound_handsets` rather than `line = "biz"` in `handsets.toml`, for the same
+reason the trunk does not live in a policy file: handsets.toml is one shared
+inventory, and a line default is not a property of the hardware. It also gives
+`doorman check` — the only thing that reads every line at once — something to
+validate, and gives the claim the same rollback story as everything else here:
+delete the file.
+
+**The console releases rather than bridges.** It sets the caller ID on the
+handset's channel and hands it to `[outbound-console]` via ContinueToDialplan,
+the way `sendToVoicemail` hands a caller to `[voicemail-drop]`. Originating and
+bridging would put the trunk's dial string into Go, which is precisely the
+thing Phase 2 makes vary and precisely the thing `docs/architecture.md` says
+Asterisk owns. Releasing keeps both outbound paths on the same dialplan lines
+and takes doorman out of the call the moment it is placed.
 
 ---
 
@@ -295,10 +317,11 @@ an accident of the code.
 | 4 | An invalid policy must never take the phone down | **Strengthened.** Per-line stores mean a bad file has a smaller blast radius than today |
 | 5 | PIN comparison stays exact-match against a map | Unchanged — one map per line |
 | 6 | Failed PIN attempts always call `Limiter.Failure` | Unchanged; only the key gains a prefix. M1.2 adds a path that reaches the same exit *without* a failed attempt — a caller who says nothing has not guessed at anything, and must not be charged for it |
-| 1 | Never log a full caller ID above info | Unchanged. The `line` field is not a caller identifier |
+| 1 | Never log a full caller ID above info | Extended in M1.3. A number somebody *dialled* identifies a human as precisely as one that arrived, so it is normalised and redacted before any log sees it; a line's own `outbound_cid` is redacted too, since the useful key in those lines is the line name |
 | 2 | Never widen the ARI bind | Untouched |
-| 3 | Teardown is the deferred cleanup | Untouched **in M1.1**, live in M1.2. The disposition knob and the known caller's route through the collector are decisions only the state machine can make, so `Run`, `collect` and `evaluate` change. The shape does not: no state flag, no exit that skips the deferred cleanup, every wait still on `ctx.Done()` |
-| 8 | StasisEnd and ChannelDestroyed are different | Live in M1.2. `on_no_input = "voicemail"` reaches `sendToVoicemail`, which releases the caller via ContinueToDialplan — so nothing may hang the channel up afterwards, exactly as for a ladder falling through to a mailbox |
+| 3 | Teardown is the deferred cleanup | M1.3's console is a sibling of `Session` with the same shape: one goroutine, `defer cleanup()` in `Run`, cancellation as the state, every wait on `ctx.Done()`. Untouched **in M1.1**, live in M1.2. The disposition knob and the known caller's route through the collector are decisions only the state machine can make, so `Run`, `collect` and `evaluate` change. The shape does not: no state flag, no exit that skips the deferred cleanup, every wait still on `ctx.Done()` |
+| 8 | StasisEnd and ChannelDestroyed are different | Live in M1.2 and again in M1.3. `on_no_input = "voicemail"` reaches `sendToVoicemail`, which releases the caller via ContinueToDialplan — so nothing may hang the channel up afterwards. The `*4` console does the same thing on the way out: after the release, StasisEnd is the *successful* ending, and collapsing the two would kill every outbound call at the moment it was placed |
+| 7 | Prompts are pre-rendered WAVs, never runtime TTS | Unchanged, and M1.3 stayed inside it the hard way: the console speaks Asterisk's own clips plus `digits:`, which is Asterisk reading a number from files, not synthesis. It also stays out of the six-name pack contract, which a seventh prompt would have broken for every pack in existence |
 
 No invariant is weakened. One is generalised: *an invalid policy must never
 take down **any** line it does not belong to.*
