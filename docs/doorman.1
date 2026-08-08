@@ -19,9 +19,16 @@ talks to it over ARI on loopback and applies policy. One call is one
 goroutine, and the caller hanging up cancels a context that unwinds
 everything.
 .PP
-Known callers hear a welcome prompt and ring the whole house. Everyone else
-meets the lobby: dial a 6\-digit extension within the dial window, or the
-bouncer says "Good day" and hangs up.
+Known callers hear a welcome prompt and ring the whole house; a digit pressed
+over that prompt reaches the extension collector instead, so an allow\-listed
+caller can ask for one room rather than all of them. Pressing nothing rings
+the house the moment the prompt ends, and nothing done at the keypad can cost
+an allow\-listed caller that ring.
+.PP
+Everyone else meets the lobby: dial a 6\-digit extension within the dial
+window, or get whatever
+.B [line] on_no_input
+says \(em by default the bouncer says "Good day" and hangs up.
 .PP
 It is also its own operations tool. Every subcommand below runs against the
 same configuration and the same validator the daemon uses, so what
@@ -159,8 +166,8 @@ Print a usage summary.
 .SH FILES
 .TP
 .I policy.toml
-The rules: allow\-list, extensions, ringer ladders, schedules. Changes
-weekly and is safe to hand\-edit \(em when
+The rules: line identity, allow\-list, extensions, ringer ladders, schedules.
+Changes weekly and is safe to hand\-edit \(em when
 .B POLICY_WATCH
 is enabled, edits go live without a restart, and a file that fails
 validation is logged and discarded while the last good policy stays in
@@ -223,6 +230,14 @@ Bare
 .I policy.toml
 is the default line and serves every call that names none.
 A new line file is picked up at startup; edits to an existing one are live.
+.TP
+.B PROMPT_MEDIA_PREFIX
+Default
+.IR call\-me\-maybe .
+The prompt pack every line speaks from unless it names its own with
+.BR "[line] prompts" ,
+which overrides this per line and is read from the policy file, so swapping a
+pack reloads like any other policy edit.
 .TP
 .B FIRST_DIGIT_TIMEOUT_MS
 Default 10000. Time to dial the

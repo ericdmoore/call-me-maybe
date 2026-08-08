@@ -9,6 +9,32 @@
 # service. Handset and group ids referenced here must exist in handsets.toml.
 # ─────────────────────────────────────────────────────────────
 
+# ── Line identity ────────────────────────────────────────────
+# Optional, and every key in it is optional: leave the whole section out and
+# this file behaves exactly as it did before the section existed.
+#
+# It earns its keep on a box answering more than one number, where each extra
+# number gets its own policy.<line>.toml. `on_no_input` is the interesting
+# one — it is the difference between a curt doorman and a courteous
+# concierge running on the same binary.
+#
+# [line]
+# label       = "Mertaugh Enterprises"  # shown by `doorman check`, and on the
+#                                       # handset when a caller reaches the
+#                                       # house without dialling anything
+# number      = "+15125550142"          # identity only; nothing routes on it
+# prompts     = "concierge"             # this line's prompt pack, overriding
+#                                       # PROMPT_MEDIA_PREFIX
+# on_no_input = "voicemail"             # what a caller who dials nothing gets:
+#                                       #   dismiss     (default) "good day"
+#                                       #   voicemail   the [house] mailbox
+#                                       #   ring-house  the house rings
+#
+# "voicemail" needs a [house] voicemail to land in. "ring-house" means anyone
+# patient enough to say nothing reaches the house, so the allow-list becomes a
+# shortcut past the lobby rather than a gate — a real choice, worth making
+# deliberately. Somebody on the allow-list is never dismissed by this setting.
+
 # What rings when a known caller is welcomed.
 [house]
 handsets = ["kitchen", "living-room", "office", "primary-bed"]

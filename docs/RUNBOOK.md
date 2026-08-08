@@ -24,9 +24,12 @@ policy.toml (handsets inline) still loads; `doorman check` nudges.
 If the box answers more than one phone number, each extra one gets a
 `policy.<line>.toml` beside `policy.toml`, and the dialplan says which line a
 call arrived on. Handsets stay shared; rules, PINs and rate-limit budgets are
-per line, with a separate failure domain each. Plain `policy.toml` is the
-default line and is what a call with no line named gets — which is every call
-on an install that has one number. See "Add a second number" in §6.
+per line, with a separate failure domain each. A `[line]` section gives each
+number a name, its own prompt pack, and its own answer to "what happens to a
+caller who dials nothing" — which is what makes one number a curt doorman and
+another a courteous concierge. Plain `policy.toml` is the default line and is
+what a call with no line named gets — which is every call on an install that
+has one number. See "Add a second number" in §6.
 
 
 Everything operational: provisioning, verification, troubleshooting, day-2
@@ -537,6 +540,27 @@ no line named gets `policy.toml`, exactly as it always has.
    lines may ring the office. Everything else is per line: allow-list,
    extensions, PINs, schedules, and the rate-limit budget.
 
+   Give the line its identity and its disposition at the top of the file.
+   This is the part that makes the second number worth having — the home line
+   dismisses a stranger who dials nothing, the business one takes a message:
+
+   ```toml
+   [line]
+   label       = "Mertaugh Enterprises"   # shown by `doorman check`, and on the
+                                          # handset when a caller reaches the
+                                          # house without dialling anything
+   number      = "+15125550142"           # identity; nothing routes on it
+   prompts     = "concierge"              # optional: this line's own pack
+   on_no_input = "voicemail"              # dismiss | ring-house | voicemail
+   ```
+
+   `on_no_input = "voicemail"` needs a `[house] voicemail` to land in, and
+   `doorman check` refuses the combination without one. `prompts` needs the
+   pack installed at `/var/lib/asterisk/sounds/concierge/`; omit it and the
+   line speaks with the house voice. `ring-house` is the third option and
+   means anybody patient enough to say nothing reaches the house — a real
+   choice, and one to make deliberately.
+
 4. **Route it in the dialplan.** In `/etc/asterisk/extensions.conf`, send the
    new DID to its own context from `[inbound-trunk]` — an exact match beats
    the `_X.` pattern — and name the line as the Stasis argument:
@@ -564,10 +588,22 @@ no line named gets `policy.toml`, exactly as it always has.
    $ journalctl -u doorman -n 20 | grep line
    ```
 
-   `doorman check` prints a `Lines:` block naming every line, its file, and
-   whether it loads. A new policy file is discovered at startup, so adding a
-   line is the one policy change that needs a restart; editing one that
-   already exists is picked up live like any other.
+   `doorman check` prints a `Lines:` block naming every line, its file, its
+   `[line]` label and number, and whether it loads — then, per line, what a
+   caller who dials nothing gets and which prompt pack it speaks from. A new
+   policy file is discovered at startup, so adding a line is the one policy
+   change that needs a restart; editing one that already exists is picked up
+   live like any other, `[line]` included.
+
+   The startup log carries the same two facts per line, because both fail
+   quietly: a line meant to take messages that silently dismisses looks
+   exactly like a line nobody has called yet, and a missing prompt pack
+   degrades to silence rather than an error.
+
+   ```bash
+   $ journalctl -u doorman | grep "policy loaded"
+   # policy loaded line=biz onNoInput=voicemail prompts=concierge ...
+   ```
 
 6. **Ring both numbers.** The home line should behave exactly as it did
    before you started.

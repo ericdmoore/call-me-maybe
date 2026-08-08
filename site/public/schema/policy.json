@@ -163,6 +163,52 @@
       ],
       "additionalProperties": false
     },
+    "line": {
+      "description": "What this number is, and how it treats a caller who dials nothing. Every key is optional and a file with no [line] section behaves exactly as it did before lines existed, so this is what you add to make one number a curt doorman and another a courteous concierge on the same binary.",
+      "type": "object",
+      "properties": {
+        "label": {
+          "description": "Human name for this number — \"Mertaugh Enterprises\". Shown by `doorman check`, and displayed on the ringing handset when a caller reaches the house without dialling an extension, so whoever picks up knows which line to answer as.",
+          "type": "string"
+        },
+        "number": {
+          "description": "The DID this line answers. Any format; normalised to E.164 at load. Probe a value with `doorman e164 \u003cnumber\u003e`.",
+          "type": "string",
+          "x-rules": [
+            "An unparseable number fails the load rather than being kept as written."
+          ]
+        },
+        "on_no_input": {
+          "description": "What happens to a caller who reaches the end of the dial window having entered nothing. dismiss is the historical behaviour: the parting prompt, then a hangup. voicemail takes a message, which is what a business line wants — never drop a lead. ring-house puts them through to the house ring group.",
+          "type": "string",
+          "enum": [
+            "dismiss",
+            "ring-house",
+            "voicemail"
+          ],
+          "default": "dismiss",
+          "x-rules": [
+            "voicemail requires [house] voicemail — the caller needs a mailbox to land in.",
+            "ring-house lets anyone patient enough to say nothing reach the house, which makes the allow-list a shortcut rather than a gate. Choose it deliberately.",
+            "This governs an empty dial window only. A caller who exhausts their PIN attempts is still dismissed."
+          ]
+        },
+        "prompts": {
+          "description": "Prompt pack for this line, overriding PROMPT_MEDIA_PREFIX. An Asterisk media prefix under /var/lib/asterisk/sounds/, not a filesystem path. Two lines with different packs are the same engine with different voices.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*(/[A-Za-z0-9][A-Za-z0-9_-]*)*$",
+          "x-cross-references": [
+            "/var/lib/asterisk/sounds/\u003cprefix\u003e/",
+            "PROMPT_MEDIA_PREFIX in the environment"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "x-rules": [
+        "An allow-listed caller is never dismissed by on_no_input: they reach the house whatever it says.",
+        "Nothing routes on number. The dialplan already named the line — this is identity, for `doorman check` and for the handset display."
+      ]
+    },
     "people": {
       "description": "The allow-list. These callers hear the welcome prompt and ring the house.",
       "type": "array",

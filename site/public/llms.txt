@@ -49,6 +49,8 @@ Three files, three cadences. Do not merge them; the split is deliberate.
 
 A box answering several phone numbers has one policy file per number: `policy.<line>.toml` beside `policy.toml`, same schema, one independent failure domain each. The dialplan names the line — `Stasis(${DOORMAN_APP},line,biz)` — and bare `policy.toml` is the default line, which is what every call gets on an install with one number. `handsets.toml` is shared; allow-lists, extensions, PINs and rate-limit budgets are per line.
 
+Each file's optional `[line]` section carries what makes a number itself: `label` and `number` for identity, `prompts` for a per-line prompt pack overriding `PROMPT_MEDIA_PREFIX`, and `on_no_input` — `dismiss` (the default, and what the lobby has always done), `voicemail`, or `ring-house` — for what a caller who dials nothing gets. That last key is the difference between a curt doorman and a courteous concierge running on one binary. Outbound caller ID is **not** per line yet; every outbound call still presents the trunk default.
+
 **Helping someone write a `policy.toml`? Read <https://callmemaybe.cc/llms-policy.txt> first.** It is the complete current key surface, two worked examples, the rules a JSON Schema cannot express, and — the part that matters — an explicit list of keys that appear in the planning docs but do not load. Machine-readable schema at <https://callmemaybe.cc/schema/policy.json>.
 
 ## Docs

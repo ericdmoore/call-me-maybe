@@ -294,13 +294,20 @@ an accident of the code.
 |---|---|---|
 | 4 | An invalid policy must never take the phone down | **Strengthened.** Per-line stores mean a bad file has a smaller blast radius than today |
 | 5 | PIN comparison stays exact-match against a map | Unchanged — one map per line |
-| 6 | Failed PIN attempts always call `Limiter.Failure` | Unchanged; only the key gains a prefix |
+| 6 | Failed PIN attempts always call `Limiter.Failure` | Unchanged; only the key gains a prefix. M1.2 adds a path that reaches the same exit *without* a failed attempt — a caller who says nothing has not guessed at anything, and must not be charged for it |
 | 1 | Never log a full caller ID above info | Unchanged. The `line` field is not a caller identifier |
 | 2 | Never widen the ARI bind | Untouched |
-| 3 | Teardown is the deferred cleanup | Untouched — `internal/lobby` does not change |
+| 3 | Teardown is the deferred cleanup | Untouched **in M1.1**, live in M1.2. The disposition knob and the known caller's route through the collector are decisions only the state machine can make, so `Run`, `collect` and `evaluate` change. The shape does not: no state flag, no exit that skips the deferred cleanup, every wait still on `ctx.Done()` |
+| 8 | StasisEnd and ChannelDestroyed are different | Live in M1.2. `on_no_input = "voicemail"` reaches `sendToVoicemail`, which releases the caller via ContinueToDialplan — so nothing may hang the channel up afterwards, exactly as for a ladder falling through to a mailbox |
 
 No invariant is weakened. One is generalised: *an invalid policy must never
 take down **any** line it does not belong to.*
+
+**"`internal/lobby` does not change" is M1.1's rule, not the feature's.** It is
+the falsifiable claim that *routing* is a router concern, and it held. Line
+*behaviour* is a different kind of thing, and a design that tried to express
+"a silent caller takes a message" outside the state machine would be
+contorting itself to protect a slogan.
 
 Phase 2 adds one of its own, worth stating in the same terms once it ships:
 *a call must never leave by a trunk that does not own the number it presents* —

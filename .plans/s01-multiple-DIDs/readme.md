@@ -6,7 +6,7 @@ first on one provider, then across several.
 Reasoning and rejected alternatives: [`arch.md`](arch.md).
 Backlog with acceptance criteria: `docs/TASKS.md` §7.
 
-**Status:** M1.1 landed. M1.2 onwards planned.
+**Status:** M1.1 and M1.2 landed. M1.3 onwards planned.
 
 ---
 
@@ -71,7 +71,7 @@ exten => _X.,1,Answer()
 - Corrupting `policy.biz.toml` leaves the home line answering.
 - Rate-limit budgets do not bleed between lines.
 
-## M1.2 · Line identity
+## M1.2 · Line identity — **done**
 
 **Build**
 
@@ -84,6 +84,28 @@ exten => _X.,1,Answer()
 
 **Deliverable:** the home line dismisses strangers, the business line takes a
 message. Same binary, opposite defaults.
+
+**This is the milestone where `internal/lobby` changes**, and the note under
+M1.1 that it must not is specific to the routing spine. `Run`, `collect` and
+`evaluate` all take a diff here, because the disposition knob and the known
+caller's route through the collector are decisions the state machine has to
+make. What did *not* change is the shape: no state flag, no exit that skips
+the deferred cleanup, every wait still selecting on `ctx.Done()`.
+
+The design question was the known caller. Putting Grandma through a collect
+loop would make her wait out a dial window before any phone rings, which is a
+regression on the most common path in the system. **The welcome prompt is the
+dial window and the whole of it** — barge in with a digit to reach one room,
+press nothing and the house rings the instant it ends. Latency added on the
+silent path: none. A tail of silence after the greeting was the alternative
+and it is paid by every known caller to serve the rare one who dials.
+
+Second rule, which falls out of the first: **nothing at the keypad may cost an
+allow-listed caller the house.** No digits, half an extension abandoned, or
+attempts exhausted — every exit rings it. They were admitted the moment their
+number matched, so `on_no_input` does not apply to them at all; it is the
+stranger disposition, and its name means what it says (an empty dial window,
+not exhausted attempts, and never a rate-limit failure).
 
 ## M1.3 · Outbound line selection
 
@@ -349,8 +371,13 @@ and a failed call gives them nothing at all. Connection first.
 
 ## Testing
 
-- The state machine does not change, so `internal/lobby` tests keep passing
-  untouched. That is the signal the design is right.
+- **M1.1:** the state machine does not change, so `internal/lobby` tests keep
+  passing untouched. That is the signal the design is right.
+- **M1.2:** the state machine does change, and every one of those tests still
+  passes *unedited* — which is the same signal in the form available here. New
+  tests cover the disposition knob, the per-line pack, and the known caller's
+  route through the collector, including a latency assertion that fails if a
+  dial window is ever put in front of the house.
 - Router: `line,x`, `leg,x`, no args, unknown line.
 - Policy: per-line stores, independent failure.
 - Render: golden files per trunk, like handsets.

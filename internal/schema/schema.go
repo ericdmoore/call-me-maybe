@@ -239,10 +239,59 @@ func Policy() *Schema {
 			"Allow-listed numbers may be written in any format; they normalise to E.164 at load time. An unparseable number is a load error, not a silent never-match.",
 		},
 		Properties: map[string]*Schema{
+			"line":       line(),
 			"house":      house(),
 			"people":     {Type: "array", Description: "The allow-list. These callers hear the welcome prompt and ring the house.", Items: person()},
 			"schedules":  {Type: "array", Description: "Named time windows, defined once and referenced by id from extensions.", Items: schedule()},
 			"extensions": {Type: "array", Description: "What an unknown caller may dial in the lobby.", Items: extension()},
+		},
+		AdditionalProperties: falsy,
+	}
+}
+
+func line() *Schema {
+	return &Schema{
+		Type: "object",
+		Description: "What this number is, and how it treats a caller who dials nothing. " +
+			"Every key is optional and a file with no [line] section behaves exactly as it did before lines existed, " +
+			"so this is what you add to make one number a curt doorman and another a courteous concierge on the same binary.",
+		Rules: []string{
+			"An allow-listed caller is never dismissed by on_no_input: they reach the house whatever it says.",
+			"Nothing routes on number. The dialplan already named the line — this is identity, for `doorman check` and for the handset display.",
+		},
+		Properties: map[string]*Schema{
+			"label": {
+				Type: "string",
+				Description: "Human name for this number — \"Mertaugh Enterprises\". Shown by `doorman check`, " +
+					"and displayed on the ringing handset when a caller reaches the house without dialling an extension, " +
+					"so whoever picks up knows which line to answer as.",
+			},
+			"number": {
+				Type:        "string",
+				Description: "The DID this line answers. Any format; normalised to E.164 at load. Probe a value with `doorman e164 <number>`.",
+				Rules:       []string{"An unparseable number fails the load rather than being kept as written."},
+			},
+			"prompts": {
+				Type:    "string",
+				Pattern: `^[A-Za-z0-9][A-Za-z0-9_-]*(/[A-Za-z0-9][A-Za-z0-9_-]*)*$`,
+				Description: "Prompt pack for this line, overriding PROMPT_MEDIA_PREFIX. An Asterisk media prefix under " +
+					"/var/lib/asterisk/sounds/, not a filesystem path. Two lines with different packs are the same engine with different voices.",
+				CrossRefs: []string{"/var/lib/asterisk/sounds/<prefix>/", "PROMPT_MEDIA_PREFIX in the environment"},
+			},
+			"on_no_input": {
+				Type:    "string",
+				Enum:    []any{"dismiss", "ring-house", "voicemail"},
+				Default: "dismiss",
+				Description: "What happens to a caller who reaches the end of the dial window having entered nothing. " +
+					"dismiss is the historical behaviour: the parting prompt, then a hangup. " +
+					"voicemail takes a message, which is what a business line wants — never drop a lead. " +
+					"ring-house puts them through to the house ring group.",
+				Rules: []string{
+					"voicemail requires [house] voicemail — the caller needs a mailbox to land in.",
+					"ring-house lets anyone patient enough to say nothing reach the house, which makes the allow-list a shortcut rather than a gate. Choose it deliberately.",
+					"This governs an empty dial window only. A caller who exhausts their PIN attempts is still dismissed.",
+				},
+			},
 		},
 		AdditionalProperties: falsy,
 	}

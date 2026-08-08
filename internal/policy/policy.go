@@ -17,6 +17,10 @@ import (
 // touch it — Compile turns it into a Policy with O(1) lookups, and that is
 // what doorman consults.
 type File struct {
+	// Line is declared first because it is what this file *is* — the section
+	// order here is also the order unknown-key suggestions and the schema read
+	// in, and identity before rules is the order a person writes them.
+	Line       Line        `toml:"line"`
 	House      House       `toml:"house"`
 	Handsets   []Handset   `toml:"handsets"`
 	Groups     []Group     `toml:"groups"`
@@ -258,6 +262,7 @@ type Policy struct {
 	exts           map[string]ResolvedExtension
 	house          RingPlan
 	callerIDFormat string
+	line           LineIdentity
 
 	// Retained for tooling rather than call handling: filling in a template
 	// needs to know what handsets exist and which ids are already taken.
@@ -392,8 +397,9 @@ func fromSplitTOML(policyData, handsetsData []byte, o Options) (*Policy, error) 
 		if len(pf.Handsets) > 0 || len(pf.Groups) > 0 {
 			return nil, fmt.Errorf("policy: handsets/groups belong in handsets.toml now — move them there")
 		}
-		if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 || len(hf.House.Handsets) > 0 {
-			return nil, fmt.Errorf("handsets: extensions/people/schedules/house belong in policy.toml — move them there")
+		if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 ||
+			len(hf.House.Handsets) > 0 || hf.Line != (Line{}) {
+			return nil, fmt.Errorf("handsets: extensions/people/schedules/house/line belong in policy.toml — move them there")
 		}
 
 		pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
@@ -580,6 +586,10 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		format = DefaultCallerIDFormat
 	}
 
+	// After the house, because on_no_input = "voicemail" is only meaningful
+	// with a house mailbox to land in.
+	line := compileLine(f.Line, f.House.Voicemail, fail)
+
 	allow := make(map[string]KnownCaller)
 	for _, p := range f.People {
 		if p.Name == "" {
@@ -748,6 +758,7 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		exts:           exts,
 		house:          house,
 		callerIDFormat: format,
+		line:           line,
 		PinLength:      pinLength,
 		handsets:       handsets,
 		groups:         groups,
@@ -786,8 +797,9 @@ func LintSplitWith(policyData, handsetsData []byte, o Options) []string {
 		if len(pf.Handsets) > 0 || len(pf.Groups) > 0 {
 			problems = append(problems, "handsets/groups belong in handsets.toml now — move them there")
 		}
-		if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 || len(hf.House.Handsets) > 0 {
-			problems = append(problems, "extensions/people/schedules/house belong in policy.toml — move them there")
+		if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 ||
+			len(hf.House.Handsets) > 0 || hf.Line != (Line{}) {
+			problems = append(problems, "extensions/people/schedules/house/line belong in policy.toml — move them there")
 		}
 		if len(problems) > 0 {
 			return problems
@@ -878,6 +890,11 @@ func (p *Policy) LookupExtension(pin string) (ResolvedExtension, bool) {
 
 // HousePlan is what happens for a welcomed known caller.
 func (p *Policy) HousePlan() RingPlan { return p.house }
+
+// Line is this line's identity and disposition — the compiled [line] section.
+// A file without one resolves to the zero label and number and to
+// NoInputDismiss, so every caller of this gets a usable answer.
+func (p *Policy) Line() LineIdentity { return p.line }
 
 // HouseEndpoints flattens the house plan's first stage — kept for display.
 func (p *Policy) HouseEndpoints() []string {

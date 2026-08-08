@@ -296,13 +296,31 @@ prompts = "concierge"
 on_no_input = "voicemail"   # dismiss | ring-house | voicemail
 ```
 
-- [ ] Per-line prompt prefix, overriding `PROMPT_MEDIA_PREFIX`.
-- [ ] `on_no_input` — the disposition knob. A curt doorman and a courteous
+**Done**, except the schedules item. `policy.Line()` + `compileLine`;
+`Session.noInput` is the disposition switch.
+
+- [x] Per-line prompt prefix, overriding `PROMPT_MEDIA_PREFIX`. Resolved from
+      the policy the session captured rather than fixed in `Deps` at startup,
+      so swapping a pack reloads like any other policy edit.
+- [x] `on_no_input` — the disposition knob. A curt doorman and a courteous
       concierge are the same engine with opposite defaults; today the lobby can
-      only dismiss.
-- [ ] Known callers can reach the collect loop, with timeout meaning *admit*
-      rather than *dismiss* (the home line's "no dial → ring all").
+      only dismiss. `voicemail` requires `[house] voicemail`, same rule as
+      `afterhours`. It governs an **empty** dial window only — a caller who
+      exhausts their PIN attempts is still dismissed, and a silent caller is
+      never charged a rate-limit failure for saying nothing (invariant 6).
+- [x] Known callers can reach the collect loop, with timeout meaning *admit*
+      rather than *dismiss* (the home line's "no dial → ring all"). **The
+      welcome prompt is the dial window and the whole of it** — barge-in, no
+      tail — so a known caller who dials nothing rings the house with zero
+      added latency, which is the compatibility gate on the commonest path in
+      the system. Nothing at the keypad can cost an allow-listed caller the
+      house: no digits, half an entry abandoned, and attempts exhausted all
+      ring it.
 - [ ] Schedules usable at line scope, not only per-extension (relates to §3).
+      Not attempted with the rest of 7b — it is a `[[schedules]]` question
+      rather than a line-identity one, and it wants the `[house.afterhours]`
+      decision in §3 settled first so the two do not disagree about what a
+      window at house scope means.
 
 ### 7c. Outbound identity — **do not ship 7a without this**
 

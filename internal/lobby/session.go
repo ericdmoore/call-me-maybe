@@ -139,6 +139,10 @@ type Session struct {
 	deps Deps
 	log  *slog.Logger
 	pol  *policy.Policy
+	// prompts is the pack this call speaks from: the line's own, or the one
+	// Deps carries from PROMPT_MEDIA_PREFIX. Resolved once at call start for
+	// the same reason pol is — a pack swapped mid-call would be audible.
+	prompts *Prompts
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -173,6 +177,18 @@ func NewSession(channelID, callerNumber string, deps Deps) *Session {
 		started = deps.Now()
 	}
 
+	// The prompt pack follows the line, and a line *is* its policy file — so
+	// the prefix is read from the policy this session just captured rather
+	// than fixed in Deps at startup. That is what makes a pack swap reload
+	// like every other policy value instead of needing a restart, and it is
+	// the only reason this is not purely a router concern. Empty means the
+	// pack Deps already carries, which is PROMPT_MEDIA_PREFIX and is what
+	// every install without a [line] section gets.
+	prompts := deps.Prompts
+	if prefix := pol.Line().Prompts; prefix != "" {
+		prompts = NewPrompts(prefix)
+	}
+
 	return &Session{
 		ID:         id,
 		ChannelID:  channelID,
@@ -188,9 +204,10 @@ func NewSession(channelID, callerNumber string, deps Deps) *Session {
 		// and this attribute is precisely the one that got it wrong before.
 		log: deps.Log.With("callId", id, "caller",
 			policy.RedactCaller(e164, callerNumber, !deps.Cfg.RedactCallerID)),
-		pol:    pol,
-		ctx:    ctx,
-		cancel: cancel,
+		pol:     pol,
+		prompts: prompts,
+		ctx:     ctx,
+		cancel:  cancel,
 		// Buffered so the event router never blocks on a busy session. 64 is
 		// far beyond anything a single call can generate in flight.
 		events: make(chan event, 64),
@@ -303,8 +320,28 @@ func (s *Session) Run() {
 		s.log.Info("known caller, welcoming", "name", known.Name)
 		s.rec.Known = known.Name
 		s.deps.Limiter.Success(s.limitKey())
-		s.play(PromptWelcomeKnown, false)
+
+		// The greeting is the dial window, and the whole of it.
+		//
+		// A known caller who wants one extension rather than the whole house
+		// presses a digit over the welcome prompt and lands in the collector
+		// with it as the seed. One who does nothing — which is almost
+		// everybody, almost always, since the allow-list exists so that
+		// Grandma never has to dial anything — reaches the house the instant
+		// the prompt ends, with not one millisecond added.
+		//
+		// A tail of silence after the prompt was the obvious alternative and
+		// it is the wrong trade: it is paid by every known caller on every
+		// call to serve the rare one who dials, and a pause on a phone call
+		// is indistinguishable from a dead line. If a tail is ever wanted it
+		// is additive, with its own key, driven by somebody actually missing
+		// it.
+		seed := s.play(PromptWelcomeKnown, true)
 		if s.ctx.Err() != nil {
+			return
+		}
+		if seed != "" {
+			s.collect(seed, known.Name)
 			return
 		}
 		s.runPlan(s.pol.HousePlan(), known.Name)
@@ -324,7 +361,7 @@ func (s *Session) Run() {
 	if s.ctx.Err() != nil {
 		return
 	}
-	s.collect(seed)
+	s.collect(seed, "")
 }
 
 // play starts a prompt and waits for it to finish. With bargeIn, a DTMF digit
@@ -338,7 +375,7 @@ func (s *Session) play(name Prompt, bargeIn bool) string {
 	s.pbSeq++
 	pbID := fmt.Sprintf("pb-%s-%d", s.ID, s.pbSeq)
 
-	if err := s.deps.ARI.Play(s.ctx, s.ChannelID, s.deps.Prompts.URI(name), pbID); err != nil {
+	if err := s.deps.ARI.Play(s.ctx, s.ChannelID, s.prompts.URI(name), pbID); err != nil {
 		// A missing prompt file should degrade to silence, not a stuck call.
 		s.log.Warn("playback failed", "prompt", string(name), "err", err)
 		return ""
@@ -368,7 +405,12 @@ func (s *Session) play(name Prompt, bargeIn bool) string {
 // strict where machines probe: FirstDigitTimeout to start dialling, then
 // InterDigitTimeout between digits. seed is a digit already captured by
 // barge-in during the greeting.
-func (s *Session) collect(seed string) {
+//
+// known is the allow-list name of whoever is dialling, empty for a stranger.
+// It is a parameter rather than session state because it is decided once, in
+// Run, and nothing further down the call may change it — and because the two
+// exits that would otherwise dismiss a caller must not dismiss this one.
+func (s *Session) collect(seed, known string) {
 	cfg := s.deps.Cfg
 	attempts := 0
 	digits := ""
@@ -399,11 +441,11 @@ func (s *Session) collect(seed string) {
 			digits = ""
 			reset(cfg.InterDigitTimeout)
 		case d == "#":
-			return s.evaluate(&digits, &attempts, reset)
+			return s.evaluate(&digits, &attempts, reset, known)
 		case len(d) == 1 && d[0] >= '0' && d[0] <= '9':
 			digits += d
 			if len(digits) >= target {
-				return s.evaluate(&digits, &attempts, reset)
+				return s.evaluate(&digits, &attempts, reset, known)
 			}
 			reset(cfg.InterDigitTimeout)
 		}
@@ -425,7 +467,7 @@ func (s *Session) collect(seed string) {
 			}
 		case <-timer.C:
 			s.log.Info("dial window elapsed", "digits", len(digits))
-			s.dismiss("no-digits")
+			s.noInput(known)
 			return
 		case <-s.ctx.Done():
 			return
@@ -433,10 +475,64 @@ func (s *Session) collect(seed string) {
 	}
 }
 
+// lobbyLabel is what rings on a handset for a caller the lobby let through
+// without an extension: they have no name of their own and no label to borrow.
+// A line that sets [line] label displays that instead, which tells whoever
+// picks up which number was dialled — the one thing they need to know to
+// answer it correctly.
+const lobbyLabel = "Lobby"
+
+// noInput is where a caller who entered nothing goes.
+//
+// Three things are true here and each is load-bearing:
+//
+// A timeout is not a failed attempt. Invariant 6 counts wrong PINs, and a
+// caller who says nothing has not guessed at anything — so the rate limiter is
+// deliberately untouched on this path. Charging silence would spend the budget
+// on the caller least likely to be working the keypad.
+//
+// An allow-listed caller always reaches the house. They were admitted the
+// moment their number matched; the keypad is a shortcut past the house, never
+// a gate in front of it, so nothing they fail to do at it may cost them the
+// ring they would have had before any of this existed.
+//
+// Everyone else gets the line's disposition, which defaults to the dismissal
+// this has always been.
+func (s *Session) noInput(known string) {
+	if known != "" {
+		s.runPlan(s.pol.HousePlan(), known)
+		return
+	}
+
+	line := s.pol.Line()
+	house := s.pol.HousePlan()
+	// The record still says why they got where they got: outcome alone cannot
+	// tell a caller who dialled an extension from one who simply waited.
+	s.rec.Reason = "no-digits"
+
+	switch line.OnNoInput {
+	case policy.NoInputRingHouse:
+		s.log.Info("nobody dialled, ringing the house", "onNoInput", line.OnNoInput)
+		label := line.Label
+		if label == "" {
+			label = lobbyLabel
+		}
+		s.runPlan(house, label)
+	case policy.NoInputVoicemail:
+		// The mailbox is guaranteed non-empty: compileLine refuses
+		// on_no_input = "voicemail" on a policy whose [house] has none.
+		s.log.Info("nobody dialled, taking a message", "onNoInput", line.OnNoInput)
+		s.sendToVoicemail(house.Mailbox)
+	default:
+		s.dismiss("no-digits")
+	}
+}
+
 // evaluate checks a completed entry. Exact match against the policy map —
 // extensions are credentials, so no prefix matching and no fuzz. Returns true
-// when the collect loop should end.
-func (s *Session) evaluate(digits *string, attempts *int, reset func(time.Duration)) bool {
+// when the collect loop should end. known carries the allow-list name through
+// from collect, empty for a stranger.
+func (s *Session) evaluate(digits *string, attempts *int, reset func(time.Duration), known string) bool {
 	entered := *digits
 	*digits = ""
 
@@ -473,6 +569,16 @@ func (s *Session) evaluate(digits *string, attempts *int, reset func(time.Durati
 	s.log.Warn("invalid extension", "attempt", *attempts, "windowFailures", failures)
 
 	if *attempts > s.deps.Cfg.MaxPinAttempts {
+		if known != "" {
+			// Same rule as noInput, at the other exit: an allow-listed caller
+			// cannot lock themselves out at a keypad they never had to touch.
+			// The failures above still counted — invariant 6 is about the
+			// budget, not about who pays it — but the call still ends where it
+			// would have ended if they had stayed quiet.
+			s.log.Info("known caller ran out of attempts, ringing the house", "name", known)
+			s.runPlan(s.pol.HousePlan(), known)
+			return true
+		}
 		s.dismiss("too-many-attempts")
 		return true
 	}
