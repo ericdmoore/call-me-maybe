@@ -6,7 +6,7 @@ first on one provider, then across several.
 Reasoning and rejected alternatives: [`arch.md`](arch.md).
 Backlog with acceptance criteria: `docs/TASKS.md` §7.
 
-**Status:** planned. Nothing started.
+**Status:** M1.1 landed. M1.2 onwards planned.
 
 ---
 
@@ -40,7 +40,7 @@ are.
 One VoIP.ms registration already carries as many DIDs as you buy. The dialled
 number arrives as `${EXTEN}` and is currently logged and thrown away.
 
-## M1.1 · Routing spine
+## M1.1 · Routing spine — **done**
 
 *The prerequisite. Nothing below starts until this lands.*
 

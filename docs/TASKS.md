@@ -261,20 +261,25 @@ Named in the dialplan rather than parsed out of SIP headers, because what a
 provider puts in the To header varies (see #5) and the dialplan is the one file
 that already knows which number is which.
 
-- [ ] `policy.<line>.toml` per line; bare `policy.toml` is the default line.
-- [ ] **No app arg → today's behaviour, byte for byte.** Existing installs do
+**Done.** `policy.DiscoverLines` + `cmd/doorman/lines.go`; `doorman check`
+grows a `Lines:` block only when there is more than one.
+
+- [x] `policy.<line>.toml` per line; bare `policy.toml` is the default line.
+- [x] **No app arg → today's behaviour, byte for byte.** Existing installs do
       not change.
-- [ ] One `policy.Store` per line, so a syntax error in the business policy
+- [x] One `policy.Store` per line, so a syntax error in the business policy
       cannot take down the home line — invariant 4, generalised. This is the
       reason for separate files rather than `[[lines]]` sections.
-- [ ] An unknown line name falls back to the default line and logs loudly. It
+- [x] An unknown line name falls back to the default line and logs loudly. It
       must never drop the call: doorman cannot read the dialplan, so it cannot
       validate the set at startup.
-- [ ] `internal/lobby` unchanged. `Deps.Policy` is already
+- [x] `internal/lobby` unchanged. `Deps.Policy` is already
       `func() *policy.Policy`; the router picks per-line `Deps` at StasisStart.
-- [ ] Rate-limit key includes the line — two lines with opposite dispositions
-      must not share a budget.
-- [ ] `doorman check` prints the lines it found and what each resolves to.
+- [x] Rate-limit budget is per line — two lines with opposite dispositions
+      must not share one. One `RateLimiter` per line rather than the line in
+      the key, because the key is built inside `internal/lobby` and reaching
+      in there is the change this design exists to avoid.
+- [x] `doorman check` prints the lines it found and what each resolves to.
 
 **Files:** `cmd/doorman/main.go`, `internal/config`, `internal/policy`,
 `asterisk/extensions.conf`, `internal/schema`.

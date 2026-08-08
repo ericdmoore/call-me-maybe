@@ -60,6 +60,11 @@ typo is the whole defect. Suggestions are offered \(em
 is told about
 .BR afterhours .
 Exits 0 when valid, 1 when not, naming the offending key.
+.IP
+On a box answering several numbers this reports every line it found \(em its
+name, its file, and whether it loads \(em before describing each in turn, and
+notes a PIN that appears on more than one line. It says nothing about lines at
+all when there is only the default one.
 This is the authority on whether a configuration is usable.
 .TP
 .BI "doorman schema [" name ]
@@ -208,6 +213,16 @@ application named in
 .TP
 .BR POLICY_PATH ", " HANDSETS_PATH ", " POLICY_WATCH
 Where the config files are, and whether to reload them on change.
+.B POLICY_PATH
+also anchors the search for extra lines: any
+.I policy.<line>.toml
+beside it configures the line of that name, which the dialplan selects with
+.BR "Stasis(app,line,<name>)" .
+Each line gets its own store, so one bad file cannot take down another line.
+Bare
+.I policy.toml
+is the default line and serves every call that names none.
+A new line file is picked up at startup; edits to an existing one are live.
 .TP
 .B FIRST_DIGIT_TIMEOUT_MS
 Default 10000. Time to dial the

@@ -94,7 +94,10 @@ const usage = `doorman — the Call Me Maybe lobby daemon
                                 fell back to. A key the schema does not know
                                 is an error here (with a "did you mean"); the
                                 daemon only warns about the same key, because
-                                a bad edit must never take the phone down
+                                a bad edit must never take the phone down.
+                                On a box answering several numbers it lists
+                                every line it found — policy.<line>.toml
+                                beside policy.toml — and what each resolves to
       -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
       -allow-placeholders       accept the example sentinels; for CI, not operators
   doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
@@ -199,12 +202,23 @@ func runCheck(args []string) int {
 	// StrictUnknownKeys is set here and nowhere else that loads a policy. An
 	// operator is reading this output and a typo is exactly what they came to
 	// find; the daemon, which cannot afford to refuse a file, only warns.
-	p, err := policy.LoadSplitWith(path, handsetsPath, policy.Options{
+	opts := policy.Options{
 		AllowPlaceholders: *allowPlaceholders,
 		StrictUnknownKeys: true,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "✗ configuration is not valid\n\n%v\n", err)
+	}
+
+	files, ignored := policy.DiscoverLines(path)
+	results := make([]checkedLine, 0, len(files))
+	for _, lf := range files {
+		p, err := policy.LoadSplitWith(lf.Path, handsetsPath, opts)
+		results = append(results, checkedLine{LineFile: lf, pol: p, err: err})
+	}
+
+	// The default line is what answers when nothing else does, so a broken one
+	// is the whole phone rather than one number. Report it exactly as this has
+	// always reported an invalid config, and stop.
+	if results[0].err != nil {
+		fmt.Fprintf(os.Stderr, "✗ configuration is not valid\n\n%v\n", results[0].err)
 		return 1
 	}
 	if !policy.SplitLayout(handsetsPath) {
@@ -213,13 +227,126 @@ func runCheck(args []string) int {
 		fmt.Println("      generate the Asterisk side. See RUNBOOK: Config interfaces.")
 		fmt.Println()
 	}
+	for _, ig := range ignored {
+		fmt.Printf("note: ignoring %s — %s\n", ig.Path, ig.Reason)
+		fmt.Println()
+	}
 
+	// One line is the overwhelmingly common install, and it should never have
+	// to read the word "line" to check its config. The summary and the
+	// per-line headers appear only once there is something to disambiguate.
+	multi := len(results) > 1
+	if multi {
+		printLineSummary(results)
+	}
+
+	rc := 0
+	for i, r := range results {
+		if multi {
+			if i > 0 {
+				fmt.Println()
+			}
+			fmt.Printf("── line: %s %s\n\n", r.Name, strings.Repeat("─", max(3, 62-len(r.Name))))
+		}
+		if r.err != nil {
+			fmt.Printf("✗ %s is not valid\n\n%v\n\n", r.Path, r.err)
+			fmt.Printf("  Calls arriving on line %q are served by the %s line until this loads.\n",
+				r.Name, policy.DefaultLine)
+			rc = 1
+			continue
+		}
+		describeLine(r.Path, r.pol, *allowPlaceholders)
+	}
+	if multi {
+		printSharedPINs(results)
+	}
+	return rc
+}
+
+// checkedLine is one line and whatever loading its policy produced. Both
+// fields matter: a line that will not load is reported and the others are
+// still described, because that is exactly what the daemon does with it.
+type checkedLine struct {
+	policy.LineFile
+	pol *policy.Policy
+	err error
+}
+
+// printLineSummary answers the question a multi-line operator actually has
+// before any of the detail: which numbers does this box answer, which file
+// governs each, and where does a call go when the dialplan says something
+// unexpected.
+func printLineSummary(results []checkedLine) {
+	width := 0
+	for _, r := range results {
+		if len(r.Name) > width {
+			width = len(r.Name)
+		}
+	}
+	fmt.Printf("Lines: %d\n\n", len(results))
+	for _, r := range results {
+		state := "✓ valid"
+		if r.err != nil {
+			state = "✗ will not load"
+		}
+		suffix := ""
+		if r.Name == policy.DefaultLine {
+			suffix = "   (the default line)"
+		}
+		fmt.Printf("  %-*s  %-28s %s%s\n", width, r.Name, r.Path, state, suffix)
+	}
+	fmt.Println()
+	fmt.Println("  The dialplan chooses: Stasis(${DOORMAN_APP},line,<name>). A call with no")
+	fmt.Println("  line argument gets the default line, and so does a call naming a line")
+	fmt.Println("  that is not listed here — doorman cannot read the dialplan, so it can")
+	fmt.Println("  never drop a call over a name it does not recognise.")
+	fmt.Println()
+}
+
+// printSharedPINs flags the same PIN on two lines. Separate namespaces are the
+// design and this is not an error — but a person dialling six digits and
+// reaching different places depending which number they rang is worth saying
+// out loud. Invariant 1 holds here as everywhere: the labels are named, the
+// digits never are.
+func printSharedPINs(results []checkedLine) {
+	type owner struct{ line, label string }
+	seen := map[string]owner{}
+	var clashes []string
+	for _, r := range results {
+		if r.err != nil {
+			continue
+		}
+		for _, e := range r.pol.Extensions() {
+			if e.PIN == policy.PlaceholderPIN {
+				continue // every example shares this one; that is the sentinel, not a clash
+			}
+			if prev, ok := seen[e.PIN]; ok {
+				clashes = append(clashes, fmt.Sprintf("  %s %q and %s %q share a PIN",
+					prev.line, prev.label, r.Name, e.Label))
+				continue
+			}
+			seen[e.PIN] = owner{r.Name, e.Label}
+		}
+	}
+	if len(clashes) == 0 {
+		return
+	}
+	fmt.Println("\n  Worth a look — the same PIN on more than one line:")
+	for _, c := range clashes {
+		fmt.Println(c)
+	}
+	fmt.Println("\n  Valid: each line is its own namespace, so both work. But whoever hands")
+	fmt.Println("  the number out has to remember which line it belongs to.")
+}
+
+// describeLine prints what one policy file resolves to.
+func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 	pinLen := "mixed (inter-digit timeout decides)"
 	if p.PinLength > 0 {
 		pinLen = fmt.Sprintf("%d", p.PinLength)
 	}
 	fmt.Printf("✓ %s is valid\n\n", path)
-	if *allowPlaceholders {
+	if allowPlaceholders {
 		fmt.Println("  note: placeholder PINs were accepted. This config cannot answer a")
 		fmt.Println("        call until `doorman init` replaces them.")
 		fmt.Println()
@@ -251,7 +378,6 @@ func runCheck(args []string) int {
 			}
 		}
 	}
-	return 0
 }
 
 const (
@@ -515,38 +641,27 @@ func runService() {
 	}
 	log := slog.New(handler)
 
-	// Unknown keys warn here and refuse in `doorman check`. The daemon must
-	// keep answering the phone (invariant 4), so a key it does not recognise
-	// is something to say loudly and then ignore — which is what the decoder
-	// was already doing, minus the saying. Only names are logged; a key's
-	// value never is.
-	loadOpts := policy.Options{
-		OnUnknownKey: func(u policy.UnknownKey) {
-			log.Warn("unrecognised key in config, ignoring it",
-				"file", u.File, "key", u.Path, "didYouMean", u.Suggest,
-				"hint", "run `doorman check` for the full report")
-		},
+	// The lines this box answers: the default line, whose file is POLICY_PATH
+	// itself, plus one per sibling policy.<name>.toml. Discovered rather than
+	// declared, because doorman cannot read the dialplan and so can never know
+	// the authoritative set anyway. An install with one number finds one line
+	// and behaves exactly as it always has.
+	lineFiles, ignored := policy.DiscoverLines(cfg.PolicyPath)
+	for _, ig := range ignored {
+		log.Warn("ignoring a file that looks like a line policy but is not one",
+			"path", ig.Path, "reason", ig.Reason)
 	}
 
-	store, err := policy.OpenStoreWith(cfg.PolicyPath, cfg.HandsetsPath, cfg.PolicyWatch, loadOpts,
-		func(p *policy.Policy) {
-			log.Info("policy reloaded",
-				"allowList", p.AllowListCount(), "extensions", p.ExtensionCount())
-		},
-		func(err error) {
-			log.Error("policy reload failed, keeping previous version", "err", err)
-		},
-	)
+	opened, err := openLines(lineFiles, cfg.HandsetsPath, cfg.PolicyWatch, log)
 	if err != nil {
 		log.Error("cannot load policy", "path", cfg.PolicyPath, "err", err)
 		os.Exit(1)
 	}
-	defer store.Close()
-
-	pol := store.Current()
-	log.Info("policy loaded", "path", cfg.PolicyPath,
-		"allowList", pol.AllowListCount(), "extensions", pol.ExtensionCount(),
-		"pinLength", pol.PinLength)
+	defer func() {
+		for _, o := range opened {
+			o.store.Close()
+		}
+	}()
 
 	client := ari.New(ari.Options{
 		BaseURL:      cfg.ARIBaseURL,
@@ -568,13 +683,6 @@ func runService() {
 		os.Exit(1)
 	}
 	log.Info("connected to asterisk", "version", astVersion)
-
-	limiter := lobby.NewRateLimiter(cfg.RateLimitEnabled, cfg.RateLimitMaxFailures, cfg.RateLimitWindow)
-	go func() {
-		for range time.Tick(5 * time.Minute) {
-			limiter.Sweep(time.Now())
-		}
-	}()
 
 	prompts := lobby.NewPrompts(cfg.PromptMediaPrefix)
 	reg := newRegistry()
@@ -617,37 +725,61 @@ func runService() {
 		log.Info("event webhook enabled", "host", hook.Host(), "redacted", cfg.WebhookRedactCallerID)
 	}
 
-	deps := lobby.Deps{
-		ARI:     ariAdapter{client},
-		Policy:  store.Current,
-		Limiter: limiter,
-		Prompts: prompts,
-		Log:     log,
-		Cfg: lobby.Config{
-			DefaultCountryCode: cfg.DefaultCountryCode,
-			ExtensionLength:    cfg.ExtensionLength,
-			FirstDigitTimeout:  cfg.FirstDigitTimeout,
-			InterDigitTimeout:  cfg.InterDigitTimeout,
-			RingTimeout:        cfg.RingTimeout,
-			RingCycle:          6 * time.Second, // standard US cadence
-			MaxPinAttempts:     cfg.MaxPinAttempts,
-			RedactCallerID:     cfg.RedactCallerID,
-			MaxConcurrentCalls: cfg.MaxConcurrentCalls,
-		},
-		OnLegCreated: reg.addLeg,
-		OnFinished:   reg.remove,
-	}
-	// A typed nil in an interface is not nil, so these fields are only set
-	// when there is a real sink — the state machine's nil checks depend on it.
-	if callLog != nil {
-		deps.Calls = callLog
-	}
-	if hook != nil {
-		deps.Notify = hook
+	// Everything a line does not own is shared: one ARI client, one prompt
+	// pack, one registry, one call log, one webhook, one concurrency cap. What
+	// a line owns is its policy and its rate-limit budget.
+	lines := newLineSet()
+	var limiters []*lobby.RateLimiter
+	for _, o := range opened {
+		limiter := lobby.NewRateLimiter(cfg.RateLimitEnabled, cfg.RateLimitMaxFailures, cfg.RateLimitWindow)
+		limiters = append(limiters, limiter)
+
+		deps := lobby.Deps{
+			ARI:     ariAdapter{client},
+			Policy:  o.store.Current,
+			Limiter: limiter,
+			Prompts: prompts,
+			Log:     o.log,
+			Cfg: lobby.Config{
+				DefaultCountryCode: cfg.DefaultCountryCode,
+				ExtensionLength:    cfg.ExtensionLength,
+				FirstDigitTimeout:  cfg.FirstDigitTimeout,
+				InterDigitTimeout:  cfg.InterDigitTimeout,
+				RingTimeout:        cfg.RingTimeout,
+				RingCycle:          6 * time.Second, // standard US cadence
+				MaxPinAttempts:     cfg.MaxPinAttempts,
+				RedactCallerID:     cfg.RedactCallerID,
+				MaxConcurrentCalls: cfg.MaxConcurrentCalls,
+			},
+			OnLegCreated: reg.addLeg,
+			OnFinished:   reg.remove,
+		}
+		// A typed nil in an interface is not nil, so these fields are only set
+		// when there is a real sink — the state machine's nil checks depend on it.
+		if callLog != nil {
+			deps.Calls = callLog
+		}
+		if hook != nil {
+			deps.Notify = hook
+		}
+		lines.add(o.name, deps)
 	}
 
-	client.Connect(func(ev ari.Event) { route(ev, reg, deps, client, log) })
+	go func() {
+		for range time.Tick(5 * time.Minute) {
+			now := time.Now()
+			for _, limiter := range limiters {
+				limiter.Sweep(now)
+			}
+		}
+	}()
+
+	client.Connect(func(ev ari.Event) { route(ev, reg, lines, client, log) })
 	log.Info("doorman is on duty", "app", cfg.ARIApp, "version", version)
+	if len(lines.byName) > 1 {
+		log.Info("serving several lines", "lines", strings.Join(lines.names(), ", "),
+			"default", policy.DefaultLine)
+	}
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
@@ -661,7 +793,13 @@ func runService() {
 // route dispatches ARI events to sessions. It runs on the websocket read
 // goroutine, so everything here must hand off fast — sessions consume through
 // buffered channels and never block this path.
-func route(ev ari.Event, reg *registry, deps lobby.Deps, client *ari.Client, log *slog.Logger) {
+//
+// The Stasis application arguments are the dialplan talking to the router.
+// There are two things it can say and they are both a first argument: "leg"
+// (an originated handset leg answered, correlation id follows) and "line"
+// (this call arrived on the named line). Saying nothing is the third case and
+// the one every existing install uses.
+func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log *slog.Logger) {
 	switch ev.Type {
 	case "StasisStart":
 		if ev.Channel == nil {
@@ -683,6 +821,7 @@ func route(ev ari.Event, reg *registry, deps lobby.Deps, client *ari.Client, log
 			return
 		}
 
+		deps := lines.forCall(ev.Args, log)
 		s := lobby.NewSession(ev.Channel.ID, ev.Channel.Caller.Number, deps)
 		if !reg.admit(s, deps.Cfg.MaxConcurrentCalls) {
 			// The rate limiter counts PIN failures per caller; it has nothing

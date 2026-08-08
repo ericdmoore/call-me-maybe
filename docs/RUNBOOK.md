@@ -21,6 +21,13 @@ on every reload, but a typo in a bedtime can no longer invalidate the
 handset inventory: the failure domains are separate. Legacy single-file
 policy.toml (handsets inline) still loads; `doorman check` nudges.
 
+If the box answers more than one phone number, each extra one gets a
+`policy.<line>.toml` beside `policy.toml`, and the dialplan says which line a
+call arrived on. Handsets stay shared; rules, PINs and rate-limit budgets are
+per line, with a separate failure domain each. Plain `policy.toml` is the
+default line and is what a call with no line named gets — which is every call
+on an install that has one number. See "Add a second number" in §6.
+
 
 Everything operational: provisioning, verification, troubleshooting, day-2
 tasks. Commands assume the repo is at `/opt/call-me-maybe` on the Pi.
@@ -493,6 +500,109 @@ agree procedure:
 4. Reference the id from `policy.toml` ([house], a group, or an extension) —
    live within a second.
 5. `./bin/doorman check`
+
+### Add a second number
+
+One box, several phone numbers, each with its own rules — a curt doorman on
+the home line, a courteous concierge on the business one. One VoIP.ms
+registration already carries every DID you buy, so this is config on both
+sides and no new trunk.
+
+**Nothing changes for an install that does not do this.** A call arriving with
+no line named gets `policy.toml`, exactly as it always has.
+
+1. **Buy the DID** in the VoIP.ms portal and point it at the same sub-account
+   as the first. Nothing new to register.
+
+2. **Find out what digits arrive.** Providers differ — 10 digits, 11, or full
+   E.164 — and the dialplan match has to be exact:
+
+   ```bash
+   $ sudo asterisk -rvvv          # then ring the new number
+                                  # want: "Inbound from <caller> to 5125550142"
+   ```
+
+3. **Write the line's policy**, beside the existing one. The name in the
+   filename is the name the dialplan will use:
+
+   ```bash
+   $ cd /opt/call-me-maybe
+   $ sudo -u doorman cp policy.toml policy.biz.toml
+   $ sudo -u doorman nano policy.biz.toml      # its own allow-list, its own
+                                               # extensions, its own ladders
+   $ sudo -u doorman ./bin/doorman rotate -policy policy.biz.toml
+   ```
+
+   Handsets are **shared** — one `handsets.toml`, one phone plant, and both
+   lines may ring the office. Everything else is per line: allow-list,
+   extensions, PINs, schedules, and the rate-limit budget.
+
+4. **Route it in the dialplan.** In `/etc/asterisk/extensions.conf`, send the
+   new DID to its own context from `[inbound-trunk]` — an exact match beats
+   the `_X.` pattern — and name the line as the Stasis argument:
+
+   ```
+   [inbound-trunk]
+   exten => 5125550142,1,Goto(from-trunk-biz,${EXTEN},1)
+   ; ... the existing _X. lines stay exactly as they are ...
+
+   [from-trunk-biz]
+   exten => _X.,1,NoOp(Inbound from ${CALLERID(num)} to ${EXTEN} on line biz)
+    same => n,Set(CHANNEL(hangup_handler_push)=cmm-hangup,s,1)
+    same => n,Answer()
+    same => n,Stasis(${DOORMAN_APP},line,biz)
+    same => n,Hangup()
+   ```
+
+5. **Confirm and reload:**
+
+   ```bash
+   $ ./bin/doorman check                       # lists every line it found
+   $ sudo asterisk -rx 'dialplan reload'
+   $ sudo systemctl restart doorman            # new files need a restart;
+                                               # edits to them do not
+   $ journalctl -u doorman -n 20 | grep line
+   ```
+
+   `doorman check` prints a `Lines:` block naming every line, its file, and
+   whether it loads. A new policy file is discovered at startup, so adding a
+   line is the one policy change that needs a restart; editing one that
+   already exists is picked up live like any other.
+
+6. **Ring both numbers.** The home line should behave exactly as it did
+   before you started.
+
+**When it goes wrong.** The name in the dialplan and the name in the filename
+have to match, and doorman cannot read the dialplan — so it cannot tell you at
+startup that they do not. Instead the call is answered by the default line and
+the log says so:
+
+```bash
+$ journalctl -u doorman | grep "no policy file"
+# dialplan named a line that has no policy file, using the default line
+#   line=bizz known="biz, default"
+```
+
+That is deliberate: a typo in a config file must never turn a number somebody
+is paying for into a number that does not answer.
+
+A line whose policy will not load behaves the same way — that line falls back
+to the default and everything else keeps working:
+
+```bash
+$ journalctl -u doorman | grep "will not load"
+```
+
+This is invariant 4 generalised. Each line gets its own policy store, which is
+the whole reason lines are separate files rather than sections of one: a stray
+bracket in the business policy cannot stop the house phone ringing.
+
+**Rolling back** is deleting the `Goto` line from `[inbound-trunk]`, or
+deleting `policy.biz.toml`. There is no migration and no stored state.
+
+Outbound calls still present the trunk's default caller ID whichever line the
+policy came from — per-line outbound identity is a separate piece of work
+(`docs/TASKS.md` §7c).
 
 ### Rotate a PIN
 
