@@ -6,7 +6,9 @@ first on one provider, then across several.
 Reasoning and rejected alternatives: [`arch.md`](arch.md).
 Backlog with acceptance criteria: `docs/TASKS.md` §7.
 
-**Status:** M1.1, M1.2 and M1.3 landed. M1.4 onwards planned.
+**Status:** **Phase 1 is complete** — M1.1, M1.2, M1.3 and M1.4 have all
+landed. A household can buy a second number today. Phase 2 (several providers)
+is planned.
 
 ---
 
@@ -217,12 +219,62 @@ guarantees that.
 **Use this as a filter on later work.** If a multi-line feature forces itself on
 someone who only has one line, it is designed wrong.
 
-## M1.4 · Per-line observability
+## M1.4 · Per-line observability — **done**
 
 **Build**
 
 - `line` on the call record; `doorman calls --line biz`.
 - One log file, not one per line, so a whole day still reads in order.
+
+**What landed, and the two things the sketch above did not anticipate.**
+
+**A direction, not only a line.** M1.3 deliberately produced no records for the
+`*4` console, because an outbound call needs a direction before a line means
+anything. It has one now — `inbound` is the zero value and is written as
+absence — and the console posts a record from its single teardown path exactly
+as a session does.
+
+The outcome vocabulary did not transfer, and forcing it would have been worse
+than admitting so. `answered`, `voicemail` and the rest are all statements
+about *who picked up in this house*, and doorman is out of an outbound call
+before the far end even rings — it sets the caller ID, hands the channel to the
+dialplan, and stops existing as far as that call is concerned. So there is one
+new outcome, `placed`, meaning the call left the building and nothing more.
+`dismissed` and `abandoned` carry over unchanged because they are the two that
+were never about direction: doorman ended it, or the human hung up.
+
+The same rule applies to `ms`. On an outbound record it is how long the console
+had the handset, not how long anybody talked, and `doorman calls` refuses to
+print it in the column where an inbound row shows exactly that.
+
+**Absence is the compatibility story, twice.** `line` is absent on the default
+line and `direction` is absent on an inbound call, so a box answering one
+number writes byte-identical records, every `calls.jsonl` in existence keeps
+parsing, and both zero values already mean the right thing. `doorman calls`
+grows a `LINE` column only once a call has arrived on a line with a name and a
+direction column only once something has gone out — the same rule M1.1 gave
+`doorman check`, so nobody with one number ever reads the word "line".
+
+The dialled number lands in `dialled`, held in full on disk and narrowed by
+`Redacted` exactly like `caller`, because that is what it is: a number that
+identifies a person and will appear on a bill. Only a complete number the
+console accepted gets there — a half-entry somebody gave up on is forgotten —
+and that is where invariant 1's line falls between a destination and a
+credential.
+
+The webhook carries `line` on both events, which is the point of it: routing an
+announcement by which number was rung is precisely what Home Assistant is for.
+It stays inbound-only. Its two events are "the house is ringing" and "the call
+ended", and an outbound call rings nothing here and ends somewhere doorman
+cannot see.
+
+---
+
+**Phase 1 is complete.** One box, several numbers, one provider: the dialplan
+names the line, each line has its own policy file and failure domain, its own
+identity and disposition, its own outbound caller ID, and now its own readable
+history. Everything below changes how a call *leaves* the building, which is a
+different and harder problem.
 
 ---
 

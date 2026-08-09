@@ -167,7 +167,7 @@ SSH on the Pi with no additional installation. See
 .B doorman calls
 .RS
 Read the call log: one line per completed call, with who called, what happened
-and why. Caller IDs are redacted unless
+and why. Numbers are redacted unless
 .BR \-\-no\-redact ,
 so the default output is safe to paste into a bug report or hand to a model.
 Entered digits and PINs are never recorded at all \(em a record says whether a
@@ -176,9 +176,30 @@ PIN was valid, never what it was. Requires
 to be set; see
 .BR "doorman schema env" .
 .PP
+A box answering several numbers writes one log with
+.B line
+on each record, not one file per line, so a whole day still reads in order. A
+call placed through the
+.B *4
+console is recorded too, as
+.BR direction " " outbound
+with the number in
+.BR dialled ;
+its outcome is
+.B placed
+rather than
+.BR answered ,
+because doorman hands the channel to the dialplan and never learns whether
+anybody picked up. Both fields are absent for the default line and for inbound,
+so a box with one number reads exactly as it always did \(em no
+.B LINE
+column, no direction column.
+.PP
 Filters:
 .BR \-\-since " (a duration like " 24h " or " 7d ", or a date), "
-.BR \-\-outcome ", " \-\-caller ", " \-n .
+.BR \-\-outcome ", " \-\-caller " (either end of the call), "
+.BR \-\-line " (" default " is plain policy.toml), "
+.BR \-\-direction ", " \-n .
 .B \-\-json
 emits JSON Lines.
 .RE

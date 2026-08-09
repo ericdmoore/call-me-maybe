@@ -89,6 +89,15 @@ type Deps struct {
 	Prompts *Prompts
 	Log     *slog.Logger
 	Cfg     Config
+	// Line is the name of the line these calls arrive on. It is stamped onto
+	// the call record and read nowhere else — the state machine still learns
+	// nothing about lines from it, and a policy is still the only thing that
+	// decides anything.
+	//
+	// Empty is the default line, and the router leaves it empty deliberately:
+	// an install with one number then writes exactly the records it wrote
+	// before lines existed. See calls.Record.Line.
+	Line string
 	// Calls receives one record per completed call. Nil disables the call
 	// log entirely, which is why every use is behind a nil check rather
 	// than a config flag.
@@ -215,9 +224,13 @@ func NewSession(channelID, callerNumber string, deps Deps) *Session {
 		// Abandoned is the zero outcome, so a caller who hangs up mid-lobby
 		// is recorded truthfully with nobody having to remember to set it.
 		startedAt: started,
+		// Direction is left at its zero value on purpose: a Session is inbound
+		// by construction, and an absent direction is what every record written
+		// before outbound calling existed says.
 		rec: calls.Record{
 			ID:      id,
 			Start:   started,
+			Line:    deps.Line,
 			Caller:  e164,
 			Outcome: calls.OutcomeAbandoned,
 		},

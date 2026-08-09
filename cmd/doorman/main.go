@@ -108,8 +108,11 @@ const usage = `doorman — the Call Me Maybe lobby daemon
                                 offers. Rendering is content-addressed, so
                                 editing one line re-renders one clip.
   doorman calls                 read the call log: who called, what happened,
-                                and why. Caller IDs redacted unless
-                                --no-redact. Needs CALL_LOG_PATH set.
+                                and why. Numbers redacted unless --no-redact.
+                                One log for every line, so a whole day reads
+                                in order; --line and --direction narrow it on
+                                a box answering several numbers or placing
+                                calls through *4. Needs CALL_LOG_PATH set.
   doorman schema [name]         print the configuration surface as JSON Schema:
                                 every key, type, default, and cross-file
                                 reference for policy.toml, handsets.toml, and
@@ -873,6 +876,7 @@ func runService() {
 			Limiter: limiter,
 			Prompts: prompts,
 			Log:     o.log,
+			Line:    recordedLine(o.name),
 			Cfg: lobby.Config{
 				DefaultCountryCode: cfg.DefaultCountryCode,
 				ExtensionLength:    cfg.ExtensionLength,
@@ -968,6 +972,10 @@ func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log 
 				// The timeouts, and nothing line-specific: the console belongs
 				// to no line, which is the whole reason it exists.
 				Cfg: lines.deflt.Cfg,
+				// The call log is shared by every line and owned by none, so
+				// the default line's copy of it is every line's copy — the same
+				// route the timeouts take, for the same reason.
+				Calls: lines.deflt.Calls,
 				// Called on the console's own goroutine, so reading every
 				// line's current policy never happens on this one.
 				Lines:      func() []lobby.ConsoleLine { return lines.outbound().consoleLines() },

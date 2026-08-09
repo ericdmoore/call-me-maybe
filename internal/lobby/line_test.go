@@ -59,9 +59,9 @@ handsets = ["kitchen"]
 // so a regression that put a FirstDigitTimeout in front of the house would
 // miss by an order of magnitude rather than by a scheduling hiccup.
 func TestKnownCallerReachesTheHouseWithNoDialWindow(t *testing.T) {
-	h := startTuned(t, testPolicy, "5125550100", nil, func(c *Config) {
-		c.FirstDigitTimeout = 5 * time.Second
-		c.InterDigitTimeout = 5 * time.Second
+	h := startTuned(t, testPolicy, "5125550100", nil, func(d *Deps) {
+		d.Cfg.FirstDigitTimeout = 5 * time.Second
+		d.Cfg.InterDigitTimeout = 5 * time.Second
 	})
 
 	c := h.fake.expect(t, "Play")

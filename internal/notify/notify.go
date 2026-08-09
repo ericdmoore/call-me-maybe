@@ -74,6 +74,19 @@ type Event struct {
 	At     time.Time `json:"at"`
 	CallID string    `json:"call_id"`
 
+	// Line is which of this box's numbers was rung, and it is on the ringing
+	// event as well as the completed one because that is the whole use for it:
+	// announcing the business line on the office speaker and the house line
+	// everywhere. Absent means the default line, so a payload from an install
+	// with one number is byte-identical to what it was before lines existed.
+	Line string `json:"line,omitempty"`
+	// Direction is "outbound" on a call this house placed, absent for inbound.
+	// Nothing posts an outbound event today — the console has no notifier,
+	// because the two events here are about a phone ringing in this house —
+	// but the projection below carries every field the record has rather than
+	// quietly dropping one.
+	Direction string `json:"direction,omitempty"`
+
 	// Caller is redacted unless the operator opted out; empty when withheld.
 	Caller string `json:"caller,omitempty"`
 	// Known is the allow-list name that matched — the field an announcement
@@ -104,6 +117,8 @@ func FromRecord(kind string, at time.Time, r calls.Record) Event {
 		Type:      kind,
 		At:        at,
 		CallID:    r.ID,
+		Line:      r.Line,
+		Direction: r.Direction,
 		Caller:    r.Caller,
 		Known:     r.Known,
 		Extension: r.Extension,

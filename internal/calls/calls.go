@@ -27,7 +27,10 @@
 // a credential, so a record says whether a PIN was valid and never what was
 // typed. Caller IDs *are* written in full, which is the point of a call log on
 // a telephone; the file is 0600, stays on the box, and Record.Redacted covers
-// them for anything that leaves it.
+// them for anything that leaves it. A dialled number is a caller ID by the
+// same argument and gets the same treatment — full on disk, narrowed by
+// Redacted — and the line between the two rules is that a destination somebody
+// asked for is not a credential, while a six-digit near-miss at the door is.
 package calls
 
 import (
@@ -47,6 +50,14 @@ import (
 )
 
 // Outcomes. Every call ends as exactly one of these.
+//
+// The first four are the inbound vocabulary and they are about who answered.
+// Only two of them mean the same thing in both directions: doorman ended it
+// (dismissed) and the human hung up first (abandoned). "Answered" is the one
+// an outbound call cannot borrow, because doorman releases the channel into
+// the dialplan and is out of the call before anybody picks up — hence
+// OutcomePlaced, which is the whole of the outbound vocabulary that inbound
+// did not already have.
 const (
 	// OutcomeAnswered: a handset picked up and the caller was bridged.
 	OutcomeAnswered = "answered"
@@ -58,6 +69,20 @@ const (
 	// that ends by cancellation is recorded truthfully without anyone
 	// remembering to set it.
 	OutcomeAbandoned = "abandoned"
+	// OutcomePlaced: an outbound call was handed to the dialplan carrying the
+	// chosen line's caller ID. It says the call left the building and nothing
+	// more — whether it rang, was answered, or how long it lasted is not
+	// knowable here, because the point of the outbound console is that doorman
+	// stops being in the call the moment it is placed.
+	OutcomePlaced = "placed"
+)
+
+// Directions. A record with no direction is inbound: that is the call this
+// system was built for, and it means every record written before outbound
+// calling existed still says something true.
+const (
+	DirectionInbound  = "inbound"
+	DirectionOutbound = "outbound"
 )
 
 // A Record is one call. Field names are short because they are read by people
@@ -65,10 +90,38 @@ const (
 type Record struct {
 	ID    string    `json:"id"` // channel id; ties back to the slog lines
 	Start time.Time `json:"start"`
-	MS    int64     `json:"ms"` // duration
+	// MS is how long this call was doorman's. Inbound that is the call;
+	// outbound it is the time spent at the console, because the call is handed
+	// to the dialplan and doorman never learns how long anybody talked.
+	MS int64 `json:"ms"`
+
+	// Line is the line the call arrived on, or was placed as. Empty is the
+	// default line — every call on an install with one number — so a
+	// single-line log is byte-identical to the one written before lines
+	// existed, and a record from an older doorman still reads correctly.
+	// LineOrDefault resolves it.
+	//
+	// One log rather than one file per line, deliberately: a whole day still
+	// reads in order, which is how anybody actually looks for a call.
+	Line string `json:"line,omitempty"`
+	// Direction is DirectionOutbound on a call this house placed. Empty is
+	// inbound, for the same reason Line's zero value is the default line.
+	// Inbound resolves it.
+	Direction string `json:"direction,omitempty"`
 
 	Caller string `json:"caller"`          // full E.164, or "" when withheld
 	Known  string `json:"known,omitempty"` // allow-list name that matched
+	// Dialled is the number an outbound call was placed to, exactly as it was
+	// dialled — not normalised, because that is what reached the dialplan and
+	// what will appear on the bill, and a number doorman cannot normalise is
+	// still a number somebody called.
+	//
+	// It is a caller ID in every sense that matters, so it is held in full
+	// here and narrowed by Redacted, exactly like Caller. It is never a
+	// fumbled entry: only a complete number the console accepted as a
+	// destination lands here, which is what keeps this field on the caller-ID
+	// side of invariant 1 rather than the entered-digits side.
+	Dialled string `json:"dialled,omitempty"`
 
 	Outcome string `json:"outcome"`
 	Reason  string `json:"reason,omitempty"` // rate-limited, no-digits, …
@@ -95,9 +148,35 @@ type Stage struct {
 }
 
 // Redacted returns a copy safe to paste into a bug report or hand to a model.
+// Both numbers are narrowed by the same function: an outbound call's dialled
+// number identifies a person exactly as precisely as an inbound caller ID.
 func (r Record) Redacted() Record {
 	r.Caller = policy.Redact(r.Caller)
+	r.Dialled = policy.Redact(r.Dialled)
 	return r
+}
+
+// LineOrDefault is the line this call belongs to, resolving the zero value. A
+// reader should use this rather than the field: an empty Line is not "no line",
+// it is the default one.
+func (r Record) LineOrDefault() string {
+	if r.Line == "" {
+		return policy.DefaultLine
+	}
+	return r.Line
+}
+
+// Inbound reports whether somebody rang this house. True for the zero value,
+// which is what makes every record written before outbound calling existed
+// still mean what it says.
+func (r Record) Inbound() bool { return r.Direction != DirectionOutbound }
+
+// direction is Inbound as the string a filter compares against.
+func (r Record) direction() string {
+	if r.Inbound() {
+		return DirectionInbound
+	}
+	return DirectionOutbound
 }
 
 // Duration is a convenience for readers.
@@ -274,8 +353,18 @@ func (w *Writer) rotate(f *os.File) (*os.File, error) {
 type Filter struct {
 	Since   time.Time
 	Outcome string // exact match, empty for any
-	Caller  string // substring of the E.164, so a partial number works
-	Limit   int    // most recent N, 0 for all
+	// Caller is a substring of the number at the other end of the call, so a
+	// partial number works. It matches the caller ID inbound and the dialled
+	// number outbound: "did we ever speak to this number" is one question, not
+	// two.
+	Caller string
+	// Line is exact and resolved, so "default" finds the records an install
+	// with one number writes — which carry no line at all.
+	Line string
+	// Direction is DirectionInbound or DirectionOutbound, exact, empty for
+	// either.
+	Direction string
+	Limit     int // most recent N, 0 for all
 }
 
 func (f Filter) match(r Record) bool {
@@ -285,7 +374,13 @@ func (f Filter) match(r Record) bool {
 	if f.Outcome != "" && r.Outcome != f.Outcome {
 		return false
 	}
-	if f.Caller != "" && !strings.Contains(r.Caller, f.Caller) {
+	if f.Caller != "" && !strings.Contains(r.Caller, f.Caller) && !strings.Contains(r.Dialled, f.Caller) {
+		return false
+	}
+	if f.Line != "" && r.LineOrDefault() != f.Line {
+		return false
+	}
+	if f.Direction != "" && r.direction() != f.Direction {
 		return false
 	}
 	return true
