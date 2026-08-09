@@ -90,29 +90,47 @@ The real shape of a household: your contacts, your spouse's, later the kids'.
 In an SMB, several employees' exports. Each is its own file from its own
 account, and they must merge into one set.
 
+Sources live in their own file, **`contacts.toml`**, not in a policy file.
+
+`policy.toml` is per line as of s01; contact sources are global — one
+household's address books, not the home line's. Putting them in policy would
+mean repeating every source in every line file, or making them per-line by
+accident. The tree already has the right shape for this: **inventories are
+global files and policy selects from them.** `handsets.toml` defines the phones
+and `policy.toml` picks which ring; `trunks.toml` defines providers and
+`[line] trunk` picks one.
+
+It is a fifth config file, which is a real cost. It buys the per-line question
+for free later — `[line] contacts = ["eric","becky"]` selecting sources without
+redefining them — and it keeps the file-ownership rule intact.
+
 ```toml
-[contacts]
+# contacts.toml
 cache_dir = "/var/lib/doorman/contacts"   # 0600, holds everyone's address book
 refresh   = "6h"
 
-[[contacts.sources]]
+[[sources]]
 id        = "eric"
 url       = "https://bullmoose.cc/contacts/eric.vcf"
-token_env = "CONTACTS_ERIC_TOKEN"
+token_env = "CONTACTS_ERIC_TOKEN"         # names a .env variable, never the token
 
-[[contacts.sources]]
+[[sources]]
 id        = "becky"
 url       = "https://bullmoose.cc/contacts/becky.vcf"
 token_env = "CONTACTS_BECKY_TOKEN"
 
-[[contacts.sources]]
+[[sources]]
 id   = "blocked"
 url  = "https://bullmoose.cc/contacts/blocked.vcf"
 kind = "block"          # admit (default) | block
+
+[[sources]]
+id   = "exported"
+path = "/var/lib/doorman/contacts/manual.vcf"   # a local file works too
 ```
 
-A source may also be a local path, so a file dropped by any other tool works
-and the feature is testable without a network.
+A source may be a URL or a local path, so a file dropped by any other tool
+works and the feature is testable with no network and no token.
 
 ### De-duplication
 
@@ -153,14 +171,24 @@ by reading the config top to bottom. No scoring, no recency.
   contacts this is microseconds, and re-deriving beats keeping a second
   artefact that can disagree with the first.
 
-### The URL is a credential
+### The token goes in a header, not the URL
 
-A contacts URL with a token in it *is* the secret. This project has already been
-bitten once: every `net/http` transport error wraps into a `*url.Error`
-carrying the full URL, so the obvious `log.Warn("fetch failed", "err", err)`
-ships it to journald — and `nologsecrets` cannot catch it, because the
-offending identifier is `err`. See `internal/notify`, which unwraps and logs
-the host alone. Do the same here.
+`Authorization: Bearer <token>`, read from the variable `token_env` names.
+
+This is not a style preference. A token embedded in a query string makes the
+*URL itself* a secret, and this project has already been bitten by exactly
+that: every `net/http` transport error wraps into a `*url.Error` carrying the
+full URL, so the obvious `log.Warn("fetch failed", "err", err)` ships it to
+journald — and `nologsecrets` cannot catch it, because the offending identifier
+is `err` (see `internal/notify`).
+
+Keeping the credential in a header **dissolves that problem instead of
+mitigating it**: the URL becomes safe to log, safe to print in `doorman check`,
+and safe in an error nobody remembered to unwrap. A URL is also far more likely
+to end up in a proxy log or a shell history than a header is.
+
+If a source can only authenticate by query string, treat its URL as a secret
+and say so in the config comment — but prefer a source that cannot force that.
 
 ---
 
