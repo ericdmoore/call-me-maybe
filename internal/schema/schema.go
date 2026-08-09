@@ -248,11 +248,14 @@ func Trunks() *Schema {
 				Type: "string",
 				Description: "Which trunk carries 911. Optional: unset, emergency calls leave by the primary line's trunk — the [line] trunk in plain policy.toml, the same file that is already the default for everything unqualified. " +
 					"`doorman check` and every startup print which trunk it is and whether that was chosen or inferred, so the default is never a surprise and there is no state where somebody forgot.",
-				CrossRefs: []string{"trunks.toml [[trunks]].id", "policy.toml [line] trunk"},
+				CrossRefs: []string{"trunks.toml [[trunks]].id", "policy.toml [line] trunk", "asterisk/extensions_trunks.conf [cmm-emergency]"},
 				Rules: []string{
 					"It lives here rather than in a policy file on purpose. Whoever grabs the nearest handset has no idea which line they are on, and E911 is registered per DID against a street address, so the trunk carrying 911 must be the one whose address is filed — not the one belonging to whichever number a caller happens to be on.",
 					"Not \"whichever trunk sorts first\" and not \"the first declared\": a default derived from file order moves silently when a block is added at the top of a file, and this is the most safety-critical route in the system.",
-					"Outbound routing by trunk is not implemented yet. This key settles where 911 will go and is what `doorman check` reports; today an emergency call still leaves by the hand-written dialplan.",
+					"One of this key and plain policy.toml's [line] trunk MUST have an answer. `doorman check` exits non-zero and `doorman render` refuses to generate when neither does: a dialplan that routes every DID and says nothing about 911 is the one that gets installed with confidence.",
+					"If the designated trunk cannot carry the call, 911 falls over to the other trunks in turn — the ones declaring e911 = true first, a trunk declaring e911 = false last. The dispatcher may then see the wrong address, which is the deliberate trade: a connected call lets a human say their address out loud, a failed call gives them nothing.",
+					"Nothing asks whether a trunk is registered; it tries it. A provider that ignores SIP OPTIONS looks unreachable while working perfectly, and diverting an emergency call off the trunk whose address is filed on a false negative is exactly the failure this design prevents.",
+					"An emergency call never presents a line's outbound_cid, on any path, and the *4 console refuses emergency numbers outright.",
 				},
 			},
 			"trunks": {
@@ -410,13 +413,15 @@ func line() *Schema {
 			},
 			"trunk": {
 				Type: "string",
-				Description: "The provider this line's number lives at — an id from trunks.toml. Optional, and absent is the whole of a single-provider install: one registration, one hand-written or generated trunk, and the dialplan decides. " +
-					"Inbound it is what puts this line's DID route in the right provider's context when `doorman render` generates them. Outbound it is what will choose the path out of the building once routing by trunk lands.",
-				CrossRefs: []string{"trunks.toml [[trunks]].id"},
+				Description: "The provider this line's number lives at — an id from trunks.toml. Optional, and absent is the whole of a single-provider install: one registration, one hand-written or generated trunk, and the dialplan's DEFAULT_TRUNK decides. " +
+					"Inbound it is what puts this line's DID route in the right provider's context when `doorman render` generates them. Outbound it is the path out of the building: a call placed as this line leaves by this trunk, on both the plain dial path and the *4 console.",
+				CrossRefs: []string{"trunks.toml [[trunks]].id", "asterisk/extensions.conf [cmm-outbound] OUTBOUND_TRUNK"},
 				Rules: []string{
-					"Validated as a cross-file reference by `doorman check` and `doorman render`, exactly as a handset id is. The daemon does not validate it, because nothing on the call path routes on a trunk yet and refusing to load a policy over a reference nothing reads would be the wrong trade.",
-					"plain policy.toml's trunk is the one 911 inherits when trunks.toml sets no emergency_trunk.",
+					"Validated as a cross-file reference by `doorman check` and `doorman render`, exactly as a handset id is. The daemon does not validate it against the inventory, because refusing to load a policy over a reference the call path reads only as a string would be the wrong trade — it warns instead.",
+					"plain policy.toml's trunk is the one 911 inherits when trunks.toml sets no emergency_trunk. One of the two must have an answer or `doorman render` refuses to generate.",
 					"A route is generated only for a line that has BOTH trunk and number. A line with a trunk and no number gets a context but no DID route, and calls for it fall through to the default line.",
+					"It travels with outbound_cid as one decision: a provider will not present a number its account does not own, so `doorman check` and `doorman render` refuse a caller ID this config declares at a different provider.",
+					"Reaches the plain dial path as set_var=OUTBOUND_TRUNK on the endpoint at the next `doorman render`; the *4 console picks it up at the next policy reload.",
 				},
 			},
 			"outbound_cid": {
@@ -430,8 +435,9 @@ func line() *Schema {
 					"policy.toml's value is the house default: any handset no line claims presents it.",
 					"Changing it takes effect on the *4 console at the next reload, and on the plain dialplan path at the next `doorman render`.",
 					"911 never presents it. Emergency calls leave with the trunk's own caller ID, because E911 is registered per DID against a street address.",
+					"With a trunks.toml it is checked against [line] trunk: a number this config declares as another line's number on a DIFFERENT trunk is refused by `doorman check` and `doorman render`, because a provider will not carry a caller ID its account does not own. A number no [line] number declares cannot be checked — nothing can ask a provider what an account owns — and is reported rather than refused.",
 				},
-				CrossRefs: []string{"asterisk/extensions.conf [internal] OUTBOUND_CID", "the DID this line answers, at your provider"},
+				CrossRefs: []string{"asterisk/extensions.conf [cmm-outbound] OUTBOUND_CID", "policy.toml [line] trunk", "the DID this line answers, at your provider"},
 			},
 			"outbound_handsets": {
 				Type:     "array",
@@ -641,7 +647,7 @@ func Env() *Schema {
 
 		"POLICY_PATH":   env("Path to policy.toml.", "path", "./policy.toml"),
 		"HANDSETS_PATH": env("Path to handsets.toml.", "path", "./handsets.toml"),
-		"TRUNKS_PATH":   env("Path to trunks.toml, the provider inventory. The file is optional and absent is the default: with no trunks.toml `doorman render` generates only the handset config and a hand-written pjsip.conf keeps working. The daemon reads it for one thing only — to say at startup which trunk carries 911 and whether that was chosen or inferred. Nothing on the call path routes on a trunk yet.", "path", "./trunks.toml"),
+		"TRUNKS_PATH":   env("Path to trunks.toml, the provider inventory. The file is optional and absent is the default: with no trunks.toml `doorman render` generates only the handset config and a hand-written pjsip.conf keeps working. The daemon reads it to report, not to route — which trunk carries 911 at startup, and a warning when a line presents a caller ID its own trunk does not own. Outbound routing reads [line] trunk from the policy file, so a trunks.toml that will not load warns and the phone keeps answering.", "path", "./trunks.toml"),
 		"POLICY_WATCH":  env("Re-read both config files on change so edits go live without a restart. An invalid file is rejected and the previous policy stays in service.", "boolean (1|true|yes|on)", true),
 
 		"DEFAULT_COUNTRY_CODE": env("Country code assumed when a caller ID arrives without one.", "string", "1"),

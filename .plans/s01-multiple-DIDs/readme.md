@@ -7,11 +7,12 @@ Reasoning and rejected alternatives: [`arch.md`](arch.md).
 Backlog with acceptance criteria: `docs/TASKS.md` §7.
 
 **Status:** **Phase 1 is complete** — M1.1, M1.2, M1.3 and M1.4 have all
-landed. A household can buy a second number today. **Phase 2 is half done:**
-M2.1 (`trunks.toml`) and M2.2 (lines belong to trunks) have landed, so adding
-a provider is editing TOML and re-rendering. M2.3 (outbound by trunk) and M2.4
-(per-provider health) are next, and until M2.3 a call still leaves by whatever
-the dialplan says.
+landed. A household can buy a second number today. **Phase 2 is all but done:**
+M2.1 (`trunks.toml`), M2.2 (lines belong to trunks) and M2.3 (outbound by
+trunk) have landed, so adding a provider is editing TOML and re-rendering, a
+call leaves by its line's provider, and 911 leaves by a designated trunk with
+a fallback rather than by whatever the dialplan hard-codes. M2.4 (per-provider
+health) is what is left.
 
 ---
 
@@ -416,7 +417,7 @@ and both the CLI and the runbook say so rather than implying otherwise.
 Settling the key before anything reads it is the point — retrofitting the
 setting that decides where emergency calls go is worse than adding it early.
 
-## M2.3 · Outbound by trunk
+## M2.3 · Outbound by trunk — **done**
 
 **Build**
 
@@ -429,6 +430,65 @@ setting that decides where emergency calls go is worse than adding it early.
 **Verify:** place a call on each line and confirm **both** that the receiving
 phone shows the right number *and* that the provider's own CDR shows the call
 on the right account. Either alone can look correct while the other is wrong.
+
+**What landed, and the four decisions the sketch above did not contain.**
+
+**A second channel variable, and one shared context.** `OUTBOUND_TRUNK` sits
+beside `OUTBOUND_CID` and arrives the same two ways — a `set_var` per endpoint
+from `doorman render`, or the `*4` console setting it on the channel. The
+dialplan half is the part worth reading: `[internal]` and `[outbound-console]`
+now both `include => cmm-outbound`, which is the *only* copy of the outbound
+dial in the file. The alternative was a second copied `Dial` line in the
+console's context, which is what the file already had, and with a trunk in the
+string it becomes two implementations of the most consequential line in the
+dialplan whose drift shows up as a call that connects and bills correctly while
+presenting the wrong number. `_911` stays in `[internal]`, deliberately outside
+the shared context, so the console cannot reach an emergency route even if
+doorman's own refusal were bypassed. That is the M1.3 guard preserved
+structurally rather than by assertion.
+
+**The caller ID and the trunk became one value.** `render.OutboundIdentity`
+carries both, the console sets both in one loop and refuses the call if either
+fails, and `[line] outbound_cid` is checked against `[line] trunk`. Two maps
+could disagree; a pair cannot. The check itself is the honest part: doorman
+cannot ask VoIP.ms which DIDs an account owns and no config shape would make
+that possible, so what it proves is a contradiction *inside* this config — a
+line presenting a number that another line declares at a different provider.
+That is refused by `doorman check` and `doorman render`. A caller ID no `[line]
+number` declares is reported and allowed, because a DID somebody owns and does
+not answer here is ordinary and indistinguishable from a typo.
+
+**911 is tried, not asked about.** The plan says "if the designated trunk is
+unregistered at call time", and the obvious implementation is a `DEVICE_STATE`
+check before the `Dial`. It is wrong. A provider that does not answer `OPTIONS`
+looks unreachable while working perfectly, and diverting an emergency call off
+the one trunk whose street address is filed — on a false negative, at the worst
+possible moment — is precisely the failure this whole section exists to
+prevent. So the generated `[cmm-emergency]` dials the designated trunk first and
+unconditionally, and falls through on `DIALSTATUS` alone. An unregistered trunk
+fails in milliseconds with `CHANUNAVAIL`, which is the same answer arrived at
+honestly. The fallback order had to be decided too: `e911 = true` first, unset
+next, `e911 = false` last, because a fallback that fires is already a call whose
+location data may be wrong. Nothing can carry it → `Playback` plus
+`Congestion(5)`, because a caller who has just dialled 911 must hear something.
+
+**`DIALPLAN_EXISTS` is what makes adoption one step.** The generated ladder is a
+new context, and reaching it could have been a hand edit in the runbook — one
+more thing to forget, on the route where forgetting is worst. Instead `_911`
+reads `GotoIf($[${DIALPLAN_EXISTS(cmm-emergency,911,1)}]?...)` and falls through
+to `Dial(PJSIP/911@${DEFAULT_TRUNK})`. `#include`ing the generated file *is* the
+switch, and an install with no `trunks.toml` gets the single-trunk dial it has
+always had. `DEFAULT_TRUNK` in `[globals]` is the other half of that: it is a
+name for the endpoint the file used to hard-code, so no-trunks.toml behaviour is
+byte-identical in effect while the file itself stops repeating `@voipms` in five
+places.
+
+**And undecided became an error.** M2.2 said "it becomes an error when that
+changes", and it has: with a `trunks.toml` and neither `emergency_trunk` nor a
+`[line] trunk` on plain `policy.toml`, `doorman check` exits non-zero and
+`doorman render` refuses to write anything at all. A generated dialplan that
+routes every DID beautifully and has no answer for 911 is worse than no
+generated dialplan, because it is the one that gets installed with confidence.
 
 ## M2.4 · Per-provider health
 
@@ -511,10 +571,18 @@ plainly: the location data the dispatcher receives may then be wrong, which is
 genuinely bad — but a connected call lets a human say their address out loud,
 and a failed call gives them nothing at all. Connection first.
 
+**As built:** the generated `[cmm-emergency]` dials each trunk in turn and takes
+the first that connects, guarding each attempt on `DIALSTATUS` so a finished
+call is never redialled. It never asks whether a trunk is registered — see M2.3
+for why a liveness check was rejected — and the order after the designated one
+puts `e911 = true` ahead of unset ahead of `e911 = false`. If nothing carries
+it, the caller hears congestion rather than silence.
+
 ### What has to be said out loud
 
-- `doorman check`: which trunk, chosen or inferred, and whether it has a
-  registered address.
+- `doorman check`: which trunk, chosen or inferred, whether it has a
+  registered address, and the order it falls over in. Non-zero when there is no
+  answer, and `doorman render` refuses to generate.
 - Startup: the same, every boot.
 - RUNBOOK and the site: that some providers do not offer E911 in every area, so
   a wrong choice of provider means a phone that cannot call for help.
@@ -534,7 +602,23 @@ and a failed call gives them nothing at all. Connection first.
   dial window is ever put in front of the house.
 - Router: `line,x`, `leg,x`, no args, unknown line.
 - Policy: per-line stores, independent failure.
-- Render: golden files per trunk, like handsets.
+- Render: `strings.Contains` assertions against the generated output rather
+  than golden files. A golden of the trunk PJSIP would put a `password=` line
+  in the repository, and a golden of the dialplan makes every comment edit a
+  test failure while asserting nothing about behaviour.
+- **M2.3:** the generated dialplan is the artefact, so the emergency ladder is
+  asserted as shape — designated trunk first, an `ANSWER` guard per attempt so
+  a finished call is not redialled, no `CALLERID`/`OUTBOUND_*` anywhere in the
+  context, no `DEVICE_STATE` gate, and the loud failure at the end. The shipped
+  `asterisk/extensions.conf` gets its own test too, because it is the one
+  interface here that is not Go: that `_911` sets no caller ID, that both
+  outbound paths include the one shared context, and that neither the console's
+  context nor the shared one can match a three-digit emergency number.
+- **What no test can reach:** whether Asterisk parses any of it, whether
+  `DIALPLAN_EXISTS` finds the generated context, what `DIALSTATUS` a real
+  provider returns when a trunk is unregistered, and whether the fallback trunk
+  will actually accept a 911 call. Those are hardware, and they belong in the
+  runbook.
 - **No test requires a live trunk.** Phase 2's real verification is manual and
   belongs in the runbook — CI cannot register with Telnyx.
 
@@ -547,9 +631,9 @@ The drift guards will insist on most of it.
 - `llms-policy.txt` — move `[line]` and `trunk` out of the "do not emit" list.
   **This matters more than it looks:** unknown keys are silently ignored, so a
   model writing `[line]` today produces a config that validates and does
-  nothing. Both are out of that list now; what remains in it for Phase 2 is
-  *outbound routing by trunk*, which is the behaviour rather than the key. Its
-  three-file split is four, with the standing instruction not to write a
+  nothing. Both are out of that list now, and with M2.3 outbound routing by
+  trunk has left it too — what remains for Phase 2 is per-provider balance.
+  Its three-file split is four, with the standing instruction not to write a
   `trunks.toml` for somebody who has one provider.
 - `make site-assets` republishes the schema.
 - `site/src/data/providers.ts` — mark verified providers verified.
@@ -570,9 +654,9 @@ No migration, no persistent state, nothing to un-migrate.
 
 | Risk | Mitigation |
 |---|---|
-| **911 leaves by the wrong trunk** | Designated trunk, defaulting to the first declared. `doorman check` and every startup say which, and whether it was chosen or inferred. Blocks Phase 2 |
+| **911 leaves by the wrong trunk** | Designated trunk, defaulting to the primary line's. `doorman check` and every startup say which, and whether it was chosen or inferred; undecided fails the check and refuses the render. **Closed in M2.3** |
 | **doorman down takes out outbound calling** | The plain `_NXXNXXXXXX` dialplan path keeps working with a house default CID. `*4` is enhancement, not dependency |
-| Outbound CID rejected by a provider that does not own the number | Validate `outbound_cid` against its trunk at check time |
+| Outbound CID rejected by a provider that does not own the number | Validate `outbound_cid` against its trunk at check time. **Closed in M2.3** for the provable case — a number this config declares at another provider — and reported, not refused, for a number nothing declares, because no static check can ask a provider what an account owns |
 | Dialplan typo in a line name | Falls back to default and logs. Cannot be caught at startup — doorman cannot read the dialplan. Accepted |
 | Generated PJSIP hand-edited | Same rule as handsets: it is an output. Header comment says so |
 | Scope creep toward tenancy | Every one is a no — per-line users, per-line auth, per-line concurrency caps, a web UI |

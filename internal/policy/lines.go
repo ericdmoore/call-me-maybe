@@ -51,9 +51,10 @@ type Line struct {
 	OnNoInput string `toml:"on_no_input"`
 	// Trunk names the provider this line's number lives at — an id from
 	// trunks.toml. Inbound it is what `doorman render` needs to put the DID's
-	// route in the right provider's context; outbound it will be how a call
-	// leaves, once outbound routing is selected by trunk. Empty is the whole of
-	// today: one provider, and the hand-written dialplan decides.
+	// route in the right provider's context; outbound it is how a call as this
+	// line leaves the building, on both the plain dial path and the *4 console.
+	// Empty means the dialplan's DEFAULT_TRUNK decides, which is every install
+	// with one provider.
 	Trunk string `toml:"trunk"`
 	// OutboundCID is what a callee sees when this line places a call.
 	OutboundCID string `toml:"outbound_cid"`
@@ -108,8 +109,10 @@ type LineIdentity struct {
 	Prompts string
 	// OnNoInput is never empty once compiled; unset resolves to NoInputDismiss.
 	OnNoInput NoInput
-	// Trunk is the trunks.toml id this line's number arrives on, or "" when the
-	// line names none — which is every install with one provider.
+	// Trunk is the trunks.toml id this line's number arrives on and leaves by,
+	// or "" when the line names none — which is every install with one
+	// provider. It travels with OutboundCID everywhere the two go: a provider
+	// will not present a number its account does not own.
 	Trunk string
 	// OutboundCID is the caller ID a call placed as this line presents,
 	// normalised to E.164. Empty means whatever the trunk defaults to, which

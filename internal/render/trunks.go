@@ -47,7 +47,8 @@ type TrunkLine struct {
 type TrunkFragments struct {
 	// PJSIP is the auth/registration/aor/endpoint objects — pjsip_trunks.conf.
 	PJSIP string
-	// Dialplan is the inbound contexts — extensions_trunks.conf.
+	// Dialplan is the inbound contexts, the per-line contexts and the
+	// emergency ladder — extensions_trunks.conf.
 	Dialplan string
 	// Trunks is how many providers were rendered.
 	Trunks int
@@ -55,12 +56,42 @@ type TrunkFragments struct {
 	// with trunks present is a real and reportable state: the registrations
 	// will work and every call will land on the default line.
 	Routes int
+	// Emergency is the trunk 911 leaves by, and Fallbacks are the trunks it
+	// tries after that one, in order. Reported back so `doorman render` can
+	// print the most consequential thing it just generated rather than leaving
+	// it to be read out of a file.
+	Emergency string
+	Fallbacks []string
+}
+
+// Emergency is where a 911 call leaves by, already resolved by the caller.
+//
+// Resolved rather than derived here, because the rule spans two files: an
+// explicit emergency_trunk in trunks.toml wins, and unset it is the primary
+// line's [line] trunk — plain policy.toml, the file that is already the
+// default for everything unqualified. render sees lines one at a time and has
+// no business re-deriving it. cmd/doorman resolves it once, prints it to the
+// operator, and passes the same answer here, so the file and the terminal
+// cannot disagree about the most safety-critical route in the system.
+type Emergency struct {
+	// Trunk is the id 911 leaves by. Empty is refused: a generated dialplan
+	// with no answer for 911 is the one output this package will not write.
+	Trunk string
+	// Chosen distinguishes an explicit emergency_trunk from the inferred
+	// primary line, for the comment above the generated context. Config that
+	// looks wrong is only fixable if it says where the value came from.
+	Chosen bool
 }
 
 // LineContext is the dialplan context that runs one line. Generated names are
 // prefixed so they cannot collide with a context somebody wrote by hand, the
 // same way cmm-hangup already does.
 func LineContext(name string) string { return "cmm-line-" + name }
+
+// EmergencyContext is the generated context 911 is routed through. The
+// hand-written dialplan reaches it with DIALPLAN_EXISTS, so the name is part of
+// the interface between the two files and not an internal detail.
+const EmergencyContext = "cmm-emergency"
 
 // registrationBinding emits the two settings that make a registration-based
 // trunk work, with the reason attached.
@@ -84,6 +115,12 @@ const inboundNote = `; The DID routes come from every policy file's [line] numbe
 ; the contexts come from trunks.toml. Asterisk reads none of this until
 ; extensions.conf #includes it — see docs/RUNBOOK.md, "Add a second provider" —
 ; and the hand-written [inbound-trunk] must come out when it does.
+;
+; The last context in this file is [cmm-emergency], which is how 911 leaves the
+; building once this file is included. Until it is, the hand-written _911 dials
+; one trunk, exactly as it always has: extensions.conf reaches this context
+; through DIALPLAN_EXISTS, so #including the file IS the switch and there is no
+; second edit for anybody to forget.
 
 `
 
@@ -105,7 +142,12 @@ const noIdentifyNote = `; No identify blocks are generated, and that is the desi
 // with a handset id. Both become a PJSIP endpoint named after the id, and two
 // endpoints with one name is a config Asterisk loads without complaining about
 // in any way an operator would notice.
-func BuildTrunks(trunks []policy.Trunk, lines []TrunkLine, handsetIDs []string, env Env) (*TrunkFragments, error) {
+//
+// em is where 911 leaves by, and an empty one is refused. Once several trunks
+// exist, "whichever the dialplan happens to say" stops being an answer, and a
+// generated dialplan that routes every DID beautifully and has nothing to say
+// about an emergency call is worse than no generated dialplan at all.
+func BuildTrunks(trunks []policy.Trunk, lines []TrunkLine, handsetIDs []string, em Emergency, env Env) (*TrunkFragments, error) {
 	var problems []string
 	fail := func(format string, args ...any) {
 		problems = append(problems, fmt.Sprintf(format, args...))
@@ -122,6 +164,18 @@ func BuildTrunks(trunks []policy.Trunk, lines []TrunkLine, handsetIDs []string, 
 	known := make(map[string]policy.Trunk, len(trunks))
 	for _, tr := range trunks {
 		known[tr.ID] = tr
+	}
+
+	// Checked before anything is written. Everything else in this file is
+	// recoverable by editing config and re-rendering; a dialplan installed with
+	// no route for 911 is discovered by somebody who needed it.
+	switch _, ok := known[em.Trunk]; {
+	case em.Trunk == "":
+		fail("no trunk carries emergency calls — set emergency_trunk in trunks.toml, " +
+			"or give plain policy.toml a [line] trunk. With one provider there was " +
+			"nothing to choose; with several this is the one thing that may not be undecided")
+	case !ok:
+		fail("the emergency trunk %q is not declared in trunks.toml", em.Trunk)
 	}
 
 	var pjsip, plan strings.Builder
@@ -177,12 +231,20 @@ func BuildTrunks(trunks []policy.Trunk, lines []TrunkLine, handsetIDs []string, 
 	}
 
 	writeLineContexts(&plan, lines)
+	order := EmergencyOrder(trunks, em.Trunk)
+	writeEmergencyContext(&plan, order, em)
 
+	fallbacks := make([]string, 0, len(order))
+	for _, tr := range order[1:] {
+		fallbacks = append(fallbacks, tr.ID)
+	}
 	return &TrunkFragments{
-		PJSIP:    pjsip.String(),
-		Dialplan: plan.String(),
-		Trunks:   generated,
-		Routes:   routeCount,
+		PJSIP:     pjsip.String(),
+		Dialplan:  plan.String(),
+		Trunks:    generated,
+		Routes:    routeCount,
+		Emergency: em.Trunk,
+		Fallbacks: fallbacks,
 	}, nil
 }
 
@@ -289,6 +351,119 @@ func writeLineContexts(b *strings.Builder, lines []TrunkLine) {
 		fmt.Fprintf(b, " same => n,Stasis(${DOORMAN_APP}%s)\n", stasisArgs(l.Name))
 		b.WriteString(" same => n,Hangup()\n\n")
 	}
+}
+
+// ── Emergency calls ──────────────────────────────────────────────────────
+
+// EmergencyOrder is the order 911 tries trunks in: the designated one, then
+// every other, the ones most likely to have a street address on file first.
+//
+// The designated trunk is first because that is the whole decision — E911 is
+// registered per DID against an address, and only its provider has this
+// household's. The rest is the fallback, and it needs an order because a
+// fallback that fires is already a call whose location data may be wrong. A
+// trunk that declares e911 = true is the best of the remaining answers and a
+// trunk that declares e911 = false is the worst, so they are tried in that
+// order, stable within each group so the generated file reads the same way
+// twice running. Nothing safety-critical is decided by file order: the
+// designated trunk is named, never picked.
+func EmergencyOrder(trunks []policy.Trunk, designated string) []policy.Trunk {
+	out := make([]policy.Trunk, 0, len(trunks))
+	rest := make([]policy.Trunk, 0, len(trunks))
+	for _, tr := range trunks {
+		if tr.ID == designated {
+			out = append(out, tr)
+			continue
+		}
+		rest = append(rest, tr)
+	}
+	sort.SliceStable(rest, func(i, j int) bool { return e911Rank(rest[i]) < e911Rank(rest[j]) })
+	return append(out, rest...)
+}
+
+// e911Rank orders a trunk by what it says about its own registered address.
+// Unknown sorts between declared and declared-absent: it might have one, and a
+// trunk that has said it has none is the last thing to try.
+func e911Rank(tr policy.Trunk) int {
+	switch {
+	case tr.E911 == nil:
+		return 1
+	case *tr.E911:
+		return 0
+	default:
+		return 2
+	}
+}
+
+// writeEmergencyContext generates the one route in this system that somebody's
+// life may depend on.
+//
+// Three decisions are baked into the shape of it and each is deliberate.
+//
+// **No caller ID is set, anywhere in here.** E911 is registered per DID against
+// a street address, so an emergency call leaves as the trunk's own number and
+// never as a line's outbound_cid. OUTBOUND_CID and OUTBOUND_TRUNK are both
+// ignored: which trunk carries 911 is a property of the house, not of whichever
+// line the nearest handset happens to call as, and whoever grabs that handset
+// has no idea which line they are on.
+//
+// **The trunk is tried, not asked.** There is no DEVICE_STATE check before the
+// Dial. A provider that does not answer OPTIONS looks unreachable while working
+// perfectly, and diverting an emergency call away from the one trunk whose
+// address is filed — on a false negative, at the worst possible moment — is
+// precisely the failure this whole design exists to prevent. An unregistered
+// trunk fails the Dial in milliseconds with CHANUNAVAIL, which is the same
+// answer arrived at honestly.
+//
+// **Falling over is a trade, not a nicety.** If the designated trunk cannot
+// carry the call, the next one may put the wrong address on a dispatcher's
+// screen, which is genuinely bad. A connected call lets a human say their
+// address out loud; a failed call gives them nothing. Connection first.
+func writeEmergencyContext(b *strings.Builder, order []policy.Trunk, em Emergency) {
+	how := "inferred — the primary line's trunk, from policy.toml"
+	if em.Chosen {
+		how = "chosen — emergency_trunk in trunks.toml"
+	}
+
+	b.WriteString("; ── Emergency calls ──────────────────────────────────────────\n")
+	fmt.Fprintf(b, "; 911 leaves by %s (%s).\n", em.Trunk, how)
+	b.WriteString(";\n")
+	b.WriteString("; NO caller ID is set here and none may ever be added. E911 is registered\n")
+	b.WriteString("; per DID against a street address, so an emergency call leaves as the\n")
+	b.WriteString("; trunk's own number — never as a business line whose registered address is\n")
+	b.WriteString("; somebody else's house. OUTBOUND_CID and OUTBOUND_TRUNK are both ignored:\n")
+	b.WriteString("; whoever grabs the nearest handset has no idea which line they are on.\n")
+	b.WriteString(";\n")
+	b.WriteString("; The trunks below are tried in order and the call takes the first that\n")
+	b.WriteString("; connects. The designated one is first; the rest are the fallback, ordered\n")
+	b.WriteString("; by what each trunk declares about having an address on file (e911 in\n")
+	b.WriteString("; trunks.toml), because a fallback that fires is already a call whose\n")
+	b.WriteString("; location data may be wrong. That is a deliberate trade: a connected call\n")
+	b.WriteString("; lets a human say their address out loud, a failed call gives them nothing.\n")
+	b.WriteString(";\n")
+	b.WriteString("; Nothing here asks whether a trunk is registered — it tries it. A provider\n")
+	b.WriteString("; that does not answer OPTIONS looks unreachable while working perfectly,\n")
+	b.WriteString("; and an unregistered trunk fails the Dial in milliseconds anyway.\n")
+	b.WriteString(";\n")
+	b.WriteString("; And the honest framing: this is a supplementary phone. It stops working in\n")
+	b.WriteString("; a power cut and on a bad internet day. Nobody should make it a household's\n")
+	b.WriteString("; only route to emergency services.\n")
+
+	fmt.Fprintf(b, "[%s]\n", EmergencyContext)
+	fmt.Fprintf(b, "exten => _911,1,NoOp(Emergency call from ${CALLERID(num)} via %s)\n", em.Trunk)
+	for i, tr := range order {
+		if i > 0 {
+			fmt.Fprintf(b, " same => n,NoOp(FALLING OVER to %s: the trunks before it could not carry this call)\n", tr.ID)
+		}
+		fmt.Fprintf(b, " same => n,Dial(PJSIP/911@%s,60)\n", tr.ID)
+		b.WriteString(" same => n,GotoIf($[\"${DIALSTATUS}\"=\"ANSWER\"]?done)\n")
+	}
+	// Loud, and audible. A caller who has just dialled 911 must hear something
+	// rather than silence: the tone is what tells them to reach for a mobile.
+	b.WriteString(" same => n,NoOp(NO TRUNK COULD CARRY THIS EMERGENCY CALL)\n")
+	b.WriteString(" same => n,Playback(all-circuits-busy-now)\n")
+	b.WriteString(" same => n,Congestion(5)\n")
+	b.WriteString(" same => n(done),Hangup()\n\n")
 }
 
 func stasisArgs(line string) string {

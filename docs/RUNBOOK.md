@@ -227,6 +227,36 @@ $ journalctl -u doorman -n 20 --no-pager
 up. If Asterisk is running and doorman is running but the app is absent, the
 WebSocket did not connect — check `ARI_APP` matches `Stasis()` in the dialplan.
 
+### Rung 5b — 911 has a route
+
+```bash
+$ sudo asterisk -rx "dialplan show cmm-emergency"   # several providers
+$ sudo asterisk -rx "dialplan show 911@internal"    # one provider
+```
+
+Exactly one of these shows a `Dial(PJSIP/911@…)`. Which one is correct depends
+on whether you have a `trunks.toml`: the generated `[cmm-emergency]` ladder
+appears once `extensions_trunks.conf` is `#include`d, and until then `_911` in
+`[internal]` dials `DEFAULT_TRUNK`. **Neither showing one is a failure** —
+911 would go nowhere.
+
+Then confirm the endpoints it names actually exist, including the fallbacks;
+the fallback is the half nobody exercises, so it is the half that rots:
+
+```bash
+$ sudo asterisk -rx "pjsip show endpoint voipms"    # per trunk in the ladder
+```
+
+`_911` reaches the generated ladder through `DIALPLAN_EXISTS`, so
+`func_dialplan.so` has to be loaded — it is by default. Without it the `GotoIf`
+is false and 911 falls through to `DEFAULT_TRUNK`, which still connects on a
+box whose primary trunk is the emergency one but is not what the ladder says.
+`sudo asterisk -rx "core show function DIALPLAN_EXISTS"` confirms it.
+
+`./scripts/smoke.sh` does all of this. See "Which trunk carries 911" in §6 for
+what to do when the answer is wrong, and read the supplementary-phone framing
+there before you rely on any of it.
+
 ### Rung 6 — prompts are present and in the right format
 
 ```bash
@@ -746,6 +776,21 @@ the handset files, and nothing in `doorman check` mentions trunks.
    $ sudo chmod 640 /etc/asterisk/*_trunks.conf
    ```
 
+   **First, make sure `/etc/asterisk/extensions.conf` has the `[cmm-outbound]`
+   context.** Boxes provisioned before outbound routing by trunk have the dial
+   patterns written out twice instead, and those copies ignore
+   `OUTBOUND_TRUNK` — so every call would still leave by the old trunk while
+   presenting each line's caller ID, which is exactly the mismatch a provider
+   rejects or silently rewrites. Check with
+   `grep -c 'include => cmm-outbound' /etc/asterisk/extensions.conf`, which
+   should print 2 — one for `[internal]`, one for `[outbound-console]`. If it
+   prints 0, take the shipped file and re-apply your local edits:
+
+   ```bash
+   $ diff /etc/asterisk/extensions.conf asterisk/extensions.conf
+   $ sudo cp asterisk/extensions.conf /etc/asterisk/    # then redo your edits
+   ```
+
    In `/etc/asterisk/pjsip.conf`: **delete** the hand-written `[voipms_auth]`,
    `[voipms_reg]`, `[voipms_aor]` and `[voipms]` blocks and uncomment
    `#include "pjsip_trunks.conf"`. Leaving both in place registers twice.
@@ -756,17 +801,39 @@ the handset files, and nothing in `doorman check` mentions trunks.
    the default line's `Stasis()` call is byte-identical to the one you are
    removing.
 
+   Then set `DEFAULT_TRUNK` in `[globals]` to the id `doorman render` printed —
+   the trunk that carries 911. It is what a channel with no trunk of its own
+   leaves by, and leaving it pointing at an endpoint you have just deleted is
+   the one way to end up with a dialplan that cannot dial.
+
    Both includes ship commented out on purpose: Asterisk refuses to start on a
    missing `#include`, so an unconditional one would break every install that
    does not use `trunks.toml`.
 
+   **Nothing else in the dialplan changes.** The outbound patterns already read
+   `OUTBOUND_TRUNK`, and `doorman render` writes it onto each handset from its
+   line's `trunk`. `_911` already reaches the generated `[cmm-emergency]` when
+   there is one and dials `DEFAULT_TRUNK` when there is not, so `#include`ing
+   the file *is* the switch — there is no second edit to forget.
+
    ```bash
    $ sudo asterisk -rx 'pjsip reload' && sudo asterisk -rx 'dialplan reload'
    $ sudo asterisk -rx 'pjsip show registrations'   # want Registered on both
+   $ sudo asterisk -rx 'dialplan show cmm-emergency' # want the ladder, not "no such context"
    ```
 
-5. **Ring every number.** The one on the old provider should behave exactly as
-   it did before you started.
+5. **Ring every number, and place a call from each line.** The one on the old
+   provider should behave exactly as it did before you started.
+
+   Outbound needs checking at **both** ends and either alone can look right
+   while the other is wrong:
+
+   - the receiving phone shows the number you expect, and
+   - the provider's own CDR shows the call on the account you expect.
+
+   A call leaving by the wrong trunk usually still connects — the provider
+   rewrites the caller ID to a number that account owns — so the only symptom
+   is a customer saving a number you did not choose.
 
 **When inbound goes silent, this is why.** The generated registration carries
 `line=yes` and `endpoint=<id>`, and that pair is what binds inbound traffic on
@@ -781,15 +848,79 @@ $ sudo asterisk -rvvv                      # then ring the number: you want a
                                            # NoOp naming the line, not silence
 ```
 
-**Which trunk carries 911.** `doorman check` prints it, and says whether it was
-**chosen** (`emergency_trunk`) or **inferred** (plain `policy.toml`'s `[line]
-trunk` — the primary line, which is already the default for everything
-unqualified). So does the startup log, every boot. Neither has to be set and
-unset is never undefined, but it is deliberately *not* "the only trunk you
-declared": a default derived from file order would move silently the day a
-second block was added above it.
+### Which trunk carries 911
 
-Two things to be plain about:
+**Read this section before you add a second provider, not after.** It is where
+911 stops being "whatever the dialplan hard-codes" and becomes a decision.
+
+**How to check.** Two commands, and they answer different questions:
+
+```bash
+$ ./bin/doorman check                          # what the CONFIG says
+$ sudo asterisk -rx 'dialplan show cmm-emergency'  # what ASTERISK LOADED
+```
+
+`doorman check` prints the trunk, whether it was **chosen** (`emergency_trunk`
+in `trunks.toml`) or **inferred** (plain `policy.toml`'s `[line] trunk` — the
+primary line, already the default for everything unqualified), whether that
+trunk declares a registered street address, and the order it falls over in. So
+does the startup log, every boot. Neither key has to be set and unset is never
+undefined — but it is deliberately *not* "the only trunk you declared": a
+default derived from file order would move silently the day a second block was
+added above it.
+
+`dialplan show cmm-emergency` is the other half, because doorman cannot read
+the dialplan. **"No such context" means the generated file is not `#include`d
+and 911 is leaving by `DEFAULT_TRUNK`**, whatever `doorman check` says. On a
+single-provider box that is correct and expected. On a multi-provider one it
+means step 4 above is unfinished.
+
+**If the answer is "none".** `doorman check` exits non-zero and `doorman
+render` refuses to generate anything — deliberately, because a dialplan that
+routes every DID beautifully and has no answer for 911 is the one that gets
+installed with confidence. Fix it by setting **either**:
+
+```toml
+# trunks.toml — the explicit answer
+emergency_trunk = "voipms"
+```
+
+```toml
+# policy.toml — or let the primary line answer it, like everything else
+[line]
+trunk = "voipms"
+```
+
+Set `emergency_trunk` when the trunk that carries 911 is *not* the one the
+house line lives at — a household whose primary number moved to a provider with
+no E911 in their area, for instance. Otherwise leave it unset and let the one
+rule serve both jobs.
+
+**When the designated trunk is down.** The call falls over to the next trunk,
+then the next, and takes the first that connects. This is a deliberate trade
+and worth stating plainly: the dispatcher may then see the wrong address, which
+is genuinely bad — but a connected call lets a human say their address out
+loud, and a failed call gives them nothing. Connection first. The fallback
+order puts trunks that declare `e911 = true` ahead of ones that declare
+nothing, and a trunk that declares `e911 = false` last of all.
+
+Nothing asks a trunk whether it is registered; it tries it. A provider that
+does not answer SIP `OPTIONS` looks unreachable while working perfectly, and
+diverting an emergency call off the one trunk whose address is on file — on a
+false negative, at the worst possible moment — is exactly what this design
+exists to prevent. An unregistered trunk fails the `Dial` in milliseconds.
+
+If **nothing** can carry it, the caller hears congestion rather than silence.
+That tone is the signal to reach for a mobile.
+
+**911 never presents a line's `outbound_cid`,** on any path. E911 is registered
+per DID against a street address, so an emergency call leaves as the trunk's own
+number — never as a business line whose registered address is somebody else's
+house. `_911` lives in `[internal]` and not in the shared `[cmm-outbound]`
+context precisely so that the `*4` console cannot reach it, and the console
+refuses emergency numbers itself. Two independent things have to be wrong.
+
+Two more things to be plain about:
 
 - **Not every provider offers E911 in every area.** A provider without it means
   a phone that cannot call for help. That is a reason to reject the provider,
@@ -797,17 +928,14 @@ Two things to be plain about:
   `doorman check` reports "unknown" rather than guessing when you have not.
 - **This is a supplementary phone.** It stops working in a power cut and on a
   bad internet day. Nobody should make it the household's only route to
-  emergency services. That is not a disclaimer, it is the accurate description
-  of a hobbyist phone on a consumer internet connection.
-
-**What is not here yet.** Outbound routing by trunk. A call still leaves by
-whatever `Dial(PJSIP/…@voipms)` says in the dialplan, including `_911`, so
-`trunk` currently decides where inbound arrives and settles where emergency
-calls will go. Until it lands, present a caller ID only on the trunk that owns
-the number: providers reject or silently rewrite one they do not own.
+  emergency services. Keep a mobile in the house and teach everyone that it is
+  the one to reach for. That is not a disclaimer, it is the accurate
+  description of a hobbyist phone on a consumer internet connection.
 
 **Rolling back** is deleting `trunks.toml`, re-rendering, and putting the
-hand-written blocks back. There is no migration and no stored state.
+hand-written blocks back. `_911` returns to dialling `DEFAULT_TRUNK` the moment
+the generated context stops being included. There is no migration and no stored
+state.
 
 ### Outbound caller ID, and the `*4` console
 
@@ -847,6 +975,24 @@ The office phone now rings customers back as the business number. **Every
 phone no line claims presents `policy.toml`'s `outbound_cid`** — the primary
 line — so adding a business line cannot change what the kitchen phone shows.
 
+**A caller ID and the trunk that carries it are one decision.** With a
+`trunks.toml`, `doorman render` writes `set_var=OUTBOUND_TRUNK=` beside
+`OUTBOUND_CID` on each endpoint, from the same line's `trunk`, and `*4` sets
+both together per call. That is not a convenience: a provider will not present
+a number its account does not own — it rejects the call or silently rewrites
+the caller ID as anti-spoofing — so the pair must never be assembled from two
+places.
+
+`doorman check` refuses a line whose `outbound_cid` is a number this config
+declares at a *different* provider, and `doorman render` refuses to generate
+one. What it cannot check is a number no `[line] number` declares: that is
+often a DID you own and do not answer here, so it is reported and left alone.
+Nothing can ask a provider which numbers an account owns.
+
+With no `trunks.toml`, nothing writes `OUTBOUND_TRUNK` at all and every
+outbound call leaves by `DEFAULT_TRUNK` in `[globals]`, exactly as it always
+has.
+
 `outbound_handsets` is written in the *line's* file and not in
 `handsets.toml`, because the inventory is shared by every line and cannot say
 something that is true of only one. A handset claimed by two lines is an error
@@ -883,8 +1029,10 @@ street address, so an emergency call placed as another line would reach a
 dispatcher with somebody else's address on screen. The console beeps once and
 releases the handset so you can dial 911 directly — which is untouched, and
 leaves with the trunk's own caller ID as it always has. Two things guard this:
-doorman refuses the number, and `[outbound-console]` in the dialplan contains
-no emergency pattern for it to reach.
+doorman refuses the number, and the context it releases into contains no
+emergency pattern for it to reach. `_911` lives in `[internal]`, which the
+console never enters; the outbound patterns both paths share cannot match three
+digits.
 
 **`*4` inherits whatever trust the LAN handsets have** (see issue #13). It is
 not new exposure — a compromised handset can already dial `_NXXNXXXXXX`
@@ -907,11 +1055,17 @@ disagree until you re-render. Check what the endpoint actually carries:
 
 ```bash
 $ sudo asterisk -rx 'pjsip show endpoint office' | grep -i set_var
+# want both, and from the same line:
+#   set_var=OUTBOUND_CID=+15125550142
+#   set_var=OUTBOUND_TRUNK=telnyx
 ```
 
 If your provider rejects the caller ID or silently replaces it, it is because
 the account does not own that number — providers do this as anti-spoofing.
-Buy the DID on the same account, or present a number you own.
+Either the DID is on a different account (buy it on this one, or present a
+number you own), or the call left by the wrong trunk. Check the second one on
+the provider's CDR rather than from here: a rewritten caller ID looks like a
+perfectly normal call from this end.
 
 **Rolling back** is removing the two keys and re-rendering. With no
 `outbound_cid` anywhere, nothing is generated and every outbound call presents

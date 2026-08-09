@@ -97,19 +97,17 @@ func printTrunks(trunks *policy.Trunks, results []checkedLine) {
 
 // ── doorman check: the emergency trunk ───────────────────────────────────
 
-// printEmergency says which trunk carries 911, and whether that was chosen or
-// inferred.
+// printEmergency says which trunk carries 911, whether that was chosen or
+// inferred, and what happens when it is down. It returns false when there is no
+// answer, which is the one configuration this command refuses outright.
 //
 // The plan asks for this by name and it is worth restating why: requiring an
 // explicit designation creates a state where somebody forgot and 911 has no
 // route, and defaulting silently creates one where somebody is surprised.
 // Defaulting *and* announcing is the only arrangement with neither failure.
-//
-// It is also honest about today. Outbound routing by trunk is not built, so
-// this says where 911 *will* leave by rather than implying it already does.
-func printEmergency(trunks *policy.Trunks, results []checkedLine) {
+func printEmergency(trunks *policy.Trunks, results []checkedLine) bool {
 	if !trunks.Present() {
-		return
+		return true
 	}
 
 	primary := ""
@@ -122,7 +120,7 @@ func printEmergency(trunks *policy.Trunks, results []checkedLine) {
 	fmt.Println()
 	switch {
 	case id == "":
-		fmt.Println("  911 would leave by   (undecided)")
+		fmt.Println("✗ 911 leaves by       (undecided)")
 		fmt.Println()
 		fmt.Println("  Settle this. Nothing is designated and plain policy.toml names no")
 		fmt.Println("  trunk, so there is no answer to which provider carries an emergency")
@@ -130,45 +128,83 @@ func printEmergency(trunks *policy.Trunks, results []checkedLine) {
 		fmt.Println("  [line] trunk — the primary line is the default for everything")
 		fmt.Println("  unqualified, and this is the most important thing it defaults.")
 		fmt.Println()
-		fmt.Println("  Not an error today only because outbound routing by trunk is not")
-		fmt.Println("  built yet: 911 still leaves by the dialplan's _911 line, which has")
-		fmt.Println("  one trunk hard-coded in it. It becomes an error when that changes.")
+		fmt.Println("  `doorman render` refuses to generate until this has an answer. With")
+		fmt.Println("  one provider there was nothing to choose; with several, a dialplan")
+		fmt.Println("  that routes every DID beautifully and says nothing about 911 is worse")
+		fmt.Println("  than no generated dialplan at all.")
 		fmt.Println()
 		fmt.Println("  Deliberately not \"the only trunk you declared\" and not \"the first\":")
 		fmt.Println("  a default derived from file order moves silently the day a second")
 		fmt.Println("  block is added above it, and this is the one route where a silent")
 		fmt.Println("  move is unacceptable.")
+		return false
 	case chosen:
-		fmt.Printf("  911 would leave by   %s   (chosen — emergency_trunk in %s)\n", id, trunks.Where())
+		fmt.Printf("  911 leaves by        %s   (chosen — emergency_trunk in %s)\n", id, trunks.Where())
 	default:
-		fmt.Printf("  911 would leave by   %s   (inferred — the primary line's trunk, from policy.toml)\n", id)
+		fmt.Printf("  911 leaves by        %s   (inferred — the primary line's trunk, from policy.toml)\n", id)
 	}
 
-	if id != "" {
-		tr, known := trunks.Lookup(id)
-		if !known {
-			// Only reachable through an inferred id: emergency_trunk itself is
-			// validated at load, but policy.toml's trunk is validated against
-			// the inventory only when one is in play.
-			fmt.Printf("\n  ✗ %q is not a trunk declared in %s.\n", id, trunks.Where())
-			return
-		}
-		fmt.Printf("  provider             %s\n", orDefault(tr.Provider, "(unnamed)"))
-		fmt.Printf("  registered address   %s\n", describeE911(tr))
+	tr, known := trunks.Lookup(id)
+	if !known {
+		// Only reachable through an inferred id: emergency_trunk itself is
+		// validated at load, but policy.toml's trunk is validated against
+		// the inventory only when one is in play.
+		fmt.Printf("\n✗ %q is not a trunk declared in %s.\n", id, trunks.Where())
+		return false
 	}
+	fmt.Printf("  provider             %s\n", orDefault(tr.Provider, "(unnamed)"))
+	fmt.Printf("  registered address   %s\n", describeE911(tr))
+
+	if fallbacks := emergencyFallbacks(trunks, id); len(fallbacks) > 0 {
+		fmt.Printf("  falls over to        %s\n", strings.Join(fallbacks, ", then "))
+		fmt.Println()
+		fmt.Println("  If the designated trunk cannot carry the call, the next one is tried,")
+		fmt.Println("  and the dispatcher may then see the wrong address. That is a deliberate")
+		fmt.Println("  trade: a connected call lets a human say their address out loud, and a")
+		fmt.Println("  failed call gives them nothing. Connection first. The order puts the")
+		fmt.Println("  trunks that declare a registered address ahead of the ones that do not.")
+	} else {
+		fmt.Println()
+		fmt.Println("  One trunk, so nothing to fall over to: if it cannot carry the call,")
+		fmt.Println("  the caller hears congestion and needs another phone.")
+	}
+
+	fmt.Println()
+	fmt.Println("  Generated into extensions_trunks.conf as [cmm-emergency] and reached")
+	fmt.Println("  from _911 in [internal]. Confirm what Asterisk actually loaded:")
+	fmt.Println("    sudo asterisk -rx 'dialplan show cmm-emergency'")
+	fmt.Println("  No context there means the file is not #included and 911 is leaving by")
+	fmt.Println("  the dialplan's DEFAULT_TRUNK. See RUNBOOK, \"Which trunk carries 911\".")
 
 	fmt.Println("\n  E911 is registered per DID against a street address, so the trunk that")
 	fmt.Println("  carries 911 must be the one whose address is on file — not whichever")
 	fmt.Println("  line a caller happens to be on, which nobody grabbing the nearest")
-	fmt.Println("  handset knows anyway.")
+	fmt.Println("  handset knows anyway. An emergency call never presents a line's")
+	fmt.Println("  outbound_cid, on any path.")
 	fmt.Println()
-	fmt.Println("  Not yet enforced: outbound routing by trunk is not built, so today an")
-	fmt.Println("  emergency call still leaves by whatever the dialplan's _911 line says.")
-	fmt.Println("  This is what that will read.")
+	fmt.Println("  Not every provider offers E911 in every area, and a provider without it")
+	fmt.Println("  is a phone that cannot call for help. That is a reason to reject the")
+	fmt.Println("  provider, not a line item to skip.")
 	fmt.Println()
 	fmt.Println("  And the honest framing: this is a supplementary phone. It stops working")
 	fmt.Println("  in a power cut and on a bad internet day. Nobody should make it a")
 	fmt.Println("  household's only route to emergency services.")
+	return true
+}
+
+// emergencyFallbacks is the order 911 tries the other trunks in, mirroring what
+// `doorman render` generates. Derived from the same inventory rather than read
+// back out of the generated file, so `doorman check` can say it before anything
+// has been rendered.
+func emergencyFallbacks(trunks *policy.Trunks, designated string) []string {
+	frags := render.EmergencyOrder(trunks.All(), designated)
+	out := make([]string, 0, len(frags))
+	for _, tr := range frags {
+		if tr.ID != designated {
+			out = append(out, tr.ID)
+		}
+	}
+	return out
 }
 
 func describeE911(tr policy.Trunk) string {
@@ -200,8 +236,9 @@ func announceEmergencyTrunk(trunks *policy.Trunks, primaryLineTrunk string, log 
 		how = "chosen"
 	}
 	if id == "" {
-		log.Warn("no trunk carries emergency calls",
-			"hint", "set emergency_trunk in trunks.toml, or [line] trunk in policy.toml")
+		log.Error("no trunk carries emergency calls",
+			"hint", "set emergency_trunk in trunks.toml, or [line] trunk in policy.toml — "+
+				"`doorman render` refuses to generate a dialplan until this has an answer")
 		return
 	}
 	tr, known := trunks.Lookup(id)
@@ -212,7 +249,9 @@ func announceEmergencyTrunk(trunks *policy.Trunks, primaryLineTrunk string, log 
 	}
 	log.Info("emergency trunk", "trunk", id, "how", how,
 		"provider", tr.Provider, "registeredAddress", e911Field(tr),
-		"hint", "outbound routing by trunk is not built yet — 911 leaves by the dialplan's _911 line")
+		"fallsOverTo", orDefault(strings.Join(emergencyFallbacks(trunks, id), ", "), "(nothing — one trunk)"),
+		"hint", "911 is routed by the generated [cmm-emergency] context, not by doorman — "+
+			"confirm with: asterisk -rx 'dialplan show cmm-emergency'")
 }
 
 func e911Field(tr policy.Trunk) string {
@@ -226,6 +265,30 @@ func e911Field(tr policy.Trunk) string {
 }
 
 // ── doorman render ───────────────────────────────────────────────────────
+
+// resolveEmergency answers which trunk 911 leaves by, for the generator.
+//
+// The rule lives here rather than in `internal/render` because it spans two
+// files: emergency_trunk in trunks.toml wins, and unset it is the primary
+// line's [line] trunk — plain policy.toml, already the default for everything
+// unqualified. Resolved once, in the same process that prints it, so the
+// generated dialplan and `doorman check` can never disagree about it.
+//
+// A missing policy.toml leaves the primary line's trunk empty, which is a real
+// state: `doorman render` deliberately works before the rules exist. With a
+// trunks.toml in play it means emergency_trunk has to be set, and render says
+// so rather than generating a dialplan that has no answer for 911.
+func resolveEmergency(trunks *policy.Trunks, ids []lineIdentity) render.Emergency {
+	primary := ""
+	for _, id := range ids {
+		if id.Name == policy.DefaultLine {
+			primary = id.Trunk
+			break
+		}
+	}
+	trunk, chosen := trunks.Emergency(primary)
+	return render.Emergency{Trunk: trunk, Chosen: chosen}
+}
 
 // renderTrunkLines is what the trunk dialplan needs from the policy files: one
 // entry per line, with the DID it answers and the provider that DID arrives

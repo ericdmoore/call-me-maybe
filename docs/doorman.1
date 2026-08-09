@@ -39,11 +39,20 @@ claims it, or on plain
 \(em the primary line \(em for a handset no line claims. Dialling
 .B *4
 answers with a menu of the numbers this box can call as and places one call as
-whichever is chosen. That path refuses emergency numbers outright: E911 is
-registered per DID against a street address, so
+whichever is chosen. With a
+.I trunks.toml
+the call also leaves by that line's
+.BR "[line] trunk" ,
+because a provider will not present a number its account does not own; the
+caller ID and the trunk are one decision and travel together on both paths.
+.PP
+That console refuses emergency numbers outright: E911 is registered per DID
+against a street address, so
 .B 911
-is dialled directly from a handset and always leaves with the trunk's own
-caller ID.
+is dialled directly from a handset, leaves by the designated
+.B emergency_trunk
+(or the primary line's, unset), falls over to any other trunk if that one
+cannot carry it, and never presents a line's caller ID.
 .PP
 It is also its own operations tool. Every subcommand below runs against the
 same configuration and the same validator the daemon uses, so what
@@ -92,14 +101,22 @@ all when there is only the default one.
 With a
 .I trunks.toml
 it also lists the providers, which lines land on each, and \(em prominently \(em
-which trunk would carry a 911 call, saying whether that was
+which trunk carries a 911 call, saying whether that was
 .B chosen
 .RB ( emergency_trunk )
 or
 .B inferred
 (plain
 .IR policy.toml 's
-.BR "[line] trunk" ).
+.BR "[line] trunk" ),
+whether that trunk declares a registered street address, and which trunks it
+falls over to. It exits non\-zero when neither key has an answer: that is the
+one route that may not be undecided, and
+.B doorman render
+refuses to generate a dialplan until it is settled. It also refuses a line
+whose
+.B outbound_cid
+is a number this configuration declares at a different provider.
 Both are silent without one, so a box with a single provider never reads the
 word trunk.
 This is the authority on whether a configuration is usable.
@@ -155,16 +172,17 @@ via each handset's
 .B password_env
 key; the generated file contains real secrets and must be treated as such.
 .IP
-Each endpoint also carries the outbound caller ID that phone presents, read
-from every line's
-.B [line] outbound_cid
+Each endpoint also carries the outbound caller ID that phone presents and the
+trunk its calls leave by, read from every line's
+.BR "[line] outbound_cid" ,
+.B [line] trunk
 and
 .BR "outbound_handsets" .
 It is generated rather than configured because a handset that picks up and
 dials never reaches
 .BR doorman ,
 which is exactly what keeps outbound calling working when the daemon is not.
-Changing a caller ID therefore takes a re\-render and a
+Changing either therefore takes a re\-render and a
 .BR "pjsip reload" ;
 the
 .B *4
@@ -172,12 +190,17 @@ console picks the same change up on the next policy reload.
 .IP
 When a
 .I trunks.toml
-exists, two more files are written: the provider registrations, and one
-inbound dialplan context per trunk with each line's DID routed to it from
+exists, two more files are written: the provider registrations, and a dialplan
+fragment holding one inbound context per trunk with each line's DID routed to
+it from
 .B [line] number
 and
 .BR "[line] trunk" ,
-matched in every digit format a provider might send. Every generated
+matched in every digit format a provider might send, plus
+.BR [cmm\-emergency] :
+the trunk 911 leaves by, then every other trunk in turn so an emergency call
+still connects when the designated one is down. Nothing in it presents a caller
+ID. Every generated
 registration carries
 .B line=yes
 and
@@ -331,7 +354,10 @@ application named in
 Where the config files are, and whether to reload them on change.
 .I TRUNKS_PATH
 is optional and a missing file is the normal state; the daemon reads it only
-to announce which trunk carries 911.
+to announce which trunk carries 911 and to warn about a caller ID its own
+trunk does not own. Nothing on the call path consults it, so a
+.I trunks.toml
+that will not load warns and the phone keeps answering.
 .B POLICY_PATH
 also anchors the search for extra lines: any
 .I policy.<line>.toml

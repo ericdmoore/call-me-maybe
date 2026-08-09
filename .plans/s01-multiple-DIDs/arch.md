@@ -304,6 +304,18 @@ connected call lets a human say their address, and a failed call gives them
 nothing. Connection first, and say so in the runbook rather than leaving it as
 an accident of the code.
 
+**Built (M2.3) as "try it", not "ask whether it is up".** The obvious
+implementation gates each attempt on `DEVICE_STATE`, and it is wrong: a
+provider that does not answer SIP `OPTIONS` looks unreachable while working
+perfectly, so a false negative would divert an emergency call off the one trunk
+whose street address is on file, at the worst possible moment. The generated
+ladder dials the designated trunk first and unconditionally and falls through on
+`DIALSTATUS` alone; an unregistered trunk fails in milliseconds with
+`CHANUNAVAIL`, which is the same answer arrived at honestly. Among the
+fallbacks, `e911 = true` is tried before unset and `e911 = false` last, because
+a fallback that fires is already a call whose location may be wrong. Nothing
+left to try means congestion tone, never silence.
+
 ## Failure modes and what happens
 
 | Situation | Behaviour | Why |
@@ -352,7 +364,18 @@ the falsifiable claim that *routing* is a router concern, and it held. Line
 "a silent caller takes a message" outside the state machine would be
 contorting itself to protect a slogan.
 
-Phase 2 adds one of its own, worth stating in the same terms once it ships:
-*a call must never leave by a trunk that does not own the number it presents* —
-and its safety-critical sibling, *emergency calls leave by the designated
-trunk, or fail loudly.*
+Phase 2 adds one of its own, and M2.3 shipped it: *a call must never leave by a
+trunk that does not own the number it presents* — and its safety-critical
+sibling, *emergency calls leave by the designated trunk, or by another trunk, or
+fail loudly.*
+
+The first is held by making the caller ID and the trunk one value rather than
+two settings: `render.OutboundIdentity` carries both, the `*4` console sets both
+in one loop and refuses the call if either fails, and `doorman check` refuses an
+`outbound_cid` this config declares at a different provider. The limit is worth
+stating in the same breath — nothing can ask a provider which DIDs an account
+owns, so a caller ID no `[line] number` declares is reported and allowed.
+
+The second is held by the generated `[cmm-emergency]`, by `_911` living in
+`[internal]` rather than in the outbound context both paths share, and by
+`doorman render` refusing to generate at all when nothing carries 911.
