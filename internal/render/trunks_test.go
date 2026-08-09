@@ -35,14 +35,21 @@ var trunkSecrets = map[string]string{
 	"TRUNK_TELNYX_PASSWORD": "telnyx-secret",
 }
 
+// The designated emergency trunk every fixture renders with. Named rather than
+// defaulted, exactly as the real thing: nothing in this system picks the trunk
+// that carries 911 by position or by sorting.
+var testEmergency = Emergency{Trunk: "voipms", Chosen: true}
+
 func buildTrunks(t *testing.T, trunks []policy.Trunk, lines []TrunkLine) *TrunkFragments {
 	t.Helper()
-	f, err := BuildTrunks(trunks, lines, []string{"kitchen", "office"}, env(trunkSecrets))
+	f, err := BuildTrunks(trunks, lines, []string{"kitchen", "office"}, testEmergency, env(trunkSecrets))
 	if err != nil {
 		t.Fatalf("BuildTrunks: %v", err)
 	}
 	return f
 }
+
+func boolp(b bool) *bool { return &b }
 
 // THE assertion of this milestone.
 //
@@ -128,7 +135,7 @@ func TestTrunkPJSIPCarriesTheProviderFields(t *testing.T) {
 // Secrets reach the file from the environment and nowhere else, exactly as
 // they do for handsets. A trunks.toml is safe to keep; its output is not.
 func TestTrunkRenderRefusesAMissingSecret(t *testing.T) {
-	_, err := BuildTrunks(trunkFixture(), trunkLines(), nil,
+	_, err := BuildTrunks(trunkFixture(), trunkLines(), nil, testEmergency,
 		env(map[string]string{"TRUNK_VOIPMS_PASSWORD": "x"}))
 	if err == nil || !strings.Contains(err.Error(), "TRUNK_TELNYX_PASSWORD") {
 		t.Errorf("err = %v, want the missing variable named", err)
@@ -154,7 +161,7 @@ func TestGeneratedTrunkPJSIPSaysItHoldsPasswords(t *testing.T) {
 // Both become a PJSIP endpoint named after the id, and Asterisk loading two
 // blocks with one name is not something an operator would notice.
 func TestTrunkIDMayNotCollideWithAHandset(t *testing.T) {
-	_, err := BuildTrunks(trunkFixture(), nil, []string{"voipms"}, env(trunkSecrets))
+	_, err := BuildTrunks(trunkFixture(), nil, []string{"voipms"}, testEmergency, env(trunkSecrets))
 	if err == nil || !strings.Contains(err.Error(), "collides with a handset") {
 		t.Errorf("err = %v, want the collision refused", err)
 	}
@@ -268,17 +275,165 @@ func TestTrunkRenderRefusesAmbiguousRouting(t *testing.T) {
 	_, err := BuildTrunks(trunkFixture(), []TrunkLine{
 		{Name: "default", Number: "+15125550100", Trunk: "voipms"},
 		{Name: "biz", Number: "+15125550100", Trunk: "voipms"},
-	}, nil, env(trunkSecrets))
+	}, nil, testEmergency, env(trunkSecrets))
 	if err == nil || !strings.Contains(err.Error(), "one DID reaches one line") {
 		t.Errorf("err = %v, want the ambiguity refused", err)
 	}
 
 	_, err = BuildTrunks(trunkFixture(), []TrunkLine{
 		{Name: "biz", Number: "+15125550142", Trunk: "nope"},
-	}, nil, env(trunkSecrets))
+	}, nil, testEmergency, env(trunkSecrets))
 	if err == nil || !strings.Contains(err.Error(), "does not declare") {
 		t.Errorf("err = %v, want the unknown trunk refused", err)
 	}
+}
+
+// ── the emergency ladder ─────────────────────────────────────────────────
+
+// The highest-stakes assertion in the repository.
+//
+// The designated trunk is tried FIRST and unconditionally: E911 is registered
+// per DID against a street address, so the trunk whose address is on file is
+// the only one that puts the right house on a dispatcher's screen.
+func TestEmergencyCallsLeaveByTheDesignatedTrunkFirst(t *testing.T) {
+	f := buildTrunks(t, trunkFixture(), trunkLines())
+	block, ok := section(f.Dialplan, "[cmm-emergency]")
+	if !ok {
+		t.Fatal("no [cmm-emergency] context was generated")
+	}
+	first := "exten => _911,1,NoOp(Emergency call from ${CALLERID(num)} via voipms)\n" +
+		" same => n,Dial(PJSIP/911@voipms,60)\n"
+	if !strings.Contains(block, first) {
+		t.Errorf("911 does not leave by the designated trunk first:\n%s", block)
+	}
+	if f.Emergency != "voipms" {
+		t.Errorf("Emergency = %q, want voipms", f.Emergency)
+	}
+}
+
+// Invariant, and the comment in the hand-written dialplan that must stay true:
+// _911 never sets a caller ID. An emergency call leaves as the trunk's own
+// number, never as a line whose registered address is somebody else's house.
+func TestEmergencyContextNeverSetsACallerID(t *testing.T) {
+	f := buildTrunks(t, trunkFixture(), trunkLines())
+	block, _ := section(f.Dialplan, "[cmm-emergency]")
+	// The comment block above the context says the words; the context itself
+	// must not contain the mechanism.
+	for _, forbidden := range []string{"Set(CALLERID", "${OUTBOUND_CID}", "${OUTBOUND_TRUNK}"} {
+		if strings.Contains(block, forbidden) {
+			t.Errorf("the emergency context contains %q:\n%s", forbidden, block)
+		}
+	}
+}
+
+// The deliberate trade, spelled out in .plans/s01-multiple-DIDs: a connected
+// call lets a human say their address out loud, a failed call gives them
+// nothing. So every other trunk is tried in turn.
+func TestEmergencyCallsFallOverToEveryOtherTrunk(t *testing.T) {
+	f := buildTrunks(t, trunkFixture(), trunkLines())
+	block, _ := section(f.Dialplan, "[cmm-emergency]")
+	if !strings.Contains(block, "same => n,Dial(PJSIP/911@telnyx,60)") {
+		t.Errorf("no fallback to the other trunk:\n%s", block)
+	}
+	// A completed call must not be re-dialled down the next trunk when the far
+	// end hangs up first, which is what returns control to the dialplan.
+	if strings.Count(block, `same => n,GotoIf($["${DIALSTATUS}"="ANSWER"]?done)`) != 2 {
+		t.Errorf("each attempt needs an ANSWER guard or a finished call redials:\n%s", block)
+	}
+	if want := []string{"telnyx"}; len(f.Fallbacks) != 1 || f.Fallbacks[0] != want[0] {
+		t.Errorf("Fallbacks = %v, want %v", f.Fallbacks, want)
+	}
+}
+
+// Registration state is never consulted, and that is a decision rather than an
+// omission. A provider that does not answer OPTIONS looks unreachable while
+// working perfectly, and diverting an emergency call off the one trunk whose
+// address is filed — on a false negative, at the worst possible moment — is
+// exactly the failure this design exists to prevent. Trying it costs
+// milliseconds when it really is down.
+func TestEmergencyCallsTryTheTrunkRatherThanAskingIfItIsUp(t *testing.T) {
+	f := buildTrunks(t, trunkFixture(), trunkLines())
+	block, _ := section(f.Dialplan, "[cmm-emergency]")
+	if strings.Contains(block, "DEVICE_STATE") {
+		t.Errorf("the designated trunk is gated on a liveness check:\n%s", block)
+	}
+}
+
+// When nothing can carry it the caller must hear something. Silence on a 911
+// call is the one outcome with no recovery: the tone is what tells somebody to
+// reach for a mobile.
+func TestEmergencyCallsFailLoudly(t *testing.T) {
+	f := buildTrunks(t, trunkFixture(), trunkLines())
+	block, _ := section(f.Dialplan, "[cmm-emergency]")
+	for _, want := range []string{
+		"same => n,NoOp(NO TRUNK COULD CARRY THIS EMERGENCY CALL)",
+		"same => n,Playback(all-circuits-busy-now)",
+		"same => n,Congestion(5)",
+		"same => n(done),Hangup()",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("the emergency context is missing %q:\n%s", want, block)
+		}
+	}
+}
+
+// A fallback that fires is already a call whose location data may be wrong, so
+// the trunks that declare a registered address are tried before the ones that
+// do not, and a trunk that declares it has none is tried last of all.
+func TestEmergencyFallbacksPreferTrunksWithARegisteredAddress(t *testing.T) {
+	trunks := []policy.Trunk{
+		{ID: "designated"}, {ID: "none", E911: boolp(false)},
+		{ID: "unknown"}, {ID: "registered", E911: boolp(true)},
+	}
+	got := EmergencyOrder(trunks, "designated")
+	want := []string{"designated", "registered", "unknown", "none"}
+	for i, id := range want {
+		if got[i].ID != id {
+			t.Fatalf("order = %v, want %v", ids(got), want)
+		}
+	}
+}
+
+// The one output this package refuses to write. A generated dialplan that
+// routes every DID beautifully and has no answer for 911 is worse than no
+// generated dialplan at all, because the first is installed with confidence.
+func TestTrunkRenderRefusesWhenNothingCarriesEmergencyCalls(t *testing.T) {
+	_, err := BuildTrunks(trunkFixture(), trunkLines(), nil, Emergency{}, env(trunkSecrets))
+	if err == nil || !strings.Contains(err.Error(), "no trunk carries emergency calls") {
+		t.Errorf("err = %v, want the undecided emergency trunk refused", err)
+	}
+
+	_, err = BuildTrunks(trunkFixture(), trunkLines(), nil,
+		Emergency{Trunk: "gone"}, env(trunkSecrets))
+	if err == nil || !strings.Contains(err.Error(), "emergency trunk") {
+		t.Errorf("err = %v, want an undeclared emergency trunk refused", err)
+	}
+}
+
+// Whether the answer was chosen or inherited belongs in the file. Config that
+// looks wrong is only fixable if it says where the value came from.
+func TestEmergencyContextSaysWhereTheDecisionCameFrom(t *testing.T) {
+	chosen := buildTrunks(t, trunkFixture(), trunkLines())
+	if !strings.Contains(chosen.Dialplan, "911 leaves by voipms (chosen — emergency_trunk in trunks.toml).") {
+		t.Error("the generated file does not say the emergency trunk was chosen")
+	}
+	inferred, err := BuildTrunks(trunkFixture(), trunkLines(), nil,
+		Emergency{Trunk: "telnyx"}, env(trunkSecrets))
+	if err != nil {
+		t.Fatalf("BuildTrunks: %v", err)
+	}
+	if !strings.Contains(inferred.Dialplan,
+		"911 leaves by telnyx (inferred — the primary line's trunk, from policy.toml).") {
+		t.Error("the generated file does not say the emergency trunk was inferred")
+	}
+}
+
+func ids(trunks []policy.Trunk) []string {
+	out := make([]string, 0, len(trunks))
+	for _, tr := range trunks {
+		out = append(out, tr.ID)
+	}
+	return out
 }
 
 // section returns the text of one ini-style block, from its header to the

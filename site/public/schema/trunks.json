@@ -10,12 +10,16 @@
       "type": "string",
       "x-cross-references": [
         "trunks.toml [[trunks]].id",
-        "policy.toml [line] trunk"
+        "policy.toml [line] trunk",
+        "asterisk/extensions_trunks.conf [cmm-emergency]"
       ],
       "x-rules": [
         "It lives here rather than in a policy file on purpose. Whoever grabs the nearest handset has no idea which line they are on, and E911 is registered per DID against a street address, so the trunk carrying 911 must be the one whose address is filed — not the one belonging to whichever number a caller happens to be on.",
         "Not \"whichever trunk sorts first\" and not \"the first declared\": a default derived from file order moves silently when a block is added at the top of a file, and this is the most safety-critical route in the system.",
-        "Outbound routing by trunk is not implemented yet. This key settles where 911 will go and is what `doorman check` reports; today an emergency call still leaves by the hand-written dialplan."
+        "One of this key and plain policy.toml's [line] trunk MUST have an answer. `doorman check` exits non-zero and `doorman render` refuses to generate when neither does: a dialplan that routes every DID and says nothing about 911 is the one that gets installed with confidence.",
+        "If the designated trunk cannot carry the call, 911 falls over to the other trunks in turn — the ones declaring e911 = true first, a trunk declaring e911 = false last. The dispatcher may then see the wrong address, which is the deliberate trade: a connected call lets a human say their address out loud, a failed call gives them nothing.",
+        "Nothing asks whether a trunk is registered; it tries it. A provider that ignores SIP OPTIONS looks unreachable while working perfectly, and diverting an emergency call off the trunk whose address is filed on a false negative is exactly the failure this design prevents.",
+        "An emergency call never presents a line's outbound_cid, on any path, and the *4 console refuses emergency numbers outright."
       ]
     },
     "trunks": {

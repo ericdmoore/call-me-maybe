@@ -10,8 +10,8 @@ a JSON Schema cannot express. Machine-readable schema:
     https://callmemaybe.cc/schema/env.json
 
 **Everything below describes what the binary accepts today.** The project's
-planning docs discuss features that do not exist yet — outbound routing by
-trunk, per-person ring overrides, house-wide quiet hours.
+planning docs discuss features that do not exist yet — per-provider balance
+checking, per-person ring overrides, house-wide quiet hours.
 
 **Do not emit configuration for any of them.** `doorman check` now rejects a
 key it does not recognise, and suggests the nearest real one:
@@ -150,6 +150,18 @@ If someone has one number, write one `policy.toml` and do not mention lines.
 15. A generated DID route needs `trunk` AND `number` on the same line. Either
     alone produces a line with no route, whose calls fall through to the
     default line.
+16. **`outbound_cid` and `trunk` are one decision.** A call placed as a line
+    leaves by that line's trunk, and a provider will not present a number its
+    account does not own — it rejects the call or silently rewrites the caller
+    ID. `doorman check` and `doorman render` refuse an `outbound_cid` that this
+    same config declares as another line's `number` on a *different* trunk. A
+    caller ID no `[line] number` declares cannot be checked either way and is
+    reported rather than refused, because a DID somebody owns and does not
+    answer here is an ordinary thing to present.
+17. With a trunks.toml, **something must carry 911**: either `emergency_trunk`
+    in trunks.toml or `[line] trunk` in plain policy.toml. Neither is an error,
+    not a note — `doorman check` exits non-zero and `doorman render` refuses to
+    generate. Never write a multi-provider config without settling it.
 
 ## `on_no_input` — the difference between a doorman and a concierge
 
@@ -290,9 +302,14 @@ the kitchen phone shows. Two things to say out loud when writing this:
 
 - The caller ID reaches the plain dial path through `doorman render`, so tell
   them to re-render and reload PJSIP. Editing the file alone changes what `*4`
-  offers and nothing else.
+  offers and nothing else. The same is true of `[line] trunk`, which rides on
+  the same endpoint as a second `set_var`.
+- With a trunks.toml, a call as this line also *leaves* by this line's trunk.
+  Present a number the trunk owns: the provider rejects or silently rewrites
+  one it does not, and `doorman check` refuses the case it can prove.
 - Emergency calls are not affected and must not be made to be. 911 leaves with
-  the trunk's own caller ID whatever any line says.
+  the trunk's own caller ID whatever any line says, by the designated
+  emergency trunk rather than by this one.
 
 ## The provider inventory — trunks.toml
 
@@ -342,6 +359,15 @@ Rules a schema cannot express:
   `policy.toml`'s `[line] trunk` — the primary line. It is deliberately NOT
   "the only trunk declared" or "the first one": a default derived from file
   order would move silently when a block was added above it.
+- **One of the two must have an answer.** With a trunks.toml and neither
+  `emergency_trunk` nor a `[line] trunk` on plain policy.toml, `doorman check`
+  exits non-zero and `doorman render` refuses to generate anything. Never hand
+  somebody a multi-provider config with this undecided.
+- If the designated trunk cannot carry the call, 911 falls over to the other
+  trunks in turn, preferring the ones that declare `e911 = true`. The address
+  the dispatcher sees may then be wrong, which is the deliberate trade: a
+  connected call lets a human say their address, a failed one gives them
+  nothing. If nothing can carry it the caller hears congestion, not silence.
 - Not every provider offers E911 everywhere. A provider without it means a
   phone that cannot call for help — say so rather than treating it as a
   cheaper option. And say plainly that this is a supplementary phone: it stops
@@ -384,13 +410,10 @@ These appear in the project's planning documents. They are not implemented, and
   console is `*4` and it asks; there is no prefix and there is not going to be
   one. Per-line outbound caller ID itself IS available — `outbound_cid` and
   `outbound_handsets`, above.
-- **Outbound routing by trunk.** A call leaves by whatever the dialplan's
-  `Dial()` line says, whatever `[line] trunk` names. That is also why
-  `outbound_cid` is still not validated against the trunk that will carry it:
-  presenting a number a provider does not own is rejected or silently
-  rewritten, and nothing checks for you yet. `[line] trunk` and `trunks.toml`
-  themselves DO exist — see above — and settle where inbound arrives and where
-  911 will go.
+- **Per-provider balance.** `doorman balance` does not exist. A prepaid trunk
+  that hits zero stops the phone ringing with no error anywhere, and there is
+  nothing in the config surface to warn about it. Outbound routing by trunk
+  itself DOES exist — see `[line] trunk` above.
 - `ring` on `[[people]]` (per-person routing overrides).
 - `[house.afterhours]` — afterhours exists per-extension only.
 - `[[schedules]]` at line scope. A schedule is referenced from an extension.

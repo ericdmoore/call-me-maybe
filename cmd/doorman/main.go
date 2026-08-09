@@ -297,13 +297,15 @@ func runCheck(args []string) int {
 	if multi {
 		printSharedPINs(results)
 	}
-	if !printOutbound(results) {
+	if !printOutbound(results, trunks) {
 		rc = 1
 	}
 	// Both silent without a trunks.toml: a box with one provider has nothing
 	// to choose between and should never have to read the word "trunk".
 	printTrunks(trunks, results)
-	printEmergency(trunks, results)
+	if !printEmergency(trunks, results) {
+		rc = 1
+	}
 	return rc
 }
 
@@ -313,7 +315,7 @@ func runCheck(args []string) int {
 // Quiet unless there is something to say: an install with one number and no
 // outbound_cid gets nothing here, because it has nothing to choose between and
 // should never have to read the word "line" to check its config.
-func printOutbound(results []checkedLine) bool {
+func printOutbound(results []checkedLine, trunks *policy.Trunks) bool {
 	ids := make([]lineIdentity, 0, len(results))
 	var handsetIDs []string
 	for _, r := range results {
@@ -335,15 +337,16 @@ func printOutbound(results []checkedLine) bool {
 		}
 	}
 	plan := newOutboundPlan(ids)
-	if !plan.anyCID() && !plan.claims() {
+	if !plan.anyCID() && !plan.claims() && !plan.anyTrunk() {
 		return true
 	}
 
 	fmt.Println()
 	fmt.Print(plan.describe(handsetIDs))
 
+	ok := printCIDChecks(plan.checkCIDs(trunks))
 	if len(plan.Conflicts) == 0 {
-		return true
+		return ok
 	}
 	// An error rather than a note. A phone presents one number, so two lines
 	// claiming it means somebody's customers see somebody else's number — and
@@ -358,6 +361,44 @@ func printOutbound(results []checkedLine) bool {
 		"  Until then the daemon uses %s and `doorman render` refuses to generate.\n",
 		plan.Conflicts[0].Winner)
 	return false
+}
+
+// printCIDChecks reports each line's outbound_cid against the trunk that will
+// carry it, and returns false when one of them is provably wrong.
+//
+// The split between refusing and reporting is the honest edge of what a
+// static check can do here. doorman cannot ask a provider which DIDs an account
+// owns, so the only thing it can prove is a contradiction inside this config:
+// a line presenting a number that another line declares at a different
+// provider. Everything else is said out loud and left alone, because a caller
+// ID matching no [line] number is a DID you own and do not answer here just as
+// often as it is a typo.
+func printCIDChecks(checks []cidCheck) bool {
+	if len(checks) == 0 {
+		return true
+	}
+	wrong := wrongTrunkCIDs(checks)
+	if len(wrong) > 0 {
+		fmt.Println("\n✗ a line presents a caller ID its trunk does not own")
+		for _, c := range wrong {
+			fmt.Printf("    %s\n", describeCIDCheck(c))
+		}
+		fmt.Println("\n  A provider will not carry a number its account does not own: it rejects")
+		fmt.Println("  the call or silently rewrites the caller ID, and neither is visible from")
+		fmt.Println("  this end — the phone works and the customer saves the wrong number. Move")
+		fmt.Println("  the number to the trunk that owns it, or present one that trunk does.")
+	}
+	if len(wrong) < len(checks) {
+		fmt.Println("\n  Cannot be verified from here (not an error):")
+		for _, c := range checks {
+			if c.Verdict != cidWrongTrunk {
+				fmt.Printf("    %s\n", describeCIDCheck(c))
+			}
+		}
+		fmt.Println("\n  Nothing can ask a provider which numbers an account owns. What is")
+		fmt.Println("  checkable is whether this config contradicts itself, and these do not.")
+	}
+	return len(wrong) == 0
 }
 
 // checkedLine is one line and whatever loading its policy produced. Both
@@ -690,11 +731,23 @@ func runRender(args []string) int {
 		return 1
 	}
 
+	// A caller ID the carrying trunk does not own is refused rather than
+	// generated. This file decides what every customer sees, and a provider
+	// rejecting or rewriting the number is invisible from this end.
+	if wrong := wrongTrunkCIDs(plan.checkCIDs(trunks)); len(wrong) > 0 {
+		fmt.Fprintln(os.Stderr, "✗ a line presents a caller ID its trunk does not own")
+		for _, c := range wrong {
+			fmt.Fprintf(os.Stderr, "  %s\n", describeCIDCheck(c))
+		}
+		fmt.Fprintln(os.Stderr, "\n  Move the number to the trunk that owns it, or present one that trunk does.")
+		return 1
+	}
+
 	ids := make([]string, 0, len(handsets))
 	for _, h := range handsets {
 		ids = append(ids, h.ID)
 	}
-	frags, err := render.Build(handsets, env, plan.callerIDs(ids))
+	frags, err := render.Build(handsets, env, plan.identities(ids))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return 1
@@ -704,11 +757,8 @@ func runRender(args []string) int {
 	// cannot leave half a phone plant on disk.
 	var trunkFrags *render.TrunkFragments
 	if trunks.Present() {
-		ids := make([]string, 0, len(handsets))
-		for _, h := range handsets {
-			ids = append(ids, h.ID)
-		}
-		trunkFrags, err = render.BuildTrunks(trunks.All(), renderTrunkLines(lineIDs), ids, env)
+		trunkFrags, err = render.BuildTrunks(trunks.All(), renderTrunkLines(lineIDs), ids,
+			resolveEmergency(trunks, lineIDs), env)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 			return 1
@@ -766,6 +816,18 @@ func runRender(args []string) int {
 			fmt.Println("\nNo DID routes: no line sets both [line] trunk and [line] number, so")
 			fmt.Println("every inbound call lands on the default line.")
 		}
+		// Printed last and on its own, because it is the one line of this
+		// output somebody should read twice.
+		fmt.Printf("\n911 leaves by %s", trunkFrags.Emergency)
+		if len(trunkFrags.Fallbacks) > 0 {
+			fmt.Printf(", falling over to %s", strings.Join(trunkFrags.Fallbacks, ", then "))
+		}
+		fmt.Println(".")
+		fmt.Printf("Set DEFAULT_TRUNK=%s in [globals] in extensions.conf to match, so a\n",
+			trunkFrags.Emergency)
+		fmt.Println("channel carrying no trunk of its own cannot leave by a dead endpoint.")
+		fmt.Println("Then confirm what Asterisk loaded:")
+		fmt.Println("  sudo asterisk -rx 'dialplan show cmm-emergency'")
 	}
 	fmt.Println("\nThe PJSIP fragments contain real passwords — never commit them.")
 	return 0
@@ -998,17 +1060,21 @@ func runService() {
 		}
 	}()
 
-	announceOutbound(lines, log)
-
-	// The provider inventory, read for exactly one thing: saying which trunk
-	// carries 911 and whether that was chosen or inferred. Nothing on the call
-	// path routes on a trunk yet, so a trunks.toml that will not load is a
-	// warning rather than a refusal to start — the phone must keep answering,
-	// and this file has no say in whether it can.
-	if trunks, err := policy.LoadTrunks(cfg.TrunksPath); err != nil {
+	// The provider inventory, read for two things: saying which trunk carries
+	// 911, and weighing each line's outbound caller ID against the trunk that
+	// will carry it. Both are reports. Nothing on the call path routes on the
+	// *inventory* — the console reads [line] trunk, which is a string in a
+	// policy file — so a trunks.toml that will not load is a warning rather
+	// than a refusal to start. The phone must keep answering, and this file has
+	// no say in whether it can.
+	trunks, err := policy.LoadTrunks(cfg.TrunksPath)
+	if err != nil {
 		log.Warn("trunk inventory will not load — the phone is unaffected, but nothing can say which trunk carries 911",
 			"path", cfg.TrunksPath, "err", err)
-	} else {
+		trunks = nil
+	}
+	announceOutbound(lines, trunks, log)
+	if trunks != nil {
 		announceEmergencyTrunk(trunks, lines.deflt.Policy().Line().Trunk, log)
 	}
 

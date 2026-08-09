@@ -51,27 +51,51 @@ func header(from string, secrets bool) string {
 	return b.String()
 }
 
-// outboundCIDVar is the channel variable the dialplan reads to decide what an
-// outbound call presents. The name appears in exactly three places and they
-// have to agree: here, internal/lobby/console.go, and the [internal] and
-// [outbound-console] contexts in asterisk/extensions.conf. There is no shared
-// constant because the third of those is not Go — the same arrangement
+// The two channel variables the dialplan reads to place an outbound call: what
+// it presents, and which provider it leaves by. Each name appears in exactly
+// three places and they have to agree: here, internal/lobby/console.go, and
+// the shared [cmm-outbound] context in asterisk/extensions.conf. There is no
+// shared constant because the third of those is not Go — the same arrangement
 // "voicemail-drop" has always had.
-const outboundCIDVar = "OUTBOUND_CID"
+const (
+	outboundCIDVar   = "OUTBOUND_CID"
+	outboundTrunkVar = "OUTBOUND_TRUNK"
+)
+
+// OutboundIdentity is what one handset presents and where its calls leave by.
+//
+// The two travel together in one value on purpose. A provider will not let you
+// present a number its account does not own — it rejects the call or silently
+// rewrites the caller ID as anti-spoofing — so the caller ID and the trunk are
+// one decision, not two settings that happen to sit near each other. Two maps
+// could disagree; a pair cannot.
+type OutboundIdentity struct {
+	// CID is what the callee sees, in E.164, or "" for whatever the trunk
+	// sends — which is what every outbound call did before lines existed.
+	CID string
+	// Trunk is the PJSIP endpoint the call leaves by: a trunks.toml id. Empty
+	// means the dialplan's DEFAULT_TRUNK decides, which is every install with
+	// one provider and no trunks.toml at all.
+	Trunk string
+}
+
+// set reports whether this handset has any outbound identity to write.
+func (o OutboundIdentity) set() bool { return o.CID != "" || o.Trunk != "" }
 
 // Build renders both fragments. Secrets come exclusively through env — the
 // generated PJSIP file contains real passwords and must be treated like
 // pjsip.conf itself (root-owned, mode 0640, never committed).
 //
-// outboundCID maps handset id to the caller ID that phone presents when it
-// picks up and dials, resolved from [line] outbound_cid and outbound_handsets
-// across every line. It is generated rather than configured in the dialplan
-// because the plain _NXXNXXXXXX path never reaches doorman: a handset dialling
-// a number talks to Asterisk and nothing else, which is exactly the property
-// that keeps outbound calling working when doorman is down. A handset with no
-// entry gets no set_var, and its endpoint is byte-identical to what it was
-// before per-line identity existed.
-func Build(handsets []policy.Handset, env Env, outboundCID map[string]string) (*Fragments, error) {
+// outbound maps handset id to the identity that phone calls with — the caller
+// ID it presents and the trunk it leaves by — resolved from [line]
+// outbound_cid, [line] trunk and [line] outbound_handsets across every line.
+// It is generated rather than configured in the dialplan because the plain
+// _NXXNXXXXXX path never reaches doorman: a handset dialling a number talks to
+// Asterisk and nothing else, which is exactly the property that keeps outbound
+// calling working when doorman is down. A handset with no entry gets no
+// set_var, and its endpoint is byte-identical to what it was before per-line
+// identity existed.
+func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdentity) (*Fragments, error) {
 	var problems []string
 	fail := func(format string, args ...any) {
 		problems = append(problems, fmt.Sprintf(format, args...))
@@ -125,12 +149,18 @@ func Build(handsets []policy.Handset, env Env, outboundCID map[string]string) (*
 		if h.Mailbox != "" {
 			fmt.Fprintf(&pjsip, "mailboxes=%s@household\n", h.Mailbox)
 		}
-		if cid := outboundCID[h.ID]; cid != "" {
-			// Read by the outbound patterns in [internal], and deliberately
-			// NOT by _911: an emergency call has to leave by the trunk whose
-			// street address is registered, never by a business line whose
-			// address is somebody else's.
-			fmt.Fprintf(&pjsip, "set_var=%s=%s\n", outboundCIDVar, cid)
+		if out := outbound[h.ID]; out.set() {
+			// Read by [cmm-outbound], the one context both outbound paths go
+			// through, and deliberately NOT by _911: which trunk carries an
+			// emergency call is a property of the house — the trunk whose
+			// street address is registered — never of whichever line the
+			// nearest handset happens to call as.
+			if out.CID != "" {
+				fmt.Fprintf(&pjsip, "set_var=%s=%s\n", outboundCIDVar, out.CID)
+			}
+			if out.Trunk != "" {
+				fmt.Fprintf(&pjsip, "set_var=%s=%s\n", outboundTrunkVar, out.Trunk)
+			}
 		}
 		fmt.Fprintf(&pjsip, "\n[%s-auth]\ntype=auth\nauth_type=userpass\nusername=%s\npassword=%s\n\n", h.ID, h.ID, secret)
 		fmt.Fprintf(&pjsip, "[%s]\ntype=aor\nmax_contacts=2\nremove_existing=yes\nqualify_frequency=60\n\n", h.ID)

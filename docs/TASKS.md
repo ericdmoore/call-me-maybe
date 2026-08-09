@@ -250,15 +250,27 @@ independent of each other.**
 under 7b is the schedules-at-line-scope item, which is a `[[schedules]]`
 question rather than a line one.
 
-Several *providers* is Phase 2 of `.plans/s01-multiple-DIDs/readme.md`, and
-its first half has landed too: `trunks.toml` is a provider inventory rendered
-the way `handsets.toml` is, `[line] trunk` names which provider a number
-arrives on, and `doorman render` generates the registrations and one inbound
-context per trunk. The file is optional and its absence is today's behaviour
-exactly. What is left is the materially harder part — how a call *leaves* the
-building: outbound routing by trunk, `outbound_cid` validated against the
-trunk that will carry it, and 911 actually leaving by the designated trunk
-rather than by the one hard-coded in the dialplan.
+Several *providers* is Phase 2 of `.plans/s01-multiple-DIDs/readme.md`, and it
+has now landed but for per-provider health. `trunks.toml` is a provider
+inventory rendered the way `handsets.toml` is, `[line] trunk` names which
+provider a number arrives on, and `doorman render` generates the registrations,
+one inbound context per trunk, and the emergency ladder. The file is optional
+and its absence is today's behaviour exactly.
+
+**Outbound now leaves by the line's trunk, on both paths.** A second channel
+variable, `OUTBOUND_TRUNK`, arrives the same two ways `OUTBOUND_CID` does — a
+`set_var` per endpoint from `doorman render`, and the `*4` console setting it
+per call — and `[internal]` and `[outbound-console]` both include one shared
+`[cmm-outbound]` context so the two cannot drift. `outbound_cid` is checked
+against the trunk that will carry it: a number this config declares at another
+provider is refused by `doorman check` and `doorman render`, and a number
+nothing declares is reported, because no static check can ask a provider what
+an account owns. And 911 leaves by the designated trunk, falls over to the
+others in turn if that one cannot carry it, presents no caller ID on any path,
+and fails audibly rather than silently. Undecided is now an error in both
+`check` and `render`.
+
+What is left under Phase 2 is per-provider balance (§8 below, per trunk).
 
 ---
 
@@ -362,10 +374,17 @@ resolves them; `internal/lobby/console.go` is `*4`.
       caller ID and releases the handset into `[outbound-console]` rather than
       originating and bridging, so the trunk dial string stays in the dialplan
       and both outbound paths dial through the same lines.
-- [x] **`*4` refuses emergency numbers**, and `[outbound-console]` contains no
-      emergency pattern for a bug to reach. `_911` in `[internal]` is untouched
-      and sets no caller ID.
+- [x] **`*4` refuses emergency numbers**, and the context it releases into
+      contains no emergency pattern for a bug to reach. `_911` lives in
+      `[internal]`, outside the outbound context both paths share, and sets no
+      caller ID.
 - [x] The plain `_NXXNXXXXXX` path keeps working with doorman down.
+- [x] **Outbound leaves by the line's trunk** (Phase 2, M2.3). `OUTBOUND_TRUNK`
+      beside `OUTBOUND_CID`, from the same `[line]`, on both paths — a provider
+      will not present a number its account does not own. `doorman check` and
+      `doorman render` refuse an `outbound_cid` this config declares at another
+      provider; a number nothing declares is reported rather than refused,
+      because nothing can ask a provider what an account owns.
 - [x] **Rejected: a dial prefix** (`*3` + number). It needs `*1`–`*9` reserved
       forever, fights `*97` and every future feature code, and with five
       ventures nobody remembers which digit is which. A menu that says the

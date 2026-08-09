@@ -168,6 +168,61 @@ else
        "sudo cp $REPO/asterisk/extensions.conf /etc/asterisk/ && sudo asterisk -rx 'dialplan reload'"
 fi
 
+# ── Rung 5b: the emergency route ─────────────────────────────
+# The one route somebody's life may depend on, and the one nothing else here
+# would notice was broken. Two shapes are correct and this reports which:
+# a generated [cmm-emergency] ladder (several providers), or the single-trunk
+# _911 in [internal] (one provider, and every box that has no trunks.toml).
+rung "5b. Emergency route"
+
+emergency_endpoints() { # print every trunk a 911 route dials, in order
+  printf '%s\n' "$1" | sed -n 's|.*PJSIP/911@\([A-Za-z0-9_-][A-Za-z0-9_-]*\).*|\1|p'
+}
+
+E_PLAN="$(ast 'dialplan show cmm-emergency')"
+E_WHERE="[cmm-emergency]"
+if ! printf '%s' "$E_PLAN" | grep -q 'PJSIP/911@'; then
+  E_PLAN="$(ast 'dialplan show 911@internal')"
+  E_WHERE="_911 in [internal]"
+elif ! ast 'core show function DIALPLAN_EXISTS' | grep -q 'DIALPLAN_EXISTS'; then
+  # _911 reaches the generated ladder through DIALPLAN_EXISTS. Without
+  # func_dialplan it evaluates to nothing, the GotoIf is false, and the call
+  # falls through to DEFAULT_TRUNK — safe, but not what the ladder says.
+  warn "the [cmm-emergency] ladder exists but func_dialplan is not loaded" \
+       "911 falls through to DEFAULT_TRUNK instead; sudo asterisk -rx 'module load func_dialplan.so'"
+  E_PLAN="$(ast 'dialplan show 911@internal')"
+  E_WHERE="_911 in [internal], because DIALPLAN_EXISTS is unavailable"
+fi
+
+E_TRUNKS="$(emergency_endpoints "$E_PLAN")"
+if [ -z "$E_TRUNKS" ]; then
+  fail "911 has no route at all" \
+       "sudo asterisk -rx 'dialplan show 911@internal' — reinstall extensions.conf and reload"
+else
+  E_FIRST="$(printf '%s\n' "$E_TRUNKS" | head -1)"
+  E_COUNT="$(printf '%s\n' "$E_TRUNKS" | wc -l | tr -d ' ')"
+  if [ "$E_COUNT" -gt 1 ]; then
+    pass "911 leaves by $E_FIRST via $E_WHERE, falling over to $((E_COUNT - 1)) more"
+  else
+    pass "911 leaves by $E_FIRST via $E_WHERE (no fallback — one trunk)"
+  fi
+  # A route to an endpoint that does not exist dials nothing. Every trunk in
+  # the ladder is checked, not only the first: the fallback is the half nobody
+  # ever exercises, so it is the half that rots.
+  for e in $E_TRUNKS; do
+    if ast "pjsip show endpoint $e" | grep -qi 'unable to find'; then
+      fail "911 route dials PJSIP endpoint '$e', which does not exist" \
+           "check DEFAULT_TRUNK in extensions.conf [globals] and the trunk ids in trunks.toml"
+    fi
+  done
+fi
+
+# Printed, not counted as a WARN. A warning that fires on every run is one
+# people learn to scroll past, and this is the last line that should be.
+printf '    this script does not dial 911 and never will. Test it deliberately,\n'
+printf '    and keep a mobile in the house: a hobbyist phone on a consumer\n'
+printf '    connection is a supplementary phone, never the only way to call for help.\n'
+
 # ── Rung 6: prompts ──────────────────────────────────────────
 rung "6. Prompts"
 

@@ -21,8 +21,8 @@ type consoleHarness struct {
 }
 
 var testConsoleLines = []ConsoleLine{
-	{Name: "default", Label: "Home", CallerID: "+15125550100"},
-	{Name: "biz", Label: "Mertaugh Enterprises", CallerID: "+15125550142"},
+	{Name: "default", Label: "Home", CallerID: "+15125550100", Trunk: "voipms"},
+	{Name: "biz", Label: "Mertaugh Enterprises", CallerID: "+15125550142", Trunk: "telnyx"},
 }
 
 // startConsole runs a console against the fake. Timeouts are real but short,
@@ -112,6 +112,28 @@ func (h *consoleHarness) waitFor(t *testing.T, name string) fakeCall {
 	}
 }
 
+// waitForVar waits for one named channel variable to be set and returns its
+// value. A placed call sets two of them, and which order they go out in is not
+// something any test should be asserting.
+func (h *consoleHarness) waitForVar(t *testing.T, name string) string {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case c := <-h.fake.calls:
+			if c.Name == "SetChannelVar" && c.Args[1] == name {
+				return c.Args[2]
+			}
+			if c.Name == "Play" {
+				h.console.PlaybackFinished(c.Args[2])
+			}
+		case <-deadline:
+			t.Fatalf("the console never set %s", name)
+			return ""
+		}
+	}
+}
+
 // runOut completes every playback until the console finishes, then returns
 // everything it saw. For the tests whose assertion is about where a call ended
 // up rather than the order it got there.
@@ -192,9 +214,14 @@ func TestConsolePlacesACallAsTheChosenLine(t *testing.T) {
 	h.playUntil(t, sayBeep)
 	h.dial("5125550199#")
 
-	v := h.waitFor(t, "SetChannelVar")
-	if v.Args[1] != "OUTBOUND_CID" || v.Args[2] != "+15125550142" {
-		t.Fatalf("set %s=%s, want OUTBOUND_CID=+15125550142", v.Args[1], v.Args[2])
+	// Both variables, from the same line. The caller ID and the trunk that
+	// carries it are one decision: a provider will not present a number its
+	// account does not own.
+	if got := h.waitForVar(t, "OUTBOUND_TRUNK"); got != "telnyx" {
+		t.Fatalf("OUTBOUND_TRUNK=%q, want telnyx — the chosen line's provider", got)
+	}
+	if got := h.waitForVar(t, "OUTBOUND_CID"); got != "+15125550142" {
+		t.Fatalf("OUTBOUND_CID=%q, want +15125550142", got)
 	}
 	c := h.waitFor(t, "Continue")
 	if c.Args[1] != "outbound-console" || c.Args[2] != "5125550199" {
@@ -252,18 +279,22 @@ func TestConsoleDialsNumbersThatMerelyLookLikeEmergencies(t *testing.T) {
 	h.waitFinished(t)
 }
 
-// A line with no outbound_cid presents the trunk default — and the variable is
-// set to empty anyway, because leaving the handset's own default in place
-// would present a number the operator went out of their way to choose against.
+// A line with no outbound_cid and no trunk presents the dialplan's defaults —
+// and both variables are set to empty anyway, because leaving the handset's own
+// defaults in place would place the call as an identity the operator went out
+// of their way to choose against. Clearing one and not the other would be the
+// worst of the three: the business caller ID down the home trunk.
 func TestConsoleClearsTheHandsetDefaultForALineWithNoCallerID(t *testing.T) {
 	h := startConsole(t, []ConsoleLine{{Name: "default"}})
 	h.console.Dtmf("1")
 	h.playUntil(t, sayBeep)
 	h.dial("5125550199#")
 
-	v := h.waitFor(t, "SetChannelVar")
-	if v.Args[1] != "OUTBOUND_CID" || v.Args[2] != "" {
-		t.Fatalf("set %s=%q, want OUTBOUND_CID cleared", v.Args[1], v.Args[2])
+	if got := h.waitForVar(t, "OUTBOUND_TRUNK"); got != "" {
+		t.Fatalf("OUTBOUND_TRUNK=%q, want it cleared", got)
+	}
+	if got := h.waitForVar(t, "OUTBOUND_CID"); got != "" {
+		t.Fatalf("OUTBOUND_CID=%q, want it cleared", got)
 	}
 	h.waitFor(t, "Continue")
 	h.console.CallerLeft()
@@ -391,9 +422,8 @@ func TestConsoleSurvivesMissingPrompts(t *testing.T) {
 	h.console.Dtmf("2")
 	h.dial("5125550199#")
 
-	v := h.waitFor(t, "SetChannelVar")
-	if v.Args[2] != "+15125550142" {
-		t.Fatalf("presented %q with no audio available", v.Args[2])
+	if got := h.waitForVar(t, "OUTBOUND_CID"); got != "+15125550142" {
+		t.Fatalf("presented %q with no audio available", got)
 	}
 	h.waitFor(t, "Continue")
 	h.console.CallerLeft()

@@ -165,16 +165,39 @@ func TestCheckSaysWhetherTheEmergencyTrunkWasChosenOrInferred(t *testing.T) {
 	}
 }
 
-// Honesty about today: the key settles where 911 will go, and nothing routes
-// on it yet. Claiming otherwise would be the worst kind of wrong in this file.
-func TestCheckDoesNotClaim911AlreadyRoutesByTrunk(t *testing.T) {
+// What the emergency block has to say out loud, from the plan: where the call
+// goes, where it goes when that fails, that E911 coverage is not universal, and
+// the honest framing of what this phone is.
+func TestCheckSaysEverythingTheEmergencyDecisionTurnsOn(t *testing.T) {
 	out := capture(t, func() {
 		printEmergency(loadTrunks(t, cliTrunks), []checkedLine{lineResult(policy.DefaultLine, "voipms", "")})
 	})
-	for _, want := range []string{"not built", "supplementary phone", "street address"} {
+	for _, want := range []string{
+		"911 leaves by", "falls over to", "street address",
+		"Not every provider offers E911", "supplementary phone",
+		"dialplan show cmm-emergency",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the emergency block should say %q:\n%s", want, out)
 		}
+	}
+}
+
+// Undecided is an error now, not a note. Outbound routing by trunk is built,
+// so a box with several providers and no answer for 911 is a box whose
+// dialplan `doorman render` will refuse to generate.
+func TestCheckFailsWhenNothingCarriesEmergencyCalls(t *testing.T) {
+	noDesignation := strings.Replace(cliTrunks, `emergency_trunk = "voipms"`, "", 1)
+	results := []checkedLine{lineResult(policy.DefaultLine, "", "")}
+	ok := true
+	capture(t, func() { ok = printEmergency(loadTrunks(t, noDesignation), results) })
+	if ok {
+		t.Error("check passed with no trunk carrying 911")
+	}
+	// And it stays quiet, and passing, for the install that has one provider.
+	out := capture(t, func() { ok = printEmergency(&policy.Trunks{}, results) })
+	if !ok || out != "" {
+		t.Errorf("check failed or spoke for a box with no trunks.toml at all: %q", out)
 	}
 }
 
@@ -297,6 +320,167 @@ func TestRenderRefusesALineNamingAnUnknownTrunk(t *testing.T) {
 	if rc == 0 {
 		t.Fatal("render accepted a line naming a trunk that does not exist")
 	}
+}
+
+// End to end, because the pieces are in three packages and the thing that
+// matters is what lands in /etc/asterisk: the phone carries its line's trunk,
+// and 911 has a context of its own that leaves by the designated one.
+func TestRenderRoutesOutboundAndEmergencyByTrunk(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "handsets.toml", renderHandsets)
+	// The primary line answers and presents the VoIP.ms number; the business
+	// line answers and presents the Telnyx one.
+	writeFile(t, dir, "policy.toml", `
+[line]
+label  = "Home"
+number = "+15125550100"
+trunk  = "voipms"
+outbound_cid = "+15125550100"
+
+[house]
+handsets = ["kitchen"]
+`)
+	writeFile(t, dir, "policy.biz.toml", `
+[line]
+label  = "Mertaugh Enterprises"
+number = "+15125550142"
+trunk  = "telnyx"
+outbound_cid = "+15125550142"
+outbound_handsets = ["office"]
+
+[house]
+handsets = ["office"]
+`)
+	writeFile(t, dir, "trunks.toml", cliTrunks)
+	writeFile(t, dir, ".env", "HANDSET_KITCHEN_PASSWORD=k\nHANDSET_OFFICE_PASSWORD=o\n"+
+		"TRUNK_VOIPMS_PASSWORD=v\nTRUNK_TELNYX_PASSWORD=t\n")
+	out := filepath.Join(dir, "generated")
+
+	rc, printed := 1, ""
+	printed = capture(t, func() {
+		rc = runRender([]string{
+			"-handsets", filepath.Join(dir, "handsets.toml"),
+			"-policy", filepath.Join(dir, "policy.toml"),
+			"-trunks", filepath.Join(dir, "trunks.toml"),
+			"-env", filepath.Join(dir, ".env"),
+			"-out", out,
+		})
+	})
+	if rc != 0 {
+		t.Fatalf("render exited %d:\n%s", rc, printed)
+	}
+
+	pjsip := readGenerated(t, out, "pjsip_handsets.conf")
+	// The office phone is claimed by the business line, so it leaves by Telnyx
+	// presenting the Telnyx number. The kitchen is claimed by nobody and gets
+	// the primary line's pair — one rule, and the same one 911 follows.
+	for _, want := range []string{
+		"set_var=OUTBOUND_CID=+15125550142\nset_var=OUTBOUND_TRUNK=telnyx",
+		"set_var=OUTBOUND_CID=+15125550100\nset_var=OUTBOUND_TRUNK=voipms",
+	} {
+		if !strings.Contains(pjsip, want) {
+			t.Errorf("the generated phone plant is missing %q", want)
+		}
+	}
+
+	plan := readGenerated(t, out, "extensions_trunks.conf")
+	if !strings.Contains(plan, "[cmm-emergency]") {
+		t.Fatalf("no emergency context was generated:\n%s", plan)
+	}
+	if !strings.Contains(plan, "same => n,Dial(PJSIP/911@voipms,60)") {
+		t.Error("911 does not leave by the designated trunk")
+	}
+	// And the most consequential fact is printed where somebody will read it.
+	if !strings.Contains(printed, "911 leaves by voipms") ||
+		!strings.Contains(printed, "DEFAULT_TRUNK=voipms") {
+		t.Errorf("render did not say where 911 goes:\n%s", printed)
+	}
+}
+
+// Refused where a person is standing. A generated dialplan that routes every
+// DID beautifully and has no answer for 911 is worse than none, because it is
+// the one that gets installed with confidence.
+func TestRenderRefusesWhenNothingCarriesEmergencyCalls(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "handsets.toml", renderHandsets)
+	// A policy file with no [line] trunk, and a trunks.toml with no
+	// emergency_trunk: neither half of the rule has an answer.
+	writeFile(t, dir, "policy.toml", renderPolicy)
+	writeFile(t, dir, "trunks.toml",
+		strings.Replace(cliTrunks, `emergency_trunk = "voipms"`, "", 1))
+	writeFile(t, dir, ".env", "HANDSET_KITCHEN_PASSWORD=k\nHANDSET_OFFICE_PASSWORD=o\n"+
+		"TRUNK_VOIPMS_PASSWORD=v\nTRUNK_TELNYX_PASSWORD=t\n")
+	out := filepath.Join(dir, "generated")
+
+	rc := 0
+	capture(t, func() {
+		rc = runRender([]string{
+			"-handsets", filepath.Join(dir, "handsets.toml"),
+			"-policy", filepath.Join(dir, "policy.toml"),
+			"-trunks", filepath.Join(dir, "trunks.toml"),
+			"-env", filepath.Join(dir, ".env"),
+			"-out", out,
+		})
+	})
+	if rc == 0 {
+		t.Fatal("render generated a dialplan with no route for 911")
+	}
+	// Nothing half-written: a partial phone plant on disk is worse than none.
+	if _, err := os.Stat(filepath.Join(out, "extensions_trunks.conf")); err == nil {
+		t.Error("a trunk dialplan was written despite the refusal")
+	}
+}
+
+// A caller ID this very config says belongs to another provider is refused
+// before anything reaches /etc/asterisk, because the generated file is what
+// decides what every customer sees.
+func TestRenderRefusesACallerIDItsTrunkDoesNotOwn(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "handsets.toml", renderHandsets)
+	writeFile(t, dir, "policy.toml", `
+[line]
+number = "+15125550100"
+trunk  = "voipms"
+outbound_cid = "+15125550100"
+
+[house]
+handsets = ["kitchen"]
+`)
+	writeFile(t, dir, "policy.biz.toml", `
+[line]
+number = "+15125550142"
+trunk  = "telnyx"
+outbound_cid = "+15125550100"
+
+[house]
+handsets = ["office"]
+`)
+	writeFile(t, dir, "trunks.toml", cliTrunks)
+	writeFile(t, dir, ".env", "HANDSET_KITCHEN_PASSWORD=k\nHANDSET_OFFICE_PASSWORD=o\n"+
+		"TRUNK_VOIPMS_PASSWORD=v\nTRUNK_TELNYX_PASSWORD=t\n")
+
+	rc := 0
+	capture(t, func() {
+		rc = runRender([]string{
+			"-handsets", filepath.Join(dir, "handsets.toml"),
+			"-policy", filepath.Join(dir, "policy.toml"),
+			"-trunks", filepath.Join(dir, "trunks.toml"),
+			"-env", filepath.Join(dir, ".env"),
+			"-out", filepath.Join(dir, "generated"),
+		})
+	})
+	if rc == 0 {
+		t.Fatal("render baked a caller ID the carrying trunk does not own")
+	}
+}
+
+func readGenerated(t *testing.T, dir, name string) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
 }
 
 func generatedFiles(t *testing.T, dir string) string {

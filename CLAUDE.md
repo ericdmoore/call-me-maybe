@@ -96,10 +96,10 @@ belong in, and the legacy single-file layout still loads.
 **No `trunks.toml` is the normal state and the compatibility gate.** Without
 one, `doorman render` generates only the handset files and the hand-written
 `asterisk/pjsip.conf` keeps working — which is every single-provider install.
-Nothing on the call path routes on a trunk yet: `[line] trunk` decides where
-inbound DIDs are routed by the generated dialplan, and `emergency_trunk`
-settles where 911 *will* go. Outbound routing by trunk is unbuilt (M2.3), and
-`doorman check` says so rather than implying otherwise.
+With one, the generated dialplan routes inbound DIDs by `[line] trunk` and
+outbound by the same, and `emergency_trunk` settles which trunk carries 911.
+The daemon still never reads the inventory — it hands `[line] trunk` to the
+dialplan as a string, so a dangling reference is reported, never fatal.
 
 ## Hard invariants
 
@@ -151,6 +151,23 @@ Break these and the phone fails in ways that look like working software.
    them and `TestEveryRegistrationBindsInboundToItsEndpoint` is the guard.
    Do not generate an `identify` block instead: an IP allow-list goes stale
    silently the day a provider adds a media server.
+
+11. **A call never leaves by a trunk that does not own the number it
+   presents, and emergency calls leave by the designated trunk or fail
+   loudly.** Presenting a caller ID a provider does not own gets the call
+   rejected or silently rewritten, so `[line] outbound_cid` and
+   `[line] trunk` travel together as one value (`render.OutboundIdentity`)
+   and `doorman check` refuses a config that contradicts itself. For 911:
+   the designated trunk is tried first and unconditionally — **never gated
+   on a liveness check**, because a provider that does not answer OPTIONS
+   looks unreachable while working perfectly, and diverting an emergency
+   call off the one trunk whose street address is filed is the worst
+   available failure. An unregistered trunk answers CHANUNAVAIL in
+   milliseconds, which is the same conclusion reached honestly. The
+   fallback ladder then tries every other trunk before failing audibly.
+   `_911` lives in `[internal]`, outside the context the `*4` console
+   releases into, so the console cannot reach it topologically rather than
+   by convention.
 
 10. **The call log is never an input.** Nothing on the call path may read
    `calls.jsonl` to decide anything. The moment something does — "this

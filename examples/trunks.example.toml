@@ -40,6 +40,22 @@
 # got. What it is NOT is "the only one declared" or "the first one": a default
 # derived from file order moves silently the day a second block is added above
 # it, and that is unacceptable for this particular route.
+#
+# One of the two MUST have an answer. With neither, `doorman check` exits
+# non-zero and `doorman render` refuses to generate: a dialplan that routes
+# every DID beautifully and says nothing about 911 is the one that gets
+# installed with confidence.
+#
+# `doorman render` turns this into [cmm-emergency] — this trunk first, then
+# every other in turn, so an emergency call still connects when the designated
+# one is down. The dispatcher may then see the wrong address, which is the
+# deliberate trade: a connected call lets a human say their address out loud, a
+# failed call gives them nothing. Nothing in that context ever presents a
+# line's outbound_cid, and *4 refuses emergency numbers outright.
+#
+# This is a supplementary phone. It stops working in a power cut and on a bad
+# internet day, and it should never be a household's only route to emergency
+# services.
 emergency_trunk = "voipms"
 
 # ── VoIP.ms ──────────────────────────────────────────────────
@@ -91,6 +107,8 @@ e911     = true                        # is a street address registered against
 # nobody has to discover which one arrives. A line with a trunk and no number
 # gets no route, and its calls fall through to the default line.
 #
-# What is NOT here yet: outbound routing by trunk. A call still leaves by
-# whatever the dialplan's Dial() line says. `trunk` settles where inbound
-# arrives and where 911 will go.
+# Outbound, `trunk` is the path out of the building: a call placed as that line
+# leaves by that provider, because a provider will not present a number its
+# account does not own. `doorman render` writes it onto the endpoint beside the
+# caller ID, and the *4 console sets both together — `doorman check` refuses an
+# outbound_cid this config declares at a different provider.

@@ -92,9 +92,9 @@ func TestGeneratedFilesCarryTheDoNotEditHeader(t *testing.T) {
 // Outbound identity reaches the phone plant through the generated PJSIP
 // config, because the plain dialplan path never touches doorman.
 func TestRenderWritesOutboundCallerIDPerHandset(t *testing.T) {
-	f, err := Build(fixture(), env(secrets), map[string]string{
-		"kitchen":   "+15125550142",
-		"kids-room": "+15125550100",
+	f, err := Build(fixture(), env(secrets), map[string]OutboundIdentity{
+		"kitchen":   {CID: "+15125550142"},
+		"kids-room": {CID: "+15125550100"},
 	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -107,13 +107,71 @@ func TestRenderWritesOutboundCallerIDPerHandset(t *testing.T) {
 			t.Errorf("pjsip missing %q", want)
 		}
 	}
+	// The Phase 1 world, and the compatibility gate for outbound routing: a
+	// caller ID with no trunk beside it is every install that has one provider,
+	// and its endpoints must be exactly what they were before trunks existed.
+	if strings.Contains(f.PJSIP, "OUTBOUND_TRUNK") {
+		t.Error("a trunk was written for lines that name none")
+	}
+}
+
+// M2.3. The plain dial path never reaches doorman, so the only way a handset
+// can leave by its line's provider is for the endpoint to carry it — and it
+// has to carry the trunk beside the caller ID, because a provider will not
+// present a number its account does not own.
+func TestRenderWritesOutboundTrunkBesideTheCallerID(t *testing.T) {
+	f, err := Build(fixture(), env(secrets), map[string]OutboundIdentity{
+		"kitchen":   {CID: "+15125550142", Trunk: "telnyx"},
+		"kids-room": {CID: "+15125550100", Trunk: "voipms"},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	kitchen, ok := section(f.PJSIP, "[kitchen]")
+	if !ok {
+		t.Fatal("no kitchen endpoint")
+	}
+	for _, want := range []string{
+		"set_var=OUTBOUND_CID=+15125550142",
+		"set_var=OUTBOUND_TRUNK=telnyx",
+	} {
+		if !strings.Contains(kitchen, want) {
+			t.Errorf("[kitchen] missing %q:\n%s", want, kitchen)
+		}
+	}
+	kids, _ := section(f.PJSIP, "[kids-room]")
+	if strings.Contains(kids, "OUTBOUND_TRUNK=telnyx") {
+		t.Error("one handset's trunk leaked onto another")
+	}
+	if !strings.Contains(kids, "set_var=OUTBOUND_TRUNK=voipms") {
+		t.Errorf("[kids-room] did not get its own trunk:\n%s", kids)
+	}
+}
+
+// A line with a trunk and no outbound_cid is a real state: it leaves by its
+// provider and presents whatever that provider sends. The trunk must reach the
+// endpoint anyway, and an empty OUTBOUND_CID must not.
+func TestRenderWritesATrunkWithNoCallerID(t *testing.T) {
+	f, err := Build(fixture(), env(secrets), map[string]OutboundIdentity{
+		"kitchen": {Trunk: "telnyx"},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	kitchen, _ := section(f.PJSIP, "[kitchen]")
+	if !strings.Contains(kitchen, "set_var=OUTBOUND_TRUNK=telnyx") {
+		t.Errorf("[kitchen] lost its trunk:\n%s", kitchen)
+	}
+	if strings.Contains(kitchen, "OUTBOUND_CID") {
+		t.Errorf("an empty caller id was written as a set_var:\n%s", kitchen)
+	}
 }
 
 // The compatibility gate: with no outbound identity configured anywhere, the
 // generated endpoint is what it always was. A set_var nobody asked for would
 // be a channel variable the dialplan reads, and an empty one at that.
 func TestRenderWithoutOutboundIdentityIsUnchanged(t *testing.T) {
-	with, err := Build(fixture(), env(secrets), map[string]string{})
+	with, err := Build(fixture(), env(secrets), map[string]OutboundIdentity{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -124,8 +182,8 @@ func TestRenderWithoutOutboundIdentityIsUnchanged(t *testing.T) {
 	if with.PJSIP != without.PJSIP {
 		t.Error("an empty outbound map changed the generated PJSIP")
 	}
-	if strings.Contains(without.PJSIP, "OUTBOUND_CID") {
-		t.Error("OUTBOUND_CID appears with nothing configured")
+	if strings.Contains(without.PJSIP, "OUTBOUND_") {
+		t.Error("an outbound channel variable appears with nothing configured")
 	}
 }
 
@@ -133,7 +191,9 @@ func TestRenderWithoutOutboundIdentityIsUnchanged(t *testing.T) {
 // this is what makes "the primary line has no outbound_cid" mean "the trunk
 // decides" rather than "an empty caller ID".
 func TestRenderLeavesUnclaimedHandsetsAlone(t *testing.T) {
-	f, err := Build(fixture(), env(secrets), map[string]string{"kitchen": "+15125550142"})
+	f, err := Build(fixture(), env(secrets), map[string]OutboundIdentity{
+		"kitchen": {CID: "+15125550142"},
+	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

@@ -93,10 +93,60 @@ DID against a street address, so the trunk carrying it must be the one whose
 address is filed — which is why a trunk can declare `e911` and `doorman check`
 reports "unknown" rather than guessing when it does not.
 
-Outbound routing by trunk is not built yet, so today `_911` still leaves by the
-dialplan line that names one trunk. The configuration surface is settled ahead
-of it deliberately: retrofitting the key that decides where emergency calls go
-is worse than adding it before anything reads it.
+**When the designated trunk cannot carry the call, 911 falls over to the next
+trunk, and the next.** The dispatcher may then see the wrong address, which is
+genuinely bad — but a connected call lets a human say their address out loud
+and a failed call gives them nothing. Connection first. The fallback order puts
+trunks declaring `e911 = true` ahead of ones declaring nothing, and a trunk
+declaring `e911 = false` last. If nothing can carry it the caller hears
+congestion, never silence: the tone is what tells somebody to reach for a
+mobile.
+
+**Nothing asks whether a trunk is registered; it tries it.** A `DEVICE_STATE`
+check before the `Dial` was the obvious design and it is wrong: a provider that
+does not answer `OPTIONS` looks unreachable while working perfectly, and
+diverting an emergency call off the one trunk whose address is on file — on a
+false negative, at the worst possible moment — is the exact failure this design
+exists to prevent. An unregistered trunk fails the `Dial` in milliseconds,
+which is the same answer arrived at honestly.
+
+The ladder is generated into `[cmm-emergency]` and the hand-written `_911`
+reaches it with `DIALPLAN_EXISTS`. That is what makes `#include`ing the
+generated file the whole switch: with no `trunks.toml` the context does not
+exist, `_911` dials `DEFAULT_TRUNK`, and a single-provider box behaves exactly
+as it did before any of this — with no second edit for anybody to forget.
+
+## Outbound leaves by the line's trunk
+
+A provider will not present a caller ID its account does not own: it rejects
+the call or silently rewrites it as anti-spoofing, and neither is visible from
+this end. So a line's `outbound_cid` and its `trunk` are **one decision**, and
+they travel together everywhere — one `render.OutboundIdentity`, two `set_var`
+lines on the endpoint, two channel variables set in the same loop by the `*4`
+console.
+
+**Both outbound paths share one dialplan context.** `[internal]` and
+`[outbound-console]` each `include => cmm-outbound`, which is four lines that
+read `OUTBOUND_TRUNK` (falling back to `DEFAULT_TRUNK`) and `OUTBOUND_CID`
+(falling back to whatever the trunk sends). The alternative — a copied `Dial`
+line in each — is two implementations of the most consequential string in the
+file, and the failure mode of them drifting is a call that connects and bills
+correctly while showing the wrong number.
+
+`_911` is deliberately *not* in that shared context. It sits in `[internal]`,
+which the console never enters, so the console cannot reach an emergency route
+even if doorman's own refusal were bypassed.
+
+**What `outbound_cid` validation can and cannot catch.** Nothing here can ask
+VoIP.ms or Telnyx which DIDs an account owns, and no config shape would make
+that possible. What this box does know is which numbers it answers and which
+provider each arrives on, because `[line] number` and `[line] trunk` say so.
+That is enough for the one provable mistake: a line presenting a number that
+this same config declares at a different provider. `doorman check` and `doorman
+render` refuse it. A caller ID matching no declared number is reported and
+allowed — a DID you own and do not answer here is an ordinary config and
+indistinguishable from a typo, so refusing it would make the check wrong more
+often than the file.
 
 ## Event routing
 

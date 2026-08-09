@@ -258,9 +258,13 @@ named `[[schedules]]` referenced as `afterhours = "school-night"`.
 There is an optional fourth, **`trunks.toml`**, and not having it is the
 normal state: one provider fits comfortably in the hand-written
 `asterisk/pjsip.conf` this repo ships. Declare providers there when you have
-more than one, and `doorman render` generates their registrations and one
-inbound dialplan context each as well. See the runbook's "Add a second
-provider".
+more than one, and `doorman render` generates their registrations, one inbound
+dialplan context each, and the route emergency calls take. A line then names
+its provider with `[line] trunk`, calls placed as that line leave by it, and
+911 leaves by a designated trunk with a fallback to the others. See the
+runbook's "Add a second provider", and read "Which trunk carries 911" before
+you do — **this is a supplementary phone and should never be a household's
+only route to emergency services.**
 
 Editing those files gets IDE support: `doorman lsp` is a language server
 whose diagnostics come from the same validator that guards the daemon —

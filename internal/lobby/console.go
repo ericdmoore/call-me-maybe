@@ -34,16 +34,17 @@ import (
 // the deferred cleanup in Run.
 //
 // What the console does NOT do is dial the trunk itself. It sets the caller ID
-// on the handset's own channel and releases it into the dialplan, exactly as
-// sendToVoicemail releases a caller into [voicemail-drop]. Three things follow
-// from that and each is worth more than the bridge it replaces:
+// and the trunk on the handset's own channel and releases it into the dialplan,
+// exactly as sendToVoicemail releases a caller into [voicemail-drop]. Three
+// things follow from that and each is worth more than the bridge it replaces:
 //
-//  1. The trunk dial string stays in extensions.conf, where it already is and
-//     where Phase 2 will make it vary per provider. doorman never learns how to
-//     address a trunk.
+//  1. The trunk dial string stays in extensions.conf. doorman names a trunk —
+//     an id out of trunks.toml — but never learns how to address one, so
+//     nothing here knows what a PJSIP dial string looks like.
 //  2. The console path and the plain _NXXNXXXXXX path dial through the *same*
-//     dialplan lines, differing only in which caller ID the channel carries. The
-//     enhanced path is not a parallel implementation that can drift.
+//     dialplan lines — literally the same [cmm-outbound] context — differing
+//     only in which two channel variables the channel carries. The enhanced
+//     path is not a parallel implementation that can drift.
 //  3. Once released, doorman is out of the call. A restart mid-conversation
 //     cannot touch it.
 
@@ -54,6 +55,15 @@ const (
 	// explicitly, or unset — which is the trunk default and is what every
 	// outbound call did before any of this existed.
 	outboundCIDVar = "OUTBOUND_CID"
+	// outboundTrunkVar is the channel variable that decides which provider the
+	// call leaves by. It arrives the same three ways, and unset means the
+	// dialplan's DEFAULT_TRUNK — one provider, and nothing to choose.
+	//
+	// It is set with the caller ID and never apart from it. A provider will not
+	// carry a number its account does not own, so presenting one line's caller
+	// ID down another line's trunk is a call that is rejected or silently
+	// rewritten, and neither is visible from this end.
+	outboundTrunkVar = "OUTBOUND_TRUNK"
 	// outboundContext is where the console releases the handset. It is
 	// deliberately not [internal]: see emergencyNumbers.
 	outboundContext = "outbound-console"
@@ -136,6 +146,12 @@ type ConsoleLine struct {
 	// the one fact the operator is choosing between — and the only one that
 	// can be spoken without recording anything.
 	CallerID string
+	// Trunk is the provider a call placed as this line leaves by — a
+	// trunks.toml id — or empty for the dialplan's default trunk, which is
+	// every install with one provider. Never spoken: the person at the keypad
+	// is choosing an identity, and which company carries it is the part that
+	// has to follow from that choice rather than be made separately.
+	Trunk string
 }
 
 // ConsoleDeps wires a Console to the world.
@@ -319,7 +335,7 @@ func (c *Console) chooseLine(lines []ConsoleLine) (ConsoleLine, bool) {
 			if n := int(digit[0] - '0'); n >= 1 && n <= len(lines) {
 				chosen := lines[n-1]
 				c.log.Info("line chosen", "line", chosen.Name, "label", chosen.Label,
-					"presents", maskCID(chosen.CallerID))
+					"presents", maskCID(chosen.CallerID), "trunk", orTrunkDefault(chosen.Trunk))
 				c.rec.Line = chosen.Name
 				return chosen, true
 			}
@@ -422,21 +438,32 @@ func (c *Console) place(line ConsoleLine, dialledDigits string) {
 		return
 	}
 
-	// Set unconditionally, including to empty. A handset that carries its own
-	// default from the generated PJSIP config has OUTBOUND_CID set already;
-	// leaving that in place when the operator has explicitly chosen a line
-	// with no caller ID of its own would present the wrong number on a call
-	// they went out of their way to place as something else.
-	if err := c.deps.ARI.SetChannelVar(c.ctx, c.ChannelID, outboundCIDVar, line.CallerID); err != nil {
-		c.log.Error("could not set the outbound caller id, refusing to place the call",
-			"line", line.Name, "err", err)
-		c.gaveUp("cid-failed")
-		c.say(false, sayInvalid, sayGoodbye)
-		return
+	// Both set unconditionally, including to empty, and both from the same
+	// line. A handset that carries its own default from the generated PJSIP
+	// config already has these set; leaving either in place when the operator
+	// has explicitly chosen another line would place the call as a pairing
+	// nobody configured — the business caller ID down the home trunk, or the
+	// reverse. Empty is a real answer for both: it means "whatever the dialplan
+	// defaults to", which is exactly what an unclaimed handset does.
+	//
+	// Either failing refuses the call rather than placing it half-configured.
+	// A caller ID the carrying trunk does not own is rejected or silently
+	// rewritten by the provider, and neither is visible from this end.
+	for _, v := range []struct{ name, value, reason string }{
+		{outboundTrunkVar, line.Trunk, "trunk-failed"},
+		{outboundCIDVar, line.CallerID, "cid-failed"},
+	} {
+		if err := c.deps.ARI.SetChannelVar(c.ctx, c.ChannelID, v.name, v.value); err != nil {
+			c.log.Error("could not set the outbound channel variables, refusing to place the call",
+				"line", line.Name, "variable", v.name, "err", err)
+			c.gaveUp(v.reason)
+			c.say(false, sayInvalid, sayGoodbye)
+			return
+		}
 	}
 
 	c.log.Info("placing an outbound call", "line", line.Name,
-		"presents", maskCID(line.CallerID),
+		"presents", maskCID(line.CallerID), "trunk", orTrunkDefault(line.Trunk),
 		"number", redactDialled(dialledDigits, c.deps.Cfg.DefaultCountryCode))
 
 	// From here the channel belongs to the dialplan. Invariant 8, and the same
@@ -599,4 +626,15 @@ func maskCID(cid string) string {
 		return "(the trunk default)"
 	}
 	return policy.Redact(cid)
+}
+
+// orTrunkDefault names the provider a call leaves by. A trunk id is inventory
+// rather than a caller identifier, so it is logged in full — but empty is
+// named rather than blank, because "" in a log would read as "no trunk at all"
+// when it means the dialplan's DEFAULT_TRUNK, which is every one-provider box.
+func orTrunkDefault(trunk string) string {
+	if trunk == "" {
+		return "(the dialplan default)"
+	}
+	return trunk
 }

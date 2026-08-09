@@ -197,14 +197,16 @@
           "description": "What a call placed as this line presents to the person being called. Any format; normalised to E.164 at load. Absent means whatever the trunk sends, which is what every outbound call did before this key existed. It reaches a call two ways: `doorman render` writes it into the generated PJSIP config for the handsets this line claims, and the *4 console sets it per call for a line chosen at the keypad.",
           "type": "string",
           "x-cross-references": [
-            "asterisk/extensions.conf [internal] OUTBOUND_CID",
+            "asterisk/extensions.conf [cmm-outbound] OUTBOUND_CID",
+            "policy.toml [line] trunk",
             "the DID this line answers, at your provider"
           ],
           "x-rules": [
             "An unparseable number fails the load rather than being kept as written.",
             "policy.toml's value is the house default: any handset no line claims presents it.",
             "Changing it takes effect on the *4 console at the next reload, and on the plain dialplan path at the next `doorman render`.",
-            "911 never presents it. Emergency calls leave with the trunk's own caller ID, because E911 is registered per DID against a street address."
+            "911 never presents it. Emergency calls leave with the trunk's own caller ID, because E911 is registered per DID against a street address.",
+            "With a trunks.toml it is checked against [line] trunk: a number this config declares as another line's number on a DIFFERENT trunk is refused by `doorman check` and `doorman render`, because a provider will not carry a caller ID its account does not own. A number no [line] number declares cannot be checked — nothing can ask a provider what an account owns — and is reported rather than refused."
           ]
         },
         "outbound_handsets": {
@@ -235,15 +237,18 @@
           ]
         },
         "trunk": {
-          "description": "The provider this line's number lives at — an id from trunks.toml. Optional, and absent is the whole of a single-provider install: one registration, one hand-written or generated trunk, and the dialplan decides. Inbound it is what puts this line's DID route in the right provider's context when `doorman render` generates them. Outbound it is what will choose the path out of the building once routing by trunk lands.",
+          "description": "The provider this line's number lives at — an id from trunks.toml. Optional, and absent is the whole of a single-provider install: one registration, one hand-written or generated trunk, and the dialplan's DEFAULT_TRUNK decides. Inbound it is what puts this line's DID route in the right provider's context when `doorman render` generates them. Outbound it is the path out of the building: a call placed as this line leaves by this trunk, on both the plain dial path and the *4 console.",
           "type": "string",
           "x-cross-references": [
-            "trunks.toml [[trunks]].id"
+            "trunks.toml [[trunks]].id",
+            "asterisk/extensions.conf [cmm-outbound] OUTBOUND_TRUNK"
           ],
           "x-rules": [
-            "Validated as a cross-file reference by `doorman check` and `doorman render`, exactly as a handset id is. The daemon does not validate it, because nothing on the call path routes on a trunk yet and refusing to load a policy over a reference nothing reads would be the wrong trade.",
-            "plain policy.toml's trunk is the one 911 inherits when trunks.toml sets no emergency_trunk.",
-            "A route is generated only for a line that has BOTH trunk and number. A line with a trunk and no number gets a context but no DID route, and calls for it fall through to the default line."
+            "Validated as a cross-file reference by `doorman check` and `doorman render`, exactly as a handset id is. The daemon does not validate it against the inventory, because refusing to load a policy over a reference the call path reads only as a string would be the wrong trade — it warns instead.",
+            "plain policy.toml's trunk is the one 911 inherits when trunks.toml sets no emergency_trunk. One of the two must have an answer or `doorman render` refuses to generate.",
+            "A route is generated only for a line that has BOTH trunk and number. A line with a trunk and no number gets a context but no DID route, and calls for it fall through to the default line.",
+            "It travels with outbound_cid as one decision: a provider will not present a number its account does not own, so `doorman check` and `doorman render` refuse a caller ID this config declares at a different provider.",
+            "Reaches the plain dial path as set_var=OUTBOUND_TRUNK on the endpoint at the next `doorman render`; the *4 console picks it up at the next policy reload."
           ]
         }
       },

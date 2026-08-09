@@ -64,6 +64,13 @@
 # Changing outbound_cid reaches *4 on the next reload and the plain dial path
 # on the next `doorman render` — it is baked into the generated PJSIP config,
 # because a handset that just picks up and dials never reaches doorman at all.
+#
+# With a trunks.toml, outbound_cid travels with [line] trunk as one decision:
+# the call leaves by that provider, because a provider will not present a
+# number its account does not own — it rejects the call or silently rewrites
+# the caller ID, and neither is visible from this end. `doorman check` refuses
+# an outbound_cid this config declares at a different provider. Without a
+# trunks.toml there is one trunk, nothing to choose, and nothing changes.
 
 # What rings when a known caller is welcomed.
 [house]

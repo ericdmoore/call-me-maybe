@@ -314,11 +314,14 @@ type Options struct {
 	// The split matters. `doorman check` and `doorman render` always pass one —
 	// even an absent one, so a line naming a trunk with no trunks.toml gets
 	// told exactly that — because both have a person standing in front of them.
-	// The daemon passes nil, deliberately: nothing on the call path routes on a
-	// trunk yet, and refusing to load a policy over a reference nothing reads
-	// is precisely the trade invariant 4 forbids. When outbound routing starts
-	// consulting it, that decision gets revisited on purpose rather than by
-	// default.
+	// The daemon passes nil, deliberately, and outbound routing by trunk was
+	// where that decision got revisited on purpose: the call path reads `[line]
+	// trunk` as a *string* and hands it to the dialplan, so nothing it does
+	// needs the inventory. Refusing to load a policy — and so refusing to
+	// answer that number at all — because a trunk id is unknown would be the
+	// trade invariant 4 forbids, and would take the phone down over a file the
+	// phone does not read. The daemon warns instead, at startup, where an
+	// operator sees it.
 	Trunks *Trunks
 }
 
