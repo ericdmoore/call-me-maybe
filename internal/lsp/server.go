@@ -146,7 +146,7 @@ func (s *Server) setDoc(uri, text string) {
 // pair resolves the policy/handsets texts for analysis: open buffers first,
 // then siblings on disk — so edits in one file immediately re-validate the
 // other, and a lone open file still sees its counterpart.
-func (s *Server) pair(uri string) (policyURI, policyText string, handsetsText *string, handsetsURI string) {
+func (s *Server) pair(uri string) docSet {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -166,25 +166,42 @@ func (s *Server) pair(uri string) (policyURI, policyText string, handsetsText *s
 		return "", "", false
 	}
 
+	var d docSet
 	pURI, pText, pOK := find(KindPolicy, "policy.toml")
 	hURI, hText, hOK := find(KindHandsets, "handsets.toml")
+	tURI, tText, tOK := find(KindTrunks, "trunks.toml")
 
-	if !pOK {
-		// Handsets open alone with no policy anywhere: lint what we can by
-		// pairing with an empty-but-valid-enough policy is worse than
-		// pairing with nothing; use an empty policy and let attribution put
-		// inventory problems in the handsets doc.
-		pURI, pText = "", ""
+	if pOK {
+		// Handsets open alone with no policy anywhere: pairing with an
+		// empty-but-valid-enough policy is worse than pairing with nothing, so
+		// use an empty policy and let attribution put inventory problems in
+		// the handsets doc.
+		d.policyURI, d.policyText = pURI, pText
 	}
 	if hOK {
-		return pURI, pText, &hText, hURI
+		d.handsetsURI, d.handsets = hURI, &hText
 	}
-	return pURI, pText, nil, ""
+	if tOK {
+		d.trunksURI, d.trunks = tURI, &tText
+	}
+	return d
+}
+
+// docSet is the config files in play for one analysis: the policy/handsets
+// pair the cross-file rules need, plus the provider inventory, which is linted
+// on its own and referenced from the policy.
+type docSet struct {
+	policyURI   string
+	policyText  string
+	handsetsURI string
+	handsets    *string
+	trunksURI   string
+	trunks      *string
 }
 
 func (s *Server) publishAll() {
 	// Analyse once, publish per document. Which URIs get published: any of
-	// the pair that is actually open.
+	// the files that is actually open.
 	s.mu.Lock()
 	uris := make([]string, 0, len(s.docs))
 	for u := range s.docs {
@@ -195,17 +212,21 @@ func (s *Server) publishAll() {
 		return
 	}
 
-	pURI, pText, hText, hURI := s.pair(uris[0])
-	pDiags, hDiags := Analyse(pText, hText)
+	d := s.pair(uris[0])
+	pDiags, hDiags := AnalyseWithTrunks(d.policyText, d.handsets, d.trunks)
 
 	published := map[string]bool{}
-	if pURI != "" {
-		s.notify("textDocument/publishDiagnostics", map[string]any{"uri": pURI, "diagnostics": nonNil(pDiags)})
-		published[pURI] = true
+	publish := func(uri string, diags []Diagnostic) {
+		if uri == "" {
+			return
+		}
+		s.notify("textDocument/publishDiagnostics", map[string]any{"uri": uri, "diagnostics": nonNil(diags)})
+		published[uri] = true
 	}
-	if hURI != "" {
-		s.notify("textDocument/publishDiagnostics", map[string]any{"uri": hURI, "diagnostics": nonNil(hDiags)})
-		published[hURI] = true
+	publish(d.policyURI, pDiags)
+	publish(d.handsetsURI, hDiags)
+	if d.trunks != nil {
+		publish(d.trunksURI, AnalyseTrunks(*d.trunks))
 	}
 	// Clear any other open doc we did not analyse into.
 	for _, u := range uris {
@@ -230,8 +251,8 @@ func (s *Server) complete(uri string, pos Position) []CompletionItem {
 		return []CompletionItem{}
 	}
 
-	_, pText, hText, _ := s.pair(uri)
-	model := BuildModel(pText, hText)
+	d := s.pair(uri)
+	model := BuildModelWith(d.policyText, d.handsets, d.trunks)
 
 	lines := strings.Split(text, "\n")
 	if pos.Line < 0 || pos.Line >= len(lines) {

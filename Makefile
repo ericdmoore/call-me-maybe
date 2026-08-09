@@ -68,10 +68,10 @@ site-assets: build
 	@mkdir -p site/public/schema
 	@cp llms.txt site/public/llms.txt
 	@cp llms-policy.txt site/public/llms-policy.txt
-	@for n in policy handsets env; do \
+	@for n in policy handsets trunks env; do \
 		./bin/doorman schema $$n > site/public/schema/$$n.json; \
 	done
-	@echo "✓ site/public: llms.txt, llms-policy.txt, schema/{policy,handsets,env}.json"
+	@echo "✓ site/public: llms.txt, llms-policy.txt, schema/{policy,handsets,trunks,env}.json"
 
 ## check: everything that must be green before a commit
 check: fmt-check vet lint test build

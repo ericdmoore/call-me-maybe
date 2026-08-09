@@ -169,6 +169,16 @@ outbound_cid = "+15125550100"
 handsets = ["kitchen"]
 `
 
+// renderPlan is what `doorman render` does with the lines it reads, minus the
+// trunk inventory these cases have no opinion about.
+func renderPlan(policyPath, handsetsPath string) (outboundPlan, error) {
+	ids, err := renderLines(policyPath, handsetsPath, nil)
+	if err != nil {
+		return outboundPlan{}, err
+	}
+	return newOutboundPlan(ids), nil
+}
+
 func TestRenderOutboundReadsEveryLine(t *testing.T) {
 	dir := t.TempDir()
 	handsets := writeFile(t, dir, "handsets.toml", renderHandsets)
@@ -182,9 +192,9 @@ outbound_handsets = ["office"]
 handsets = ["office"]
 `)
 
-	plan, err := renderOutbound(policyPath, handsets)
+	plan, err := renderPlan(policyPath, handsets)
 	if err != nil {
-		t.Fatalf("renderOutbound: %v", err)
+		t.Fatalf("renderLines: %v", err)
 	}
 	got := plan.callerIDs([]string{"kitchen", "office"})
 	if got["kitchen"] != "+15125550100" || got["office"] != "+15125550142" {
@@ -198,9 +208,9 @@ func TestRenderOutboundToleratesAMissingPolicy(t *testing.T) {
 	dir := t.TempDir()
 	handsets := writeFile(t, dir, "handsets.toml", renderHandsets)
 
-	plan, err := renderOutbound(filepath.Join(dir, "policy.toml"), handsets)
+	plan, err := renderPlan(filepath.Join(dir, "policy.toml"), handsets)
 	if err != nil {
-		t.Fatalf("renderOutbound: %v", err)
+		t.Fatalf("renderLines: %v", err)
 	}
 	if plan.anyCID() {
 		t.Error("a missing policy file should mean no outbound identity")
@@ -215,7 +225,7 @@ func TestRenderOutboundRefusesAnInvalidPolicy(t *testing.T) {
 	handsets := writeFile(t, dir, "handsets.toml", renderHandsets)
 	policyPath := writeFile(t, dir, "policy.toml", "[line\nlabel = \"broken\"\n")
 
-	if _, err := renderOutbound(policyPath, handsets); err == nil {
+	if _, err := renderPlan(policyPath, handsets); err == nil {
 		t.Fatal("render must refuse a policy file it cannot read")
 	}
 }
@@ -233,9 +243,9 @@ label = "Kitchen"
 handsets = ["kitchen"]
 `)
 
-	plan, err := renderOutbound(policyPath, handsets)
+	plan, err := renderPlan(policyPath, handsets)
 	if err != nil {
-		t.Fatalf("renderOutbound: %v", err)
+		t.Fatalf("renderLines: %v", err)
 	}
 	if plan.Primary.CID != "+15125550100" {
 		t.Errorf("primary presents %q", plan.Primary.CID)

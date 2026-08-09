@@ -307,6 +307,19 @@ type Options struct {
 	// whether or not StrictUnknownKeys is on. This is how the daemon logs
 	// them. Never pass a key's *value* to it — the callback receives names.
 	OnUnknownKey func(UnknownKey)
+
+	// Trunks is the inventory `[line] trunk` is checked against, or nil to
+	// leave the reference unchecked.
+	//
+	// The split matters. `doorman check` and `doorman render` always pass one —
+	// even an absent one, so a line naming a trunk with no trunks.toml gets
+	// told exactly that — because both have a person standing in front of them.
+	// The daemon passes nil, deliberately: nothing on the call path routes on a
+	// trunk yet, and refusing to load a policy over a reference nothing reads
+	// is precisely the trade invariant 4 forbids. When outbound routing starts
+	// consulting it, that decision gets revisited on purpose rather than by
+	// default.
+	Trunks *Trunks
 }
 
 // decode is the single TOML entry point for both config files: it fills a
@@ -320,7 +333,20 @@ func decode(data []byte, file string) (File, []UnknownKey, error) {
 	if err != nil {
 		return File{}, nil, fmt.Errorf("%s: %w", file, err)
 	}
-	return f, unknownKeys(md, file), nil
+	return f, unknownKeys(md, file, fileShape()), nil
+}
+
+// decodeTrunks is decode's sibling for the third file. Separate because
+// trunks.toml has its own root struct: the three files own their sections
+// exclusively, and one struct covering all of them would make a section in the
+// wrong file indistinguishable from one in the right file.
+func decodeTrunks(data []byte) (TrunkFile, []UnknownKey, error) {
+	var f TrunkFile
+	md, err := toml.Decode(string(data), &f)
+	if err != nil {
+		return TrunkFile{}, nil, fmt.Errorf("trunks: %w", err)
+	}
+	return f, unknownKeys(md, "trunks", trunkFileShape()), nil
 }
 
 func FromTOML(data []byte) (*Policy, error) {
@@ -613,7 +639,7 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 
 	// After the house, because on_no_input = "voicemail" is only meaningful
 	// with a house mailbox to land in.
-	line := compileLine(f.Line, f.House.Voicemail, expandIDs, fail)
+	line := compileLine(f.Line, f.House.Voicemail, expandIDs, o.Trunks, fail)
 
 	allow := make(map[string]KnownCaller)
 	for _, p := range f.People {

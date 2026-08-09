@@ -6,16 +6,17 @@ a JSON Schema cannot express. Machine-readable schema:
 
     https://callmemaybe.cc/schema/policy.json
     https://callmemaybe.cc/schema/handsets.json
+    https://callmemaybe.cc/schema/trunks.json
     https://callmemaybe.cc/schema/env.json
 
 **Everything below describes what the binary accepts today.** The project's
-planning docs discuss features that do not exist yet — several trunks,
-per-person ring overrides, house-wide quiet hours.
+planning docs discuss features that do not exist yet — outbound routing by
+trunk, per-person ring overrides, house-wide quiet hours.
 
 **Do not emit configuration for any of them.** `doorman check` now rejects a
 key it does not recognise, and suggests the nearest real one:
 
-    policy: unknown key "trunk" in [line]
+    policy: unknown key "trunkk" in [line] — did you mean trunk?
     policy: unknown key "afterhous" in [[extensions]] — did you mean afterhours?
 
 So an invented key is a loud failure rather than a silent one. There is a list
@@ -33,18 +34,25 @@ Authoritative check, always: `doorman check` validates a real config and prints
 what it resolves to. `doorman schema policy` prints the schema from the binary
 in hand, which beats this file if they ever disagree.
 
-## Three files, each owning its sections exclusively
+## Four files, each owning its sections exclusively
 
 The loader **rejects** a section that appears in the wrong file rather than
-merging it. This is the most common mistake.
+merging it, and names the file it belongs in. This is the most common mistake.
 
     policy.toml     [line], [house], [[people]], [[extensions]], [[schedules]]
     handsets.toml   [[handsets]], [[groups]]        — hardware inventory
+    trunks.toml     emergency_trunk, [[trunks]]     — providers; OPTIONAL
     .env            secrets and tuning              — timeouts, lengths, keys
 
 Handset *ids* are defined in handsets.toml and referenced by name from
 policy.toml. A reference to a handset that does not exist fails validation at
-load time.
+load time. Trunk ids work the same way, referenced from policy.toml as
+`[line] trunk`.
+
+**trunks.toml is optional and most installs do not have one.** If the person
+has one provider, do not write one: their hand-written asterisk/pjsip.conf is
+the right answer and `doorman render` generates only the handset config
+without it. See "The provider inventory" below before writing one.
 
 ## One policy file per phone number
 
@@ -67,6 +75,7 @@ If someone has one number, write one `policy.toml` and do not mention lines.
     number      = "+15125550142"           # the DID; any format, stored E.164
     prompts     = "concierge"              # prompt pack, overrides PROMPT_MEDIA_PREFIX
     on_no_input = "voicemail"              # dismiss | ring-house | voicemail
+    trunk       = "voipms"                 # id from trunks.toml; ONLY with one
     outbound_cid      = "+15125550142"     # what a call placed as this line shows
     outbound_handsets = ["office"]         # phones that call as it without asking
 
@@ -134,6 +143,13 @@ If someone has one number, write one `policy.toml` and do not mention lines.
 13. `outbound_cid` never appears on a 911 call. E911 is registered per DID
     against a street address, so emergency calls leave with the trunk's own
     caller ID and the `*4` console refuses to dial them at all.
+14. `[line] trunk` must name an id declared in trunks.toml — a cross-file
+    reference exactly like a handset id. **Only write it if the person has a
+    trunks.toml.** Without one the key is a no-op that `doorman check` refuses,
+    because there is nothing for it to point at.
+15. A generated DID route needs `trunk` AND `number` on the same line. Either
+    alone produces a line with no route, whose calls fall through to the
+    default line.
 
 ## `on_no_input` — the difference between a doorman and a concierge
 
@@ -278,9 +294,68 @@ the kitchen phone shows. Two things to say out loud when writing this:
 - Emergency calls are not affected and must not be made to be. 911 leaves with
   the trunk's own caller ID whatever any line says.
 
+## The provider inventory — trunks.toml
+
+**Optional, and most boxes do not have one.** One provider fits in a
+hand-written `asterisk/pjsip.conf`, and with no `trunks.toml` at all
+`doorman render` generates only the handset config and nothing changes. If the
+person you are helping has one provider, do not write this file and do not
+write `[line] trunk`.
+
+It earns its keep with several providers, because each registration binds to
+its own endpoint with its own inbound context, so the Asterisk side grows as
+providers × numbers. `doorman render` generates all of it.
+
+    emergency_trunk = "voipms"         # which trunk carries 911; optional
+
+    [[trunks]]
+    id       = "voipms"                # names the generated PJSIP endpoint,
+                                       # and what [line] trunk references
+    provider = "voip.ms"               # display only; nothing routes on it
+    host     = "chicago.voip.ms"       # the POP; hostname, not a URL
+    username = "123456_home"           # the SUB ACCOUNT, never the main login
+    password_env = "TRUNK_VOIPMS_PASSWORD"   # the NAME of a .env variable
+    context  = "from-voipms"           # optional; defaults to from-<id>
+    codecs   = ["ulaw", "g722"]        # optional; this is the default
+    from_user   = "123456_home"        # optional; defaults to username
+    from_domain = "chicago.voip.ms"    # optional; defaults to host
+    expiration  = 300                  # optional; seconds
+    e911     = true                    # is a street address registered here?
+
+**Never put a password in `password_env`.** It holds the NAME of a `.env`
+variable; `doorman render` substitutes the value. The loader refuses anything
+that is not shaped like a variable name, so a pasted password fails the load —
+but write the variable name, not the secret, and never invent a secret to fill
+a field.
+
+Rules a schema cannot express:
+
+- `line=yes` and `endpoint=<id>` are written on every generated registration.
+  That pair is what binds inbound calls to the endpoint; without both they hit
+  the `anonymous` endpoint and vanish with no error anywhere. It is generated,
+  so there is nothing to get wrong — but never suggest hand-editing
+  `pjsip_trunks.conf`, which is an output and holds real passwords.
+- A trunk id may not collide with a handset id, and may not end in `_auth`,
+  `_reg` or `_aor`.
+- Two trunks may not share a `context`.
+- `emergency_trunk` must name a declared trunk. Unset, 911 leaves by plain
+  `policy.toml`'s `[line] trunk` — the primary line. It is deliberately NOT
+  "the only trunk declared" or "the first one": a default derived from file
+  order would move silently when a block was added above it.
+- Not every provider offers E911 everywhere. A provider without it means a
+  phone that cannot call for help — say so rather than treating it as a
+  cheaper option. And say plainly that this is a supplementary phone: it stops
+  working in a power cut, and it should not be a household's only route to
+  emergency services.
+
 ## Common mistakes
 
 - Putting `[[handsets]]` in policy.toml. It belongs in handsets.toml.
+- Putting `[[trunks]]` in policy.toml, or `[line]` in trunks.toml. Each file
+  owns its sections; the loader names the right file.
+- Writing `[line] trunk` with no trunks.toml to point at.
+- `[line] trunk` without `[line] number`, then expecting the DID to route.
+- Putting a real password in `password_env`. It names a variable.
 - Putting `[line]` in handsets.toml. That file is shared by every line, so a
   line identity in it cannot be true; the loader refuses it.
 - `on_no_input` on an `[[extensions]]` entry. It is a `[line]` key — the
@@ -309,8 +384,13 @@ These appear in the project's planning documents. They are not implemented, and
   console is `*4` and it asks; there is no prefix and there is not going to be
   one. Per-line outbound caller ID itself IS available — `outbound_cid` and
   `outbound_handsets`, above.
-- `trunk` on `[line]`, or a `trunks.toml`. One provider, one registration —
-  which is also why `outbound_cid` is not validated against a trunk yet.
+- **Outbound routing by trunk.** A call leaves by whatever the dialplan's
+  `Dial()` line says, whatever `[line] trunk` names. That is also why
+  `outbound_cid` is still not validated against the trunk that will carry it:
+  presenting a number a provider does not own is rejected or silently
+  rewritten, and nothing checks for you yet. `[line] trunk` and `trunks.toml`
+  themselves DO exist — see above — and settle where inbound arrives and where
+  911 will go.
 - `ring` on `[[people]]` (per-person routing overrides).
 - `[house.afterhours]` — afterhours exists per-extension only.
 - `[[schedules]]` at line scope. A schedule is referenced from an extension.
@@ -323,6 +403,7 @@ that appears to deliver it. `docs/TASKS.md` has the current state.
 
 - `https://callmemaybe.cc/llms.txt` — what the whole system is
 - `https://callmemaybe.cc/schema/policy.json` — the machine-readable surface
+- `https://callmemaybe.cc/schema/trunks.json` — the provider inventory
 - `doorman schema policy` — the same, from the binary in hand
 - `doorman check` — the authority on whether a file is valid
 - `doorman init` — generate a starting config whose placeholders cannot

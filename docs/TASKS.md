@@ -248,9 +248,17 @@ independent of each other.**
 
 **All four have landed** — one box, several numbers, one provider. What is left
 under 7b is the schedules-at-line-scope item, which is a `[[schedules]]`
-question rather than a line one. Several *providers* is Phase 2 of
-`.plans/s01-multiple-DIDs/readme.md` and is a materially harder problem: it
-changes how a call leaves the building.
+question rather than a line one.
+
+Several *providers* is Phase 2 of `.plans/s01-multiple-DIDs/readme.md`, and
+its first half has landed too: `trunks.toml` is a provider inventory rendered
+the way `handsets.toml` is, `[line] trunk` names which provider a number
+arrives on, and `doorman render` generates the registrations and one inbound
+context per trunk. The file is optional and its absence is today's behaviour
+exactly. What is left is the materially harder part — how a call *leaves* the
+building: outbound routing by trunk, `outbound_cid` validated against the
+trunk that will carry it, and 911 actually leaving by the designated trunk
+rather than by the one hard-coded in the dialplan.
 
 ---
 

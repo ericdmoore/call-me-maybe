@@ -2,19 +2,28 @@
 
 ## Config interfaces
 
-Three files, three cadences, three failure domains:
+Three files, three cadences, three failure domains — plus an optional fourth:
 
 | File | Holds | Changes | Editable by |
 |---|---|---|---|
-| `.env` | secrets (ARI, handset SIP passwords) + tuning | almost never | you |
+| `.env` | secrets (ARI, handset and trunk SIP passwords) + tuning | almost never | you |
 | `handsets.toml` | the hardware: ids, endpoints, internal numbers, page/MWI membership | when you buy phones | you |
 | `policy.toml` | the rules: allow-list, extensions, ladders, schedules | weekly | anyone in the house |
+| `trunks.toml` | **optional** — the providers: hosts, sub-accounts, which trunk carries 911 | when you buy a number somewhere new | you |
 
 `handsets.toml` is the single source of truth for the phone plant:
 `doorman render` generates the per-handset Asterisk config from it
 (`pjsip_handsets.conf`, `extensions_handsets.conf`), so the SIP endpoint,
 the internal number, the BLF hint, and the policy reference can never drift
 apart. Never hand-edit the generated files — the header says so and means it.
+
+`trunks.toml` does the same for the provider side, and **not having it is the
+normal state.** One provider fits comfortably in a hand-written
+`asterisk/pjsip.conf` — that is what `pjsip.conf.example` is, and it keeps
+working untouched. Create the file when a second provider turns copying PJSIP
+blocks into a chore; then `doorman render` also writes `pjsip_trunks.conf` and
+`extensions_trunks.conf`. See "Add a second provider" in §6. Deleting the file
+is the whole rollback.
 
 `policy.toml` cross-references handsets by id and is validated against them
 on every reload, but a typo in a bedtime can no longer invalidate the
@@ -640,6 +649,165 @@ deleting `policy.biz.toml`. There is no migration and no stored state.
 
 That covers calls coming *in*. Calls going out still present the trunk's
 default until you set an outbound caller ID — next section.
+
+### Add a second provider
+
+A different thing from a second *number*. A second number on the same provider
+is config on both sides and no new trunk (above). A second provider is a second
+registration, which changes where inbound calls arrive and eventually how they
+leave.
+
+Why bother: **redundancy** is the real prize — one provider having a bad
+afternoon stops being your bad afternoon. Then rate shopping, porting a number
+without downtime, and coverage, since one company may do E911 in your area and
+another may have the number you want.
+
+**Nothing changes for an install that does not do this.** With no `trunks.toml`
+the hand-written `pjsip.conf` keeps working, `doorman render` generates only
+the handset files, and nothing in `doorman check` mentions trunks.
+
+1. **Declare the trunks you have — including the one you already run.**
+
+   ```bash
+   $ cd /opt/call-me-maybe
+   $ sudo -u doorman cp examples/trunks.example.toml trunks.toml
+   $ sudo -u doorman nano trunks.toml
+   ```
+
+   ```toml
+   emergency_trunk = "voipms"          # which trunk carries 911; see below
+
+   [[trunks]]
+   id       = "voipms"                 # keep the id your dialplan already
+                                       # dials — PJSIP/1${EXTEN}@voipms — and
+                                       # no dialplan edit is needed
+   provider = "voip.ms"
+   host     = "chicago.voip.ms"
+   username = "123456_home"            # the SUB ACCOUNT, never the main login
+   password_env = "TRUNK_VOIPMS_PASSWORD"
+   e911     = true
+
+   [[trunks]]
+   id       = "telnyx"
+   provider = "telnyx"
+   host     = "sip.telnyx.com"
+   username = "cmm-home"
+   password_env = "TRUNK_TELNYX_PASSWORD"
+   e911     = false
+   ```
+
+   **The passwords are not in this file and must never be.** `password_env`
+   names a `.env` variable and `doorman render` substitutes it; the loader
+   refuses a `password_env` that is not shaped like a variable name, so a
+   password pasted there fails loudly rather than reaching a commit.
+
+   ```bash
+   $ sudo -u doorman nano .env      # TRUNK_VOIPMS_PASSWORD=…
+                                    # TRUNK_TELNYX_PASSWORD=…
+   ```
+
+   Before trusting a provider, check the list in issue #5: registration or
+   credential auth (the load-bearing one), **E911 on the DID**, per-DID routing
+   to a sub-account, ulaw and g722 without forced transcoding, NAT tolerance,
+   and whether it tolerates a 300s registration expiry.
+
+2. **Point each line at its provider.** In the line's policy file:
+
+   ```toml
+   [line]
+   label  = "Mertaugh Enterprises"
+   number = "+15125550142"          # the DID — needed for a route to exist
+   trunk  = "telnyx"                # an id from trunks.toml
+   ```
+
+   Both keys or no route. A line with a `trunk` and no `number` gets a context
+   but nothing routed into it, and `doorman check` names it.
+
+3. **Render.**
+
+   ```bash
+   $ ./bin/doorman check      # lists the trunks, which lines land on each,
+                              # and which trunk would carry 911
+   $ ./bin/doorman render
+   ```
+
+   Four files now instead of two. `pjsip_trunks.conf` holds real registration
+   passwords; `extensions_trunks.conf` holds one inbound context per trunk with
+   each DID routed to its line, matched in **every digit format a provider might
+   send** — 10-digit, 11-digit and full E.164 — so there is nothing to discover
+   about which one arrives.
+
+4. **Switch Asterisk over to the generated files.** This is the only fiddly
+   step, and it is a one-time one.
+
+   ```bash
+   $ sudo cp asterisk/generated/*_trunks.conf /etc/asterisk/
+   $ sudo chown asterisk:asterisk /etc/asterisk/*_trunks.conf
+   $ sudo chmod 640 /etc/asterisk/*_trunks.conf
+   ```
+
+   In `/etc/asterisk/pjsip.conf`: **delete** the hand-written `[voipms_auth]`,
+   `[voipms_reg]`, `[voipms_aor]` and `[voipms]` blocks and uncomment
+   `#include "pjsip_trunks.conf"`. Leaving both in place registers twice.
+
+   In `/etc/asterisk/extensions.conf`: **delete** `[inbound-trunk]` and any
+   `[from-trunk-<line>]` contexts you added for a second number, and uncomment
+   `#include "extensions_trunks.conf"`. The generated contexts replace them and
+   the default line's `Stasis()` call is byte-identical to the one you are
+   removing.
+
+   Both includes ship commented out on purpose: Asterisk refuses to start on a
+   missing `#include`, so an unconditional one would break every install that
+   does not use `trunks.toml`.
+
+   ```bash
+   $ sudo asterisk -rx 'pjsip reload' && sudo asterisk -rx 'dialplan reload'
+   $ sudo asterisk -rx 'pjsip show registrations'   # want Registered on both
+   ```
+
+5. **Ring every number.** The one on the old provider should behave exactly as
+   it did before you started.
+
+**When inbound goes silent, this is why.** The generated registration carries
+`line=yes` and `endpoint=<id>`, and that pair is what binds inbound traffic on
+a registration to its endpoint. Without both, calls hit the `anonymous`
+endpoint and vanish — no error, no log line, just a number that never rings.
+Never hand-edit the generated file, and if you write a trunk by hand instead,
+copy those two lines first.
+
+```bash
+$ sudo asterisk -rx 'pjsip show registrations'
+$ sudo asterisk -rvvv                      # then ring the number: you want a
+                                           # NoOp naming the line, not silence
+```
+
+**Which trunk carries 911.** `doorman check` prints it, and says whether it was
+**chosen** (`emergency_trunk`) or **inferred** (plain `policy.toml`'s `[line]
+trunk` — the primary line, which is already the default for everything
+unqualified). So does the startup log, every boot. Neither has to be set and
+unset is never undefined, but it is deliberately *not* "the only trunk you
+declared": a default derived from file order would move silently the day a
+second block was added above it.
+
+Two things to be plain about:
+
+- **Not every provider offers E911 in every area.** A provider without it means
+  a phone that cannot call for help. That is a reason to reject the provider,
+  not a line item to skip. Declare what you know with `e911 = true|false`;
+  `doorman check` reports "unknown" rather than guessing when you have not.
+- **This is a supplementary phone.** It stops working in a power cut and on a
+  bad internet day. Nobody should make it the household's only route to
+  emergency services. That is not a disclaimer, it is the accurate description
+  of a hobbyist phone on a consumer internet connection.
+
+**What is not here yet.** Outbound routing by trunk. A call still leaves by
+whatever `Dial(PJSIP/…@voipms)` says in the dialplan, including `_911`, so
+`trunk` currently decides where inbound arrives and settles where emergency
+calls will go. Until it lands, present a caller ID only on the trunk that owns
+the number: providers reject or silently rewrite one they do not own.
+
+**Rolling back** is deleting `trunks.toml`, re-rendering, and putting the
+hand-written blocks back. There is no migration and no stored state.
 
 ### Outbound caller ID, and the `*4` console
 

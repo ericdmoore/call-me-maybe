@@ -49,6 +49,12 @@ type Line struct {
 	Number    string `toml:"number"`
 	Prompts   string `toml:"prompts"`
 	OnNoInput string `toml:"on_no_input"`
+	// Trunk names the provider this line's number lives at — an id from
+	// trunks.toml. Inbound it is what `doorman render` needs to put the DID's
+	// route in the right provider's context; outbound it will be how a call
+	// leaves, once outbound routing is selected by trunk. Empty is the whole of
+	// today: one provider, and the hand-written dialplan decides.
+	Trunk string `toml:"trunk"`
 	// OutboundCID is what a callee sees when this line places a call.
 	OutboundCID string `toml:"outbound_cid"`
 	// OutboundHandsets are the phones that call as this line without being
@@ -102,6 +108,9 @@ type LineIdentity struct {
 	Prompts string
 	// OnNoInput is never empty once compiled; unset resolves to NoInputDismiss.
 	OnNoInput NoInput
+	// Trunk is the trunks.toml id this line's number arrives on, or "" when the
+	// line names none — which is every install with one provider.
+	Trunk string
 	// OutboundCID is the caller ID a call placed as this line presents,
 	// normalised to E.164. Empty means whatever the trunk defaults to, which
 	// is what every call did before this key existed.
@@ -125,8 +134,11 @@ var promptPrefix = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*(/[A-Za-z0-9][A
 // without one, which is the same rule afterhours already applies per
 // extension, for the same reason. handsetIDs resolves a mixed list of handset
 // and group ids to handset ids, reporting the ones that do not exist.
-func compileLine(l Line, houseMailbox string, handsetIDs func(where string, ids []string) []string, fail func(string, ...any)) LineIdentity {
-	out := LineIdentity{Label: l.Label, Prompts: l.Prompts, OnNoInput: NoInputDismiss}
+// trunks is the inventory `trunk` is
+// checked against, or nil to leave the reference unchecked — see
+// Options.Trunks for which callers pass which, and why.
+func compileLine(l Line, houseMailbox string, handsetIDs func(where string, ids []string) []string, trunks *Trunks, fail func(string, ...any)) LineIdentity {
+	out := LineIdentity{Label: l.Label, Prompts: l.Prompts, OnNoInput: NoInputDismiss, Trunk: l.Trunk}
 
 	if l.Number != "" {
 		// Same treatment as an allow-listed number: unparseable is a load
@@ -158,6 +170,20 @@ func compileLine(l Line, houseMailbox string, handsetIDs func(where string, ids 
 	if out.OnNoInput == NoInputVoicemail && houseMailbox == "" {
 		fail("[line] on_no_input = %q but [house] has no voicemail — "+
 			"a caller who says nothing needs a mailbox to land in", NoInputVoicemail)
+	}
+
+	// A cross-file reference, checked exactly like a handset id is: the id has
+	// to exist in the other file, and being wrong here is invisible until an
+	// inbound call arrives at a context nothing generated.
+	if l.Trunk != "" && trunks != nil {
+		switch _, known := trunks.Lookup(l.Trunk); {
+		case !trunks.Present():
+			fail("[line] trunk %q names a provider, but there is no %s — "+
+				"create one beside policy.toml, or remove the key", l.Trunk, trunks.Where())
+		case !known:
+			fail("[line] trunk %q is not declared in %s (it has %s)",
+				l.Trunk, trunks.Where(), strings.Join(trunks.IDs(), ", "))
+		}
 	}
 
 	if l.OutboundCID != "" {

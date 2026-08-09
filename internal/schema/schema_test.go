@@ -33,6 +33,51 @@ func TestEveryTOMLKeyIsDocumented(t *testing.T) {
 	}
 }
 
+// trunks.toml is a third root struct rather than more sections of File, so it
+// needs its own drift guard: the walk above would never reach it.
+func TestEveryTrunkTOMLKeyIsDocumented(t *testing.T) {
+	documented := map[string]bool{}
+	collectProperties(schema.Trunks(), documented)
+
+	for _, key := range tomlKeys(reflect.TypeOf(policy.TrunkFile{})) {
+		if !documented[key] {
+			t.Errorf("policy.TrunkFile exposes toml key %q but `doorman schema trunks` "+
+				"does not document it", key)
+		}
+	}
+}
+
+// And the reverse for the one key whose absence is silent and whose presence
+// is load-bearing: [line] trunk is what puts a DID route in the right
+// provider's context, and an undocumented key is one a model will not emit.
+func TestLineTrunkIsDocumented(t *testing.T) {
+	line, ok := schema.Policy().Properties["line"]
+	if !ok {
+		t.Fatal("policy schema has no [line] section")
+	}
+	trunk, ok := line.Properties["trunk"]
+	if !ok {
+		t.Fatal("[line] trunk is not documented — a model writing it would produce " +
+			"config that validates and generates no route")
+	}
+	joined := strings.Join(trunk.CrossRefs, " ")
+	if !strings.Contains(joined, "trunks.toml") {
+		t.Errorf("[line] trunk does not cross-reference trunks.toml: %v", trunk.CrossRefs)
+	}
+}
+
+// The failure mode this whole milestone turns on is silent, so the schema has
+// to say it where somebody authoring a trunk will read it.
+func TestTrunkSchemaStatesTheRegistrationBinding(t *testing.T) {
+	joined := strings.Join(schema.Trunks().Rules, " ")
+	for _, want := range []string{"line=yes", "endpoint=", "anonymous"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("trunks schema no longer mentions %q — it is the detail that "+
+				"decides whether inbound calls arrive at all", want)
+		}
+	}
+}
+
 func TestEveryEnvVarIsDocumented(t *testing.T) {
 	// config.Load reads the environment through small helpers, so the set of
 	// variable names is a set of string literals in that one file. Reading it
@@ -138,7 +183,7 @@ func TestBundleCarriesTheAuthorityNote(t *testing.T) {
 	if !strings.Contains(b.Authority, "doorman check") {
 		t.Error("bundle no longer points at `doorman check` as the authority")
 	}
-	for _, want := range []string{"policy.toml", "handsets.toml", "env"} {
+	for _, want := range []string{"policy.toml", "handsets.toml", "trunks.toml", "env"} {
 		if _, ok := b.Schemas[want]; !ok {
 			t.Errorf("bundle is missing %q", want)
 		}

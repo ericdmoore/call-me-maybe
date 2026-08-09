@@ -7,8 +7,11 @@ Reasoning and rejected alternatives: [`arch.md`](arch.md).
 Backlog with acceptance criteria: `docs/TASKS.md` §7.
 
 **Status:** **Phase 1 is complete** — M1.1, M1.2, M1.3 and M1.4 have all
-landed. A household can buy a second number today. Phase 2 (several providers)
-is planned.
+landed. A household can buy a second number today. **Phase 2 is half done:**
+M2.1 (`trunks.toml`) and M2.2 (lines belong to trunks) have landed, so adding
+a provider is editing TOML and re-rendering. M2.3 (outbound by trunk) and M2.4
+(per-provider health) are next, and until M2.3 a call still leaves by whatever
+the dialplan says.
 
 ---
 
@@ -310,7 +313,7 @@ for generating it rather than hand-writing it.
 VoIP.ms example. Several providers make it a data problem — which is exactly
 what issue #5 asks for.
 
-## M2.1 · `trunks.toml`
+## M2.1 · `trunks.toml` — **done**
 
 Trunks become an inventory, rendered the way `handsets.toml` already is.
 
@@ -339,7 +342,48 @@ codecs   = ["ulaw", "g722"]
 **Deliverable:** adding a provider is editing TOML and re-rendering. Closes the
 config half of issue #5.
 
-## M2.2 · Lines belong to trunks
+**What landed, and where it differs from the sketch above.**
+
+The file grew three fields the sketch did not have, each earning its place.
+`password_env` follows handsets.toml exactly rather than inventing a second
+secrets mechanism — and goes one step further than that file does by refusing
+a value that is not shaped like a variable name, so a password pasted where a
+name belongs fails the load instead of reaching a commit. `from_user` and
+`from_domain` exist because providers that authenticate as one name and expect
+another in From are precisely the differences issue #5 is about. And `e911`
+records whether a street address is registered, which is the one fact the
+emergency decision turns on and the one doorman cannot discover; unset reads
+as *unknown* rather than as either answer.
+
+**No identify blocks are generated**, and the generated file says why. With
+`line=yes` and `endpoint=` on the registration they are redundant, and an IP
+allow-list is a list that goes stale silently the day a provider adds a media
+server. A provider that can only do IP authentication is out of scope, which
+issue #5 already says.
+
+**Render generates the inbound contexts.** The plan argued for it and the
+argument held, with a third reason that only appeared while building it: a
+generated route can match a DID in *every* digit format a provider might send
+— ten digits, eleven, full E.164 — which deletes the "watch `asterisk -rvvv`
+to find out which one arrives" step from the runbook. It costs two extra lines
+per DID and they never fire. Each trunk context also ends in a `_X.` catch-all
+to the default line, so a DID nobody routed is answered rather than falling
+off the end of a context.
+
+**The generated dialplan is two layers, not one.** One context per trunk
+routing DIDs, and one context per *line* carrying the Answer/Stasis
+boilerplate. Otherwise the five-line block would be repeated three times per
+DID. The default line's generated context calls `Stasis(${DOORMAN_APP})` with
+no arguments at all — byte-identical to the hand-written `[inbound-trunk]` it
+replaces, which is the compatibility gate for the dialplan half.
+
+**Both `#include` lines ship commented out.** Asterisk refuses to start on a
+missing include, so an unconditional one in the shipped `extensions.conf`
+would break every install that has no `trunks.toml` — which is all of them.
+Uncommenting is a documented step in the runbook, alongside deleting the
+hand-written blocks the generated ones replace.
+
+## M2.2 · Lines belong to trunks — **done**
 
 **Build**
 
@@ -347,6 +391,30 @@ config half of issue #5.
 - `doorman check` fails on a line naming a trunk that does not exist — a
   cross-file reference exactly like handsets, and the same validator shape.
 - Generated inbound contexts route each provider's DIDs to the right line.
+
+**What landed, and the one thing the sketch did not anticipate.**
+
+**Who validates the reference is a decision, not a detail.** `doorman check`
+and `doorman render` always pass the inventory — even an absent one, which is
+what lets a line naming a trunk be told *there is no trunks.toml* rather than
+*that trunk is not declared*, two mistakes with different fixes. The daemon
+passes nothing, deliberately: nothing on the call path routes on a trunk yet,
+and refusing to load a policy over a reference nothing reads is exactly the
+trade invariant 4 forbids. When outbound routing starts consulting it, that
+decision gets revisited on purpose rather than by default.
+
+A route needs `trunk` **and** `number`. Either alone is a real state and a
+silent one — the registration works, the calls arrive, and they all reach the
+default line's greeting — so `doorman check` names the lines that will get no
+route rather than leaving it to be discovered by phone.
+
+**Emergency calling carries its config surface ahead of its behaviour.**
+`emergency_trunk` exists, is validated, and is reported by `doorman check` and
+by every startup, saying whether the answer was chosen or inferred. Nothing
+routes on it: `_911` still leaves by the dialplan line that names one trunk,
+and both the CLI and the runbook say so rather than implying otherwise.
+Settling the key before anything reads it is the point — retrofitting the
+setting that decides where emergency calls go is worse than adding it early.
 
 ## M2.3 · Outbound by trunk
 
@@ -479,7 +547,10 @@ The drift guards will insist on most of it.
 - `llms-policy.txt` — move `[line]` and `trunk` out of the "do not emit" list.
   **This matters more than it looks:** unknown keys are silently ignored, so a
   model writing `[line]` today produces a config that validates and does
-  nothing.
+  nothing. Both are out of that list now; what remains in it for Phase 2 is
+  *outbound routing by trunk*, which is the behaviour rather than the key. Its
+  three-file split is four, with the standing instruction not to write a
+  `trunks.toml` for somebody who has one provider.
 - `make site-assets` republishes the schema.
 - `site/src/data/providers.ts` — mark verified providers verified.
 

@@ -29,6 +29,20 @@ bind=0.0.0.0:5060
 ; Replace 123456_home with your SUB ACCOUNT (Main Menu -> Sub Accounts),
 ; not your main VoIP.ms login. Replace POP with your chosen server,
 ; e.g. dallas.voip.ms / atlanta.voip.ms — use the same host everywhere.
+;
+; ── More than one provider? ──────────────────────────────────
+; This block is one worked example, hand-maintained, and it is the right
+; answer for one provider. With several it becomes copy-and-paste, and the
+; detail below that must not be got wrong (line=yes + endpoint=) is exactly
+; the kind that gets lost in a copy.
+;
+; trunks.toml is the alternative: declare each provider once, run
+; `doorman render`, and get this block generated per trunk with the
+; passwords substituted from .env. To switch: create trunks.toml (see
+; examples/trunks.example.toml), DELETE the four objects below, and
+; uncomment the include. Leaving both in place registers twice.
+;
+;#include "pjsip_trunks.conf"
 
 [voipms_auth]
 type=auth

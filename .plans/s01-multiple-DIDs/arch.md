@@ -250,6 +250,26 @@ infrastructure that several lines point at, not a property of one line. Putting
 it in policy would duplicate host, codecs and credentials per line and make
 "change the POP" an edit in N files.
 
+**Built, and the shape it took.** `trunks.toml` is *optional*, and its absence
+is the compatibility gate rather than a migration step: no file means nothing
+is generated, the hand-written `pjsip.conf` keeps working, and nothing in
+`doorman check` says the word trunk. Rollback is deleting the file.
+
+Generating the inbound contexts turned out to have a third argument the plan
+did not make. Beyond the combinatorial growth and the drift between two
+hand-maintained files, a generated route can match a DID in *every* digit
+format a provider might send — ten digits, eleven, full E.164 — which removes
+"find out what digits arrive" from the runbook entirely. It costs two lines per
+DID that never fire.
+
+`emergency_trunk` lives in `trunks.toml` rather than in a policy file, which
+follows from the reasoning below: it is a property of the inventory, and
+putting it in a policy file would make it per line — the exact thing this
+design refuses, since whoever grabs the nearest handset has no idea which line
+they are on. `e911` sits on each trunk for the same reason `password_env` does:
+it is a fact about the provider that doorman cannot discover and must not
+guess, so unset reads as *unknown* rather than as either answer.
+
 ### Emergency calling is a design decision, not a detail
 
 With one trunk, `911` has one way out. With several, something must choose —

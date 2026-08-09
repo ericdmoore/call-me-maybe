@@ -82,7 +82,7 @@ var (
 )
 
 // Names are the selectable schema names for `doorman schema <name>`.
-var Names = []string{"policy", "handsets", "env", "template"}
+var Names = []string{"policy", "handsets", "trunks", "env", "template"}
 
 // Get returns one schema by name.
 func Get(name string) (*Schema, error) {
@@ -91,6 +91,8 @@ func Get(name string) (*Schema, error) {
 		return Policy(), nil
 	case "handsets":
 		return Handsets(), nil
+	case "trunks":
+		return Trunks(), nil
 	case "env":
 		return Env(), nil
 	case "template":
@@ -110,6 +112,7 @@ func All(version string) *Bundle {
 		Schemas: map[string]*Schema{
 			"policy.toml":   Policy(),
 			"handsets.toml": Handsets(),
+			"trunks.toml":   Trunks(),
 			"env":           Env(),
 			"template":      TemplateFormat(),
 		},
@@ -223,6 +226,132 @@ func groupItem() *Schema {
 	}
 }
 
+// ── trunks.toml ──────────────────────────────────────────────────────────
+
+func Trunks() *Schema {
+	return &Schema{
+		SchemaURI:   "https://json-schema.org/draft/2020-12/schema",
+		ID:          "https://callmemaybe.cc/schema/trunks.json",
+		Title:       "trunks.toml — the provider inventory",
+		Type:        "object",
+		Description: "The providers this box registers with. Optional, and its absence is the compatibility gate: with no trunks.toml `doorman render` generates only the handset config and a hand-written pjsip.conf keeps working exactly as it does today. Adding it makes a second provider a TOML block rather than a page of copied PJSIP. Changes when you buy a number somewhere new.",
+		Rules: []string{
+			"`doorman render` generates pjsip_trunks.conf and extensions_trunks.conf from this file. Both are OUTPUTS: never hand-edit them, and never commit the PJSIP one — it holds real registration passwords.",
+			"Every generated registration carries line=yes and endpoint=<id>. That pair is what binds inbound calls arriving on a registration to its endpoint, which is why no identify block and no provider IP allow-list is needed. Get it wrong and inbound calls hit the anonymous endpoint and vanish with no error anywhere.",
+			"One inbound dialplan context per trunk, because each registration binds to its own endpoint with its own context=. Inside it, one route per DID, generated from [line] number and [line] trunk across every policy file.",
+			"A trunk id may not collide with a handset id: both become a PJSIP endpoint named after the id.",
+			"Secrets are named here, never written here. password_env holds the NAME of a .env variable; the loader refuses anything that is not shaped like one, so a pasted password fails loudly instead of being committed.",
+			"Deleting trunks.toml is the whole rollback. There is no migration and no stored state.",
+		},
+		Properties: map[string]*Schema{
+			"emergency_trunk": {
+				Type: "string",
+				Description: "Which trunk carries 911. Optional: unset, emergency calls leave by the primary line's trunk — the [line] trunk in plain policy.toml, the same file that is already the default for everything unqualified. " +
+					"`doorman check` and every startup print which trunk it is and whether that was chosen or inferred, so the default is never a surprise and there is no state where somebody forgot.",
+				CrossRefs: []string{"trunks.toml [[trunks]].id", "policy.toml [line] trunk"},
+				Rules: []string{
+					"It lives here rather than in a policy file on purpose. Whoever grabs the nearest handset has no idea which line they are on, and E911 is registered per DID against a street address, so the trunk carrying 911 must be the one whose address is filed — not the one belonging to whichever number a caller happens to be on.",
+					"Not \"whichever trunk sorts first\" and not \"the first declared\": a default derived from file order moves silently when a block is added at the top of a file, and this is the most safety-critical route in the system.",
+					"Outbound routing by trunk is not implemented yet. This key settles where 911 will go and is what `doorman check` reports; today an emergency call still leaves by the hand-written dialplan.",
+				},
+			},
+			"trunks": {
+				Type:        "array",
+				Description: "Every provider registration this box opens.",
+				MinItems:    one,
+				Items:       trunkItem(),
+			},
+		},
+		Required:             []string{"trunks"},
+		AdditionalProperties: falsy,
+	}
+}
+
+func trunkItem() *Schema {
+	return &Schema{
+		Type:     "object",
+		Required: []string{"id", "host", "username", "password_env"},
+		Properties: map[string]*Schema{
+			"id": {
+				Type:    "string",
+				Pattern: "^[a-z0-9][a-z0-9_-]*$",
+				Description: "Names the generated PJSIP endpoint and the objects beside it — <id>_auth, <id>_reg, <id>_aor. Referenced from policy.toml as [line] trunk. " +
+					"It is also what the outbound dial string in the dialplan already says (PJSIP/1${EXTEN}@voipms), so keeping the id you already use is what lets a hand-written trunk become a generated one with no dialplan edit.",
+				Rules: []string{
+					"Must be unique, and may not collide with a handset id.",
+					"May not end in _auth, _reg or _aor — render derives those from the id and the blocks would collide.",
+				},
+				CrossRefs: []string{"policy.toml [line] trunk", "asterisk/extensions.conf outbound Dial(PJSIP/...@<id>)"},
+			},
+			"provider": {
+				Type:        "string",
+				Description: "The company, for display only — \"voip.ms\", \"telnyx\". Nothing routes on it; it is what makes a table of short ids readable in `doorman check`.",
+			},
+			"host": {
+				Type:        "string",
+				Pattern:     `^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:\d{1,5})?$`,
+				Description: "The POP or SIP host this box registers with, optionally with a port. A hostname, not a URL and not a sip: URI.",
+				Rules:       []string{"Use the same host everywhere. Mixing POPs between the registration and the AOR causes flapping that looks like a network problem."},
+			},
+			"username": {
+				Type:        "string",
+				Description: "The provider sub-account this box registers as.",
+				Rules:       []string{"Never the main account login. A compromised Pi should cost a sub-account, not a balance and a DID."},
+			},
+			"password_env": {
+				Type:        "string",
+				Pattern:     "^[A-Z][A-Z0-9_]*$",
+				Description: "Name of the .env variable holding this trunk's registration password. The secret itself never appears in this file. `doorman render` substitutes it and fails if unset.",
+				Rules: []string{
+					"Names a variable; never put the password here. The pattern is enforced so that a pasted password fails the load rather than reaching a commit.",
+					"Convention: TRUNK_<ID>_PASSWORD, matching handsets.toml's HANDSET_<NAME>_PASSWORD.",
+				},
+				CrossRefs: []string{"the environment, and examples/.env.example"},
+			},
+			"context": {
+				Type:        "string",
+				Pattern:     "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+				Default:     "from-<id>",
+				Description: "Inbound dialplan context for calls arriving on this trunk, generated into extensions_trunks.conf. One per trunk is what makes several providers work: each registration binds to its own endpoint with its own context, so one [inbound-trunk] becomes one context per provider.",
+				Rules:       []string{"Two trunks may not share a context — inbound calls could not be told apart."},
+			},
+			"codecs": {
+				Type:        "array",
+				MinItems:    one,
+				Items:       &Schema{Type: "string", Pattern: "^[a-z0-9]+$"},
+				Default:     []any{"ulaw", "g722"},
+				Description: "The endpoint's allow= list, in order. ulaw and g722 need no transcoding on a Pi; g729 costs money and would transcode.",
+			},
+			"from_user": {
+				Type:        "string",
+				Default:     "the username",
+				Description: "What this box puts in From, and the user part of the registration's client URI and contact. Defaults to username, which is what a registration trunk almost always wants; providers that authenticate as one name and expect another in From are why this exists.",
+			},
+			"from_domain": {
+				Type:        "string",
+				Default:     "the host, without any port",
+				Description: "Domain part of From. Defaults to host.",
+			},
+			"expiration": {
+				Type:        "integer",
+				Minimum:     ptr(30),
+				Maximum:     ptr(86400),
+				Default:     300,
+				Description: "Registration lifetime in seconds. Some providers throttle short ones, which is the only reason it is a knob.",
+			},
+			"e911": {
+				Type:        "boolean",
+				Description: "Whether a street address is registered against this trunk's DIDs. Declared rather than inferred: it is the one fact the emergency-trunk decision turns on and the one doorman cannot discover. Absent means unknown, and `doorman check` says \"unknown\" rather than guessing either way.",
+				Rules: []string{
+					"Not every provider offers E911 in every area. A provider without it means a phone that cannot call for help, which is a reason to reject the provider rather than a line item to skip.",
+					"This is a supplementary phone on a consumer internet connection. It stops working in a power cut, and nobody should make it a household's only route to emergency services.",
+				},
+			},
+		},
+		AdditionalProperties: falsy,
+	}
+}
+
 // ── policy.toml ──────────────────────────────────────────────────────────
 
 func Policy() *Schema {
@@ -278,6 +407,17 @@ func line() *Schema {
 				Description: "Prompt pack for this line, overriding PROMPT_MEDIA_PREFIX. An Asterisk media prefix under " +
 					"/var/lib/asterisk/sounds/, not a filesystem path. Two lines with different packs are the same engine with different voices.",
 				CrossRefs: []string{"/var/lib/asterisk/sounds/<prefix>/", "PROMPT_MEDIA_PREFIX in the environment"},
+			},
+			"trunk": {
+				Type: "string",
+				Description: "The provider this line's number lives at — an id from trunks.toml. Optional, and absent is the whole of a single-provider install: one registration, one hand-written or generated trunk, and the dialplan decides. " +
+					"Inbound it is what puts this line's DID route in the right provider's context when `doorman render` generates them. Outbound it is what will choose the path out of the building once routing by trunk lands.",
+				CrossRefs: []string{"trunks.toml [[trunks]].id"},
+				Rules: []string{
+					"Validated as a cross-file reference by `doorman check` and `doorman render`, exactly as a handset id is. The daemon does not validate it, because nothing on the call path routes on a trunk yet and refusing to load a policy over a reference nothing reads would be the wrong trade.",
+					"plain policy.toml's trunk is the one 911 inherits when trunks.toml sets no emergency_trunk.",
+					"A route is generated only for a line that has BOTH trunk and number. A line with a trunk and no number gets a context but no DID route, and calls for it fall through to the default line.",
+				},
 			},
 			"outbound_cid": {
 				Type: "string",
@@ -501,6 +641,7 @@ func Env() *Schema {
 
 		"POLICY_PATH":   env("Path to policy.toml.", "path", "./policy.toml"),
 		"HANDSETS_PATH": env("Path to handsets.toml.", "path", "./handsets.toml"),
+		"TRUNKS_PATH":   env("Path to trunks.toml, the provider inventory. The file is optional and absent is the default: with no trunks.toml `doorman render` generates only the handset config and a hand-written pjsip.conf keeps working. The daemon reads it for one thing only — to say at startup which trunk carries 911 and whether that was chosen or inferred. Nothing on the call path routes on a trunk yet.", "path", "./trunks.toml"),
 		"POLICY_WATCH":  env("Re-read both config files on change so edits go live without a restart. An invalid file is rejected and the previous policy stays in service.", "boolean (1|true|yes|on)", true),
 
 		"DEFAULT_COUNTRY_CODE": env("Country code assumed when a caller ID arrives without one.", "string", "1"),

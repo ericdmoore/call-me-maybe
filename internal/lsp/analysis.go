@@ -17,19 +17,27 @@ import (
 	"callmemaybe/internal/policy"
 )
 
-// DocKind classifies which of the two config files a document is.
+// DocKind classifies which of the config files a document is.
 type DocKind int
 
 const (
 	KindPolicy DocKind = iota
 	KindHandsets
+	KindTrunks
 )
 
-// KindOf classifies by file name; anything not named handsets.toml is
-// treated as policy (covering renamed or legacy files).
+// KindOf classifies by file name; anything not recognised is treated as policy
+// (covering renamed or legacy files, and policy.<line>.toml).
+//
+// trunks.toml earns a kind of its own rather than falling through to policy
+// because the two have different root structs: linting a provider inventory
+// against the policy schema would report every key in it as unknown.
 func KindOf(path string) DocKind {
-	if strings.HasSuffix(path, "handsets.toml") {
+	switch {
+	case strings.HasSuffix(path, "handsets.toml"):
 		return KindHandsets
+	case strings.HasSuffix(path, "trunks.toml"):
+		return KindTrunks
 	}
 	return KindPolicy
 }
@@ -52,10 +60,39 @@ type Diagnostic struct {
 	Message  string `json:"message"`
 }
 
+// AnalyseTrunks lints a trunks.toml on its own.
+//
+// On its own, and not as a third member of the pair, because nothing in it
+// depends on the other two: a trunk is valid or not by itself. The reference
+// that crosses files runs the other way — [line] trunk pointing here — and
+// that is checked in Analyse, where the policy document is.
+func AnalyseTrunks(trunksText string) []Diagnostic {
+	var out []Diagnostic
+	for _, problem := range policy.LintTrunks([]byte(trunksText)) {
+		d := Diagnostic{Severity: 1, Source: "doorman", Message: problem}
+		for _, token := range quotedTokensReversed(problem) {
+			if r, ok := locate(trunksText, token); ok {
+				d.Range = r
+				break
+			}
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
 // Analyse lints the pair and attributes each problem to one of the two
 // documents with a best-effort position. handsetsText nil means legacy
 // single-file layout.
 func Analyse(policyText string, handsetsText *string) (policyDiags, handsetsDiags []Diagnostic) {
+	return AnalyseWithTrunks(policyText, handsetsText, nil)
+}
+
+// AnalyseWithTrunks is Analyse with the provider inventory in play, so that a
+// [line] trunk naming a provider that does not exist squiggles in the editor
+// rather than waiting for `doorman check`. trunksText nil means there is no
+// trunks.toml, which is every single-provider install.
+func AnalyseWithTrunks(policyText string, handsetsText, trunksText *string) (policyDiags, handsetsDiags []Diagnostic) {
 	// Syntax errors first: the decoder knows the exact line.
 	if d, bad := syntaxDiagnostic(policyText); bad {
 		policyDiags = append(policyDiags, d)
@@ -73,7 +110,16 @@ func Analyse(policyText string, handsetsText *string) (policyDiags, handsetsDiag
 	if handsetsText != nil {
 		hdata = []byte(*handsetsText)
 	}
-	for _, problem := range policy.LintSplit([]byte(policyText), hdata) {
+	// A trunks.toml that will not compile has its own diagnostics in its own
+	// document; here it simply means the cross-reference cannot be checked,
+	// which is better than reporting every [line] trunk as unknown.
+	opts := policy.Options{}
+	if trunksText != nil {
+		if trunks, err := policy.TrunksFromTOML([]byte(*trunksText)); err == nil {
+			opts.Trunks = trunks
+		}
+	}
+	for _, problem := range policy.LintSplitWith([]byte(policyText), hdata, opts) {
 		d := Diagnostic{Severity: 1, Source: "doorman", Message: problem}
 		// Our error messages quote the offending value, conventionally last
 		// ('extension "Kids" references unknown handset "kids-rom"'), so
@@ -177,10 +223,28 @@ type Model struct {
 	GroupIDs   []string
 	Schedules  []string
 	Mailboxes  []string
+	TrunkIDs   []string
 }
 
 func BuildModel(policyText string, handsetsText *string) Model {
+	return BuildModelWith(policyText, handsetsText, nil)
+}
+
+// BuildModelWith is BuildModel with the provider inventory, so `trunk = "` can
+// complete from trunks.toml the way `handsets = [` completes from the phone
+// plant.
+func BuildModelWith(policyText string, handsetsText, trunksText *string) Model {
 	var m Model
+	if trunksText != nil {
+		var tf policy.TrunkFile
+		_, _ = toml.Decode(*trunksText, &tf)
+		for _, tr := range tf.Trunks {
+			if tr.ID != "" {
+				m.TrunkIDs = append(m.TrunkIDs, tr.ID)
+			}
+		}
+		sort.Strings(m.TrunkIDs)
+	}
 	seenMailbox := map[string]bool{}
 	addMailbox := func(mb string) {
 		if mb != "" && !seenMailbox[mb] {
@@ -230,6 +294,10 @@ var (
 	afterhoursCtx = regexp.MustCompile(`afterhours\s*=\s*"[^"]*$`)
 	daysCtx       = regexp.MustCompile(`days\s*=\s*\[[^\]]*$`)
 	mailboxCtx    = regexp.MustCompile(`(voicemail|mailbox)\s*=\s*"[^"]*$`)
+	// Matches both `trunk = "` in [line] and `emergency_trunk = "` in
+	// trunks.toml: the same vocabulary, and getting either wrong has the same
+	// invisible consequence.
+	trunkCtx = regexp.MustCompile(`(^|\s)(emergency_)?trunk\s*=\s*"[^"]*$`)
 )
 
 var allDays = []string{"SU", "MO", "TU", "WE", "TH", "FR", "SA"}
@@ -243,6 +311,8 @@ func Complete(m Model, line string, col int) []CompletionItem {
 	prefix := line[:col]
 
 	switch {
+	case trunkCtx.MatchString(prefix):
+		return items(6, "trunk (trunks.toml)", m.TrunkIDs)
 	case afterhoursCtx.MatchString(prefix):
 		return items(6, "schedule", m.Schedules)
 	case daysCtx.MatchString(prefix):
@@ -266,6 +336,6 @@ func items(kind int, detail string, labels []string) []CompletionItem {
 
 // Describe is used by tests and debug logging.
 func (m Model) Describe() string {
-	return fmt.Sprintf("handsets=%d groups=%d schedules=%d mailboxes=%d",
-		len(m.HandsetIDs), len(m.GroupIDs), len(m.Schedules), len(m.Mailboxes))
+	return fmt.Sprintf("handsets=%d groups=%d schedules=%d mailboxes=%d trunks=%d",
+		len(m.HandsetIDs), len(m.GroupIDs), len(m.Schedules), len(m.Mailboxes), len(m.TrunkIDs))
 }

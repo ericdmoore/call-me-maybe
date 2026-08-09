@@ -31,7 +31,12 @@ type Config struct {
 
 	PolicyPath   string
 	HandsetsPath string
-	PolicyWatch  bool
+	// TrunksPath is the provider inventory. The file is optional and its
+	// absence is the compatibility gate; the daemon reads it for exactly one
+	// thing, which is to announce at startup which trunk carries 911. Nothing
+	// on the call path routes on a trunk.
+	TrunksPath  string
+	PolicyWatch bool
 
 	DefaultCountryCode string
 
@@ -128,6 +133,7 @@ func Load() (Config, error) {
 
 		PolicyPath:   str("POLICY_PATH", "./policy.toml"),
 		HandsetsPath: str("HANDSETS_PATH", "./handsets.toml"),
+		TrunksPath:   str("TRUNKS_PATH", "./trunks.toml"),
 		PolicyWatch:  boolean("POLICY_WATCH", true),
 
 		DefaultCountryCode: str("DEFAULT_COUNTRY_CODE", "1"),

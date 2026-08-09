@@ -208,7 +208,10 @@ func (p outboundPlan) describe(handsetIDs []string) string {
 
 const noOutboundCID = "(none — presents whatever the trunk sends)"
 
-// renderOutbound reads every line's [line] section for `doorman render`.
+// renderLines reads every line's [line] section for `doorman render`, in
+// DiscoverLines' order: the primary line first, then the rest sorted. Both
+// halves of render want it — outbound caller ID per handset, and the DID route
+// per line — and both want the primary first.
 //
 // A missing policy file is not an error: `doorman render` generates the phone
 // plant, and the runbook has an operator do that before the rules exist. A
@@ -216,9 +219,12 @@ const noOutboundCID = "(none — presents whatever the trunk sends)"
 // a half-read policy would bake a caller ID nobody chose into the config that
 // decides what every customer sees, and unlike the daemon there is a person
 // standing right here who can fix it.
-func renderOutbound(policyPath, handsetsPath string) (outboundPlan, error) {
+//
+// trunks is passed through so that a line naming a provider that does not
+// exist fails here rather than producing a DID route in no context at all.
+func renderLines(policyPath, handsetsPath string, trunks *policy.Trunks) ([]lineIdentity, error) {
 	if _, err := os.Stat(policyPath); errors.Is(err, os.ErrNotExist) {
-		return outboundPlan{}, nil
+		return nil, nil
 	}
 	files, _ := policy.DiscoverLines(policyPath)
 	ids := make([]lineIdentity, 0, len(files))
@@ -227,13 +233,16 @@ func renderOutbound(policyPath, handsetsPath string) (outboundPlan, error) {
 		// a freshly copied policy.toml still carries the example PINs that
 		// `doorman init` is about to replace. Refusing to generate a phone
 		// plant over one would be an unhelpful place to be strict.
-		p, err := policy.LoadSplitWith(lf.Path, handsetsPath, policy.Options{AllowPlaceholders: true})
+		p, err := policy.LoadSplitWith(lf.Path, handsetsPath, policy.Options{
+			AllowPlaceholders: true,
+			Trunks:            trunks,
+		})
 		if err != nil {
-			return outboundPlan{}, fmt.Errorf("%s: %w", lf.Path, err)
+			return nil, fmt.Errorf("%s: %w", lf.Path, err)
 		}
 		ids = append(ids, lineIdentity{Name: lf.Name, LineIdentity: p.Line()})
 	}
-	return newOutboundPlan(ids), nil
+	return ids, nil
 }
 
 // announceOutbound says what the box calls out as, every boot.
