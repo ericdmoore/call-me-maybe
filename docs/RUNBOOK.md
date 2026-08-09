@@ -44,6 +44,11 @@ has one number. See "Add a second number" in §6.
 Everything operational: provisioning, verification, troubleshooting, day-2
 tasks. Commands assume the repo is at `/opt/call-me-maybe` on the Pi.
 
+**First time, with a Pi still in the box?** Start at
+[FIRST-BOOT.md](FIRST-BOOT.md) — the day-one path in order, with the hardware
+checks that prevent the two commonest week-one failures. Come back here for
+depth.
+
 Notation: `$` runs as your user, `#` needs root, `*CLI>` is the Asterisk console.
 
 ---
