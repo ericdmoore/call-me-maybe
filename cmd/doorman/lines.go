@@ -97,6 +97,21 @@ func orEnvPrompts(prefix string) string {
 	return prefix
 }
 
+// recordedLine is the line name as the call log carries it: empty for the
+// default line.
+//
+// The same rule as the default line's logger, which openLines leaves unadorned
+// for the same reason — an install with one number writes exactly the records
+// it wrote before lines existed, and nothing about it has to read the word
+// "line". calls.Record.LineOrDefault resolves the empty case on the way back
+// out, so nothing downstream has to know about this.
+func recordedLine(name string) string {
+	if name == policy.DefaultLine {
+		return ""
+	}
+	return name
+}
+
 // lineSet is the whole of multi-line routing: a map from the name the dialplan
 // passes as a Stasis argument to the Deps that serve it.
 //

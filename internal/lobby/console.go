@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"callmemaybe/internal/calls"
 	"callmemaybe/internal/policy"
 )
 
@@ -17,10 +18,16 @@ import (
 // and is connected to a stranger — same primitives (answer, play, collect,
 // release), opposite direction. It is a sibling of Session rather than a mode
 // of it: everything Session is built around is inbound. It has a caller ID to
-// normalise, an allow-list to check it against, a rate-limit budget, a ring
-// plan, and a call record whose outcomes are all about who answered. A console
-// call has none of those, and bending Session around a call with no caller
-// would cost far more than the fifty lines the two have in common.
+// normalise, an allow-list to check it against, a rate-limit budget, and a ring
+// plan. A console call has none of those, and bending Session around a call
+// with no caller would cost far more than the fifty lines the two have in
+// common.
+//
+// It does keep a call record, and that turns out to make the same point. The
+// two share a type and almost no fields: this one has a direction, a number
+// this house dialled, and an outcome of "placed" — because doorman hands the
+// channel to the dialplan and is gone before the far end rings, so every word
+// the inbound side has for how a call ended is a word about who answered here.
 //
 // What is deliberately identical is the discipline: one goroutine, all state
 // owned by it, cancellation *is* the state, and exactly one teardown path —
@@ -140,6 +147,14 @@ type ConsoleDeps struct {
 	// file gets the new caller ID on the next *4 without a restart — the same
 	// reason Deps.Policy is a func.
 	Lines func() []ConsoleLine
+	// Calls receives one record per console call, exactly as a Session's does
+	// and from the same single teardown path. Nil disables it.
+	//
+	// There is deliberately no Notifier here. The webhook's two events are
+	// "the house is ringing" and "the call ended", and an outbound call rings
+	// nothing in this house and ends somewhere doorman cannot see. Sending one
+	// anyway would mean announcing a call that is not happening here.
+	Calls Recorder
 	// OnFinished lets the router drop this console's registration.
 	OnFinished func(*Console)
 }
@@ -163,11 +178,20 @@ type Console struct {
 	detached atomic.Bool
 
 	pbSeq int
+
+	// rec accumulates the call log entry, written from this goroutine only and
+	// never read back — an output, not state, exactly as Session.rec is.
+	rec       calls.Record
+	startedAt time.Time
 }
 
 func NewConsole(channelID string, deps ConsoleDeps) *Console {
 	ctx, cancel := context.WithCancel(context.Background())
 	id := shortID(channelID)
+	// A console call begins when the handset reaches us, not when its goroutine
+	// happens to be scheduled. No injected clock: nothing here turns on the
+	// time of day, so there is no window to make testable.
+	started := time.Now()
 	return &Console{
 		ID:        id,
 		ChannelID: channelID,
@@ -176,6 +200,17 @@ func NewConsole(channelID string, deps ConsoleDeps) *Console {
 		ctx:       ctx,
 		cancel:    cancel,
 		events:    make(chan event, 64),
+		startedAt: started,
+		// Abandoned is the zero outcome here for the same reason it is inbound:
+		// a handset that hangs up mid-menu reaches cleanup by cancellation and
+		// nothing else, and it should be recorded truthfully without any exit
+		// path having to remember to say so.
+		rec: calls.Record{
+			ID:        id,
+			Start:     started,
+			Direction: calls.DirectionOutbound,
+			Outcome:   calls.OutcomeAbandoned,
+		},
 	}
 }
 
@@ -273,6 +308,7 @@ func (c *Console) chooseLine(lines []ConsoleLine) (ConsoleLine, bool) {
 			return ConsoleLine{}, false
 		case endNothing:
 			c.log.Info("nobody chose a line, ending the console call")
+			c.gaveUp("no-digits")
 			c.say(false, sayGoodbye)
 			return ConsoleLine{}, false
 		}
@@ -284,12 +320,14 @@ func (c *Console) chooseLine(lines []ConsoleLine) (ConsoleLine, bool) {
 				chosen := lines[n-1]
 				c.log.Info("line chosen", "line", chosen.Name, "label", chosen.Label,
 					"presents", maskCID(chosen.CallerID))
+				c.rec.Line = chosen.Name
 				return chosen, true
 			}
 		}
 		c.log.Info("no such line on the menu", "attempt", attempt)
 		c.say(false, sayInvalid)
 	}
+	c.gaveUp("too-many-attempts")
 	c.say(false, sayGoodbye)
 	return ConsoleLine{}, false
 }
@@ -332,21 +370,27 @@ func (c *Console) takeNumber() (string, bool) {
 			return "", false
 		case endNothing:
 			c.log.Info("no number dialled, ending the console call")
+			c.gaveUp("no-digits")
 			c.say(false, sayGoodbye)
 			return "", false
 		}
 
 		if emergencyNumbers[dialledDigits] {
-			c.refuseEmergency()
+			c.refuseEmergency(dialledDigits)
 			return "", false
 		}
 		if len(dialledDigits) >= minDialledDigits {
+			// Recorded here, where a complete entry has been accepted as a
+			// destination — never in the loop below, so a fumbled half-number
+			// is forgotten rather than logged. See calls.Record.Dialled.
+			c.rec.Dialled = dialledDigits
 			return dialledDigits, true
 		}
 		c.log.Info("too few digits to be a number", "digits", len(dialledDigits),
 			"attempt", attempt)
 		c.say(false, sayInvalid)
 	}
+	c.gaveUp("too-many-attempts")
 	c.say(false, sayGoodbye)
 	return "", false
 }
@@ -360,11 +404,15 @@ func (c *Console) takeNumber() (string, bool) {
 // under a second. Every handset can dial 911 from there and it goes out by the
 // trunk whose address is registered, which is the outcome that matters.
 //
-// The log line is for the operator afterwards, not the caller now.
-func (c *Console) refuseEmergency() {
+// The log line is for the operator afterwards, not the caller now — and so is
+// the record: this is the one thing the console does that somebody may need to
+// account for later, so the number is kept even though no call was placed.
+func (c *Console) refuseEmergency(dialledDigits string) {
 	c.log.Warn("refused an emergency number on the outbound console — " +
 		"emergency calls must leave by the trunk whose address is registered, " +
 		"so they are dialled directly from a handset and never placed as another line")
+	c.rec.Dialled = dialledDigits
+	c.gaveUp("emergency-refused")
 	c.say(false, sayBeep)
 }
 
@@ -382,6 +430,7 @@ func (c *Console) place(line ConsoleLine, dialledDigits string) {
 	if err := c.deps.ARI.SetChannelVar(c.ctx, c.ChannelID, outboundCIDVar, line.CallerID); err != nil {
 		c.log.Error("could not set the outbound caller id, refusing to place the call",
 			"line", line.Name, "err", err)
+		c.gaveUp("cid-failed")
 		c.say(false, sayInvalid, sayGoodbye)
 		return
 	}
@@ -394,11 +443,25 @@ func (c *Console) place(line ConsoleLine, dialledDigits string) {
 	// release sendToVoicemail performs: detach first, undo it if the handoff
 	// itself fails, and never hang the channel up afterwards.
 	c.detached.Store(true)
+	c.rec.Outcome = calls.OutcomePlaced
 	if err := c.deps.ARI.ContinueToDialplan(c.ctx, c.ChannelID, outboundContext, dialledDigits, 1); err != nil {
 		c.detached.Store(false)
 		c.log.Error("outbound handoff failed", "context", outboundContext, "err", err)
+		c.gaveUp("handoff-failed")
 		c.say(false, sayInvalid, sayGoodbye)
 	}
+}
+
+// gaveUp records an ending that is not a placed call.
+//
+// Dismissed rather than a fifth outcome: "doorman ended it deliberately, and
+// reason says why" is direction-neutral, and it is what the inbound side
+// already does with an infrastructure failure — a voicemail handoff that fails
+// is recorded as a dismissal too. The reasons are the console's own vocabulary
+// where it has one (emergency-refused, handoff-failed) and the lobby's where
+// they mean the same thing (no-digits, too-many-attempts).
+func (c *Console) gaveUp(reason string) {
+	c.rec.Outcome, c.rec.Reason = calls.OutcomeDismissed, reason
 }
 
 // ── Speaking ─────────────────────────────────────────────────────────────
@@ -469,10 +532,24 @@ func (c *Console) cleanup() {
 	if !c.detached.Load() {
 		_ = c.deps.ARI.Hangup(ctx, c.ChannelID)
 	}
+
+	// One record per console call, from the single teardown path, exactly as a
+	// Session does it — including the handset hanging up mid-menu, which gets
+	// here by cancellation and no other route. Before OnFinished for the same
+	// reason: nothing may be sequenced behind the thing that says this console
+	// is done.
+	//
+	// MS is how long the console had the handset, not how long the call lasted:
+	// once ContinueToDialplan returns, doorman is out of it and cannot know.
+	c.rec.MS = time.Since(c.startedAt).Milliseconds()
+	if c.deps.Calls != nil {
+		c.deps.Calls.Post(c.rec)
+	}
+
 	if c.deps.OnFinished != nil {
 		c.deps.OnFinished(c)
 	}
-	c.log.Info("console finished")
+	c.log.Info("console finished", "outcome", c.rec.Outcome, "line", c.rec.Line)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────

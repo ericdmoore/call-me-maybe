@@ -809,10 +809,12 @@ operator who asked for a call log and did not get one should find out
 immediately, not a month later when they go looking for a call.
 
 ```bash
-doorman calls                          # last 20, caller IDs redacted
+doorman calls                          # last 20, numbers redacted
 doorman calls --since 7d               # a duration (24h, 7d) or a date
-doorman calls --outcome dismissed      # answered|voicemail|dismissed|abandoned
-doorman calls --caller 0100            # match part of a number
+doorman calls --outcome dismissed      # answered|voicemail|dismissed|abandoned|placed
+doorman calls --caller 0100            # match part of a number, either end
+doorman calls --line biz               # one line; "default" is plain policy.toml
+doorman calls --direction outbound     # inbound|outbound
 doorman calls --json | jq .            # JSON Lines for anything else
 doorman calls --no-redact              # full numbers
 ```
@@ -823,6 +825,45 @@ stage expires before anybody can cross a room, or that the lobby's ten seconds
 is too short because most strangers are dismissed with `no-digits` rather than
 a wrong extension. Those are policy questions, and they are unanswerable from
 the operational log.
+
+### Several lines, one log
+
+A box answering several numbers writes **one** file, with `line` on each
+record, rather than one file per line — so a whole day still reads in order,
+which is how anybody actually looks for a call. `--line` narrows it after the
+fact.
+
+`line` is absent on the default line, the one plain `policy.toml` configures.
+That is deliberate on both ends: a box with one number writes exactly the
+records it always did, a record written by an older doorman still means what it
+says, and `--line default` finds them all. The `LINE` column appears only once
+a call has arrived on a line with a name — the same rule `doorman check`
+follows, so nobody with one number ever has to read the word "line".
+
+### Outbound calls
+
+A call placed through the `*4` console gets a record too, with
+`"direction":"outbound"` and the number in `dialled` rather than `caller`.
+Inbound is the absent default, again so nothing changes for an install that
+never places one.
+
+Its outcome is `placed` — not `answered`. doorman sets the caller ID, hands the
+channel to the dialplan and is out of the call before the far end rings, so
+whether anybody picked up and how long they talked are not things it can know.
+For the same reason `ms` on an outbound record is how long the console had the
+handset, not how long the call lasted, and `doorman calls` does not print it in
+the column where an inbound row shows exactly that.
+
+A console call that never got as far as dialling is `dismissed` with a reason:
+`no-digits`, `too-many-attempts`, `emergency-refused` (see "Outbound caller ID,
+and the `*4` console" above — `*4` cannot dial 911, by design and in two
+independent places), `cid-failed` or `handoff-failed`. Only a complete number
+the console
+accepted reaches `dialled`; a half-entry somebody gave up on is forgotten.
+
+Calls dialled straight from a handset never touch doorman — that is what keeps
+outbound working when the daemon is down — so they are not in this log. The
+provider's CDR is the record of those.
 
 ### What it holds, and what it never holds
 
@@ -900,6 +941,15 @@ only a `completed` event.
 however the call ended. `outcome` is `answered`, `voicemail`, `dismissed` or
 `abandoned`, with `reason` on a dismissal (`no-digits`, `rate-limited`,
 `too-many-attempts`, `no-answer`).
+
+On a box answering several numbers both events carry `line` — which is what an
+automation routes on, announcing the business line in the office and the house
+line everywhere. It is absent on the default line, so a box with one number
+sends exactly the payload it always did.
+
+Only inbound calls produce events. An outbound call placed through `*4` rings
+nothing in this house and ends somewhere doorman cannot see, so there is
+nothing here to announce; it is in the call log instead.
 
 Add `WEBHOOK_TOKEN` if the receiver wants `Authorization: Bearer`. HA's
 `/api/webhook/<id>` endpoints do not.

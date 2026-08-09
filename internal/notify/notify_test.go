@@ -127,6 +127,55 @@ func TestARingingEventCarriesNoOutcome(t *testing.T) {
 	}
 }
 
+// Which number was rung is exactly what an announcement wants to route on —
+// the business line on the office speaker, the house line everywhere — so it
+// rides on the ringing event, not only the completed one.
+func TestTheLineReachesTheEndpointOnBothEvents(t *testing.T) {
+	rec := newReceiver(t)
+	w := open(t, notify.Options{URL: rec.URL})
+
+	r := record()
+	r.Line = "biz"
+	at := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	w.Post(notify.FromRecord(notify.EventRinging, at, r))
+	w.Post(notify.FromRecord(notify.EventCompleted, at, r))
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, got := range rec.got() {
+		if got["line"] != "biz" {
+			t.Errorf("event %d: line = %v, want biz", i, got["line"])
+		}
+	}
+}
+
+// A box answering one number sends exactly the payload it sent before lines
+// existed. An absent line means the default one, the same as everywhere else.
+func TestTheDefaultLineAddsNothingToThePayload(t *testing.T) {
+	b, err := json.Marshal(notify.FromRecord(notify.EventCompleted, time.Now(), record()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, absent := range []string{"line", "direction"} {
+		if strings.Contains(string(b), `"`+absent+`"`) {
+			t.Errorf("a default-line inbound payload carries %q: %s", absent, b)
+		}
+	}
+}
+
+// FromRecord is a projection, so a field the record grows must not be silently
+// dropped on the way out. Nothing posts an outbound event today — the console
+// has no notifier — but the projection is what would carry it.
+func TestFromRecordDropsNoField(t *testing.T) {
+	r := record()
+	r.Line, r.Direction = "biz", calls.DirectionOutbound
+	e := notify.FromRecord(notify.EventCompleted, time.Now(), r)
+	if e.Line != "biz" || e.Direction != calls.DirectionOutbound {
+		t.Errorf("line = %q direction = %q, want the record's own", e.Line, e.Direction)
+	}
+}
+
 // ── redaction ───────────────────────────────────────────────────────────
 
 // The destination is another program on the network, so the default is the
@@ -181,6 +230,9 @@ func TestNoFieldCanCarryEnteredDigits(t *testing.T) {
 	b, err := json.Marshal(notify.Event{
 		Type: notify.EventCompleted, Caller: "+15125550100",
 		Extension: "Kids", PIN: "valid",
+		// Every field added since, filled in, so a new one that could hold a
+		// PIN fails here rather than in review.
+		Line: "biz", Direction: calls.DirectionOutbound,
 	})
 	if err != nil {
 		t.Fatal(err)

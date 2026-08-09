@@ -246,6 +246,12 @@ the router multiplexes.** Asterisk already knows the dialled number
 Ordered into four groups. **7a is a hard prerequisite for the rest; 7b–7d are
 independent of each other.**
 
+**All four have landed** — one box, several numbers, one provider. What is left
+under 7b is the schedules-at-line-scope item, which is a `[[schedules]]`
+question rather than a line one. Several *providers* is Phase 2 of
+`.plans/s01-multiple-DIDs/readme.md` and is a materially harder problem: it
+changes how a call leaves the building.
+
 ---
 
 ### 7a. The routing spine
@@ -357,17 +363,40 @@ resolves them; `internal/lobby/console.go` is `*4`.
       ventures nobody remembers which digit is which. A menu that says the
       numbers out loud beats a mapping you have to memorise.
       See `.plans/s01-multiple-DIDs/readme.md`.
-- [ ] Outbound calls in the call log. Deferred to 7d with the rest of per-line
-      observability: it wants a direction on the record, not just a line.
+- [x] Outbound calls in the call log. Landed in 7d, where it belonged: it
+      wanted a direction on the record, not just a line.
 
 **Files:** `asterisk/extensions.conf`, `internal/policy`, `internal/render`,
 `internal/lobby`, `cmd/doorman`.
 
 ### 7d. Per-line observability
 
-- [ ] `line` field on the call record (one log, not one per line, so a whole
-      day still reads in order).
-- [ ] `doorman calls --line biz`.
+**Done, and this closes Phase 1** — several numbers on one provider, each with
+its own rules, its own outbound identity, and now its own readable history.
+Phase 2 (several *providers*) is a separate problem and starts at `trunks.toml`.
+
+- [x] `line` field on the call record (one log, not one per line, so a whole
+      day still reads in order). Absent for the default line, so a box with one
+      number writes byte-identical records and a record from an older doorman
+      still means what it says. `calls.Record.LineOrDefault` resolves it.
+- [x] `direction` on the record, and outbound console calls recorded. Not in
+      7c because the outcome vocabulary there is about who answered an inbound
+      call: an outbound call gets `placed` — doorman sets the caller ID, hands
+      the channel to the dialplan and is out of the call before the far end
+      rings, so "answered" is not a thing it can know. The number goes in
+      `dialled` (full on disk, redacted by `Redacted`, exactly like `caller`),
+      and only a complete number the console accepted lands there — a fumbled
+      half-entry is forgotten, which is where invariant 1's line falls.
+- [x] `doorman calls --line biz`, plus `--direction`, and `--caller` now
+      matches either end of the call.
+- [x] The `LINE` column appears only once a call has arrived on a line with a
+      name, and the direction column only once something has gone out — the
+      same rule `doorman check` follows, so one number never reads the word
+      "line". `CALLER` becomes `NUMBER` in the same breath, because the header
+      is only truthful while every row is inbound.
+- [x] The webhook carries `line` on both events — routing an announcement by
+      which number was rung is exactly what Home Assistant wants — and stays
+      inbound-only: an outbound call rings nothing in this house.
 - [ ] If §4 metrics land, a `line` label — and still **no caller identifiers
       in labels**.
 

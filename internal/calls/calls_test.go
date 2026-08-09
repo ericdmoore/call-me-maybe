@@ -67,14 +67,25 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-// The file holds numbers; anything leaving the box does not.
+// The file holds numbers; anything leaving the box does not. Both ends of the
+// call: a number this house dialled identifies a person exactly as precisely
+// as one that rang it.
 func TestRedactedHidesTheNumber(t *testing.T) {
-	r := rec("+15125550100", calls.OutcomeAnswered).Redacted()
+	r := rec("+15125550100", calls.OutcomeAnswered)
+	r.Dialled = "5125550199"
+	r = r.Redacted()
+
 	if strings.Contains(r.Caller, "5550100") {
 		t.Errorf("Redacted still contains the subscriber digits: %q", r.Caller)
 	}
 	if r.Caller == "" {
 		t.Error("redaction should leave something identifiable, not nothing")
+	}
+	if strings.Contains(r.Dialled, "5550199") {
+		t.Errorf("Redacted left the dialled number readable: %q", r.Dialled)
+	}
+	if r.Dialled == "" {
+		t.Error("a redacted dialled number should still be recognisable")
 	}
 }
 
@@ -87,6 +98,14 @@ func TestNoFieldCanCarryEnteredDigits(t *testing.T) {
 		Extension: "Kids",
 		PIN:       "valid",
 		Attempts:  2,
+		// Every field added since, filled in, so a new one that could hold a
+		// PIN fails here rather than in review. Dialled is the interesting one:
+		// it holds digits somebody typed, and it is on the caller-ID side of
+		// invariant 1 rather than the entered-digits side because a complete
+		// destination is not a credential — a near-miss at the door is.
+		Line:      "biz",
+		Direction: calls.DirectionOutbound,
+		Dialled:   "5125550199",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -179,6 +198,105 @@ func TestFilters(t *testing.T) {
 	}
 	if got[0].Caller != "+15125550102" {
 		t.Errorf("limit kept %s, want the most recent", got[0].Caller)
+	}
+}
+
+// One log for every line, so a whole day reads in order — which makes the line
+// a filter rather than a filename.
+func TestFilteringByLineAndDirection(t *testing.T) {
+	path := tmp(t)
+
+	home := rec("+15125550100", calls.OutcomeAnswered) // the default line: no line field
+	biz := rec("+15125550101", calls.OutcomeAnswered)
+	biz.Line = "biz"
+	out := calls.Record{
+		ID:        "ch-out",
+		Start:     time.Date(2026, 8, 1, 13, 0, 0, 0, time.UTC),
+		Line:      "biz",
+		Direction: calls.DirectionOutbound,
+		Dialled:   "5125550199",
+		Outcome:   calls.OutcomePlaced,
+	}
+	writeAll(t, path, home, biz, out)
+
+	for _, c := range []struct {
+		name string
+		f    calls.Filter
+		want int
+	}{
+		// "default" has to find the records an install with one number
+		// writes, which carry no line at all.
+		{"the default line by name", calls.Filter{Line: "default"}, 1},
+		{"a named line", calls.Filter{Line: "biz"}, 2},
+		{"a line nobody has", calls.Filter{Line: "nope"}, 0},
+		{"inbound", calls.Filter{Direction: calls.DirectionInbound}, 2},
+		{"outbound", calls.Filter{Direction: calls.DirectionOutbound}, 1},
+		{"a line in one direction", calls.Filter{Line: "biz", Direction: calls.DirectionInbound}, 1},
+		// One question — "did we ever speak to this number" — not two.
+		{"a dialled number matches --caller", calls.Filter{Caller: "5550199"}, 1},
+	} {
+		got, _, err := calls.Read(path, c.f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != c.want {
+			t.Errorf("%s: got %d records, want %d", c.name, len(got), c.want)
+		}
+	}
+}
+
+// The compatibility gate for this milestone. Every calls.jsonl in existence
+// was written without a line or a direction, and the zero values have to keep
+// meaning the sensible thing rather than "unknown".
+func TestARecordWrittenBeforeLinesExistedStillReads(t *testing.T) {
+	path := tmp(t)
+	old := `{"id":"ch-1","start":"2026-08-01T12:00:00Z","ms":4200,` +
+		`"caller":"+15125550100","known":"Grandma","outcome":"answered",` +
+		`"answered_by":"PJSIP/kitchen"}`
+	if err := os.WriteFile(path, []byte(old+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, skipped, err := calls.Read(path, calls.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 0 || len(got) != 1 {
+		t.Fatalf("read %d records and skipped %d, want 1 and 0", len(got), skipped)
+	}
+	r := got[0]
+	if r.Known != "Grandma" || r.Outcome != calls.OutcomeAnswered {
+		t.Errorf("an old record came back wrong: %+v", r)
+	}
+	if r.LineOrDefault() != "default" {
+		t.Errorf("line = %q, want the default line", r.LineOrDefault())
+	}
+	if !r.Inbound() {
+		t.Error("a record with no direction must read as inbound")
+	}
+	// And the filters an operator would reach for still find it.
+	for _, f := range []calls.Filter{{Line: "default"}, {Direction: calls.DirectionInbound}} {
+		got, _, err := calls.Read(path, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 {
+			t.Errorf("filter %+v found %d records, want the old one", f, len(got))
+		}
+	}
+}
+
+// New records stay small, and a single-line install writes exactly what it
+// wrote before any of this existed.
+func TestTheDefaultLineAddsNothingToARecord(t *testing.T) {
+	b, err := json.Marshal(rec("+15125550100", calls.OutcomeAnswered))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, absent := range []string{"line", "direction", "dialled"} {
+		if strings.Contains(string(b), `"`+absent+`"`) {
+			t.Errorf("a default-line inbound record carries %q: %s", absent, b)
+		}
 	}
 }
 

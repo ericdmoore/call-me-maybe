@@ -17,6 +17,7 @@ type consoleHarness struct {
 	fake     *fakeARI
 	console  *Console
 	finished chan struct{}
+	rec      *testRecorder
 }
 
 var testConsoleLines = []ConsoleLine{
@@ -28,11 +29,18 @@ var testConsoleLines = []ConsoleLine{
 // as everywhere else in this package: no fake clock, tens of milliseconds.
 func startConsole(t *testing.T, lines []ConsoleLine, tweak ...func(*fakeARI)) *consoleHarness {
 	t.Helper()
-	h := &consoleHarness{fake: newFakeARI(), finished: make(chan struct{})}
+	return startConsoleWith(t, lines, nil, tweak...)
+}
+
+// startConsoleWith is startConsole with the wiring adjustable. Tuning happens
+// before Run so a test never writes to deps a running console is reading.
+func startConsoleWith(t *testing.T, lines []ConsoleLine, tune func(*ConsoleDeps), tweak ...func(*fakeARI)) *consoleHarness {
+	t.Helper()
+	h := &consoleHarness{fake: newFakeARI(), finished: make(chan struct{}), rec: &testRecorder{}}
 	for _, tw := range tweak {
 		tw(h.fake)
 	}
-	h.console = NewConsole("ch-office-1", ConsoleDeps{
+	deps := ConsoleDeps{
 		ARI: h.fake,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Cfg: Config{
@@ -41,8 +49,13 @@ func startConsole(t *testing.T, lines []ConsoleLine, tweak ...func(*fakeARI)) *c
 			InterDigitTimeout:  60 * time.Millisecond,
 		},
 		Lines:      func() []ConsoleLine { return lines },
+		Calls:      h.rec,
 		OnFinished: func(*Console) { close(h.finished) },
-	})
+	}
+	if tune != nil {
+		tune(&deps)
+	}
+	h.console = NewConsole("ch-office-1", deps)
 	go h.console.Run()
 	return h
 }

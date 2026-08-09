@@ -21,13 +21,23 @@ Usage:
 Flags:
   --since <when>     only calls since then: a duration (24h, 7d) or a date
                      (2026-08-01). Default: everything.
-  --outcome <what>   answered | voicemail | dismissed | abandoned
-  --caller <digits>  match part of a caller ID, e.g. the last four
+  --outcome <what>   answered | voicemail | dismissed | abandoned | placed
+  --caller <digits>  match part of the number at the other end — the caller ID
+                     on an inbound call, the number dialled on an outbound one
+  --line <name>      only calls on one line. "default" is the line plain
+                     policy.toml configures, which is every call on a box
+                     answering one number
+  --direction <way>  inbound | outbound
   -n <count>         show only the most recent N (default 20; 0 for all)
   --json             emit raw JSON Lines instead of a table
-  --no-redact        print full caller IDs
+  --no-redact        print full numbers, both ends
 
-Caller IDs are redacted unless --no-redact, so the default output is safe to
+One log for every line, so a whole day reads in order. The LINE column appears
+only once a call has arrived on a line other than the default, and the
+direction column only once something has gone out — a box with one number
+reads exactly as it always did.
+
+Numbers are redacted unless --no-redact, so the default output is safe to
 paste into a bug report or hand to a model. Entered digits and PINs are never
 in the log at all — a record says whether a PIN was valid, never what it was.
 
@@ -39,13 +49,15 @@ func runCalls(args []string) int {
 	fs.Usage = func() { fmt.Print(callsUsage) }
 
 	var (
-		since    = fs.String("since", "", "duration or date")
-		outcome  = fs.String("outcome", "", "answered|voicemail|dismissed|abandoned")
-		caller   = fs.String("caller", "", "substring of a caller ID")
-		limit    = fs.Int("n", 20, "most recent N, 0 for all")
-		asJSON   = fs.Bool("json", false, "raw JSON Lines")
-		noRedact = fs.Bool("no-redact", false, "print full caller IDs")
-		path     = fs.String("path", "", "override CALL_LOG_PATH")
+		since     = fs.String("since", "", "duration or date")
+		outcome   = fs.String("outcome", "", "answered|voicemail|dismissed|abandoned|placed")
+		caller    = fs.String("caller", "", "substring of a number at either end")
+		line      = fs.String("line", "", "only calls on one line")
+		direction = fs.String("direction", "", "inbound|outbound")
+		limit     = fs.Int("n", 20, "most recent N, 0 for all")
+		asJSON    = fs.Bool("json", false, "raw JSON Lines")
+		noRedact  = fs.Bool("no-redact", false, "print full numbers")
+		path      = fs.String("path", "", "override CALL_LOG_PATH")
 	)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -68,7 +80,13 @@ func runCalls(args []string) int {
 		return 1
 	}
 
-	f := calls.Filter{Outcome: *outcome, Caller: *caller, Limit: *limit}
+	f := calls.Filter{
+		Outcome:   *outcome,
+		Caller:    *caller,
+		Line:      *line,
+		Direction: *direction,
+		Limit:     *limit,
+	}
 	if *since != "" {
 		t, err := parseSince(*since, time.Now())
 		if err != nil {
@@ -131,34 +149,98 @@ func parseSince(s string, now time.Time) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("cannot read %q as a time: try 24h, 7d, or 2026-08-01", s)
 }
 
+// printCalls renders the table. Two columns appear only when they have
+// something to say, which is the same rule `doorman check` applies to the word
+// "line": a box answering one number and placing no console calls reads
+// exactly as it did before either feature existed.
 func printCalls(w *os.File, records []calls.Record) {
 	if len(records) == 0 {
 		fmt.Fprintln(w, "No calls match.")
 		return
 	}
 
+	var showLine, showWay bool
+	for _, r := range records {
+		showLine = showLine || r.Line != ""
+		showWay = showWay || !r.Inbound()
+	}
+
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "WHEN\tCALLER\tWHO\tOUTCOME\tDETAIL")
+	head := []string{"WHEN"}
+	if showLine {
+		head = append(head, "LINE")
+	}
+	if showWay {
+		// CALLER is only truthful while every row is inbound. Once one row is a
+		// number this house dialled, the column is the far end of the call
+		// rather than the person who rang, and the header says so.
+		head = append(head, "WAY", "NUMBER")
+	} else {
+		head = append(head, "CALLER")
+	}
+	head = append(head, "WHO", "OUTCOME", "DETAIL")
+	fmt.Fprintln(tw, strings.Join(head, "\t"))
 
 	for _, r := range records {
-		who := r.Known
-		if who == "" {
-			who = r.Extension
+		row := []string{r.Start.Local().Format("2006-01-02 15:04")}
+		if showLine {
+			row = append(row, r.LineOrDefault())
 		}
-		if who == "" {
-			who = "—"
+		if showWay {
+			row = append(row, way(r))
 		}
-
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
-			r.Start.Local().Format("2006-01-02 15:04"),
-			orDash(r.Caller), who, r.Outcome, detail(r))
+		row = append(row, farEnd(r), who(r), r.Outcome, detail(r))
+		fmt.Fprintln(tw, strings.Join(row, "\t"))
 	}
 	_ = tw.Flush()
+}
+
+func way(r calls.Record) string {
+	if r.Inbound() {
+		return "in"
+	}
+	return "out"
+}
+
+// farEnd is the number at the other end of the call.
+func farEnd(r calls.Record) string {
+	if r.Inbound() {
+		return orDash(r.Caller)
+	}
+	// Nothing dialled: the console call ended before a number was accepted, so
+	// there is no far end. "withheld" would be a lie — nobody withheld it.
+	if r.Dialled == "" {
+		return "—"
+	}
+	return r.Dialled
+}
+
+// who is the person or place this call reached. An outbound call reached
+// whoever answered at the other end, which doorman never finds out.
+func who(r calls.Record) string {
+	if w := r.Known; w != "" {
+		return w
+	}
+	if w := r.Extension; w != "" {
+		return w
+	}
+	return "—"
 }
 
 // detail is the one-line "and then what happened" — the reason a call was
 // dismissed, who picked up, how long it rang.
 func detail(r calls.Record) string {
+	// An outbound row says only why it did not go out. Its duration is how long
+	// the console had the handset, not how long anybody talked, and printed
+	// here — beside inbound rows where the same column is exactly that — it
+	// would read as a call length doorman does not know.
+	if !r.Inbound() {
+		if r.Reason != "" {
+			return r.Reason
+		}
+		return "—"
+	}
+
 	var parts []string
 	switch r.Outcome {
 	case calls.OutcomeAnswered:

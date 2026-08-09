@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"callmemaybe/internal/ari"
+	"callmemaybe/internal/calls"
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/policy"
 )
@@ -117,6 +118,22 @@ func TestNoLineArgumentGetsTheDefaultLine(t *testing.T) {
 		if got := lineOf(set.forCall(args, quiet())); got != want {
 			t.Errorf("%s reached line %s, want the default line %s", what, got, want)
 		}
+	}
+}
+
+// The same compatibility gate, in the call log. A named line goes on the
+// record so one log can serve every number; the default line goes on unnamed,
+// so an install with one number writes exactly what it wrote before lines
+// existed and calls.Record.LineOrDefault resolves it on the way back out.
+func TestOnlyANamedLineIsNamedOnTheRecord(t *testing.T) {
+	if got := recordedLine(policy.DefaultLine); got != "" {
+		t.Errorf("recordedLine(default) = %q, want empty", got)
+	}
+	if got := recordedLine("biz"); got != "biz" {
+		t.Errorf("recordedLine(biz) = %q", got)
+	}
+	if got := (calls.Record{Line: recordedLine(policy.DefaultLine)}).LineOrDefault(); got != policy.DefaultLine {
+		t.Errorf("an unnamed record resolves to %q, want the default line", got)
 	}
 }
 

@@ -18,7 +18,8 @@ doorman schema handsets   # just handsets.toml
 doorman schema env        # just the environment variables
 doorman check             # validate a real config and report what it resolves to
 doorman calls --json      # the call log as JSON Lines: one record per call,
-                          # caller IDs redacted unless --no-redact
+                          # numbers redacted unless --no-redact. --line and
+                          # --direction narrow it on a box with several numbers
 doorman help              # every subcommand
 ```
 
@@ -52,6 +53,8 @@ A box answering several phone numbers has one policy file per number: `policy.<l
 Each file's optional `[line]` section carries what makes a number itself: `label` and `number` for identity, `prompts` for a per-line prompt pack overriding `PROMPT_MEDIA_PREFIX`, and `on_no_input` — `dismiss` (the default, and what the lobby has always done), `voicemail`, or `ring-house` — for what a caller who dials nothing gets. That last key is the difference between a curt doorman and a courteous concierge running on one binary.
 
 Outbound, the same section carries `outbound_cid` — what a call placed as this line shows the person being rung — and `outbound_handsets`, the phones that call as it without being asked. A handset no line claims presents plain `policy.toml`'s `outbound_cid`: the primary line, which is also the route 911 leaves by, so there is one answer to "which line am I on when I have not said" rather than two that can disagree. Dial `*4` from any handset to choose a different line for one call; it refuses emergency numbers, because E911 is registered per DID against a street address. The plain dial path needs no doorman at all — the caller ID is baked into the generated PJSIP config by `doorman render` — so a crashed daemon stops neither making nor receiving calls.
+
+Observability follows the same shape: **one** call log for every line, with `line` on the record, so a whole day reads in order and `doorman calls --line biz` narrows it afterwards. A `*4` call is recorded as `direction: outbound` with the number in `dialled` and an outcome of `placed` — doorman hands the channel to the dialplan and never learns whether anybody answered. Both fields are absent for the default line and for inbound, so an install with one number writes byte-identical records and never sees a line column. The event webhook carries `line` too, which is what a Home Assistant automation routes an announcement on; it stays inbound-only, because an outbound call rings nothing in this house.
 
 **Helping someone write a `policy.toml`? Read <https://callmemaybe.cc/llms-policy.txt> first.** It is the complete current key surface, two worked examples, the rules a JSON Schema cannot express, and — the part that matters — an explicit list of keys that appear in the planning docs but do not load. Machine-readable schema at <https://callmemaybe.cc/schema/policy.json>.
 
