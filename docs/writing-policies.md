@@ -289,6 +289,27 @@ handsets = ["kitchen"]
 | `afterhours_ring` | list | Ring these during the window instead of taking a message. |
 | `enabled` | bool | Defaults true. |
 
+### Who to allow-list, and who not to
+
+`[[people]]` bypasses the lobby entirely — those callers ring the house with no
+extension and no PIN. That is the point, and it is also why the list wants one
+rule applied to it:
+
+> **Do not allow-list a number that appears on a website.** Anyone who can read
+> it can present it.
+
+Caller ID is trivially spoofable. What stops that mattering is that an attacker
+has to know *what* to spoof — and a number nobody has published is a number
+nobody can look up. Your sister's mobile is safe to allow-list for exactly that
+reason. Your plumber's is not, and neither is the school's, the surgery's, or
+any business you deal with, however much you trust the people answering.
+
+The test is not whether you trust them. It is whether a stranger can find the
+number and pretend to be them.
+
+Published numbers are not excluded from the house — they dial an extension like
+anyone else. They just do not get the door opened before anyone has checked.
+
 ### Choosing a PIN
 
 **Pick one you will remember.** An extension is meant to be given out — a kid
