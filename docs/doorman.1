@@ -59,11 +59,12 @@ below and
 Exits non\-zero if ARI is unreachable at startup, which is deliberate: a
 lobby daemon that cannot answer calls should fail loudly.
 .TP
-.BI "doorman check [\-handsets " path "] [" path ]
+.BI "doorman check [\-handsets " path "] [\-trunks " path "] [" path ]
 Validate
-.I policy.toml
-and
+.IR policy.toml ,
 .I handsets.toml
+and, when there is one,
+.I trunks.toml
 together and report what they add up to \(em allow\-list size, extension
 count, PIN length, the house ring group, and then every extension with each
 of its settings spelled out, including the ones left at their default. A
@@ -87,6 +88,20 @@ On a box answering several numbers this reports every line it found \(em its
 name, its file, and whether it loads \(em before describing each in turn, and
 notes a PIN that appears on more than one line. It says nothing about lines at
 all when there is only the default one.
+.IP
+With a
+.I trunks.toml
+it also lists the providers, which lines land on each, and \(em prominently \(em
+which trunk would carry a 911 call, saying whether that was
+.B chosen
+.RB ( emergency_trunk )
+or
+.B inferred
+(plain
+.IR policy.toml 's
+.BR "[line] trunk" ).
+Both are silent without one, so a box with a single provider never reads the
+word trunk.
 This is the authority on whether a configuration is usable.
 .TP
 .BI "doorman schema [" name ]
@@ -94,14 +109,16 @@ Print the configuration surface as JSON Schema (draft 2020\-12) on stdout:
 every key, type, pattern, default, and cross\-file reference for
 .IR policy.toml ,
 .IR handsets.toml ,
+.IR trunks.toml ,
 and the environment.
 .I name
 is
 .BR policy ,
 .BR handsets ,
+.BR trunks ,
 or
 .BR env ;
-all three are emitted as one bundle when omitted.
+all of them are emitted as one bundle when omitted.
 .IP
 This exists for tooling and for language models. It describes
 .IR shape ;
@@ -127,7 +144,7 @@ given, or only the named ones. A running daemon picks the change up within a
 second. New PINs are printed to stdout \(em the one place they are ever
 shown \(em and are never written to the logs.
 .TP
-.BI "doorman render [\-handsets " path "] [\-policy " path "] [\-out " dir "] [\-env " path ]
+.BI "doorman render [\-handsets " path "] [\-policy " path "] [\-trunks " path "] [\-out " dir "] [\-env " path ]
 Generate the per\-handset Asterisk configuration from
 .IR handsets.toml :
 PJSIP endpoints, internal numbers, BLF hints, and the ring\-all and page\-all
@@ -152,12 +169,41 @@ Changing a caller ID therefore takes a re\-render and a
 the
 .B *4
 console picks the same change up on the next policy reload.
+.IP
+When a
+.I trunks.toml
+exists, two more files are written: the provider registrations, and one
+inbound dialplan context per trunk with each line's DID routed to it from
+.B [line] number
+and
+.BR "[line] trunk" ,
+matched in every digit format a provider might send. Every generated
+registration carries
+.B line=yes
+and
+.BR endpoint= ,
+the pair that binds inbound calls to their endpoint \(em without both they
+reach the
+.B anonymous
+endpoint and vanish silently. Registration passwords come from
+.B password_env
+exactly as handset passwords do. With no
+.I trunks.toml
+nothing extra is generated and a hand\-written
+.I pjsip.conf
+keeps working, which is every single\-provider install.
+.IP
+Everything written here is an
+.BR output :
+never hand\-edit it, and never commit the PJSIP files, which hold real
+passwords.
 .TP
 .B doorman lsp
 Run a language server over stdio for
-.I policy.toml
+.IR policy.toml ,
+.I handsets.toml
 and
-.IR handsets.toml .
+.IR trunks.toml .
 Diagnostics come from the same validator that guards the daemon, so unknown
 handset ids, bad schedule references, and duplicate PINs are underlined as
 you type, with completions for every cross\-reference. Works in Neovim over
@@ -230,14 +276,26 @@ numbers, and which
 .I .env
 variable holds each SIP password. Changes when hardware is bought.
 .TP
+.I trunks.toml
+.BR Optional .
+The providers: hosts, sub\-accounts, codecs, and which trunk carries 911.
+Changes when you buy a number somewhere new. Not having it is the normal
+state \(em one provider fits in a hand\-written
+.I pjsip.conf
+and nothing is generated for it. Holds no secrets:
+.B password_env
+names a
+.I .env
+variable, and the loader refuses a value that is not shaped like one.
+.TP
 .I .env
 Secrets and tuning. Loaded by systemd's
 .B EnvironmentFile
-in production. Contains the ARI password and every handset password; keep it
-mode 0600.
+in production. Contains the ARI password and every handset and trunk
+password; keep it mode 0600.
 .TP
 .I examples/
-Templates to copy for all three of the above.
+Templates to copy for all of the above.
 .TP
 .I /var/lib/asterisk/sounds/<prefix>/
 Pre\-rendered prompt audio, where
@@ -269,8 +327,11 @@ Must match the
 application named in
 .IR asterisk/extensions.conf .
 .TP
-.BR POLICY_PATH ", " HANDSETS_PATH ", " POLICY_WATCH
+.BR POLICY_PATH ", " HANDSETS_PATH ", " TRUNKS_PATH ", " POLICY_WATCH
 Where the config files are, and whether to reload them on change.
+.I TRUNKS_PATH
+is optional and a missing file is the normal state; the daemon reads it only
+to announce which trunk carries 911.
 .B POLICY_PATH
 also anchors the search for extra lines: any
 .I policy.<line>.toml

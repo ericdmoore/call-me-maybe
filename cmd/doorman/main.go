@@ -99,8 +99,12 @@ const usage = `doorman — the Call Me Maybe lobby daemon
                                 every line it found — policy.<line>.toml
                                 beside policy.toml — and what each resolves to,
                                 including what each presents on an outbound
-                                call and which phones default to it
+                                call and which phones default to it. With a
+                                trunks.toml it also lists the providers, which
+                                lines land on each, and which trunk would carry
+                                911 — saying whether that was chosen or inferred
       -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
+      -trunks path              provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)
       -allow-placeholders       accept the example sentinels; for CI, not operators
   doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
                                 "build" renders audio through piper, ElevenLabs,
@@ -115,10 +119,11 @@ const usage = `doorman — the Call Me Maybe lobby daemon
                                 calls through *4. Needs CALL_LOG_PATH set.
   doorman schema [name]         print the configuration surface as JSON Schema:
                                 every key, type, default, and cross-file
-                                reference for policy.toml, handsets.toml, and
-                                the environment. name is policy, handsets, or
-                                env; all three when omitted. Written to be
-                                read by tooling and by LLMs — see llms.txt
+                                reference for policy.toml, handsets.toml,
+                                trunks.toml, and the environment. name is
+                                policy, handsets, trunks or env; all of them
+                                when omitted. Written to be read by tooling
+                                and by LLMs — see llms.txt
   doorman template <cmd>        list, show, and fill in policy templates:
                                 a template declares questions and the structures
                                 it emits, and this writes ordinary policy TOML
@@ -130,11 +135,17 @@ const usage = `doorman — the Call Me Maybe lobby daemon
                                 each phone presents — read from every line's
                                 [line] outbound_cid and outbound_handsets,
                                 because a handset that picks up and dials never
-                                reaches doorman at all
+                                reaches doorman at all. With a trunks.toml it
+                                also generates the provider registrations and
+                                one inbound context per trunk, with each line's
+                                DID routed to it. Every generated file is an
+                                OUTPUT: never hand-edited, and the PJSIP ones
+                                hold real passwords and are never committed
       -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
-      -policy path              policy file, for outbound caller ID (default $POLICY_PATH or ./policy.toml)
+      -policy path              policy file, for outbound caller ID and DID routes (default $POLICY_PATH or ./policy.toml)
+      -trunks path              provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)
       -out dir                  output directory (default ./asterisk/generated)
-      -env path                 secrets file for handset passwords (default ./.env)
+      -env path                 secrets file for handset and trunk passwords (default ./.env)
   doorman e164 <number>         show how a raw caller ID normalises
   doorman lsp                   language server (stdio) for policy.toml and
                                 handsets.toml — diagnostics from the same
@@ -142,9 +153,11 @@ const usage = `doorman — the Call Me Maybe lobby daemon
                                 completions for handset/group/schedule ids
   doorman version
 
-The three config interfaces: .env (secrets and tuning), handsets.toml (the
-hardware — what exists), policy.toml (the rules — who gets in, what rings,
-when). render makes handsets.toml authoritative over the Asterisk side.
+The config interfaces: .env (secrets and tuning), handsets.toml (the hardware —
+what exists), policy.toml (the rules — who gets in, what rings, when), and
+optionally trunks.toml (the providers — where numbers come from). render makes
+handsets.toml and trunks.toml authoritative over the Asterisk side; without a
+trunks.toml the trunk stays hand-written, which is every single-provider box.
 
 https://callmemaybe.cc — Apache 2.0; bundled audio CC BY-SA 4.0 (LICENSES.md)
 `
@@ -198,6 +211,7 @@ func loadDotEnv(path string) map[string]string {
 func runCheck(args []string) int {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
 	handsetsFlag := fs.String("handsets", "", "handsets file (default $HANDSETS_PATH or ./handsets.toml)")
+	trunksFlag := fs.String("trunks", "", "provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)")
 	// Structural validation of the shipped examples, whose PINs are the
 	// placeholder sentinel. CI uses this; an operator never should, which is
 	// what makes a freshly copied config fail loudly until `doorman init` runs.
@@ -210,12 +224,24 @@ func runCheck(args []string) int {
 	path = policyPathArg(path)
 	handsetsPath := handsetsPathArg(*handsetsFlag)
 
+	// The provider inventory, when there is one. check always passes it —
+	// even absent — because that is what lets a line naming a trunk be told
+	// there is no trunks.toml, rather than having the reference quietly
+	// ignored the way the daemon ignores it.
+	trunksPath := trunksPathArg(*trunksFlag)
+	trunks, terr := policy.LoadTrunks(trunksPath)
+	if terr != nil {
+		fmt.Fprintf(os.Stderr, "✗ %s is not valid\n\n%v\n", trunksPath, terr)
+		return 1
+	}
+
 	// StrictUnknownKeys is set here and nowhere else that loads a policy. An
 	// operator is reading this output and a typo is exactly what they came to
 	// find; the daemon, which cannot afford to refuse a file, only warns.
 	opts := policy.Options{
 		AllowPlaceholders: *allowPlaceholders,
 		StrictUnknownKeys: true,
+		Trunks:            trunks,
 	}
 
 	files, ignored := policy.DiscoverLines(path)
@@ -274,6 +300,10 @@ func runCheck(args []string) int {
 	if !printOutbound(results) {
 		rc = 1
 	}
+	// Both silent without a trunks.toml: a box with one provider has nothing
+	// to choose between and should never have to read the word "trunk".
+	printTrunks(trunks, results)
+	printEmergency(trunks, results)
 	return rc
 }
 
@@ -604,14 +634,25 @@ func runRender(args []string) int {
 	fs := flag.NewFlagSet("render", flag.ExitOnError)
 	handsetsFlag := fs.String("handsets", "", "inventory file (default $HANDSETS_PATH or ./handsets.toml)")
 	policyFlag := fs.String("policy", "", "policy file, for outbound caller ID (default $POLICY_PATH or ./policy.toml)")
+	trunksFlag := fs.String("trunks", "", "provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)")
 	outFlag := fs.String("out", "./asterisk/generated", "output directory")
-	envFlag := fs.String("env", "./.env", "secrets file for handset passwords")
+	envFlag := fs.String("env", "./.env", "secrets file for handset and trunk passwords")
 	_ = fs.Parse(args)
 
 	handsetsPath := handsetsPathArg(*handsetsFlag)
 	handsets, _, err := policy.LoadHandsets(handsetsPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 1
+	}
+
+	// Absent is the common case and generates nothing extra: one provider, a
+	// hand-written pjsip.conf, and this command does exactly what it did
+	// before trunks were an inventory.
+	trunksPath := trunksPathArg(*trunksFlag)
+	trunks, err := policy.LoadTrunks(trunksPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %s: %v\n", trunksPath, err)
 		return 1
 	}
 
@@ -624,17 +665,19 @@ func runRender(args []string) int {
 		return v, ok && v != ""
 	}
 
-	// Outbound identity is the one thing render needs from the *rules* rather
-	// than the inventory: [line] outbound_cid says what a line presents, and
-	// [line] outbound_handsets says which phones call as it. It has to be
-	// baked into the endpoint here because a handset that picks up and dials
-	// never reaches doorman — which is precisely why outbound calling survives
-	// doorman being down.
-	plan, err := renderOutbound(policyPathArg(*policyFlag), handsetsPath)
+	// Outbound identity is the one thing the handset half of render needs from
+	// the *rules* rather than the inventory: [line] outbound_cid says what a
+	// line presents, and [line] outbound_handsets says which phones call as it.
+	// It has to be baked into the endpoint here because a handset that picks up
+	// and dials never reaches doorman — which is precisely why outbound calling
+	// survives doorman being down. The trunk half needs [line] number and
+	// [line] trunk from the same read.
+	lineIDs, err := renderLines(policyPathArg(*policyFlag), handsetsPath, trunks)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return 1
 	}
+	plan := newOutboundPlan(lineIDs)
 	if len(plan.Conflicts) > 0 {
 		// Refused rather than resolved: this file decides what every customer
 		// sees, and a guess baked into it is invisible from this end.
@@ -657,30 +700,74 @@ func runRender(args []string) int {
 		return 1
 	}
 
+	// Rendered before anything is written, so a trunk with a missing secret
+	// cannot leave half a phone plant on disk.
+	var trunkFrags *render.TrunkFragments
+	if trunks.Present() {
+		ids := make([]string, 0, len(handsets))
+		for _, h := range handsets {
+			ids = append(ids, h.ID)
+		}
+		trunkFrags, err = render.BuildTrunks(trunks.All(), renderTrunkLines(lineIDs), ids, env)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+			return 1
+		}
+	}
+
 	if err := os.MkdirAll(*outFlag, 0o750); err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return 1
 	}
-	pjsipPath := filepath.Join(*outFlag, "pjsip_handsets.conf")
-	planPath := filepath.Join(*outFlag, "extensions_handsets.conf")
-	// 0640: the PJSIP fragment contains real SIP passwords.
-	if err := os.WriteFile(pjsipPath, []byte(frags.PJSIP), 0o640); err != nil {
-		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+	// 0640 throughout: the PJSIP fragments contain real SIP passwords.
+	written := []string{}
+	write := func(name, body string) bool {
+		path := filepath.Join(*outFlag, name)
+		if err := os.WriteFile(path, []byte(body), 0o640); err != nil {
+			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+			return false
+		}
+		written = append(written, path)
+		return true
+	}
+	if !write("pjsip_handsets.conf", frags.PJSIP) || !write("extensions_handsets.conf", frags.Dialplan) {
 		return 1
 	}
-	if err := os.WriteFile(planPath, []byte(frags.Dialplan), 0o640); err != nil {
-		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
-		return 1
+	if trunkFrags != nil {
+		if !write("pjsip_trunks.conf", trunkFrags.PJSIP) || !write("extensions_trunks.conf", trunkFrags.Dialplan) {
+			return 1
+		}
 	}
 
-	fmt.Printf("✓ rendered %d handset(s) from %s\n\n", frags.Generated, handsetsPath)
-	fmt.Printf("  %s\n  %s\n\n", pjsipPath, planPath)
-	fmt.Println("Install on the Pi:")
-	fmt.Println("  sudo cp " + pjsipPath + " " + planPath + " /etc/asterisk/")
+	fmt.Printf("✓ rendered %d handset(s) from %s\n", frags.Generated, handsetsPath)
+	if trunkFrags != nil {
+		fmt.Printf("✓ rendered %d trunk(s) and %d DID route(s) from %s\n",
+			trunkFrags.Trunks, trunkFrags.Routes, trunksPath)
+	}
+	fmt.Println()
+	for _, p := range written {
+		fmt.Printf("  %s\n", p)
+	}
+	fmt.Println("\nInstall on the Pi:")
+	fmt.Println("  sudo cp " + strings.Join(written, " ") + " /etc/asterisk/")
 	fmt.Println("  sudo chown asterisk:asterisk /etc/asterisk/*_handsets.conf")
 	fmt.Println("  sudo chmod 640 /etc/asterisk/*_handsets.conf")
+	if trunkFrags != nil {
+		fmt.Println("  sudo chown asterisk:asterisk /etc/asterisk/*_trunks.conf")
+		fmt.Println("  sudo chmod 640 /etc/asterisk/*_trunks.conf")
+	}
 	fmt.Println("  sudo asterisk -rx 'pjsip reload' && sudo asterisk -rx 'dialplan reload'")
-	fmt.Println("\nThe PJSIP fragment contains real passwords — never commit it.")
+	if trunkFrags != nil {
+		fmt.Println("\nThe trunk files are only read once pjsip.conf and extensions.conf")
+		fmt.Println("#include them — see RUNBOOK \"Add a second provider\". Delete the")
+		fmt.Println("hand-written trunk block from pjsip.conf when you do, or the box will")
+		fmt.Println("register twice.")
+		if trunkFrags.Routes == 0 {
+			fmt.Println("\nNo DID routes: no line sets both [line] trunk and [line] number, so")
+			fmt.Println("every inbound call lands on the default line.")
+		}
+	}
+	fmt.Println("\nThe PJSIP fragments contain real passwords — never commit them.")
 	return 0
 }
 
@@ -912,6 +999,18 @@ func runService() {
 	}()
 
 	announceOutbound(lines, log)
+
+	// The provider inventory, read for exactly one thing: saying which trunk
+	// carries 911 and whether that was chosen or inferred. Nothing on the call
+	// path routes on a trunk yet, so a trunks.toml that will not load is a
+	// warning rather than a refusal to start — the phone must keep answering,
+	// and this file has no say in whether it can.
+	if trunks, err := policy.LoadTrunks(cfg.TrunksPath); err != nil {
+		log.Warn("trunk inventory will not load — the phone is unaffected, but nothing can say which trunk carries 911",
+			"path", cfg.TrunksPath, "err", err)
+	} else {
+		announceEmergencyTrunk(trunks, lines.deflt.Policy().Line().Trunk, log)
+	}
 
 	client.Connect(func(ev ari.Event) { route(ev, reg, lines, client, log) })
 	log.Info("doorman is on duty", "app", cfg.ARIApp, "version", version)

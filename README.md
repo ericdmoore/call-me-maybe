@@ -176,7 +176,7 @@ call-me-maybe/
 ├── CLAUDE.md              project memory — invariants, conventions, commands
 ├── .claude/skills/        /diagnose-call, /add-person, /ship
 ├── cmd/doorman/           entrypoint, subcommands, ARI event router
-├── internal/render/       handsets.toml → generated Asterisk config
+├── internal/render/       handsets.toml + trunks.toml → Asterisk config
 ├── internal/lobby/        the state machine — lobby, bouncer, ring groups + fake-ARI tests
 ├── internal/policy/       allow-list, PINs, E.164, hot reload, PIN rotation
 ├── internal/ari/          thin typed ARI client (REST + reconnecting WebSocket)
@@ -254,6 +254,13 @@ Configuration is three files with three jobs: **`.env`** holds secrets,
 per-handset Asterisk config from it, so inventory and dialplan can't drift),
 and **`policy.toml`** holds the rules — allow-list, extensions, ladders, and
 named `[[schedules]]` referenced as `afterhours = "school-night"`.
+
+There is an optional fourth, **`trunks.toml`**, and not having it is the
+normal state: one provider fits comfortably in the hand-written
+`asterisk/pjsip.conf` this repo ships. Declare providers there when you have
+more than one, and `doorman render` generates their registrations and one
+inbound dialplan context each as well. See the runbook's "Add a second
+provider".
 
 Editing those files gets IDE support: `doorman lsp` is a language server
 whose diagnostics come from the same validator that guards the daemon —
@@ -430,10 +437,10 @@ separation is a comment on dependencies generally.
 
 `doorman schema` prints the whole configuration surface as JSON Schema — every
 key, type, pattern, default, and cross-file reference across `policy.toml`,
-`handsets.toml`, and the environment:
+`handsets.toml`, `trunks.toml`, and the environment:
 
 ```bash
-doorman schema             # all three, as one bundle
+doorman schema             # all of them, as one bundle
 doorman schema policy      # or just one
 ```
 

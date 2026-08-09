@@ -71,6 +71,7 @@ jobs:
         run: |
           go run ./cmd/doorman check --allow-placeholders \
             --handsets examples/handsets.example.toml \
+            --trunks examples/trunks.example.toml \
             examples/policy.example.toml
 
       # And the inverse: copying the examples verbatim must fail, or the
@@ -107,7 +108,7 @@ jobs:
       # wiring break must fail the build, not just be caught by unit tests.
       - name: doorman schema emits valid JSON
         run: |
-          for name in "" policy handsets env; do
+          for name in "" policy handsets trunks env; do
             ./bin/doorman schema $name | python3 -m json.tool >/dev/null \
               || { echo "::error::doorman schema $name is not valid JSON"; exit 1; }
           done

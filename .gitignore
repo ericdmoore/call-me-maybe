@@ -2,6 +2,10 @@
 .env
 policy.toml
 handsets.toml
+# trunks.toml holds no secrets by design (password_env names a variable), but
+# it is local inventory like the two above, and a sub-account username is not
+# something to publish either.
+trunks.toml
 asterisk/pjsip.conf
 asterisk/ari.conf
 # Rendered output: pjsip_handsets.conf contains real SIP passwords.

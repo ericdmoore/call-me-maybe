@@ -29,6 +29,10 @@
 #                                       #   dismiss     (default) "good day"
 #                                       #   voicemail   the [house] mailbox
 #                                       #   ring-house  the house rings
+# trunk       = "voipms"                # ONLY with a trunks.toml: which
+#                                       # provider this number arrives on. With
+#                                       # one provider leave it out — the
+#                                       # hand-written pjsip.conf is the answer
 #
 # "voicemail" needs a [house] voicemail to land in. "ring-house" means anyone
 # patient enough to say nothing reaches the house, so the allow-list becomes a

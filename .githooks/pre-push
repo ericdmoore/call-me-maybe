@@ -35,6 +35,7 @@ secrets=$(git ls-files -- \
 	.env \
 	policy.toml \
 	handsets.toml \
+	trunks.toml \
 	asterisk/pjsip.conf \
 	asterisk/ari.conf \
 	'asterisk/generated/*')
@@ -75,6 +76,7 @@ step "validating example config"
 # strict check by design. This still verifies every cross-reference in them.
 go run ./cmd/doorman check --allow-placeholders \
 	--handsets examples/handsets.example.toml \
+	--trunks examples/trunks.example.toml \
 	examples/policy.example.toml >/dev/null \
 	|| fail "examples/policy.example.toml does not validate"
 

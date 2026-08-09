@@ -233,6 +233,18 @@
             "/var/lib/asterisk/sounds/\u003cprefix\u003e/",
             "PROMPT_MEDIA_PREFIX in the environment"
           ]
+        },
+        "trunk": {
+          "description": "The provider this line's number lives at — an id from trunks.toml. Optional, and absent is the whole of a single-provider install: one registration, one hand-written or generated trunk, and the dialplan decides. Inbound it is what puts this line's DID route in the right provider's context when `doorman render` generates them. Outbound it is what will choose the path out of the building once routing by trunk lands.",
+          "type": "string",
+          "x-cross-references": [
+            "trunks.toml [[trunks]].id"
+          ],
+          "x-rules": [
+            "Validated as a cross-file reference by `doorman check` and `doorman render`, exactly as a handset id is. The daemon does not validate it, because nothing on the call path routes on a trunk yet and refusing to load a policy over a reference nothing reads would be the wrong trade.",
+            "plain policy.toml's trunk is the one 911 inherits when trunks.toml sets no emergency_trunk.",
+            "A route is generated only for a line that has BOTH trunk and number. A line with a trunk and no number gets a context but no DID route, and calls for it fall through to the default line."
+          ]
         }
       },
       "additionalProperties": false,

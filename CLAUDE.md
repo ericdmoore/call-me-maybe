@@ -19,9 +19,10 @@ prioritised backlog with acceptance criteria is `docs/TASKS.md`.
 
 **Start with `./bin/doorman schema`.** It prints the entire configuration
 surface — every key, type, default, and cross-file reference for
-`policy.toml`, `handsets.toml`, and the environment — as JSON Schema. Faster
-and more reliable than reading `internal/policy` to work out what a valid
-config looks like. `doorman schema policy|handsets|env` narrows it. It
+`policy.toml`, `handsets.toml`, `trunks.toml`, and the environment — as JSON
+Schema. Faster and more reliable than reading `internal/policy` to work out
+what a valid config looks like. `doorman schema policy|handsets|trunks|env`
+narrows it. It
 describes *shape*; `doorman check` remains the authority on *validity*,
 because JSON Schema cannot express the cross-file references or the ~30
 semantic rules (those appear as `x-cross-references` and `x-rules`).
@@ -38,7 +39,7 @@ make run                   # dev run with .env sourced (needs reachable Asterisk
 ./bin/doorman schema       # the config surface as JSON Schema — read this first
 ./bin/doorman check        # validate policy.toml, print what it resolves to
 ./bin/doorman rotate       # rotate extension PINs (all, or by label)
-./bin/doorman render       # handsets.toml → generated Asterisk config
+./bin/doorman render       # handsets.toml (+ trunks.toml) → Asterisk config
 ./bin/doorman lsp          # language server for the config files (stdio)
 ./bin/doorman e164 <num>   # show how a raw caller ID normalises
 ./scripts/smoke.sh         # full deployment verification, run ON the Pi
@@ -76,7 +77,8 @@ Layout:
   reuse `policy.LintSplit`, one problem per squiggle. stdout is protocol —
   never print to it in lsp mode.
 - `internal/render` — generates per-handset Asterisk config from
-  handsets.toml; secrets substituted from env, never stored in the file.
+  handsets.toml, and the trunk registrations plus inbound contexts from
+  trunks.toml; secrets substituted from env, never stored in either file.
 - `internal/notify` — the event webhook. One endpoint, one JSON event per
   ring and per completed call, so Home Assistant can announce or flash
   something. Same non-blocking shape as `internal/calls`, and doorman
@@ -85,9 +87,19 @@ Layout:
 
 Config interfaces: `.env` (secrets + tuning), `handsets.toml` (hardware
 inventory — source of truth for the generated Asterisk config), `policy.toml`
-(rules: allow-list, extensions, ladders, `[[schedules]]`). Each file owns its
-sections exclusively; the loader rejects sections in the wrong file rather
-than merging, and the legacy single-file layout still loads.
+(rules: allow-list, extensions, ladders, `[[schedules]]`), and optionally
+`trunks.toml` (the providers — source of truth for the generated trunk config
+and inbound contexts). Each file owns its sections exclusively; the loader
+rejects sections in the wrong file rather than merging and names the file they
+belong in, and the legacy single-file layout still loads.
+
+**No `trunks.toml` is the normal state and the compatibility gate.** Without
+one, `doorman render` generates only the handset files and the hand-written
+`asterisk/pjsip.conf` keeps working — which is every single-provider install.
+Nothing on the call path routes on a trunk yet: `[line] trunk` decides where
+inbound DIDs are routed by the generated dialplan, and `emergency_trunk`
+settles where 911 *will* go. Outbound routing by trunk is unbuilt (M2.3), and
+`doorman check` says so rather than implying otherwise.
 
 ## Hard invariants
 
@@ -130,6 +142,16 @@ Break these and the phone fails in ways that look like working software.
    lobby is deaf and every stranger is dismissed. No runtime symptom other
    than "nobody can ever get in".
 
+9b. **Every trunk registration carries `line=yes` *and* `endpoint=<id>`.**
+   That pair binds inbound traffic on a registration to its endpoint, which
+   is what removes the need for an `identify` block, a provider IP allow-list
+   and any port forward. Without both, inbound calls hit the `anonymous`
+   endpoint and vanish — no error, no log line, just a number that never
+   rings. `internal/render.registrationBinding` is the one place that emits
+   them and `TestEveryRegistrationBindsInboundToItsEndpoint` is the guard.
+   Do not generate an `identify` block instead: an IP allow-list goes stale
+   silently the day a provider adds a media server.
+
 10. **The call log is never an input.** Nothing on the call path may read
    `calls.jsonl` to decide anything. The moment something does — "this
    number has called five times, admit it" — the rate limiter's
@@ -143,9 +165,9 @@ Break these and the phone fails in ways that look like working software.
    whether a PIN was valid, never what was typed.
 
 9a. **Generated files are outputs.** `asterisk/generated/*` and the
-   installed `*_handsets.conf` come from `doorman render`; never hand-edit
-   them or commit them (the PJSIP one holds real passwords). Change
-   handsets.toml and re-render.
+   installed `*_handsets.conf` and `*_trunks.conf` come from `doorman
+   render`; never hand-edit them or commit them (both PJSIP ones hold real
+   passwords). Change handsets.toml or trunks.toml and re-render.
 
 ## Conventions
 
@@ -217,9 +239,10 @@ exposure, plus TTS provider terms. Reject contributions that cross it.
 
 ## Secrets
 
-`.env`, `policy.toml`, `asterisk/pjsip.conf`, and `asterisk/ari.conf` are
-gitignored and contain real credentials. The `.example` variants are the
-committed ones. Never commit a real VoIP.ms sub-account password, handset
-password, ARI password, or a real PIN — including in a test fixture or a
-commit message. Test fixtures use `555-01xx` numbers, which are reserved for
+`.env`, `policy.toml`, `handsets.toml`, `trunks.toml`, `asterisk/pjsip.conf`,
+and `asterisk/ari.conf` are gitignored; all but `trunks.toml` contain real
+credentials, and that one is gitignored because a sub-account username is
+local inventory too. The `.example` variants are the committed ones. Never
+commit a real VoIP.ms sub-account password, trunk password, handset password,
+ARI password, or a real PIN — including in a test fixture or a commit message. Test fixtures use `555-01xx` numbers, which are reserved for
 fiction.

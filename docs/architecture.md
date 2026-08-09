@@ -27,6 +27,77 @@ this wrong and inbound calls hit the `anonymous` endpoint and vanish.
 Viable providers: VoIP.ms, Telnyx, Flowroute, most traditional ITSPs. Not
 viable: anything that only does IP authentication to a fixed address.
 
+## Why trunks became an inventory
+
+`asterisk/pjsip.conf.example` is one worked VoIP.ms trunk, hand-maintained.
+That is the right answer for one provider and it still is — `trunks.toml` is
+optional, and with no such file `doorman render` generates only the handset
+config and the hand-written trunk keeps working untouched.
+
+Several providers turn it into a data problem. The same handful of fields per
+provider, four PJSIP objects each, and — this is the part that grows — one
+inbound dialplan context per registration with one route per DID inside it.
+That is providers × numbers, all of it mechanical, all of it derived from
+`[line] number` and `[line] trunk`. So `trunks.toml` is rendered exactly the
+way `handsets.toml` already is: an inventory, provider-specific fields,
+credentials named rather than written (`password_env`), and generated files
+that are outputs nobody hand-edits.
+
+The symmetry is the point. It reuses `internal/render`, its tests, and the
+rule about generated files, and it turns "support more providers" from a
+documentation problem into a data one — a new provider is a TOML block rather
+than a wiki page.
+
+**Render generates the inbound contexts, rather than the operator writing
+them.** Three reasons, in order of weight. The contexts and their routes are
+the part that grows combinatorially, and they are the part that is purely
+derived. Hand-writing them means keeping two files in agreement about which
+number belongs to which line, which is the drift `doorman render` exists to
+remove. And a generated route can match a DID in every digit format a provider
+might send — ten digits, eleven, full E.164 — which deletes the "watch
+`asterisk -rvvv` to find out which one arrives" step from the runbook
+altogether. It costs two extra lines per DID and they never fire.
+
+What is *not* generated: `identify` blocks. With `line=yes` and `endpoint=` on
+the registration they are redundant, and an IP allow-list is a list that goes
+stale silently the day a provider adds a media server. A provider that can
+only do IP authentication is out of scope and needs a hand-written block.
+
+**Rejected: trunk settings inside each policy file.** A trunk is shared
+infrastructure that several lines point at, not a property of one line.
+Putting it in policy would duplicate host, codecs and credentials per line and
+make "change the POP" an edit in N files.
+
+## Which trunk carries 911
+
+With one trunk there is one way out. With several, something has to choose,
+and the wrong choice is the most consequential bug this project could ship.
+
+**The primary line is the default for everything unqualified, and the CLI
+never lets you wonder which it is.** `emergency_trunk` in `trunks.toml` wins
+if it is set; unset, 911 leaves by plain `policy.toml`'s `[line] trunk` — the
+unsuffixed file, which is already the default outbound identity. One rule,
+two jobs, so "which line am I on when I have not said" has one answer rather
+than two that can drift apart. `doorman check` and every startup print which
+trunk it is and whether that was **chosen or inferred**.
+
+Requiring an explicit designation was the first instinct and it is wrong: it
+creates a state where somebody forgot and 911 has no route. Defaulting to *the
+first declared trunk* was the second, and it is also wrong — a default derived
+from file order moves silently when a block is added at the top of a file.
+Naming `policy.toml` removes the ordering question entirely.
+
+Not inferred from the line the caller is on, for two reasons. Whoever grabs the
+nearest handset has no idea which line they are on. And E911 is registered per
+DID against a street address, so the trunk carrying it must be the one whose
+address is filed — which is why a trunk can declare `e911` and `doorman check`
+reports "unknown" rather than guessing when it does not.
+
+Outbound routing by trunk is not built yet, so today `_911` still leaves by the
+dialplan line that names one trunk. The configuration surface is settled ahead
+of it deliberately: retrofitting the key that decides where emergency calls go
+is worse than adding it before anything reads it.
+
 ## Event routing
 
 ARI events arrive on one WebSocket for the whole application, so doorman keeps

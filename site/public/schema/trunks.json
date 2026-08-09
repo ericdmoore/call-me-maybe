@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://callmemaybe.cc/schema/trunks.json",
+  "title": "trunks.toml — the provider inventory",
+  "description": "The providers this box registers with. Optional, and its absence is the compatibility gate: with no trunks.toml `doorman render` generates only the handset config and a hand-written pjsip.conf keeps working exactly as it does today. Adding it makes a second provider a TOML block rather than a page of copied PJSIP. Changes when you buy a number somewhere new.",
+  "type": "object",
+  "properties": {
+    "emergency_trunk": {
+      "description": "Which trunk carries 911. Optional: unset, emergency calls leave by the primary line's trunk — the [line] trunk in plain policy.toml, the same file that is already the default for everything unqualified. `doorman check` and every startup print which trunk it is and whether that was chosen or inferred, so the default is never a surprise and there is no state where somebody forgot.",
+      "type": "string",
+      "x-cross-references": [
+        "trunks.toml [[trunks]].id",
+        "policy.toml [line] trunk"
+      ],
+      "x-rules": [
+        "It lives here rather than in a policy file on purpose. Whoever grabs the nearest handset has no idea which line they are on, and E911 is registered per DID against a street address, so the trunk carrying 911 must be the one whose address is filed — not the one belonging to whichever number a caller happens to be on.",
+        "Not \"whichever trunk sorts first\" and not \"the first declared\": a default derived from file order moves silently when a block is added at the top of a file, and this is the most safety-critical route in the system.",
+        "Outbound routing by trunk is not implemented yet. This key settles where 911 will go and is what `doorman check` reports; today an emergency call still leaves by the hand-written dialplan."
+      ]
+    },
+    "trunks": {
+      "description": "Every provider registration this box opens.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "codecs": {
+            "description": "The endpoint's allow= list, in order. ulaw and g722 need no transcoding on a Pi; g729 costs money and would transcode.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+$"
+            },
+            "minItems": 1,
+            "default": [
+              "ulaw",
+              "g722"
+            ]
+          },
+          "context": {
+            "description": "Inbound dialplan context for calls arriving on this trunk, generated into extensions_trunks.conf. One per trunk is what makes several providers work: each registration binds to its own endpoint with its own context, so one [inbound-trunk] becomes one context per provider.",
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+            "default": "from-\u003cid\u003e",
+            "x-rules": [
+              "Two trunks may not share a context — inbound calls could not be told apart."
+            ]
+          },
+          "e911": {
+            "description": "Whether a street address is registered against this trunk's DIDs. Declared rather than inferred: it is the one fact the emergency-trunk decision turns on and the one doorman cannot discover. Absent means unknown, and `doorman check` says \"unknown\" rather than guessing either way.",
+            "type": "boolean",
+            "x-rules": [
+              "Not every provider offers E911 in every area. A provider without it means a phone that cannot call for help, which is a reason to reject the provider rather than a line item to skip.",
+              "This is a supplementary phone on a consumer internet connection. It stops working in a power cut, and nobody should make it a household's only route to emergency services."
+            ]
+          },
+          "expiration": {
+            "description": "Registration lifetime in seconds. Some providers throttle short ones, which is the only reason it is a knob.",
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 86400,
+            "default": 300
+          },
+          "from_domain": {
+            "description": "Domain part of From. Defaults to host.",
+            "type": "string",
+            "default": "the host, without any port"
+          },
+          "from_user": {
+            "description": "What this box puts in From, and the user part of the registration's client URI and contact. Defaults to username, which is what a registration trunk almost always wants; providers that authenticate as one name and expect another in From are why this exists.",
+            "type": "string",
+            "default": "the username"
+          },
+          "host": {
+            "description": "The POP or SIP host this box registers with, optionally with a port. A hostname, not a URL and not a sip: URI.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:\\d{1,5})?$",
+            "x-rules": [
+              "Use the same host everywhere. Mixing POPs between the registration and the AOR causes flapping that looks like a network problem."
+            ]
+          },
+          "id": {
+            "description": "Names the generated PJSIP endpoint and the objects beside it — \u003cid\u003e_auth, \u003cid\u003e_reg, \u003cid\u003e_aor. Referenced from policy.toml as [line] trunk. It is also what the outbound dial string in the dialplan already says (PJSIP/1${EXTEN}@voipms), so keeping the id you already use is what lets a hand-written trunk become a generated one with no dialplan edit.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-cross-references": [
+              "policy.toml [line] trunk",
+              "asterisk/extensions.conf outbound Dial(PJSIP/...@\u003cid\u003e)"
+            ],
+            "x-rules": [
+              "Must be unique, and may not collide with a handset id.",
+              "May not end in _auth, _reg or _aor — render derives those from the id and the blocks would collide."
+            ]
+          },
+          "password_env": {
+            "description": "Name of the .env variable holding this trunk's registration password. The secret itself never appears in this file. `doorman render` substitutes it and fails if unset.",
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "x-cross-references": [
+              "the environment, and examples/.env.example"
+            ],
+            "x-rules": [
+              "Names a variable; never put the password here. The pattern is enforced so that a pasted password fails the load rather than reaching a commit.",
+              "Convention: TRUNK_\u003cID\u003e_PASSWORD, matching handsets.toml's HANDSET_\u003cNAME\u003e_PASSWORD."
+            ]
+          },
+          "provider": {
+            "description": "The company, for display only — \"voip.ms\", \"telnyx\". Nothing routes on it; it is what makes a table of short ids readable in `doorman check`.",
+            "type": "string"
+          },
+          "username": {
+            "description": "The provider sub-account this box registers as.",
+            "type": "string",
+            "x-rules": [
+              "Never the main account login. A compromised Pi should cost a sub-account, not a balance and a DID."
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "host",
+          "username",
+          "password_env"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "trunks"
+  ],
+  "additionalProperties": false,
+  "x-rules": [
+    "`doorman render` generates pjsip_trunks.conf and extensions_trunks.conf from this file. Both are OUTPUTS: never hand-edit them, and never commit the PJSIP one — it holds real registration passwords.",
+    "Every generated registration carries line=yes and endpoint=\u003cid\u003e. That pair is what binds inbound calls arriving on a registration to its endpoint, which is why no identify block and no provider IP allow-list is needed. Get it wrong and inbound calls hit the anonymous endpoint and vanish with no error anywhere.",
+    "One inbound dialplan context per trunk, because each registration binds to its own endpoint with its own context=. Inside it, one route per DID, generated from [line] number and [line] trunk across every policy file.",
+    "A trunk id may not collide with a handset id: both become a PJSIP endpoint named after the id.",
+    "Secrets are named here, never written here. password_env holds the NAME of a .env variable; the loader refuses anything that is not shaped like one, so a pasted password fails loudly instead of being committed.",
+    "Deleting trunks.toml is the whole rollback. There is no migration and no stored state."
+  ]
+}

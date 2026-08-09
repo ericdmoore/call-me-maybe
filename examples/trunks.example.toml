@@ -1,0 +1,96 @@
+# ─────────────────────────────────────────────────────────────
+# Call Me Maybe — the providers: where phone numbers come from.
+#   cp trunks.example.toml trunks.toml
+#   ./bin/doorman check
+#   ./bin/doorman render
+#
+# THIS FILE IS OPTIONAL, and not having it is the normal state. One provider
+# fits comfortably in a hand-written asterisk/pjsip.conf — that is what
+# pjsip.conf.example is, and it keeps working untouched. Nothing here changes
+# for an install that does not create this file.
+#
+# Create it when a second provider turns copying PJSIP blocks into a chore, or
+# when you want `doorman render` to write the inbound dialplan instead of
+# maintaining one context per provider by hand. Adding a provider then becomes
+# a block in this file plus a re-render.
+#
+# Rollback is deleting the file. There is no migration and no stored state.
+#
+# SECRETS ARE NAMED HERE, NEVER WRITTEN HERE. `password_env` holds the NAME of
+# a .env variable; `doorman render` substitutes the value. The loader refuses a
+# password_env that is not shaped like a variable name, so a password pasted
+# into this field fails the load rather than reaching a commit.
+# ─────────────────────────────────────────────────────────────
+
+# ── Which trunk carries 911 ──────────────────────────────────
+# Optional, and unset is never undefined: with no designation, emergency calls
+# leave by the primary line's trunk — the [line] trunk in plain policy.toml,
+# the file that is already the default for everything unqualified. `doorman
+# check` and every startup print which trunk it is and whether that was chosen
+# or inferred, so the default is never a surprise and there is no state where
+# somebody forgot.
+#
+# It lives here rather than in a policy file because whoever grabs the nearest
+# handset has no idea which line they are on, and E911 is registered per DID
+# against a street address: the trunk carrying 911 has to be the one whose
+# address is filed.
+#
+# Set explicitly here. Delete the line and it becomes policy.toml's [line]
+# trunk instead — both are fine, and `doorman check` tells you which one you
+# got. What it is NOT is "the only one declared" or "the first one": a default
+# derived from file order moves silently the day a second block is added above
+# it, and that is unacceptable for this particular route.
+emergency_trunk = "voipms"
+
+# ── VoIP.ms ──────────────────────────────────────────────────
+[[trunks]]
+id       = "voipms"                    # names the generated PJSIP endpoint,
+                                       # and what [line] trunk references. Keep
+                                       # the id your dialplan already dials
+                                       # (PJSIP/1${EXTEN}@voipms) and no
+                                       # dialplan edit is needed.
+provider = "voip.ms"                   # display only; nothing routes on it
+host     = "chicago.voip.ms"           # your POP — use the same one everywhere
+username = "123456_home"               # the SUB ACCOUNT, never the main login
+password_env = "TRUNK_VOIPMS_PASSWORD" # the NAME of a .env variable
+codecs   = ["ulaw", "g722"]            # optional; this is the default
+e911     = true                        # is a street address registered against
+                                       # this trunk's DIDs? Declared rather
+                                       # than guessed — doorman cannot know
+
+# ── A second provider ────────────────────────────────────────
+# Redundancy is the real prize: one provider having a bad afternoon stops
+# being your bad afternoon. Porting is the other one — stand the new provider
+# up beside the old, move numbers, retire the old registration.
+#
+#[[trunks]]
+#id       = "telnyx"
+#provider = "telnyx"
+#host     = "sip.telnyx.com"
+#username = "cmm-home"
+#password_env = "TRUNK_TELNYX_PASSWORD"
+#context  = "from-telnyx"    # optional; defaults to from-<id>
+#from_user   = "cmm-home"    # optional; defaults to username. Some providers
+#from_domain = "sip.telnyx.com"  # authenticate as one name and expect another
+#expiration  = 300           # optional; seconds. Some providers throttle
+#e911     = false            # NOT every provider offers E911 everywhere. A
+                             # provider without it means a phone that cannot
+                             # call for help — a reason to reject the provider,
+                             # not a line item to skip.
+
+# ── Pointing a line at a trunk ───────────────────────────────
+# In policy.toml (or policy.<line>.toml), the [line] section names which of
+# these its number arrives on:
+#
+#   [line]
+#   number = "+15125550142"
+#   trunk  = "telnyx"
+#
+# `doorman render` then puts that DID's route in [from-telnyx], matching every
+# digit format a provider might send — 10-digit, 11-digit and +E.164 — so
+# nobody has to discover which one arrives. A line with a trunk and no number
+# gets no route, and its calls fall through to the default line.
+#
+# What is NOT here yet: outbound routing by trunk. A call still leaves by
+# whatever the dialplan's Dial() line says. `trunk` settles where inbound
+# arrives and where 911 will go.

@@ -12,9 +12,10 @@ rather than to read prose:
 ```bash
 doorman schema            # every config key, type, default, and cross-file
                           # reference as JSON Schema — policy.toml,
-                          # handsets.toml, and the environment
+                          # handsets.toml, trunks.toml, and the environment
 doorman schema policy     # just policy.toml
 doorman schema handsets   # just handsets.toml
+doorman schema trunks     # just trunks.toml (the optional provider inventory)
 doorman schema env        # just the environment variables
 doorman check             # validate a real config and report what it resolves to
 doorman calls --json      # the call log as JSON Lines: one record per call,
@@ -42,11 +43,16 @@ key that was dropped reads as a feature you configured and did not get.
 
 ## Configuration model
 
-Three files, three cadences. Do not merge them; the split is deliberate.
+Three files, three cadences, plus an optional fourth. Do not merge them; the split is deliberate.
 
 - **`.env`** — secrets and tuning. Changes rarely. Template: [examples/.env.example](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/.env.example)
 - **`handsets.toml`** — the hardware: what phones exist. Changes when hardware is bought. `doorman render` generates the per-handset Asterisk config from it, so the inventory and the dialplan cannot drift. Template: [examples/handsets.example.toml](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/handsets.example.toml)
 - **`policy.toml`** — the rules: who gets in, what rings, when. Changes weekly and is safe to hand-edit; an invalid file is rejected on reload and the last good policy stays in service. Template: [examples/policy.example.toml](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/policy.example.toml)
+- **`trunks.toml`** — *optional* — the providers: where numbers come from. Changes when you buy a number somewhere new. Template: [examples/trunks.example.toml](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/trunks.example.toml)
+
+**Not having a `trunks.toml` is the normal state, and is what every one-provider box does.** One registration fits comfortably in a hand-written `asterisk/pjsip.conf`, and with no such file `doorman render` generates only the handset config. Create it when a second provider turns copying PJSIP blocks into a chore: each `[[trunks]]` block becomes an endpoint, an auth, a registration and an AOR, plus one inbound dialplan context per provider with each line's DID routed into it. Every generated registration carries `line=yes` and `endpoint=<id>` — the pair that binds inbound traffic to the endpoint, whose absence makes calls hit the `anonymous` endpoint and vanish with no error anywhere. Passwords are named there (`password_env`) and substituted from `.env` at render time, exactly as handset passwords are; the loader refuses a `password_env` that is not shaped like a variable name. Deleting the file is the whole rollback.
+
+A line names its provider with `[line] trunk = "voipms"`, an id from `trunks.toml`, validated as a cross-file reference the way handset ids are. `trunks.toml` also carries `emergency_trunk`, which settles which provider a 911 call leaves by; unset, it is plain `policy.toml`'s `trunk` — the primary line, already the default for everything unqualified — and `doorman check` and every startup say which it is and whether that was chosen or inferred. Outbound routing by trunk is **not** implemented yet: a call still leaves by whatever the dialplan's `Dial()` line says.
 
 A box answering several phone numbers has one policy file per number: `policy.<line>.toml` beside `policy.toml`, same schema, one independent failure domain each. The dialplan names the line — `Stasis(${DOORMAN_APP},line,biz)` — and bare `policy.toml` is the default line, which is what every call gets on an install with one number. `handsets.toml` is shared; allow-lists, extensions, PINs and rate-limit budgets are per line.
 
