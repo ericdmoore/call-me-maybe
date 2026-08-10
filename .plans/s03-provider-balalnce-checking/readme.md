@@ -2,9 +2,13 @@
 
 Know the trunk is about to die before the phone stops ringing.
 
-**Status:** planned. Nothing started.
+**Status:** **M1 has landed, per trunk** — the capability, a VoIP.ms client and
+`doorman balance` with an exit code cron can use. M4 landed with it rather than
+after it, because `trunks.toml` already existed and retrofitting per-trunk would
+have meant building the thing twice. M2 (the phone call) and M3 (the gauge) are
+open.
 Related: `docs/TASKS.md` §8, `docs/product-extensions.md` §10, issue #5,
-and `.plans/s01-multiple-DIDs` (Phase 2 makes this per-trunk).
+and `.plans/s01-multiple-DIDs` (M2.4, which this closes).
 
 ---
 
@@ -88,7 +92,7 @@ already a stack for them.
 
 ## Milestones
 
-### M1 · The capability
+### M1 · The capability — **done, and per trunk (M4 with it)**
 
 **Build**
 
@@ -100,6 +104,57 @@ already a stack for them.
 
 **Verify:** a real account, a real number, and a postpaid provider reporting
 "none" rather than zero.
+
+**What landed, and the four things the sketch above did not contain.**
+
+**An invoiced provider is in the backend map, and it is the reason the shape
+holds.** Flowroute is registered and deliberately implements nothing but
+`Provider`. Without it, "balance is a capability" would be a claim rather than
+a shape: every entry would satisfy `Balance`, the type assertion would always
+succeed, and the first postpaid provider anybody added would discover the CLI
+had nowhere to put the answer. With it, `doorman balance` says *"Flowroute is
+postpaid — no balance to report"*, which is the sentence this milestone is
+for. The billing model is not a guess: `site/src/data/providers.ts` has
+published Flowroute as postpaid since the comparison page went up. A provider
+whose model is genuinely mixed — Telnyx, CallCentric — is absent rather than
+guessed at, and a trunk naming one is still reported, never skipped.
+
+**Four exit codes, not two.** 0, 1 and 2 as expected, plus **3: nothing was
+low, but something could not be checked at all.** Conflating that with 1 makes
+an expired API key look like an empty account and a network blip look like an
+emergency; conflating it with 0 hides an outage. 1 wins when both happen,
+because a balance known to be low is more actionable than one that is unknown.
+A trunk with no credentials is not 3 — nobody made a mistake — but a
+`api_password_env` naming a variable that is not set is.
+
+**The daemon is kept out structurally, not by promise.** Two tests enforce it:
+nothing under `internal/` may import `internal/provider`, and no file in
+`cmd/doorman` except `balance.go` may mention the package or the credential
+fields. That is the same trick invariant 10 uses on the call log — a direction
+of dependency you cannot violate by accident — and it is what makes "the
+higher-privilege key never reaches the long-running process" a property rather
+than an intention.
+
+**The URL is the credential, and that is the sharp edge in the code.** The
+VoIP.ms API takes `api_username` and `api_password` as query parameters and
+answers a POST with a form body with a SOAP fault, so a GET is not a choice.
+Every transport failure therefore arrives as a `*url.Error` carrying the whole
+URL, password included, and no name-based analyzer can catch it because by
+then the identifier is `err`. `internal/notify` already unwraps for exactly
+this reason; this is the second customer for the rule, and the tests assert
+that no error, no table and no `--json` output ever contains the key. The
+non-200 path refuses to print the body for the same reason: a bot challenge or
+a proxy error page quotes the request line back.
+
+**And the API was verified rather than remembered.** The published docs sit
+behind a bot challenge, so the endpoint, the parameter names and the method
+were confirmed by probing the live API with no credentials on 2026-08-10 —
+`missing_method`, `missing_credentials`, `invalid_credentials`,
+`invalid_method` are its actual vocabulary, and `getBalance` dispatches rather
+than answering `invalid_method`. The success shape is the one thing a
+credential-free probe cannot show; it is corroborated by two independent
+client libraries, and the client fails loudly rather than reporting zero if it
+ever changes.
 
 ### M2 · The phone call
 
@@ -122,10 +177,18 @@ kitchen rings and says the number.
 - Balance as a gauge on the metrics endpoint (TASKS §4).
 - **No account identifiers in labels** — same rule as caller IDs.
 
-### M4 · Per trunk (needs s01 Phase 2)
+### M4 · Per trunk (needs s01 Phase 2) — **done, with M1**
 
 Several trunks means several balances, and the output has to say *which*
 account is low. Falls out of `trunks.toml` almost for free once it exists.
+
+**Built with M1 rather than after it.** `trunks.toml` already existed, so
+building the capability first and retrofitting per-trunk would have meant
+building it twice — once against a single implied account and once against an
+inventory. There is no single-trunk code path here at all: the credentials and
+the threshold are fields on `[[trunks]]`, the table has one row per trunk, and
+the low-balance line names the trunk before it names the number. This closes
+s01 M2.4 and with it Phase 2 of that plan.
 
 ---
 
@@ -143,6 +206,16 @@ sub-account password, which RUNBOOK §1 already says to keep off the Pi.
   down as the provider allows.
 - Never logged. `nologsecrets` should cover the new package the same way it
   covers everything else.
+
+**As built, the daemon does not hold it at all**, which turned the third bullet
+from a caveat into a non-case. `api_username` and `api_password_env` sit on
+`[[trunks]]` following the `password_env` pattern exactly — named, never
+written, and refused unless shaped like a variable name — and only `doorman
+balance` resolves them. The runbook says to run the check off-box and what it
+costs if you do not, and the analyzer covers the new package the same way it
+covers every other. The one thing it *cannot* see is the `*url.Error` trap
+described under M1, which is handled the way `internal/notify` handles it and
+asserted by test rather than by lint.
 
 ---
 

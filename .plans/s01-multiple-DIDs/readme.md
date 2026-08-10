@@ -6,13 +6,14 @@ first on one provider, then across several.
 Reasoning and rejected alternatives: [`arch.md`](arch.md).
 Backlog with acceptance criteria: `docs/TASKS.md` §7.
 
-**Status:** **Phase 1 is complete** — M1.1, M1.2, M1.3 and M1.4 have all
-landed. A household can buy a second number today. **Phase 2 is all but done:**
-M2.1 (`trunks.toml`), M2.2 (lines belong to trunks) and M2.3 (outbound by
-trunk) have landed, so adding a provider is editing TOML and re-rendering, a
-call leaves by its line's provider, and 911 leaves by a designated trunk with
-a fallback rather than by whatever the dialplan hard-codes. M2.4 (per-provider
-health) is what is left.
+**Status:** **Phase 1 and Phase 2 are both complete.** M1.1–M1.4 landed first:
+a household can buy a second number today. M2.1 (`trunks.toml`), M2.2 (lines
+belong to trunks), M2.3 (outbound by trunk) and now M2.4 (per-provider health)
+have all landed, so adding a provider is editing TOML and re-rendering, a call
+leaves by its line's provider, 911 leaves by a designated trunk with a
+fallback rather than by whatever the dialplan hard-codes, and `doorman
+balance` says which account is about to stop answering. Phase 3 (failover)
+remains a sketch and is deliberately not started.
 
 ---
 
@@ -490,7 +491,7 @@ changes", and it has: with a `trunks.toml` and neither `emergency_trunk` nor a
 routes every DID beautifully and has no answer for 911 is worse than no
 generated dialplan, because it is the one that gets installed with confidence.
 
-## M2.4 · Per-provider health
+## M2.4 · Per-provider health — **done**
 
 Extends `.plans/s03-provider-balance-checking`. Balance is a capability, not a
 provider feature; with several trunks it is per trunk, and the output has to
@@ -504,7 +505,35 @@ say *which* account is low.
 - The alert rings a handset. Internal calls never touch a trunk, so a broke
   account can still tell you it is broke.
 
+**What landed, and what did not.** The first two, per trunk, with three
+credentials-and-threshold keys on `[[trunks]]` and no single-trunk code path
+anywhere: the table has a row per trunk and the low-balance line names the
+account before it names the number. The third — the alert that rings a handset
+— is deliberately **not** here. It is s03 M2, it needs a composite prompt to
+read an amount aloud, and this milestone ends at a CLI you can put in cron.
+
+The one thing this milestone had to decide for itself is what a trunk whose
+provider cannot report a balance looks like, because with one provider the
+question never comes up. It is reported, never skipped, and in two distinct
+ways: an invoiced provider says *"Flowroute is postpaid — no balance to
+report"*, and a provider doorman has no client for says so and lists what it
+can ask. A row quietly missing from that table would be the same silence the
+whole feature exists to break.
+
+And the credential decided where the code lives. A provider API key manages
+DIDs, sub-accounts and billing, so `doorman balance` is CLI-only and the daemon
+neither reads it nor polls — enforced by tests on the import direction rather
+than by intention. Which means Phase 2 ends with the daemon still reading the
+trunk inventory for exactly two reports and routing on none of it.
+
 ---
+
+**Phase 2 is complete.** Several providers on one box: an inventory that
+generates its own PJSIP and its own inbound dialplan, lines that belong to
+trunks, calls that leave by the trunk that owns the number they present, an
+emergency route that is designated rather than incidental, and a balance check
+that says which account is about to go quiet. Phase 3 below is failover, and it
+is still a sketch on purpose.
 
 # Phase 3 · Failover — sketch only
 
@@ -614,6 +643,15 @@ it, the caller hears congestion rather than silence.
   interface here that is not Go: that `_911` sets no caller ID, that both
   outbound paths include the one shared context, and that neither the console's
   context nor the shared one can match a three-digit emergency number.
+- **M2.4:** the provider client is driven against `httptest` through an
+  overridable endpoint, the way the voice backends are, so **nothing requires a
+  real account** — including the failure paths, which matter more here than the
+  success one. Asserted: that an `invalid_credentials` answer never reads as a
+  balance of zero, that no error, table or `--json` output ever contains the
+  API password, and that the exit code separates low from unchecked. Two
+  structural tests keep the credential out of the daemon: nothing under
+  `internal/` may import `internal/provider`, and no file in `cmd/doorman`
+  besides `balance.go` may name it.
 - **What no test can reach:** whether Asterisk parses any of it, whether
   `DIALPLAN_EXISTS` finds the generated context, what `DIALSTATUS` a real
   provider returns when a trunk is unregistered, and whether the fallback trunk
@@ -631,10 +669,12 @@ The drift guards will insist on most of it.
 - `llms-policy.txt` — move `[line]` and `trunk` out of the "do not emit" list.
   **This matters more than it looks:** unknown keys are silently ignored, so a
   model writing `[line]` today produces a config that validates and does
-  nothing. Both are out of that list now, and with M2.3 outbound routing by
-  trunk has left it too — what remains for Phase 2 is per-provider balance.
-  Its three-file split is four, with the standing instruction not to write a
-  `trunks.toml` for somebody who has one provider.
+  nothing. Both are out of that list now, outbound routing by trunk left it
+  with M2.3, and per-provider balance left it with M2.4 — **nothing from this
+  plan is on that list any more.** What replaced the balance entry is the
+  narrower mistake: `balance_min` belongs on a `[[trunks]]` block and nowhere
+  else. Its three-file split is four, with the standing instruction not to
+  write a `trunks.toml` for somebody who has one provider.
 - `make site-assets` republishes the schema.
 - `site/src/data/providers.ts` — mark verified providers verified.
 

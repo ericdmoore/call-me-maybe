@@ -1,6 +1,6 @@
 .\" Manual page for doorman, the Call Me Maybe lobby daemon.
 .\" Render locally with:  man ./docs/doorman.1
-.TH DOORMAN 1 "2026-07-30" "Call Me Maybe" "User Commands"
+.TH DOORMAN 1 "2026-08-10" "Call Me Maybe" "User Commands"
 .SH NAME
 doorman \- lobby daemon and operations tool for a Call Me Maybe home phone
 .SH SYNOPSIS
@@ -295,6 +295,44 @@ Filters:
 .B \-\-json
 emits JSON Lines.
 .RE
+.TP
+.B doorman balance
+What is left on each prepaid trunk, per trunk, with a non\-zero exit when any
+of it is below its threshold \(em so a cron entry needs no wrapper script. A
+prepaid account that reaches zero does not error: inbound calls simply stop
+arriving, and "nobody called today" is indistinguishable from a quiet Tuesday.
+.PP
+Balance is a capability rather than a provider feature. A prepaid provider
+implements it; an invoiced one does not, and is reported as
+.RB \(lq "postpaid \(em no balance to report" \(rq
+rather than as a zero that looks alarming or a blank that looks broken. A
+provider doorman has no client for is reported too, never silently skipped.
+.PP
+Needs a
+.IR trunks.toml ;
+without one it says there is nothing to check and exits 0. The credentials come
+from
+.B api_username
+and
+.B api_password_env
+on each trunk, and the threshold from
+.B balance_min
+there or
+.B \-\-min
+here.
+.PP
+.BR "The daemon never reads those credentials" .
+A provider API key manages DIDs, sub\-accounts and billing, which is
+considerably more privilege than the SIP sub\-account password; keeping the
+check in a CLI keeps that key off the call path and out of the long\-running
+process. Run it wherever alerting already lives rather than on the Pi \(em
+.B doorman balance \-\-json
+needs a copy of
+.I trunks.toml
+and the API password, and no daemon at all.
+.PP
+Flags:
+.BR \-\-trunks ", " \-\-env ", " \-\-min ", " \-\-json ", " \-\-timeout .
 .PP
 .BI "doorman e164 " number
 Show how a raw caller ID normalises to E.164. Use this when a known caller
@@ -461,6 +499,16 @@ unwritable output directory.
 .TP
 .B 2
 The command line was wrong.
+.PP
+.B doorman balance
+uses the same 0, 1 and 2 and adds one:
+.TP
+.B 3
+Nothing was below its threshold, but at least one trunk could not be checked at
+all. Separate from 1 on purpose \(em an expired API key and an empty account
+look identical from here, and treating one as the other is how a real outage
+gets dismissed as a broken cron job. 1 wins when both happen, because a balance
+known to be low is more actionable than one that is unknown.
 .SH EXAMPLES
 Validate a configuration before trusting it:
 .PP
@@ -492,6 +540,16 @@ Rotate one extension's PIN after it has been shared too widely:
 .RS
 .EX
 doorman rotate Kids
+.EE
+.RE
+.PP
+Watch a prepaid trunk from cron, on the machine where your alerting lives
+rather than on the Pi \(em the exit code is the whole interface:
+.PP
+.RS
+.EX
+0 9 * * *  doorman balance \-\-trunks /etc/doorman/trunks.toml \\
+             || notify\-me "call me maybe: trunk balance"
 .EE
 .RE
 .SH SECURITY

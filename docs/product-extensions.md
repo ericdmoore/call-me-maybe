@@ -191,7 +191,13 @@ pricing — cost is a tiebreaker, not the argument.
 
 ---
 
-## 10. Provider account health
+## 10. Provider account health — the check has shipped
+
+**`doorman balance` exists** as of the s03 M1 / s01 M2.4 milestone: per trunk,
+non-zero exit below a threshold, and a provider that invoices reported as
+postpaid rather than as a zero. The credential lives on `[[trunks]]` as
+`api_username` + `api_password_env` and the daemon never reads it. What remains
+open below is the gauge and the alert.
 
 Prepaid trunks fail in the worst way this project has: **the balance hits zero
 and the phone simply stops ringing.** Nothing errors, nothing lights up, and

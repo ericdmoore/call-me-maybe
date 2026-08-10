@@ -251,7 +251,7 @@ under 7b is the schedules-at-line-scope item, which is a `[[schedules]]`
 question rather than a line one.
 
 Several *providers* is Phase 2 of `.plans/s01-multiple-DIDs/readme.md`, and it
-has now landed but for per-provider health. `trunks.toml` is a provider
+**has now landed in full** — M2.4, per-provider health, closed it. `trunks.toml` is a provider
 inventory rendered the way `handsets.toml` is, `[line] trunk` names which
 provider a number arrives on, and `doorman render` generates the registrations,
 one inbound context per trunk, and the emergency ladder. The file is optional
@@ -270,7 +270,11 @@ others in turn if that one cannot carry it, presents no caller ID on any path,
 and fails audibly rather than silently. Undecided is now an error in both
 `check` and `render`.
 
-What is left under Phase 2 is per-provider balance (§8 below, per trunk).
+**And balance is checkable per trunk**, which closes Phase 2. `doorman balance`
+reads `api_username`/`api_password_env` from `trunks.toml`, prints what is left
+on each prepaid account, names which one is low, and exits non-zero below its
+`balance_min` so cron needs no wrapper. A provider that invoices says so rather
+than reporting zero. The daemon never reads those credentials — see §8.
 
 ---
 
@@ -429,7 +433,7 @@ Phase 2 (several *providers*) is a separate problem and starts at `trunks.toml`.
 
 ---
 
-## 8. Provider account health
+## 8. Provider account health — CLI DONE (the alert and the gauge are open)
 
 **Why:** a prepaid trunk that hits zero stops the phone ringing with no error
 anywhere. "Nobody called today" is indistinguishable from a quiet Tuesday —
@@ -440,20 +444,43 @@ Balance is a **capability, not a provider feature**: the same optional-interface
 shape as the voice backends, so prepaid providers implement it and invoiced
 ones cleanly say they have none. Ties to #5.
 
-- [ ] `doorman balance` prints it; exit non-zero below a threshold so cron can
-      use it directly.
-- [ ] A provider without the capability says so, rather than reporting zero.
+**Done, per trunk, and this closes Phase 2 of §7.** `internal/provider` holds
+the optional `Balance` interface and an explicit backend map — a VoIP.ms client
+that implements it and Flowroute, which deliberately does not. `doorman
+balance` prints a table across every trunk in `trunks.toml`, names which
+account is low, and exits 1 below a threshold, 3 when something could not be
+checked at all. Credentials follow the `password_env` pattern
+(`api_username` + `api_password_env`, refused unless shaped like a variable
+name) and **the daemon never reads them**: balance checking is CLI-only, so the
+higher-privilege key stays off the call path and out of the long-running
+process. No `trunks.toml` means there is nothing to check and exit 0.
+
+- [x] `doorman balance` prints it; exit non-zero below a threshold so cron can
+      use it directly. `balance_min` per trunk, `--min` for the rest, `--json`
+      for a cron job on another machine.
+- [x] A provider without the capability says so, rather than reporting zero.
+      Flowroute is in the backend map precisely so the postpaid branch is real
+      rather than theoretical: "Flowroute is postpaid — no balance to report".
+      A provider with no client at all is reported too, never skipped.
 - [ ] Exposed as a gauge for §4 rather than doorman growing SMTP, webhooks and
       threshold config. Thresholds and delivery are operator decisions.
-- [ ] **The alert path must not be the phone.** If the balance is zero an
-      outbound call cannot report it, so the threshold fires well before empty
-      and the notification leaves by another route.
-- [ ] The API credential is documented as higher-privilege than the SIP
+- [ ] **The alert rings a handset.** An earlier draft of this line said the
+      alert path must not be the phone, reasoning that a zero balance cannot
+      pay for an outbound call to report itself. That was wrong: an *internal*
+      call never touches a trunk — no provider, no credit, no registration — so
+      a dead account can still ring the kitchen to say it is dead. It is also
+      not new machinery, because originating to a handset and playing a prompt
+      is already what this program does. See `.plans/s03-provider-balalnce-checking`
+      M2, which is where this lands.
+- [x] The API credential is documented as higher-privilege than the SIP
       sub-account password — it usually manages DIDs and sub-accounts — and the
       check is recommended to run wherever alerting already lives rather than
-      on the Pi. RUNBOOK §1 already says not to put the main login there.
+      on the Pi. RUNBOOK §1 already says not to put the main login there. The
+      VoIP.ms portal steps people hit — enabling API access, allow-listing the
+      calling IP — are in RUNBOOK §1 and §6.
 
-**Files:** `internal/provider` (new), `cmd/doorman`, `docs/RUNBOOK.md`.
+**Files:** `internal/provider` (new), `cmd/doorman/balance.go`,
+`internal/policy/trunks.go`, `internal/schema`, `docs/RUNBOOK.md`.
 
 ---
 

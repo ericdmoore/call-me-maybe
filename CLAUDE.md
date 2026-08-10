@@ -42,6 +42,7 @@ make run                   # dev run with .env sourced (needs reachable Asterisk
 ./bin/doorman render       # handsets.toml (+ trunks.toml) → Asterisk config
 ./bin/doorman lsp          # language server for the config files (stdio)
 ./bin/doorman e164 <num>   # show how a raw caller ID normalises
+./bin/doorman balance      # prepaid credit per trunk; exit 1 under threshold
 ./scripts/smoke.sh         # full deployment verification, run ON the Pi
 ```
 
@@ -79,6 +80,15 @@ Layout:
 - `internal/render` — generates per-handset Asterisk config from
   handsets.toml, and the trunk registrations plus inbound contexts from
   trunks.toml; secrets substituted from env, never stored in either file.
+- `internal/provider` — what doorman knows about the companies carrying its
+  calls, which today is one question: how much credit is left. Optional
+  interfaces in the `internal/voice` shape — a prepaid provider implements
+  `Balance`, an invoiced one does not and says so. **Reached only from
+  `doorman balance`.** Nothing under `internal/` may import it and no other
+  file in `cmd/doorman` may name it, both asserted by test: a provider API key
+  manages DIDs, sub-accounts and billing, so it stays out of the daemon
+  entirely. Its errors never carry a URL — the credentials ride in the query
+  string, so the URL *is* the credential.
 - `internal/notify` — the event webhook. One endpoint, one JSON event per
   ring and per completed call, so Home Assistant can announce or flash
   something. Same non-blocking shape as `internal/calls`, and doorman

@@ -89,6 +89,13 @@ Sanity check before touching the Pi: set a **spending limit** on the account.
 A misconfigured dialplan that loops on outbound calls is a real way to spend
 real money overnight.
 
+Optional, and worth doing on a prepaid account: **Main Menu → Account Settings
+→ API** turns on API access and sets a separate API password, and the same page
+holds the allow-list of IPs permitted to use it. That is what `doorman balance`
+needs — see "Watch a prepaid trunk's balance" in §6. Add the address of the
+machine that will run the check, which should not be the Pi: the API login is
+the main account login this section just told you to keep off it.
+
 ---
 
 ## 2. Provision the Pi
@@ -1137,6 +1144,88 @@ Sustained invalid-extension attempts from one number mean someone is probing.
 The rate limiter handles it, but it is worth knowing about — and worth
 considering whether the PINs in circulation should be rotated.
 
+### Watch a prepaid trunk's balance
+
+**The failure this prevents is silent by construction.** A prepaid account that
+reaches zero does not error. Inbound calls simply stop arriving, so "nobody
+called today" is indistinguishable from a quiet Tuesday: no log line, no alarm,
+and no symptom at all until somebody mentions they tried to reach you last
+week. With several ventures on one box it is every business's inbound at once,
+and they find out from a customer.
+
+`doorman balance` asks each provider, prints a table, and **exits non-zero when
+any trunk is below its threshold** — so a cron entry is a one-liner and nobody
+needs a wrapper script.
+
+```bash
+$ doorman balance
+$ doorman balance --json          # for a script
+$ doorman balance --min 25        # a threshold for trunks that declare none
+```
+
+| Exit | Means |
+|---|---|
+| 0 | everything checkable is above its threshold |
+| 1 | a trunk is **below** its threshold — the one to act on |
+| 2 | the command line or `trunks.toml` was wrong |
+| 3 | nothing was low, but something could not be checked at all |
+
+3 is separate from 1 on purpose: an expired API key and an empty account look
+identical from here, and treating one as the other is how a real outage gets
+dismissed as a broken cron job. 1 wins when both happen.
+
+**No `trunks.toml` means there is nothing to check**, and the command says so
+and exits 0. That is every single-provider install and it is not a mistake.
+
+#### Run it off the Pi
+
+**This credential is not the SIP sub-account password, and the difference is
+the point.** A provider's API login manages DIDs, sub-accounts and billing;
+the sub-account can only make calls. §1 above already says not to put your main
+VoIP.ms login on the Pi — this is that login.
+
+So `doorman balance` is a CLI and **the daemon never reads these keys, and
+never polls**. Put the check on whatever machine your alerting already runs on,
+with a copy of `trunks.toml` and the key in its environment. Nothing there
+needs a daemon, an Asterisk, or a phone:
+
+```cron
+0 9 * * *  doorman balance --trunks /etc/doorman/trunks.toml \
+             || notify-me "call me maybe: trunk balance"
+```
+
+If you do keep it on the Pi, know that you have widened the blast radius of a
+compromised Pi from "a sub-account that can make calls" to "the account that
+owns the DIDs", and scope the key as far down as the provider allows.
+
+#### Setting it up on VoIP.ms
+
+Three keys on the trunk, and two portal steps people reliably hit:
+
+```toml
+[[trunks]]
+id = "voipms"
+provider = "voip.ms"
+# ... registration fields as above ...
+api_username     = "you@example.com"            # the ACCOUNT EMAIL, not the sub account
+api_password_env = "TRUNK_VOIPMS_API_PASSWORD"  # the NAME of a .env variable
+balance_min      = 25.0                         # exit 1 below this
+```
+
+1. **Main Menu → Account Settings → API**: switch API access on and set an API
+   password there. It is a separate password from the portal login.
+2. **Same page**: add the IP address of the machine that will run the check to
+   the allow-list. An unlisted address fails *exactly* like a wrong password,
+   which is the single most common way this looks broken when it is not.
+
+Pick a `balance_min` that leaves time to act. A warning at zero is a death
+rattle, not an alert.
+
+A provider that invoices rather than holding a balance is reported as
+"postpaid — no balance to report", never as a zero; a provider doorman has no
+client for is reported too, rather than quietly dropped from the table. A row
+that silently disappears is the same silence this whole check exists to break.
+
 ## 6a. The call log
 
 Off by default. Set `CALL_LOG_PATH` and restart:
@@ -1453,4 +1542,5 @@ Not everything here is a matter of discipline. These are checked by machine:
 | Extension PINs meet a minimum length | `policy.MinPINLength`, on load and in `doorman check` |
 | Concurrent calls are capped | admission control in the event router |
 | Config cross-references resolve | `doorman check`, the LSP, and the daemon share one validator |
+| The provider API key stays out of the daemon | `internal/provider` is reachable only from `doorman balance`; tests assert nothing on the call path imports it and no other file in `cmd/doorman` reads the credential |
 | Every config key is one the schema names | `doorman check` and the LSP reject an unknown key; the daemon warns and keeps running |

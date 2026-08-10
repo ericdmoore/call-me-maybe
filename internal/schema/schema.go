@@ -243,7 +243,8 @@ func Trunks() *Schema {
 			"Every generated registration carries line=yes and endpoint=<id>. That pair is what binds inbound calls arriving on a registration to its endpoint, which is why no identify block and no provider IP allow-list is needed. Get it wrong and inbound calls hit the anonymous endpoint and vanish with no error anywhere.",
 			"One inbound dialplan context per trunk, because each registration binds to its own endpoint with its own context=. Inside it, one route per DID, generated from [line] number and [line] trunk across every policy file.",
 			"A trunk id may not collide with a handset id: both become a PJSIP endpoint named after the id.",
-			"Secrets are named here, never written here. password_env holds the NAME of a .env variable; the loader refuses anything that is not shaped like one, so a pasted password fails loudly instead of being committed.",
+			"Secrets are named here, never written here. password_env and api_password_env hold the NAME of a .env variable; the loader refuses anything that is not shaped like one, so a pasted password fails loudly instead of being committed.",
+			"A trunk may also carry provider API credentials (api_username, api_password_env) so `doorman balance` can report what is left on a prepaid account. That key is considerably more privilege than the SIP password — it manages DIDs, sub-accounts and billing — and the daemon never reads it: balance checking is a CLI, best run wherever alerting already lives rather than on the Pi.",
 			"Deleting trunks.toml is the whole rollback. There is no migration and no stored state.",
 		},
 		Properties: map[string]*Schema{
@@ -352,6 +353,39 @@ func trunkItem() *Schema {
 					"Not every provider offers E911 in every area. A provider without it means a phone that cannot call for help, which is a reason to reject the provider rather than a line item to skip.",
 					"This is a supplementary phone on a consumer internet connection. It stops working in a power cut, and nobody should make it a household's only route to emergency services.",
 				},
+			},
+			"api_username": {
+				Type: "string",
+				Description: "The provider's REST API login, used by `doorman balance` and by nothing else. For VoIP.ms it is the account email address. Optional: without it (and api_password_env) `doorman balance` reports this trunk as not configured, which is not an error. " +
+					"It is NOT the `username` above. That one is the SIP sub-account this box registers as; this one is the account that owns the sub-accounts.",
+				CrossRefs: []string{"trunks.toml [[trunks]].api_password_env", "the provider's API settings page"},
+				Rules: []string{
+					"HIGHER PRIVILEGE THAN THE SIP PASSWORD. A provider API key manages DIDs, sub-accounts and billing; a registration password can only make calls. RUNBOOK §1 already says to keep the main account login off the Pi, and this is that credential.",
+					"The daemon never reads this. `doorman balance` is a CLI so the key stays out of the long-running process and off the call path — run it wherever your alerting already lives, against a copy of this file.",
+					"VoIP.ms requires API access to be enabled in the portal AND the calling machine's IP to be on its allow-list. An unlisted address fails exactly like a wrong password.",
+				},
+			},
+			"api_password_env": {
+				Type:        "string",
+				Pattern:     "^[A-Z][A-Z0-9_]*$",
+				Description: "Name of the .env variable holding the provider API password. The secret itself never appears in this file, exactly as with password_env; the loader refuses anything that is not shaped like a variable name.",
+				Rules: []string{
+					"Names a variable; never put the key here. The pattern is enforced so a pasted key fails the load rather than reaching a commit.",
+					"Convention: TRUNK_<ID>_API_PASSWORD, beside the TRUNK_<ID>_PASSWORD the registration uses. They are different secrets with very different privilege and must not be the same value.",
+					"Both-or-neither with api_username: either alone is a trunk that looks configured and can check nothing.",
+				},
+				CrossRefs: []string{"the environment, and examples/.env.example"},
+			},
+			"balance_min": {
+				Type:        "number",
+				Minimum:     ptr(0),
+				Description: "The balance below which `doorman balance` exits 1, in whatever currency the account is held in. Unset means this trunk is reported and never fails — a threshold nobody chose fires at the wrong time, and the command is meant to run untended from cron.",
+				Rules: []string{
+					"Choose a number that leaves time to act. A warning at zero is a death rattle, not an alert: a prepaid trunk that reaches zero stops inbound calls arriving with no error anywhere.",
+					"Requires api_username and api_password_env — a threshold nothing can evaluate is refused at load, because it is the same silent failure the check exists to remove.",
+					"`doorman balance --min` supplies a default for trunks that declare none; a trunk's own balance_min always wins.",
+				},
+				CrossRefs: []string{"`doorman balance`, exit code 1"},
 			},
 		},
 		AdditionalProperties: falsy,
