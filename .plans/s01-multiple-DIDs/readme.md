@@ -535,14 +535,140 @@ emergency route that is designated rather than incidental, and a balance check
 that says which account is about to go quiet. Phase 3 below is failover, and it
 is still a sketch on purpose.
 
-# Phase 3 · Failover — sketch only
+# Phase 3 · Failover
 
-Several providers make this possible; it is not part of this feature.
+**Status:** planned, and smaller than it was. Phase 2 built most of the
+mechanism for a different reason.
 
-Registration down on trunk A → route outbound via trunk B. Inbound failover is
-mostly the provider's job — a failover DID at their end — not ours. Written
-down only so nobody builds Phase 2 in a way that forecloses it: **keep trunk
-selection a lookup, not a hardcode.**
+## Phase 2 already wrote the ladder
+
+`[cmm-emergency]` tries the designated trunk, then every other trunk, each
+attempt guarded so a completed call is not redialled:
+
+```
+same => n,Dial(PJSIP/911@<trunk>,60)
+same => n,GotoIf($["${DIALSTATUS}"="ANSWER"]?done)
+```
+
+That **is** failover. Phase 3 is largely generalising it from one destination
+to any, and the mechanism it needs — `[cmm-outbound]` dialling
+`${CMM_TRUNK}` rather than a hardcoded endpoint — also already exists.
+
+## The problem 911 does not have
+
+Emergency failover is unambiguously right: any connection beats none, and
+`_911` presents no caller ID, so there is nothing to get wrong.
+
+Ordinary outbound is not like that. **Failing over changes which number the
+callee sees**, and both available answers are bad:
+
+- Present the original line's caller ID over the fallback trunk — the provider
+  rejects it or silently rewrites it, which is exactly the premise of M2.3.
+- Present the fallback trunk's own number — the call connects and the customer
+  saves the wrong number, which is the failure M1.3 existed to prevent.
+
+So outbound failover is **not** "try the next trunk". Silently trading identity
+for connectivity would undo a guarantee two milestones were spent building.
+
+## The decision
+
+**Failover is opt-in per line, and off by default.**
+
+```toml
+[line]
+trunk    = "telnyx"
+failover = ["voipms"]        # explicit, ordered. Omit for no failover
+```
+
+Three properties:
+
+- **Default `never`.** A line whose trunk is down fails the call. That is
+  honest, and it never silently changes what a customer sees.
+- **An explicit ordered list**, not "any other trunk". You may be happy for the
+  business line to fall back to the household trunk and not the reverse, and
+  declaration order in `trunks.toml` is the wrong answer to that question.
+- **Emergency is exempt and always on.** `[cmm-emergency]` keeps its own
+  unconditional ladder and does not read `failover` at all. The two must not be
+  coupled, because the reasoning that makes one right makes the other wrong.
+
+When a call does fail over, it presents the **fallback trunk's** caller ID —
+the only choice a provider will accept — and that consequence is stated in the
+config comment, the schema and the runbook rather than discovered by a
+customer.
+
+## Inbound failover is not ours, and that is a real answer
+
+If the registration is down, calls never reach the Pi. There is no code path to
+write: doorman is not running in the call's route at all.
+
+What exists is the provider's **failover DID** — route to a mobile when the
+trunk is unreachable — configured in their portal. That belongs in the runbook
+beside the E911 step, and it is the single highest-value thing an operator can
+configure that this project will never implement.
+
+## Routing around a dead trunk needs no monitoring
+
+Worth separating, because they look like one feature and are not:
+
+| | Needs |
+|---|---|
+| **Route around a dead trunk** | nothing. The dialplan discovers it by trying — `CHANUNAVAIL` in milliseconds |
+| **Tell you a trunk is dead** | registration state, polling, an alert path — s03 M2 and s05 |
+
+Phase 3 is only the first. The second is more useful and belongs elsewhere.
+
+And the distinction that makes trying-rather-than-asking correct is the same
+one M2.3 recorded for 911: a provider that does not answer `OPTIONS` looks
+unreachable while working perfectly. From the dialplan's side, a lost
+registration, a provider outage, an exhausted balance and a dead network all
+look like a failed `Dial` — **you cannot distinguish them, and you do not need
+to.**
+
+One consequence: an exhausted balance often answers `CONGESTION` rather than
+`CHANUNAVAIL`, so the ladder must treat both as "try the next one".
+
+## Milestones
+
+### M3.1 · Outbound failover
+
+- `[line] failover`, an ordered list of trunk ids, validated as a cross-file
+  reference like `trunk` already is.
+- `doorman render` emits the ladder into `[cmm-outbound]`, generalising what
+  `[cmm-emergency]` does.
+- The fallback presents its own trunk's caller ID; `doorman check` says so per
+  line, in the same block that already prints outbound identity.
+- A line may not list its own trunk, and may not list a trunk that does not
+  exist.
+
+### M3.2 · Bounded and visible
+
+- The ladder is bounded by the list length; all-down fails audibly rather than
+  silently.
+- **A call that failed over is recorded as such.** The call log already carries
+  `line` and `direction`; add which trunk actually carried it, because "why did
+  the customer see the wrong number" needs an answer that is not a guess.
+
+### M3.3 · Runbook
+
+- The provider-side failover DID, beside E911.
+- What a customer sees when a call falls back, stated plainly.
+- Why the default is off.
+
+## Risks
+
+| Risk | Mitigation |
+|---|---|
+| **A customer silently sees the wrong number** | Off by default; opt-in per line; recorded in the call log when it happens |
+| Emergency and ordinary failover get coupled | `[cmm-emergency]` never reads `failover`. Assert it in a render test |
+| An all-down ladder costs N call attempts | Bounded by the list; the spending limit in RUNBOOK §1 is the backstop |
+| Failover masks a trunk that has been broken for a week | Routing around it is not noticing it — that is s03 M2 and s05, and the runbook should say so |
+
+## Out of scope
+
+Inbound failover (the provider's) · registration monitoring (s03/s05) ·
+least-cost routing, which is a different feature wearing this one's clothes ·
+automatic failback, since a trunk that answers is not necessarily a trunk that
+is well.
 
 ---
 
