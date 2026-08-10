@@ -6,6 +6,7 @@
 //	doorman check [path]     validate policy.toml and print what it resolves to
 //	doorman schema [name]    print the config surface as JSON Schema
 //	doorman calls            read the call log
+//	doorman balance          what is left on each prepaid trunk
 //	doorman pack             build and check prompt packs
 //	doorman rotate [flags] [label ...]
 //	                         rotate extension PINs (all, or by label)
@@ -66,6 +67,8 @@ func main() {
 			os.Exit(runSchema(os.Args[2:]))
 		case "calls":
 			os.Exit(runCalls(os.Args[2:]))
+		case "balance":
+			os.Exit(runBalance(os.Args[2:]))
 		case "pack":
 			os.Exit(runPack(os.Args[2:]))
 		case "version", "-v", "--version":
@@ -122,6 +125,21 @@ const usage = `doorman — the Call Me Maybe lobby daemon
                                 in order; --line and --direction narrow it on
                                 a box answering several numbers or placing
                                 calls through *4. Needs CALL_LOG_PATH set.
+  doorman balance [flags]       what is left on each prepaid trunk, and a
+                                non-zero exit when any of it is below its
+                                threshold — so cron is a one-liner. Needs a
+                                trunks.toml; without one it says there is
+                                nothing to check and exits 0. A provider that
+                                invoices rather than holding a balance is
+                                reported as such, never as zero. Best run
+                                wherever your alerting already lives: the API
+                                key it uses manages DIDs and billing, and the
+                                daemon deliberately never reads it
+      -trunks path              provider inventory (default $TRUNKS_PATH or ./trunks.toml)
+      -env path                 secrets file holding the API passwords (default ./.env)
+      -min n                    threshold for trunks that declare no balance_min
+      -json                     machine-readable, for a cron job on another box
+      -timeout d                how long to wait on one provider (default 20s)
   doorman schema [name]         print the configuration surface as JSON Schema:
                                 every key, type, default, and cross-file
                                 reference for policy.toml, handsets.toml,
@@ -210,6 +228,21 @@ func loadDotEnv(path string) map[string]string {
 		out[strings.TrimSpace(key)] = value
 	}
 	return out
+}
+
+// secretLookup resolves a named secret for the subcommands that need one —
+// `render` for SIP passwords, `balance` for provider API passwords. The real
+// environment wins over the file, so a systemd unit or a CI runner can supply
+// a value the file does not have.
+func secretLookup(envPath string) func(string) (string, bool) {
+	dotenv := loadDotEnv(envPath)
+	return func(key string) (string, bool) {
+		if v, ok := os.LookupEnv(key); ok && v != "" {
+			return v, true
+		}
+		v, ok := dotenv[key]
+		return v, ok && v != ""
+	}
 }
 
 // ── doorman check ────────────────────────────────────────────────────────
@@ -728,14 +761,7 @@ func runRender(args []string) int {
 		return 1
 	}
 
-	dotenv := loadDotEnv(*envFlag)
-	env := func(key string) (string, bool) {
-		if v, ok := os.LookupEnv(key); ok && v != "" {
-			return v, true
-		}
-		v, ok := dotenv[key]
-		return v, ok && v != ""
-	}
+	env := secretLookup(*envFlag)
 
 	// Outbound identity is the one thing the handset half of render needs from
 	// the *rules* rather than the inventory: [line] outbound_cid says what a

@@ -75,6 +75,37 @@ password_env = "hunter2-not-a-variable"
 	}
 }
 
+// Balance credentials are optional, and both halves have to be present before
+// anything will try to use them.
+func TestTrunkBalanceCredentialsAreOptionalAndPaired(t *testing.T) {
+	plain := mustTrunks(t, oneTrunk).All()[0]
+	if plain.BalanceConfigured() {
+		t.Error("a trunk with no API credentials must not claim to be checkable")
+	}
+
+	full := mustTrunks(t, oneTrunk+`
+api_username = "owner@example.invalid"
+api_password_env = "TRUNK_VOIPMS_API_PASSWORD"
+balance_min = 25.0
+`).All()[0]
+	if !full.BalanceConfigured() {
+		t.Error("a trunk with both halves is checkable")
+	}
+	if full.BalanceMin != 25 {
+		t.Errorf("balance_min = %v, want 25", full.BalanceMin)
+	}
+	// A whole number is the natural thing to write, and refusing it over the
+	// missing decimal point would be a papercut in a file people hand-edit.
+	whole := mustTrunks(t, oneTrunk+`
+api_username = "owner@example.invalid"
+api_password_env = "TRUNK_VOIPMS_API_PASSWORD"
+balance_min = 25
+`).All()[0]
+	if whole.BalanceMin != 25 {
+		t.Errorf("balance_min = %v from an integer, want 25", whole.BalanceMin)
+	}
+}
+
 func TestTrunkProblems(t *testing.T) {
 	cases := []struct {
 		name, body, want string
@@ -93,6 +124,11 @@ func TestTrunkProblems(t *testing.T) {
 		{"silly expiration", oneTrunk + "expiration = 2\n", "between 30 and 86400"},
 		{"unknown emergency trunk", "emergency_trunk = \"telnyx\"\n" + oneTrunk, "is not one of the trunks"},
 		{"unknown key", oneTrunk + "hostname = \"x\"\n", "unknown key"},
+		{"api key pasted", oneTrunk + "api_username = \"a@b.invalid\"\napi_password_env = \"live-key-abc123\"\n", "never the key itself"},
+		{"api username alone", oneTrunk + "api_username = \"a@b.invalid\"\n", "no api_password_env"},
+		{"api password alone", oneTrunk + "api_password_env = \"TRUNK_VOIPMS_API_PASSWORD\"\n", "no api_username"},
+		{"threshold nothing can check", oneTrunk + "balance_min = 20.0\n", "nothing can ever check it"},
+		{"negative threshold", oneTrunk + "api_username = \"a@b.invalid\"\napi_password_env = \"K\"\nbalance_min = -1.0\n", "must not be negative"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

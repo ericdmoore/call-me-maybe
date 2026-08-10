@@ -11,8 +11,8 @@ a JSON Schema cannot express. Machine-readable schema:
     https://callmemaybe.cc/schema/env.json
 
 **Everything below describes what the binary accepts today.** The project's
-planning docs discuss features that do not exist yet — per-provider balance
-checking, per-person ring overrides, house-wide quiet hours.
+planning docs discuss features that do not exist yet — per-person ring
+overrides, house-wide quiet hours, contacts that actually admit a caller.
 
 **Do not emit configuration for any of them.** `doorman check` now rejects a
 key it does not recognise, and suggests the nearest real one:
@@ -340,6 +340,11 @@ providers × numbers. `doorman render` generates all of it.
     from_domain = "chicago.voip.ms"    # optional; defaults to host
     expiration  = 300                  # optional; seconds
     e911     = true                    # is a street address registered here?
+    api_username = "you@example.com"   # optional; the provider's API login,
+                                       # for `doorman balance` only
+    api_password_env = "TRUNK_VOIPMS_API_PASSWORD"   # the NAME of a .env variable
+    balance_min  = 25.0                # optional; `doorman balance` exits 1
+                                       # below this
 
 **Never put a password in `password_env`.** It holds the NAME of a `.env`
 variable; `doorman render` substitutes the value. The loader refuses anything
@@ -375,6 +380,19 @@ Rules a schema cannot express:
   cheaper option. And say plainly that this is a supplementary phone: it stops
   working in a power cut, and it should not be a household's only route to
   emergency services.
+- **`api_username` and `api_password_env` are a different credential from
+  `username` and `password_env`, with far more privilege.** The SIP
+  sub-account can make calls; a provider API login manages DIDs, sub-accounts
+  and billing. They are both-or-neither, `balance_min` is refused without
+  them, and `doorman balance` is the only thing that reads them — the daemon
+  never does, which is what keeps that key off the phone. Tell the person to
+  run the check wherever their alerting already lives rather than on the Pi,
+  and that VoIP.ms needs API access switched on and the calling machine's IP
+  allow-listed in the portal first.
+- A trunk whose provider doorman has no client for is still reported by
+  `doorman balance`, never skipped. Do not promise that adding
+  `api_username` to any provider makes a balance appear: today it can ask
+  VoIP.ms.
 
 ## The address books — contacts.toml
 
@@ -486,10 +504,9 @@ These appear in the project's planning documents. They are not implemented, and
   console is `*4` and it asks; there is no prefix and there is not going to be
   one. Per-line outbound caller ID itself IS available — `outbound_cid` and
   `outbound_handsets`, above.
-- **Per-provider balance.** `doorman balance` does not exist. A prepaid trunk
-  that hits zero stops the phone ringing with no error anywhere, and there is
-  nothing in the config surface to warn about it. Outbound routing by trunk
-  itself DOES exist — see `[line] trunk` above.
+- **A `balance_min` anywhere but on a `[[trunks]]` block.** Balance checking
+  exists now, and every key it uses lives in `trunks.toml` — never in a policy
+  file. See the trunks section above.
 - **Contacts admitting a caller.** `contacts.toml` parses, classifies, merges
   and reports today, and `doorman check` prints what it adds up to — but
   nothing on a call path consults it. Do not tell somebody that adding a

@@ -95,6 +95,30 @@ type Trunk struct {
 	// inferred. Unset means unknown, and `doorman check` says "unknown" rather
 	// than guessing either way.
 	E911 *bool `toml:"e911"`
+
+	// APIUsername is who `doorman balance` asks the provider's REST API as. It
+	// is emphatically NOT the sub-account above. A provider's API login manages
+	// DIDs, sub-accounts and billing — considerably more privilege than a
+	// registration password, which is why RUNBOOK §1 already says to keep the
+	// main login off the Pi and why nothing that runs on the Pi reads this.
+	APIUsername string `toml:"api_username"`
+	// APIPasswordEnv names the .env variable holding that API password. Same
+	// rule as PasswordEnv, enforced the same way: a value that is not shaped
+	// like a variable name is refused, so a key pasted here fails the load
+	// instead of reaching a commit.
+	APIPasswordEnv string `toml:"api_password_env"`
+	// BalanceMin is the balance below which `doorman balance` exits non-zero,
+	// in whatever currency the account is held in. Unset means report but never
+	// fail: a threshold nobody chose is a threshold that fires at the wrong
+	// time, and this command is meant to go in a cron job untended.
+	BalanceMin float64 `toml:"balance_min"`
+}
+
+// BalanceConfigured reports whether this trunk was given credentials to ask
+// its provider about the balance. Absent is the normal state and not a
+// mistake — `doorman balance` says so and moves on rather than failing.
+func (t Trunk) BalanceConfigured() bool {
+	return t.APIUsername != "" && t.APIPasswordEnv != ""
 }
 
 // DefaultTrunkCodecs is what a trunk allows when it says nothing. ulaw first
@@ -344,6 +368,35 @@ func compileTrunks(f TrunkFile) (*Trunks, []string) {
 			fail("%s password_env %q must be the NAME of a .env variable such as "+
 				"TRUNK_%s_PASSWORD — never the password itself",
 				where, tr.PasswordEnv, strings.ToUpper(strings.NewReplacer("-", "_").Replace(tr.ID)))
+		}
+
+		// The balance credentials, which are a different secret with different
+		// privilege from the registration password above. Both-or-neither,
+		// because either half alone is a config that looks configured and can
+		// check nothing.
+		switch {
+		case tr.APIUsername != "" && tr.APIPasswordEnv == "":
+			fail("%s sets api_username but no api_password_env — name the .env variable "+
+				"holding the API password, the way password_env does above", where)
+		case tr.APIPasswordEnv != "" && tr.APIUsername == "":
+			fail("%s sets api_password_env but no api_username — a provider API needs both, "+
+				"and the username is not the SIP sub-account", where)
+		case tr.APIPasswordEnv != "" && !envVarPattern.MatchString(tr.APIPasswordEnv):
+			// Same strictness as password_env, and it matters more here: an API
+			// key manages DIDs, sub-accounts and billing.
+			fail("%s api_password_env %q must be the NAME of a .env variable such as "+
+				"TRUNK_%s_API_PASSWORD — never the key itself",
+				where, tr.APIPasswordEnv, strings.ToUpper(strings.NewReplacer("-", "_").Replace(tr.ID)))
+		}
+		switch {
+		case tr.BalanceMin < 0:
+			fail("%s balance_min %v must not be negative — it is the balance below which "+
+				"`doorman balance` fails, not a credit limit", where, tr.BalanceMin)
+		case tr.BalanceMin > 0 && !tr.BalanceConfigured():
+			// A threshold nothing can evaluate is the silent-failure shape this
+			// whole feature exists to remove.
+			fail("%s sets balance_min but no api_username/api_password_env, so nothing "+
+				"can ever check it", where)
 		}
 
 		if tr.Context == "" {

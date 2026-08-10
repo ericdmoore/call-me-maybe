@@ -84,6 +84,18 @@ func printTrunks(trunks *policy.Trunks, results []checkedLine) {
 	fmt.Println("    pjsip_trunks.conf        registrations (real passwords — never commit)")
 	fmt.Println("    extensions_trunks.conf   one inbound context per trunk, one route per DID")
 
+	// Balance checking, and only once somebody has set it up. Silent
+	// otherwise, which is every install: `doorman balance` is opt-in and runs
+	// off-box by preference, so nobody should have to read about a credential
+	// they were told to keep away from the Pi in order to check their config.
+	if names := balanceCheckable(trunks); len(names) > 0 {
+		sort.Strings(names)
+		fmt.Printf("\n  Balance checkable with `doorman balance`: %s\n", strings.Join(names, ", "))
+		fmt.Println("    That credential is a provider API key — it manages DIDs, sub-accounts")
+		fmt.Println("    and billing, which is far more privilege than a SIP password. The")
+		fmt.Println("    daemon never reads it: run the check wherever your alerting lives.")
+	}
+
 	// A DID route needs both halves. Saying so here is cheaper than an
 	// operator discovering it from a call that reached the wrong greeting.
 	if len(numberless) > 0 {

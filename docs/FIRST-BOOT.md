@@ -65,7 +65,7 @@ Three different secrets get confused constantly:
 |---|---|---|
 | Portal login | you, in a browser | **nowhere on the Pi** |
 | Sub-account username + password | Asterisk, to register the trunk | `.env`, substituted into generated PJSIP at render time |
-| API username + password | only if you use `doorman balance` later | not needed on day one; higher privilege than the sub account, so prefer keeping it off the Pi |
+| API username + password | `doorman balance`, and nothing else | not needed on day one; higher privilege than the sub account, and the daemon never reads it — run the balance check from wherever your alerting lives rather than putting this on the Pi |
 
 ---
 

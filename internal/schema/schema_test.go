@@ -109,6 +109,29 @@ func TestTrunkSchemaStatesTheRegistrationBinding(t *testing.T) {
 	}
 }
 
+// The balance credential is the sharp edge of the whole feature: it manages
+// DIDs, sub-accounts and billing, which is far more than the SIP password
+// beside it. A schema that documented the key without saying so would invite
+// somebody to put it on the Pi.
+func TestTrunkSchemaSaysTheAPICredentialIsHigherPrivilege(t *testing.T) {
+	item := schema.Trunks().Properties["trunks"].Items
+	user, ok := item.Properties["api_username"]
+	if !ok {
+		t.Fatal("api_username is not documented — a model writing it would produce " +
+			"config that validates and checks nothing")
+	}
+	joined := strings.Join(user.Rules, " ")
+	for _, want := range []string{"sub-accounts", "daemon never reads", "allow-list"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("api_username rules no longer mention %q: %v", want, user.Rules)
+		}
+	}
+	if pw := item.Properties["api_password_env"]; pw == nil || pw.Pattern == "" {
+		t.Error("api_password_env must carry the variable-name pattern, so a pasted " +
+			"key fails the load rather than reaching a commit")
+	}
+}
+
 func TestEveryEnvVarIsDocumented(t *testing.T) {
 	// config.Load reads the environment through small helpers, so the set of
 	// variable names is a set of string literals in that one file. Reading it

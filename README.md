@@ -266,6 +266,15 @@ runbook's "Add a second provider", and read "Which trunk carries 911" before
 you do — **this is a supplementary phone and should never be a household's
 only route to emergency services.**
 
+A trunk there can also carry API credentials, and then `doorman balance` says
+what is left on each prepaid account and exits non-zero when one is running
+low, so cron is a one-liner. It is worth having because **a prepaid trunk that
+reaches zero does not error** — inbound calls just stop arriving, and "nobody
+called today" is indistinguishable from a quiet Tuesday. A provider that
+invoices instead is reported as postpaid rather than as a zero. That key is
+higher-privilege than the SIP password, so the daemon deliberately never reads
+it and the check belongs wherever your alerting already runs.
+
 There is an optional fifth, **`contacts.toml`**, and not having it is likewise
 the normal state. It names vCard exports to read — your contacts, your
 spouse's, and one marked `kind = "block"` for the nuisance list — so the phone

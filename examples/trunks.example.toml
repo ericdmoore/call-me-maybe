@@ -74,6 +74,32 @@ e911     = true                        # is a street address registered against
                                        # this trunk's DIDs? Declared rather
                                        # than guessed — doorman cannot know
 
+# ── Watching the balance on a prepaid account ────────────────
+# OPTIONAL, and the three keys below are the whole of it. A prepaid trunk that
+# reaches zero does not error: inbound calls simply stop arriving, and "nobody
+# called today" is indistinguishable from a quiet Tuesday. `doorman balance`
+# asks, prints a table, and exits 1 when any trunk is under its threshold — so
+# cron is a one-liner and nobody needs a wrapper script.
+#
+# THIS CREDENTIAL IS NOT THE ONE ABOVE, and the difference matters. `username`
+# and `password_env` are a SIP sub-account: it can make calls and nothing else.
+# A provider's API login manages DIDs, sub-accounts and billing. RUNBOOK §1
+# already says to keep the main account login off the Pi, and this is that
+# login — so `doorman balance` is a CLI and the daemon never reads these keys
+# at all. Run it wherever your alerting already lives, against a copy of this
+# file, and the Pi never holds the key.
+#
+# On VoIP.ms: api_username is the account email address, and the API password
+# is a separate one set in Main Menu → Account Settings → API. API access is
+# OFF by default there and the IP of whatever machine runs the check has to be
+# allow-listed on the same page — an unlisted address fails exactly like a
+# wrong password.
+api_username     = "you@example.com"       # the API login, not the sub account
+api_password_env = "TRUNK_VOIPMS_API_PASSWORD"  # the NAME of a .env variable
+balance_min      = 25.0                    # exit 1 below this. Pick a number
+                                           # that leaves time to act: a warning
+                                           # at zero is a death rattle
+
 # ── A second provider ────────────────────────────────────────
 # Redundancy is the real prize: one provider having a bad afternoon stops
 # being your bad afternoon. Porting is the other one — stand the new provider
