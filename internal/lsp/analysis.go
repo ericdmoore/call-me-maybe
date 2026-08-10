@@ -24,20 +24,25 @@ const (
 	KindPolicy DocKind = iota
 	KindHandsets
 	KindTrunks
+	KindContacts
 )
 
 // KindOf classifies by file name; anything not recognised is treated as policy
 // (covering renamed or legacy files, and policy.<line>.toml).
 //
-// trunks.toml earns a kind of its own rather than falling through to policy
-// because the two have different root structs: linting a provider inventory
-// against the policy schema would report every key in it as unknown.
+// trunks.toml and contacts.toml earn kinds of their own rather than falling
+// through to policy because each has its own root struct: linting an inventory
+// against the policy schema reports every key in it as unknown, and — worse —
+// the misplaced-section hint would tell somebody editing contacts.toml that
+// [[sources]] belongs in contacts.toml.
 func KindOf(path string) DocKind {
 	switch {
 	case strings.HasSuffix(path, "handsets.toml"):
 		return KindHandsets
 	case strings.HasSuffix(path, "trunks.toml"):
 		return KindTrunks
+	case strings.HasSuffix(path, "contacts.toml"):
+		return KindContacts
 	}
 	return KindPolicy
 }
@@ -72,6 +77,24 @@ func AnalyseTrunks(trunksText string) []Diagnostic {
 		d := Diagnostic{Severity: 1, Source: "doorman", Message: problem}
 		for _, token := range quotedTokensReversed(problem) {
 			if r, ok := locate(trunksText, token); ok {
+				d.Range = r
+				break
+			}
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// AnalyseContacts lints a contacts.toml on its own, for the same reason
+// AnalyseTrunks does: nothing in it depends on the other files, and nothing in
+// the other files references it. It is a list of address books to read.
+func AnalyseContacts(contactsText string) []Diagnostic {
+	var out []Diagnostic
+	for _, problem := range policy.LintContacts([]byte(contactsText)) {
+		d := Diagnostic{Severity: 1, Source: "doorman", Message: problem}
+		for _, token := range quotedTokensReversed(problem) {
+			if r, ok := locate(contactsText, token); ok {
 				d.Range = r
 				break
 			}

@@ -35,8 +35,15 @@ type Config struct {
 	// absence is the compatibility gate; the daemon reads it for exactly one
 	// thing, which is to announce at startup which trunk carries 911. Nothing
 	// on the call path routes on a trunk.
-	TrunksPath  string
-	PolicyWatch bool
+	TrunksPath string
+	// ContactsPath is the address-book inventory. Optional, and absent is the
+	// state every install is in. Parsed here so that every config file's
+	// location is discovered the same way; the daemon does not consult contacts
+	// on a call path yet, and `doorman check` is the only thing that reads the
+	// file today. Same posture as the VOICEMAIL_* keys in examples/.env.example,
+	// declared ahead of the feature so .env does not churn when it lands.
+	ContactsPath string
+	PolicyWatch  bool
 
 	DefaultCountryCode string
 
@@ -134,6 +141,7 @@ func Load() (Config, error) {
 		PolicyPath:   str("POLICY_PATH", "./policy.toml"),
 		HandsetsPath: str("HANDSETS_PATH", "./handsets.toml"),
 		TrunksPath:   str("TRUNKS_PATH", "./trunks.toml"),
+		ContactsPath: str("CONTACTS_PATH", "./contacts.toml"),
 		PolicyWatch:  boolean("POLICY_WATCH", true),
 
 		DefaultCountryCode: str("DEFAULT_COUNTRY_CODE", "1"),

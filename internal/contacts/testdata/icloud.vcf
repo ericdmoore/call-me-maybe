@@ -1,0 +1,35 @@
+BEGIN:VCARD
+VERSION:3.0
+PRODID:-//Apple Inc.//iPhone OS 17.4//EN
+N:Mertaugh;Grandma;;;
+FN:Grandma Mertaugh
+TEL;type=CELL;type=VOICE;type=pref:+1 (512) 555-0101
+TEL;type=HOME;type=VOICE:512-555-0102
+CATEGORIES:Family
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+PRODID:-//Apple Inc.//iPhone OS 17.4//EN
+N:;;;;
+FN:Kitchen Sink Plumbing
+ORG:Kitchen Sink Plumbing & Drain;Dispatch
+TEL;type=WORK;type=VOICE;type=pref:(512) 555-0103
+TEL;type=MAIN:800-555-0104
+ADR;type=WORK;type=pref:;;114 Cedar St;Austin;TX;78701;USA
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+N:Okonkwo;Adaeze;;;
+FN:Adaeze Okonkwo
+item1.TEL;type=pref:512-555-0105
+item1.X-ABLabel:school pickup
+NOTE:Long note that iCloud folds across two physical lines because it exceed
+ s seventy-five octets in the encoded form.
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+N:Halvorsen;Britt;;;
+FN:Britt Halvorsen
+ORG:;
+TEL;type=IPHONE;type=CELL;type=VOICE;type=pref:+15125550106
+END:VCARD

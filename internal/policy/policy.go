@@ -340,7 +340,7 @@ func decode(data []byte, file string) (File, []UnknownKey, error) {
 }
 
 // decodeTrunks is decode's sibling for the third file. Separate because
-// trunks.toml has its own root struct: the three files own their sections
+// trunks.toml has its own root struct: the files own their sections
 // exclusively, and one struct covering all of them would make a section in the
 // wrong file indistinguishable from one in the right file.
 func decodeTrunks(data []byte) (TrunkFile, []UnknownKey, error) {
@@ -350,6 +350,17 @@ func decodeTrunks(data []byte) (TrunkFile, []UnknownKey, error) {
 		return TrunkFile{}, nil, fmt.Errorf("trunks: %w", err)
 	}
 	return f, unknownKeys(md, "trunks", trunkFileShape()), nil
+}
+
+// decodeContacts is the same again for contacts.toml, the address-book
+// inventory, and for the same reason.
+func decodeContacts(data []byte) (ContactFile, []UnknownKey, error) {
+	var f ContactFile
+	md, err := toml.Decode(string(data), &f)
+	if err != nil {
+		return ContactFile{}, nil, fmt.Errorf("contacts: %w", err)
+	}
+	return f, unknownKeys(md, "contacts", contactFileShape()), nil
 }
 
 func FromTOML(data []byte) (*Policy, error) {

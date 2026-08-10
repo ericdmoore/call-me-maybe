@@ -170,6 +170,11 @@ func (s *Server) pair(uri string) docSet {
 	pURI, pText, pOK := find(KindPolicy, "policy.toml")
 	hURI, hText, hOK := find(KindHandsets, "handsets.toml")
 	tURI, tText, tOK := find(KindTrunks, "trunks.toml")
+	// Contacts are looked up among open buffers only, never pulled off disk:
+	// nothing cross-references them, so a sibling file on disk would add
+	// nothing, and reading somebody's address-book inventory because they
+	// opened a policy file beside it is not the editor's business.
+	cURI, cText, cOK := s.openDoc(KindContacts)
 
 	if pOK {
 		// Handsets open alone with no policy anywhere: pairing with an
@@ -184,7 +189,20 @@ func (s *Server) pair(uri string) docSet {
 	if tOK {
 		d.trunksURI, d.trunks = tURI, &tText
 	}
+	if cOK {
+		d.contactsURI, d.contacts = cURI, &cText
+	}
 	return d
+}
+
+// openDoc finds an open buffer of a kind. Callers hold s.mu.
+func (s *Server) openDoc(kind DocKind) (uri, text string, ok bool) {
+	for u, t := range s.docs {
+		if KindOf(uriToPath(u)) == kind {
+			return u, t, true
+		}
+	}
+	return "", "", false
 }
 
 // docSet is the config files in play for one analysis: the policy/handsets
@@ -197,6 +215,9 @@ type docSet struct {
 	handsets    *string
 	trunksURI   string
 	trunks      *string
+	// contactsURI/contacts is the address-book inventory, linted alone.
+	contactsURI string
+	contacts    *string
 }
 
 func (s *Server) publishAll() {
@@ -227,6 +248,9 @@ func (s *Server) publishAll() {
 	publish(d.handsetsURI, hDiags)
 	if d.trunks != nil {
 		publish(d.trunksURI, AnalyseTrunks(*d.trunks))
+	}
+	if d.contacts != nil {
+		publish(d.contactsURI, AnalyseContacts(*d.contacts))
 	}
 	// Clear any other open doc we did not analyse into.
 	for _, u := range uris {

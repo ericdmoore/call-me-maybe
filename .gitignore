@@ -6,6 +6,13 @@ handsets.toml
 # it is local inventory like the two above, and a sub-account username is not
 # something to publish either.
 trunks.toml
+# contacts.toml holds no secrets either (token_env names a variable), but it
+# names local paths and whose address books this box reads. The exports it
+# points at hold several people's entire contact lists and must never be
+# committed — keep them outside the repo, mode 0600.
+contacts.toml
+*.vcf
+!internal/contacts/testdata/*.vcf
 asterisk/pjsip.conf
 asterisk/ari.conf
 # Rendered output: pjsip_handsets.conf contains real SIP passwords.

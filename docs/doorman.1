@@ -68,12 +68,14 @@ below and
 Exits non\-zero if ARI is unreachable at startup, which is deliberate: a
 lobby daemon that cannot answer calls should fail loudly.
 .TP
-.BI "doorman check [\-handsets " path "] [\-trunks " path "] [" path ]
+.BI "doorman check [\-handsets " path "] [\-trunks " path "] [\-contacts " path "] [" path ]
 Validate
 .IR policy.toml ,
 .I handsets.toml
-and, when there is one,
+and, when there are any,
 .I trunks.toml
+and
+.I contacts.toml
 together and report what they add up to \(em allow\-list size, extension
 count, PIN length, the house ring group, and then every extension with each
 of its settings spelled out, including the ones left at their default. A
@@ -119,6 +121,25 @@ whose
 is a number this configuration declares at a different provider.
 Both are silent without one, so a box with a single provider never reads the
 word trunk.
+.IP
+With a
+.I contacts.toml
+it reports what the address books add up to: per source, how many vCards were
+read and how many numbers came out
+.BR personal ,
+.BR published ,
+.B blocked
+or
+.B skipped
+\(em plus which signal decided each published one, and how the conflicts
+between two address books resolved. Counts only: no name and no number is ever
+printed, because "how many" answers every question this command exists to
+answer. It exits non\-zero for a source whose
+.B path
+cannot be read, and merely reports a
+.B url
+source, which this release does not fetch. Silent without the file, and
+nothing on a call path consults a contact set yet.
 This is the authority on whether a configuration is usable.
 .TP
 .BI "doorman schema [" name ]
@@ -127,12 +148,14 @@ every key, type, pattern, default, and cross\-file reference for
 .IR policy.toml ,
 .IR handsets.toml ,
 .IR trunks.toml ,
+.IR contacts.toml ,
 and the environment.
 .I name
 is
 .BR policy ,
 .BR handsets ,
 .BR trunks ,
+.BR contacts ,
 or
 .BR env ;
 all of them are emitted as one bundle when omitted.
@@ -311,6 +334,22 @@ names a
 .I .env
 variable, and the loader refuses a value that is not shaped like one.
 .TP
+.I contacts.toml
+.BR Optional .
+The address books: which vCard exports to read, and which of them is a block
+list. Not having it is the normal state, and with no file nothing is read and
+nothing is printed. Holds no secrets \(em
+.B token_env
+names a
+.I .env
+variable \(em but the exports it points at hold entire address books and
+belong outside any repository, mode 0600. Nothing here is authoritative:
+.B [[people]]
+in
+.I policy.toml
+remains the only list that admits anybody, and deleting every source changes
+nothing but who hears the lobby.
+.TP
 .I .env
 Secrets and tuning. Loaded by systemd's
 .B EnvironmentFile
@@ -350,8 +389,12 @@ Must match the
 application named in
 .IR asterisk/extensions.conf .
 .TP
-.BR POLICY_PATH ", " HANDSETS_PATH ", " TRUNKS_PATH ", " POLICY_WATCH
+.BR POLICY_PATH ", " HANDSETS_PATH ", " TRUNKS_PATH ", " CONTACTS_PATH ", " POLICY_WATCH
 Where the config files are, and whether to reload them on change.
+.I CONTACTS_PATH
+is optional, a missing file is the normal state, and
+.B doorman check
+is the only thing that reads it today.
 .I TRUNKS_PATH
 is optional and a missing file is the normal state; the daemon reads it only
 to announce which trunk carries 911 and to warn about a caller ID its own

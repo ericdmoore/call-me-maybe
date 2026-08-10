@@ -32,6 +32,7 @@ callmemaybe/internal/notify        85
 callmemaybe/internal/voice         80
 callmemaybe/internal/story         85
 callmemaybe/internal/pack          80
+callmemaybe/internal/contacts      90
 "
 
 echo "→ go test -race -coverprofile=$PROFILE"

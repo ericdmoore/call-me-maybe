@@ -266,6 +266,19 @@ runbook's "Add a second provider", and read "Which trunk carries 911" before
 you do — **this is a supplementary phone and should never be a household's
 only route to emergency services.**
 
+There is an optional fifth, **`contacts.toml`**, and not having it is likewise
+the normal state. It names vCard exports to read — your contacts, your
+spouse's, and one marked `kind = "block"` for the nuisance list — so the phone
+can see the address book your household already curates. Every number is
+classified from the card alone, with no lookups, on one rule: **if a stranger
+can look the number up, it must not be automatic admission.** An `ORG` or a
+work number or an 800 number reads as published and hears the lobby; a named
+card with a mobile and no organisation reads as personal. Anything ambiguous
+is published, because wrong-closed costs a plumber ten seconds and wrong-open
+rings every phone in the house at 3am. Today this is *reporting only* —
+`doorman check` prints what the address books add up to and nothing on a call
+path consults them. `[[people]]` in `policy.toml` stays the deliberate list.
+
 Editing those files gets IDE support: `doorman lsp` is a language server
 whose diagnostics come from the same validator that guards the daemon —
 unknown handset ids, bad schedule references, and duplicate PINs get

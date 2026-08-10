@@ -82,7 +82,7 @@ var (
 )
 
 // Names are the selectable schema names for `doorman schema <name>`.
-var Names = []string{"policy", "handsets", "trunks", "env", "template"}
+var Names = []string{"policy", "handsets", "trunks", "contacts", "env", "template"}
 
 // Get returns one schema by name.
 func Get(name string) (*Schema, error) {
@@ -93,6 +93,8 @@ func Get(name string) (*Schema, error) {
 		return Handsets(), nil
 	case "trunks":
 		return Trunks(), nil
+	case "contacts":
+		return Contacts(), nil
 	case "env":
 		return Env(), nil
 	case "template":
@@ -113,6 +115,7 @@ func All(version string) *Bundle {
 			"policy.toml":   Policy(),
 			"handsets.toml": Handsets(),
 			"trunks.toml":   Trunks(),
+			"contacts.toml": Contacts(),
 			"env":           Env(),
 			"template":      TemplateFormat(),
 		},
@@ -349,6 +352,89 @@ func trunkItem() *Schema {
 					"Not every provider offers E911 in every area. A provider without it means a phone that cannot call for help, which is a reason to reject the provider rather than a line item to skip.",
 					"This is a supplementary phone on a consumer internet connection. It stops working in a power cut, and nobody should make it a household's only route to emergency services.",
 				},
+			},
+		},
+		AdditionalProperties: falsy,
+	}
+}
+
+// ── contacts.toml ────────────────────────────────────────────────────────
+
+func Contacts() *Schema {
+	return &Schema{
+		SchemaURI:   "https://json-schema.org/draft/2020-12/schema",
+		ID:          "https://callmemaybe.cc/schema/contacts.json",
+		Title:       "contacts.toml — the address-book inventory",
+		Type:        "object",
+		Description: "Which address-book exports to read. Optional, and its absence is the compatibility gate: with no contacts.toml nothing is read, nothing is printed, and the phone behaves exactly as it always has. It exists because [[people]] is hand-typed and therefore always out of date, while every household already curates a contact list on their phones, continuously, without being asked.",
+		Rules: []string{
+			"Nothing here is authoritative. A contact set is derived, disposable data: delete every source and the phone still works, and [[people]] in policy.toml — the deliberate list — is untouched. Never put a number here that you are not willing to lose.",
+			"It is a file of its own rather than a section of policy.toml because policy is per line and contact sources are global. One household's address books, not the home line's.",
+			"The line every classification turns on: if a stranger can look the number up, it must not be automatic admission. Spoofing caller ID requires knowing what to spoof, and a plumber's number is on their website while your sister's mobile is nowhere.",
+			"Classification comes from the vCard alone, with no lookups: ORG set reads as a business, TEL;TYPE=work as probably published, an 800-family number as never personal, and a named card with a cell or home number and no ORG as a person. Everything ambiguous is published, because wrong-closed means a ten-second greeting and wrong-open means a findable number ringing the whole house at 3am.",
+			"Numbers are keyed by E.164, so the same mobile in two address books is one entry. Conflicts resolve conservatively: same number and different names, the first source in declaration order wins; personal in one source and published in another, published wins; present in an admit source and a block source, blocked wins.",
+			"A number that will not normalise to E.164 is skipped and counted, and `doorman check` reports the count per source.",
+			"doorman parses the vCard subset real exporters emit — iCloud, Google Contacts, CardDAV, and 2.1 files with quoted-printable and folded lines — and counts whatever it does not understand rather than guessing at it.",
+			"Secrets are named here, never written here. token_env holds the NAME of a .env variable, and the token it names travels in an Authorization header rather than a query string, so a URL stays safe to log and to print.",
+		},
+		Properties: map[string]*Schema{
+			"sources": {
+				Type:        "array",
+				Description: "Every address book to read, in the order they are declared. Declaration order is the only ordering there is, and it is what settles which of two names a shared number keeps.",
+				MinItems:    one,
+				Items:       contactSourceItem(),
+			},
+		},
+		Required:             []string{"sources"},
+		AdditionalProperties: falsy,
+	}
+}
+
+func contactSourceItem() *Schema {
+	return &Schema{
+		Type:        "object",
+		Required:    []string{"id"},
+		Description: "One address-book export. Exactly one of path and url.",
+		Properties: map[string]*Schema{
+			"id": {
+				Type:        "string",
+				Pattern:     "^[a-z0-9][a-z0-9_-]*$",
+				Description: "Names this source in `doorman check`, and is what tells you which address book won a disagreement.",
+				Rules:       []string{"Must be unique."},
+			},
+			"path": {
+				Type:        "string",
+				Description: "A vCard export on this box. A file dropped by any other tool works, which is what makes the whole feature usable with no network and no token.",
+				Rules: []string{
+					"Exactly one of path and url.",
+					"A relative path is relative to contacts.toml, not to the working directory, so the exports live beside the inventory that names them and `doorman check` reads the same files the daemon would.",
+					"A path that cannot be read is reported by `doorman check` and contributes nothing. It never stops the phone: the others are unaffected and [[people]] is untouched.",
+					"The file holds an entire address book. Keep it outside any repository, mode 0600 — it is more personal data than anything else this project stores.",
+				},
+			},
+			"url": {
+				Type:        "string",
+				Pattern:     "^https?://",
+				Description: "A vCard export fetched over HTTP. RESERVED — this release reads path sources only, and `doorman check` says so per source rather than letting one quietly contribute nothing. The key exists now so contacts.toml does not churn when fetching lands.",
+				Rules:       []string{"Exactly one of path and url.", "Not fetched yet. Same posture as the VOICEMAIL_* keys in .env: declared ahead of the feature so the config shape is settled."},
+			},
+			"token_env": {
+				Type:        "string",
+				Pattern:     "^[A-Z][A-Z0-9_]*$",
+				Description: "Name of the .env variable holding this source's bearer token. The secret itself never appears in this file. RESERVED with url.",
+				Rules: []string{
+					"Names a variable; never put the token here. The pattern is enforced so that a pasted token fails the load rather than reaching a commit.",
+					"The token goes in an Authorization header, never a query string. A token in a URL makes the URL itself a secret, and every net/http transport error wraps into a *url.Error carrying the whole URL — which the obvious log line then ships to journald.",
+					"Only valid with url. A local file needs no credential.",
+				},
+				CrossRefs: []string{"the environment, and examples/.env.example"},
+			},
+			"kind": {
+				Type:        "string",
+				Enum:        []any{"admit", "block"},
+				Default:     "admit",
+				Description: "What this address book means. A block source is the spam list: those callers do not hear the lobby at all, which is the whole difference between \"not admitted\" and \"blocked\".",
+				Rules:       []string{"Block beats everything, including a personal classification and — once the ladder is wired into the lobby — including [[people]]. A number in both is a contradiction an operator should resolve, and `doorman check` counts them."},
 			},
 		},
 		AdditionalProperties: falsy,
@@ -648,6 +734,7 @@ func Env() *Schema {
 		"POLICY_PATH":   env("Path to policy.toml.", "path", "./policy.toml"),
 		"HANDSETS_PATH": env("Path to handsets.toml.", "path", "./handsets.toml"),
 		"TRUNKS_PATH":   env("Path to trunks.toml, the provider inventory. The file is optional and absent is the default: with no trunks.toml `doorman render` generates only the handset config and a hand-written pjsip.conf keeps working. The daemon reads it to report, not to route — which trunk carries 911 at startup, and a warning when a line presents a caller ID its own trunk does not own. Outbound routing reads [line] trunk from the policy file, so a trunks.toml that will not load warns and the phone keeps answering.", "path", "./trunks.toml"),
+		"CONTACTS_PATH": env("Path to contacts.toml, the address-book inventory. The file is optional and absent is the default: with no contacts.toml nothing is read and nothing is printed. `doorman check` reads it today to report what the address books add up to; the daemon does not consult contacts on a call path yet, and [[people]] in policy.toml remains the only list that admits anybody.", "path", "./contacts.toml"),
 		"POLICY_WATCH":  env("Re-read both config files on change so edits go live without a restart. An invalid file is rejected and the previous policy stays in service.", "boolean (1|true|yes|on)", true),
 
 		"DEFAULT_COUNTRY_CODE": env("Country code assumed when a caller ID arrives without one.", "string", "1"),

@@ -2,7 +2,8 @@
 
 ## Config interfaces
 
-Three files, three cadences, three failure domains — plus an optional fourth:
+Three files, three cadences, three failure domains — plus two optional
+inventories:
 
 | File | Holds | Changes | Editable by |
 |---|---|---|---|
@@ -10,6 +11,7 @@ Three files, three cadences, three failure domains — plus an optional fourth:
 | `handsets.toml` | the hardware: ids, endpoints, internal numbers, page/MWI membership | when you buy phones | you |
 | `policy.toml` | the rules: allow-list, extensions, ladders, schedules | weekly | anyone in the house |
 | `trunks.toml` | **optional** — the providers: hosts, sub-accounts, which trunk carries 911 | when you buy a number somewhere new | you |
+| `contacts.toml` | **optional** — the address books: which vCard exports to read | when somebody new joins the household | you |
 
 `handsets.toml` is the single source of truth for the phone plant:
 `doorman render` generates the per-handset Asterisk config from it
@@ -24,6 +26,20 @@ working untouched. Create the file when a second provider turns copying PJSIP
 blocks into a chore; then `doorman render` also writes `pjsip_trunks.conf` and
 `extensions_trunks.conf`. See "Add a second provider" in §6. Deleting the file
 is the whole rollback.
+
+`contacts.toml` is the address-book inventory, and **not having it is likewise
+the normal state**: with no file nothing is read and `doorman check` prints
+nothing about contacts. Each `[[sources]]` block names a vCard export by
+`path` — a relative one resolves against `contacts.toml` itself — and
+`kind = "block"` marks one as the nuisance list. `doorman check` reports what
+each source contributed: cards read, and how many numbers came out personal,
+published, blocked or skipped, with counts only and never a name or a number.
+Today that report is all it does; nothing on a call path consults a contact
+set, and `[[people]]` in `policy.toml` remains the only list that admits
+anybody. **The exports are the most personal data on this box** — several
+people's entire address books — so keep them mode 0600, outside any
+repository, and never in a payload that leaves. Deleting the file is the whole
+rollback.
 
 `policy.toml` cross-references handsets by id and is validated against them
 on every reload, but a typo in a bedtime can no longer invalidate the

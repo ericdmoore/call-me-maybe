@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://callmemaybe.cc/schema/contacts.json",
+  "title": "contacts.toml — the address-book inventory",
+  "description": "Which address-book exports to read. Optional, and its absence is the compatibility gate: with no contacts.toml nothing is read, nothing is printed, and the phone behaves exactly as it always has. It exists because [[people]] is hand-typed and therefore always out of date, while every household already curates a contact list on their phones, continuously, without being asked.",
+  "type": "object",
+  "properties": {
+    "sources": {
+      "description": "Every address book to read, in the order they are declared. Declaration order is the only ordering there is, and it is what settles which of two names a shared number keeps.",
+      "type": "array",
+      "items": {
+        "description": "One address-book export. Exactly one of path and url.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Names this source in `doorman check`, and is what tells you which address book won a disagreement.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-rules": [
+              "Must be unique."
+            ]
+          },
+          "kind": {
+            "description": "What this address book means. A block source is the spam list: those callers do not hear the lobby at all, which is the whole difference between \"not admitted\" and \"blocked\".",
+            "type": "string",
+            "enum": [
+              "admit",
+              "block"
+            ],
+            "default": "admit",
+            "x-rules": [
+              "Block beats everything, including a personal classification and — once the ladder is wired into the lobby — including [[people]]. A number in both is a contradiction an operator should resolve, and `doorman check` counts them."
+            ]
+          },
+          "path": {
+            "description": "A vCard export on this box. A file dropped by any other tool works, which is what makes the whole feature usable with no network and no token.",
+            "type": "string",
+            "x-rules": [
+              "Exactly one of path and url.",
+              "A relative path is relative to contacts.toml, not to the working directory, so the exports live beside the inventory that names them and `doorman check` reads the same files the daemon would.",
+              "A path that cannot be read is reported by `doorman check` and contributes nothing. It never stops the phone: the others are unaffected and [[people]] is untouched.",
+              "The file holds an entire address book. Keep it outside any repository, mode 0600 — it is more personal data than anything else this project stores."
+            ]
+          },
+          "token_env": {
+            "description": "Name of the .env variable holding this source's bearer token. The secret itself never appears in this file. RESERVED with url.",
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "x-cross-references": [
+              "the environment, and examples/.env.example"
+            ],
+            "x-rules": [
+              "Names a variable; never put the token here. The pattern is enforced so that a pasted token fails the load rather than reaching a commit.",
+              "The token goes in an Authorization header, never a query string. A token in a URL makes the URL itself a secret, and every net/http transport error wraps into a *url.Error carrying the whole URL — which the obvious log line then ships to journald.",
+              "Only valid with url. A local file needs no credential."
+            ]
+          },
+          "url": {
+            "description": "A vCard export fetched over HTTP. RESERVED — this release reads path sources only, and `doorman check` says so per source rather than letting one quietly contribute nothing. The key exists now so contacts.toml does not churn when fetching lands.",
+            "type": "string",
+            "pattern": "^https?://",
+            "x-rules": [
+              "Exactly one of path and url.",
+              "Not fetched yet. Same posture as the VOICEMAIL_* keys in .env: declared ahead of the feature so the config shape is settled."
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "sources"
+  ],
+  "additionalProperties": false,
+  "x-rules": [
+    "Nothing here is authoritative. A contact set is derived, disposable data: delete every source and the phone still works, and [[people]] in policy.toml — the deliberate list — is untouched. Never put a number here that you are not willing to lose.",
+    "It is a file of its own rather than a section of policy.toml because policy is per line and contact sources are global. One household's address books, not the home line's.",
+    "The line every classification turns on: if a stranger can look the number up, it must not be automatic admission. Spoofing caller ID requires knowing what to spoof, and a plumber's number is on their website while your sister's mobile is nowhere.",
+    "Classification comes from the vCard alone, with no lookups: ORG set reads as a business, TEL;TYPE=work as probably published, an 800-family number as never personal, and a named card with a cell or home number and no ORG as a person. Everything ambiguous is published, because wrong-closed means a ten-second greeting and wrong-open means a findable number ringing the whole house at 3am.",
+    "Numbers are keyed by E.164, so the same mobile in two address books is one entry. Conflicts resolve conservatively: same number and different names, the first source in declaration order wins; personal in one source and published in another, published wins; present in an admit source and a block source, blocked wins.",
+    "A number that will not normalise to E.164 is skipped and counted, and `doorman check` reports the count per source.",
+    "doorman parses the vCard subset real exporters emit — iCloud, Google Contacts, CardDAV, and 2.1 files with quoted-printable and folded lines — and counts whatever it does not understand rather than guessing at it.",
+    "Secrets are named here, never written here. token_env holds the NAME of a .env variable, and the token it names travels in an Authorization header rather than a query string, so a URL stays safe to log and to print."
+  ]
+}
