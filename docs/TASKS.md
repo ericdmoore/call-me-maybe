@@ -457,6 +457,30 @@ ones cleanly say they have none. Ties to #5.
 
 ---
 
+## 3f. A schedule cannot span a weekend
+
+**Why:** found while writing the solo-business example, which wanted "closed
+Friday 17:30 until Monday 08:30" and could not say it.
+
+`afterhours` takes one schedule id, and `Afterhours.Active` handles at most a
+single crossing of midnight. The near-miss — `start = "17:30"`, `end = "17:29"`,
+`days = ["FR","SA"]` — leaves a one-minute hole on Saturday and closes Monday
+morning as well.
+
+- [ ] A window may span more than one midnight, or an extension may name more
+      than one schedule. Decide which; naming several is probably smaller and
+      composes better with §3's house-scope variant.
+- [ ] Absent the new form, behaviour is byte-identical.
+- [ ] `doorman check`'s ACTIVE NOW marker stays correct across the longer span.
+
+**Files:** `internal/policy/policy.go`, `internal/policy/policy_test.go`.
+
+Two related limits the same pass surfaced are already tracked: schedules never
+reach `[house]` (§3), and the allow-list is one class with one destination, so
+"Grandma rings the kitchen, the school rings the office" needs §5.
+
+---
+
 ## Known rough edges
 
 Project direction: code is Apache 2.0 as of v0.4.1, with audio licensed

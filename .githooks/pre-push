@@ -70,14 +70,18 @@ step "analyzer tests"
 (cd tools && go test ./...) >/dev/null || fail "tools/ tests are failing"
 
 # ── The shipped examples must stay valid ─────────────────────────────
-# A broken examples/policy.example.toml is the first thing a new user copies.
-step "validating example config"
+# A broken example is the first thing a new user copies. Every one of them:
+# a directory holding a policy.example.toml is an example, which is the same
+# rule CI discovers them by.
+step "validating example configs"
 # --allow-placeholders: the examples carry the sentinel PIN and cannot pass a
 # strict check by design. This still verifies every cross-reference in them.
-go run ./cmd/doorman check --allow-placeholders \
-	--handsets examples/handsets.example.toml \
-	--trunks examples/trunks.example.toml \
-	examples/policy.example.toml >/dev/null \
-	|| fail "examples/policy.example.toml does not validate"
+while IFS= read -r policy; do
+	dir=$(dirname "$policy")
+	args=(--handsets "$dir/handsets.example.toml")
+	[ -f "$dir/trunks.example.toml" ] && args+=(--trunks "$dir/trunks.example.toml")
+	go run ./cmd/doorman check --allow-placeholders "${args[@]}" "$policy" >/dev/null \
+		|| fail "$policy does not validate"
+done < <(find examples -name policy.example.toml | sort)
 
 printf '\033[32m✓ pre-push checks passed\033[0m\n'

@@ -2,6 +2,7 @@ package policy
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -231,18 +232,55 @@ func TestValidConfigProducesNoUnknownKeys(t *testing.T) {
 
 func TestShippedExamplesHaveNoUnknownKeys(t *testing.T) {
 	// The examples are the first thing anyone copies. A stray key there ships
-	// the defect to every new install.
-	pol, err := os.ReadFile("../../examples/policy.example.toml")
+	// the defect to every new install — and "the examples" is every one of
+	// them, not only the syntax tour at the top of examples/. A directory
+	// holding a policy.example.toml *is* an example; that filename is the whole
+	// naming convention, and it is what CI discovers them by too.
+	dirs, err := os.ReadDir("../../examples")
 	if err != nil {
 		t.Skipf("examples not readable from here: %v", err)
 	}
-	hs, err := os.ReadFile("../../examples/handsets.example.toml")
-	if err != nil {
-		t.Skipf("examples not readable from here: %v", err)
+	roots := []string{"../../examples"}
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		sub, err := os.ReadDir(filepath.Join("../../examples", d.Name()))
+		if err != nil {
+			continue
+		}
+		for _, s := range sub {
+			if s.IsDir() {
+				roots = append(roots, filepath.Join("../../examples", d.Name(), s.Name()))
+			}
+		}
 	}
-	_, err = fromSplitTOML(pol, hs, Options{AllowPlaceholders: true, StrictUnknownKeys: true})
-	if err != nil {
-		t.Errorf("shipped examples fail a strict check: %v", err)
+
+	found := 0
+	for _, dir := range roots {
+		pol, err := os.ReadFile(filepath.Join(dir, "policy.example.toml"))
+		if err != nil {
+			continue // not an example directory
+		}
+		found++
+		t.Run(filepath.Base(dir), func(t *testing.T) {
+			hs, err := os.ReadFile(filepath.Join(dir, "handsets.example.toml"))
+			if err != nil {
+				// An example without its hardware half cannot be copied, so
+				// this is a broken example rather than a directory to skip.
+				t.Fatalf("%s has a policy example and no handsets.example.toml: %v", dir, err)
+			}
+			if _, err := fromSplitTOML(pol, hs, Options{
+				AllowPlaceholders: true, StrictUnknownKeys: true,
+			}); err != nil {
+				t.Errorf("%s fails a strict check: %v", dir, err)
+			}
+		})
+	}
+	// A discovery loop that finds nothing passes silently, which is the same
+	// defect this whole file exists to close.
+	if found < 2 {
+		t.Errorf("discovered %d examples, want the top-level one plus the scenarios", found)
 	}
 }
 

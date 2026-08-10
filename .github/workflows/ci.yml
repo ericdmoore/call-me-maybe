@@ -62,28 +62,40 @@ jobs:
 
       # The examples are the first thing a new user copies, so a broken
       # cross-reference in them is a real defect. This runs the same
-      # validator the daemon uses.
+      # validator the daemon uses, against EVERY example rather than the one
+      # at the top of examples/: a directory holding a policy.example.toml is
+      # an example, and that filename is the whole discovery rule. A scenario
+      # that stops loading fails the build.
       # The examples carry the placeholder PIN sentinel and CANNOT pass a
       # strict check — that is the point. --allow-placeholders validates
       # structure (cross-references, ladders, schedules) without pretending the
       # config is usable.
-      - name: validate shipped example config
+      - name: validate every shipped example config
         run: |
-          go run ./cmd/doorman check --allow-placeholders \
-            --handsets examples/handsets.example.toml \
-            --trunks examples/trunks.example.toml \
-            examples/policy.example.toml
+          for policy in $(find examples -name policy.example.toml | sort); do
+            dir=$(dirname "$policy")
+            echo "── $policy"
+            trunks=""
+            [ -f "$dir/trunks.example.toml" ] && trunks="--trunks $dir/trunks.example.toml"
+            # shellcheck disable=SC2086
+            go run ./cmd/doorman check --allow-placeholders \
+              --handsets "$dir/handsets.example.toml" \
+              $trunks "$policy" || exit 1
+          done
 
-      # And the inverse: copying the examples verbatim must fail, or the
+      # And the inverse: copying any of them verbatim must fail, or the
       # sentinel is not doing its job.
       - name: examples must not pass a strict check
         run: |
-          if go run ./cmd/doorman check \
-               --handsets examples/handsets.example.toml \
-               examples/policy.example.toml 2>/dev/null; then
-            echo "::error::the shipped examples passed a strict check — the placeholder sentinel is not working"
-            exit 1
-          fi
+          for policy in $(find examples -name policy.example.toml | sort); do
+            dir=$(dirname "$policy")
+            if go run ./cmd/doorman check \
+                 --handsets "$dir/handsets.example.toml" \
+                 "$policy" 2>/dev/null; then
+              echo "::error::$policy passed a strict check — the placeholder sentinel is not working"
+              exit 1
+            fi
+          done
           echo "examples correctly refuse to load without doorman init"
 
       # A shipped template that does not validate would be a broken example in

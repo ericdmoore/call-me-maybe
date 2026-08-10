@@ -1,0 +1,184 @@
+# ─────────────────────────────────────────────────────────────
+# Example · A one-person business line
+#
+# FOR        One person, one number, working from a home office. Clients who
+#            are already clients should reach a ringing phone. Everyone else
+#            should reach something that takes a message, because a business
+#            line that hangs up on a stranger hangs up on next month's work.
+#
+# NEEDS      Nothing that does not exist. This is the whole of it: one
+#            policy.toml, one handsets.toml, the bundled prompt pack. No
+#            second number, no second provider, no unshipped feature.
+#            Voicemail is Asterisk's app_voicemail, so the five mailboxes
+#            named below — surveying, newwork, scheduling, accounts, urgent —
+#            must exist in voicemail.conf. See docs/RUNBOOK.md.
+#
+# DOES NOT   Close at weekends. `afterhours` takes one schedule id, and one
+#            [[schedules]] window is at most a single crossing of midnight —
+#            so "shut from Friday evening until Monday morning" cannot be
+#            written here. Evenings close; Saturday morning rings. See the
+#            note above [[schedules]].
+#
+#            Apply business hours to the allow-list. [[schedules]] reach
+#            extensions only, so a client on the list rings the phones at
+#            03:00. Take the client off the list, or turn the ringer off.
+#
+#            Take a message from a stranger who guesses at the keypad. A
+#            caller who says nothing gets the mailbox (that is on_no_input),
+#            but one who enters wrong digits until MAX_PIN_ATTEMPTS is spent
+#            is dismissed, and a caller the rate limiter has already blocked
+#            is dismissed before the greeting plays at all.
+#
+#            Separate work from home. One number is the scope of this
+#            example: business hours here apply to the only line there is, so
+#            a household sharing this number shares its hours too. Two
+#            numbers on one box is this file plus a second policy file beside
+#            it — a worked example of that is planned, see examples/README.md.
+#
+# CHECK IT   ./bin/doorman check --allow-placeholders \
+#                --handsets examples/scenarios/solo-business/handsets.example.toml \
+#                examples/scenarios/solo-business/policy.example.toml
+#
+#            It refuses a strict check on purpose: the PINs below are the
+#            CHANGEME sentinel. `doorman init` replaces them.
+#
+# THE .ENV   Three keys shape the lobby and none of them live here:
+#            EXTENSION_LENGTH (6), FIRST_DIGIT_TIMEOUT_MS (10000 — the dial
+#            window a silent caller waits out), MAX_PIN_ATTEMPTS (2).
+#
+# A starting point, not a supported configuration. Copy it and make it yours.
+# ─────────────────────────────────────────────────────────────
+
+# ── The number ───────────────────────────────────────────────
+# on_no_input is the key that makes this a business line rather than a house
+# with a doorman. A stranger who reaches the end of the dial window having
+# pressed nothing lands in the [house] mailbox instead of hearing "good day":
+# never drop a lead. It applies to strangers only — an allow-listed client is
+# admitted the moment their number matches, whatever this says.
+#
+# outbound_cid is what somebody sees when the call is returned. With one line
+# it is also the house default, so there is no outbound_handsets list here:
+# a handset no line claims already presents this number.
+
+[line]
+label = "Mertaugh Surveying"
+number = "+15125550142"
+on_no_input = "voicemail"
+outbound_cid = "+15125550142"
+
+# ── What an admitted caller reaches ──────────────────────────
+# Both phones, because there is one person and she is at one of them. This is
+# also where on_no_input = "voicemail" sends a silent stranger, which is why
+# `voicemail` is not optional on this line.
+
+[house]
+handsets = ["working"]
+voicemail = "surveying"
+caller_id_format = "Surveying: {name} <{number}>"
+
+# ── Clients ──────────────────────────────────────────────────
+# The allow-list is short by design: it is the people whose call is worth
+# interrupting a site visit for. Everyone else is not being screened out,
+# they are being asked which of the four things below they are calling about.
+#
+# Numbers may be written any way you like — they normalise to E.164 at load.
+# Probe one with `./bin/doorman e164 512-555-0170`.
+
+[[people]]
+name = "Hollis Ranch"
+numbers = ["512-555-0170"]
+notes = "current job — boundary survey"
+
+[[people]]
+name = "County permits desk"
+numbers = ["(512) 555-0171"]
+notes = "they call back same-day or not at all"
+
+[[people]]
+name = "Bookkeeper"
+numbers = ["+15125550172"]
+
+# ── Business hours ───────────────────────────────────────────
+# A schedule is a CLOSED window, not an open one: an extension referencing it
+# does not ring during it. This one covers every evening and overnight, and a
+# window that crosses midnight belongs to the day it STARTS — so 17:30 Friday
+# through 08:30 Saturday is Friday's.
+#
+# Which is exactly why the weekend is not closed here. A window is one
+# crossing of midnight, and `afterhours` on an extension takes one id, so
+# there is no way to write "Friday 17:30 until Monday 08:30". Saturday and
+# Sunday between 08:30 and 17:30 ring the phones like any weekday. If that is
+# wrong for you, the honest fixes today are to set `enabled = false` on the
+# schedule and leave everything on voicemail, or to keep the phones on and
+# decide by looking at the display.
+#
+# Holidays are one edit: enabled = false, and every reference goes inert
+# without deleting the definition.
+
+[[schedules]]
+id = "closed"
+enabled = true
+start = "17:30"
+end = "08:30"
+days = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
+
+# ── An extension per concern ─────────────────────────────────
+# The reason to have four rather than one: each ends in a DIFFERENT mailbox.
+# "New work" and "invoice question" want different amounts of attention and
+# arrive as different messages, and the caller sorted them for free.
+#
+# Every PIN below is the CHANGEME sentinel — not a weak PIN, an impossible
+# one. The lobby collects keypad digits and compares them exactly, so a
+# non-digit PIN cannot be entered by any sequence of keypresses. Replace them
+# all at once with `doorman init`.
+
+# New work rings the desk first, then follows her to the cordless. Nothing
+# else here gets two stages: this is the call the business exists for.
+[[extensions]]
+pin = "CHANGEME"
+label = "New work"
+voicemail = "newwork"
+afterhours = "closed"
+
+  [[extensions.steps]]
+  handsets = ["desk"]
+  rings = 3               # ~6s each
+
+  [[extensions.steps]]
+  handsets = ["working"]  # group: desk + cordless
+  rings = 4
+
+# Scheduling: both phones at once, because "are you still coming Thursday" is
+# worth answering from either.
+[[extensions]]
+pin = "CHANGEME"
+label = "Scheduling"
+handsets = ["working"]
+voicemail = "scheduling"
+afterhours = "closed"
+
+# Accounts rings briefly and then stops. An invoice question is not worth
+# chasing a phone across a house for, and the mailbox is the point.
+[[extensions]]
+pin = "CHANGEME"
+label = "Accounts"
+voicemail = "accounts"
+afterhours = "closed"
+
+  [[extensions.steps]]
+  handsets = ["desk"]
+  rings = 2
+
+# The one that still rings after hours. `afterhours_ring` is what turns a
+# quiet window from "voicemail" into "somewhere else" — here, the cordless
+# only, so an urgent site call reaches her without lighting up the desk phone
+# in an empty office. If she does not answer it, the caller still lands in
+# the mailbox: a redirect that goes unanswered falls through, it does not
+# hang up.
+[[extensions]]
+pin = "CHANGEME"
+label = "Site emergency"
+handsets = ["working"]
+voicemail = "urgent"
+afterhours = "closed"
+afterhours_ring = ["cordless"]

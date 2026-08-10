@@ -182,7 +182,7 @@ call-me-maybe/
 ├── internal/ari/          thin typed ARI client (REST + reconnecting WebSocket)
 ├── internal/lsp/          language server — same validator, as you type
 ├── internal/config/       env parsing, names match examples/.env.example
-├── examples/              .env / policy / handsets templates to copy
+├── examples/              templates to copy, plus worked scenarios/ (see its README)
 ├── asterisk/              pjsip / extensions / ari / http / rtp config
 ├── prompts/               prompt text + piper build script
 ├── scripts/               systemd unit, smoke.sh, coverage floors

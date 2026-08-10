@@ -1,0 +1,181 @@
+# ─────────────────────────────────────────────────────────────
+# Example · The family line
+#
+# FOR        A household with one number and a lot of phones. Grandma and the
+#            school ring straight through to the whole house. Everybody else
+#            meets the lobby, dials a six-digit extension or does not, and is
+#            wished a good day. This is the configuration the project was
+#            built to have.
+#
+# NEEDS      Nothing that does not exist — though it did until recently.
+#            Silence meaning *admit* for a known caller and *dismiss* for a
+#            stranger is `on_no_input` plus the known caller's route through
+#            the collector, and this example is the reason both were built.
+#            Voicemail is Asterisk's app_voicemail, so the "family" and
+#            "kids" mailboxes must exist in voicemail.conf — docs/RUNBOOK.md.
+#
+# DOES NOT   Give a known caller a pause to dial into. The welcome prompt IS
+#            the dial window and the whole of it: press a digit OVER the
+#            greeting to reach one room, and the house rings the instant the
+#            greeting ends otherwise. There is deliberately no tail of
+#            silence — it would be paid by every known caller on every call
+#            to serve the rare one who dials, and a pause on a phone call is
+#            indistinguishable from a dead line. Nothing at the keypad can
+#            cost an allow-listed caller the house: no digits, half an
+#            extension abandoned, or attempts exhausted, they still ring it.
+#
+#            Set the stranger's ten seconds. That is FIRST_DIGIT_TIMEOUT_MS
+#            in .env (10000), not a key in this file, and it is one number
+#            for the whole install rather than per line or per caller.
+#
+#            Put the house on a schedule. [[schedules]] reach extensions
+#            only, so the school-night window below quiets the kids'
+#            extension and nothing else — a known caller at 02:00 rings all
+#            five bedrooms. Quiet hours for [house] do not exist; take the
+#            number off the allow-list, or turn the ringer off.
+#
+#            Ring different phones for different known callers. The
+#            allow-list is one class with one destination: every matched
+#            number rings [house]. "Grandma rings the kitchen, the school
+#            rings the office" is not expressible — there is one house plan
+#            and it is the whole house.
+#
+#            Answer a second number, or present a different caller ID on one.
+#            The binary does both; one line is the scope of this example. Two
+#            numbers on one box is this file plus a second policy file beside
+#            it — a worked example of that is planned, see examples/README.md.
+#
+# CHECK IT   ./bin/doorman check --allow-placeholders \
+#                --handsets examples/scenarios/family-line/handsets.example.toml \
+#                examples/scenarios/family-line/policy.example.toml
+#
+#            It refuses a strict check on purpose: the PINs below are the
+#            CHANGEME sentinel. `doorman init` replaces them.
+#
+# THE .ENV   EXTENSION_LENGTH (6), FIRST_DIGIT_TIMEOUT_MS (10000),
+#            MAX_PIN_ATTEMPTS (2). None of them live here.
+#
+# A starting point, not a supported configuration. Copy it and make it yours.
+# ─────────────────────────────────────────────────────────────
+
+# ── The number ───────────────────────────────────────────────
+# on_no_input = "dismiss" is the default, and it is written out anyway
+# because it is the one decision that makes this a house rather than a
+# business: a stranger who waits out the dial window in silence hears the
+# parting prompt and is hung up on. The other two values are "voicemail" and
+# "ring-house" — see the solo-business example for the first, and think hard
+# before the second, which makes the allow-list a shortcut rather than a gate.
+#
+# None of this touches a known caller. They were admitted the moment their
+# number matched.
+
+[line]
+label = "The house"
+number = "+15125550100"
+on_no_input = "dismiss"
+
+# ── What a known caller reaches ──────────────────────────────
+# Everything. That is the promise of the allow-list: Grandma rings the house
+# and somebody picks up, with no keypad between her and the family.
+#
+# `voicemail` here is where a known caller lands when nobody answers all
+# eight phones. Remove it and they get "nobody's available" and a hangup.
+
+[house]
+handsets = ["everyone"]
+voicemail = "family"
+caller_id_format = "Lobby: {name} <{number}>"
+
+# ── The allow-list ───────────────────────────────────────────
+# Short, and it should stay short: every number here is one that rings five
+# bedrooms at three in the morning if it wants to. Numbers may be written any
+# way you like — 512-555-0100, (512) 555-0100, +15125550100 — they normalise
+# to E.164 at load. Anything unparseable is a load error rather than a rule
+# that silently never matches.
+
+[[people]]
+name = "Grandma"
+numbers = ["512-555-0110"]
+
+[[people]]
+name = "Grandad"
+numbers = ["512-555-0111"]
+
+[[people]]
+name = "School front office"
+numbers = ["(512) 555-0150"]
+notes = "attendance line — do not remove"
+
+[[people]]
+name = "Next door"
+numbers = ["+15125550151", "512-555-0152"]
+notes = "landline + mobile; they hold the spare key"
+
+# ── Schedules ────────────────────────────────────────────────
+# A named window, defined once and referenced by id. A window that crosses
+# midnight belongs to the day it STARTS, so this one covers Sunday night
+# through Monday 07:00 and leaves Friday and Saturday nights open.
+#
+# Spring break is one edit: enabled = false, and every reference goes inert
+# without deleting the definition.
+
+[[schedules]]
+id = "school-night"
+enabled = true
+start = "20:30"
+end = "07:00"
+days = ["SU", "MO", "TU", "WE", "TH"]
+
+# ── Extensions ───────────────────────────────────────────────
+# What a stranger may dial in the lobby. The PIN *is* the extension — there
+# is no separate username — so treat it like a password and give out one per
+# audience, not one per person you trust.
+#
+# Every PIN below is the CHANGEME sentinel: not a weak PIN, an impossible
+# one. The lobby collects keypad digits and compares them exactly, so a
+# non-digit PIN cannot be entered by any sequence of keypresses. `doorman
+# check` refuses to load this file until they are replaced, which is the
+# whole point — a placeholder that merely looks wrong (4242) works silently
+# forever. Replace them all at once with `doorman init`.
+
+# For the plumber, the delivery driver, the neighbour with a question:
+# whoever is nearest picks up.
+[[extensions]]
+pin = "CHANGEME"
+label = "Kitchen"
+handsets = ["kitchen"]
+voicemail = "family"
+
+# Work calls that should not ring the bunk room.
+[[extensions]]
+pin = "CHANGEME"
+label = "Office"
+handsets = ["office"]
+voicemail = "family"
+
+# The kids' friends. Their rooms and the playroom first, the adults after —
+# then the kids' mailbox. On a school night it does not ring at all: the
+# window is active, there is no afterhours_ring, so the caller goes straight
+# to voicemail. Turn that off for the holidays with `enabled = false` on the
+# schedule above.
+[[extensions]]
+pin = "CHANGEME"
+label = "Kids"
+voicemail = "kids"
+afterhours = "school-night"
+
+  [[extensions.steps]]
+  handsets = ["kids"]       # group: four bedrooms + the playroom
+  rings = 3                 # ~6s each
+
+  [[extensions.steps]]
+  handsets = ["adults"]     # group
+  rings = 4                 # or `seconds = 24` for an exact duration
+
+# The one to give out when you mean it. Same eight phones as [house], via the
+# same group id, so the two cannot drift apart.
+[[extensions]]
+pin = "CHANGEME"
+label = "Whole house"
+handsets = ["everyone"]
+voicemail = "family"
