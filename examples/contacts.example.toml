@@ -1,0 +1,87 @@
+# ─────────────────────────────────────────────────────────────
+# Call Me Maybe — the address books: whose contact list this phone may read.
+#   cp contacts.example.toml contacts.toml
+#   ./bin/doorman check
+#
+# THIS FILE IS OPTIONAL, and not having it is the normal state. With no
+# contacts.toml nothing is read, nothing is printed, and the phone behaves
+# exactly as it always has. Rollback is deleting the file.
+#
+# WHY IT EXISTS. [[people]] in policy.toml is hand-typed and therefore always
+# out of date, while every household already curates a contact list — on
+# phones, continuously, without being asked. The list exists; the phone just
+# cannot see it. Export it as vCard, point at the file, and it can.
+#
+# NOTHING HERE IS AUTHORITATIVE. A contact set is derived, disposable data.
+# Delete every source and the phone still works: those callers simply hear the
+# lobby like anybody else, and [[people]] is untouched because it lives in a
+# different file. Contacts are the ambient list; [[people]] stays the
+# deliberate one.
+#
+# THE LINE EVERYTHING TURNS ON: if a stranger can look the number up, it must
+# not be automatic admission. Caller ID is spoofable, but spoofing requires
+# knowing WHAT to spoof — and a plumber's number is on their website while your
+# sister's mobile is nowhere. So doorman classifies every number it reads:
+#
+#   ORG is set on the card         → a business, therefore findable → published
+#   TEL;TYPE=work                  → probably published
+#   800/888/877/866/855/844/833    → never a person's → published
+#   a name, TYPE=cell or home,     → a person → personal
+#     and no ORG
+#
+# Anything ambiguous is published, because the failures are not symmetric.
+# Wrong-closed means the plumber hears a ten-second greeting and dials an
+# extension. Wrong-open means a findable number rings every phone in the house
+# at 3am. `doorman check` prints the counts and says which signal decided.
+# ─────────────────────────────────────────────────────────────
+
+# ── One source per address book ──────────────────────────────
+# The real shape of a household is your contacts plus your spouse's, and later
+# the kids'. Each is its own export from its own account, and they merge into
+# one set keyed by E.164 — so the same mobile in two books is one entry.
+#
+# Declaration order is the only ordering there is. When two books disagree
+# about a name, the first source listed wins; when one says personal and
+# another says published, published wins; when a number is in both an admit
+# source and a block source, blocked wins. All three answers are the
+# restrictive one, and all three are predictable by reading this file top to
+# bottom.
+#
+# A relative path is relative to THIS FILE, so exports can live beside it. The
+# file it points at holds an entire address book: keep it out of any
+# repository, mode 0600. It is more personal data than anything else this
+# project stores.
+
+[[sources]]
+id   = "eric"
+path = "/var/lib/doorman/contacts/eric.vcf"
+
+[[sources]]
+id   = "becky"
+path = "/var/lib/doorman/contacts/becky.vcf"
+
+# ── The block list ───────────────────────────────────────────
+# kind = "block" is the spam list: these callers do not hear the lobby at all,
+# which is the whole difference between "not admitted" and "blocked". A number
+# here beats every other tier.
+[[sources]]
+id   = "nuisance"
+path = "/var/lib/doorman/contacts/blocked.vcf"
+kind = "block"
+
+# ── Fetching, when it lands ──────────────────────────────────
+# A source may name a url instead of a path, with an optional token_env. Both
+# keys are accepted today and RESERVED: this release reads path sources only,
+# and `doorman check` says so per source rather than letting one quietly
+# contribute nothing. They are declared now so this file does not churn when
+# fetching arrives.
+#
+# SECRETS ARE NAMED HERE, NEVER WRITTEN HERE. token_env holds the NAME of a
+# .env variable, and the token travels in an Authorization header rather than a
+# query string — a token in a URL makes the URL itself a secret, and every
+# net/http error wraps into a *url.Error carrying the whole thing.
+#
+# [[sources]]
+# id        = "shared"
+# url       = "https://example.com/contacts/shared.vcf"
+# token_env = "CONTACTS_SHARED_TOKEN"

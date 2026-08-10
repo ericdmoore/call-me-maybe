@@ -31,6 +31,7 @@ import (
 	"callmemaybe/internal/ari"
 	"callmemaybe/internal/calls"
 	"callmemaybe/internal/config"
+	"callmemaybe/internal/contacts"
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/lsp"
 	"callmemaybe/internal/notify"
@@ -102,9 +103,13 @@ const usage = `doorman — the Call Me Maybe lobby daemon
                                 call and which phones default to it. With a
                                 trunks.toml it also lists the providers, which
                                 lines land on each, and which trunk would carry
-                                911 — saying whether that was chosen or inferred
+                                911 — saying whether that was chosen or inferred.
+                                With a contacts.toml it reports what the address
+                                books add up to: per source, how many numbers
+                                read as personal, published, blocked or skipped
       -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
       -trunks path              provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)
+      -contacts path            address-book inventory, optional (default $CONTACTS_PATH or ./contacts.toml)
       -allow-placeholders       accept the example sentinels; for CI, not operators
   doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
                                 "build" renders audio through piper, ElevenLabs,
@@ -120,10 +125,10 @@ const usage = `doorman — the Call Me Maybe lobby daemon
   doorman schema [name]         print the configuration surface as JSON Schema:
                                 every key, type, default, and cross-file
                                 reference for policy.toml, handsets.toml,
-                                trunks.toml, and the environment. name is
-                                policy, handsets, trunks or env; all of them
-                                when omitted. Written to be read by tooling
-                                and by LLMs — see llms.txt
+                                trunks.toml, contacts.toml, and the environment.
+                                name is policy, handsets, trunks, contacts or
+                                env; all of them when omitted. Written to be
+                                read by tooling and by LLMs — see llms.txt
   doorman template <cmd>        list, show, and fill in policy templates:
                                 a template declares questions and the structures
                                 it emits, and this writes ordinary policy TOML
@@ -155,9 +160,10 @@ const usage = `doorman — the Call Me Maybe lobby daemon
 
 The config interfaces: .env (secrets and tuning), handsets.toml (the hardware —
 what exists), policy.toml (the rules — who gets in, what rings, when), and
-optionally trunks.toml (the providers — where numbers come from). render makes
-handsets.toml and trunks.toml authoritative over the Asterisk side; without a
-trunks.toml the trunk stays hand-written, which is every single-provider box.
+optionally trunks.toml (the providers — where numbers come from) and
+contacts.toml (the address books to read). render makes handsets.toml and
+trunks.toml authoritative over the Asterisk side; without a trunks.toml the
+trunk stays hand-written, which is every single-provider box.
 
 https://callmemaybe.cc — Apache 2.0; bundled audio CC BY-SA 4.0 (LICENSES.md)
 `
@@ -212,6 +218,7 @@ func runCheck(args []string) int {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
 	handsetsFlag := fs.String("handsets", "", "handsets file (default $HANDSETS_PATH or ./handsets.toml)")
 	trunksFlag := fs.String("trunks", "", "provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)")
+	contactsFlag := fs.String("contacts", "", "address-book inventory, optional (default $CONTACTS_PATH or ./contacts.toml)")
 	// Structural validation of the shipped examples, whose PINs are the
 	// placeholder sentinel. CI uses this; an operator never should, which is
 	// what makes a freshly copied config fail loudly until `doorman init` runs.
@@ -232,6 +239,15 @@ func runCheck(args []string) int {
 	trunks, terr := policy.LoadTrunks(trunksPath)
 	if terr != nil {
 		fmt.Fprintf(os.Stderr, "✗ %s is not valid\n\n%v\n", trunksPath, terr)
+		return 1
+	}
+
+	// The address books, when there are any. Absent is the state every install
+	// is in, and it prints nothing at all.
+	contactsPath := contactsPathArg(*contactsFlag)
+	contactSources, cerr := policy.LoadContacts(contactsPath)
+	if cerr != nil {
+		fmt.Fprintf(os.Stderr, "✗ %s is not valid\n\n%v\n", contactsPath, cerr)
 		return 1
 	}
 
@@ -306,7 +322,22 @@ func runCheck(args []string) int {
 	if !printEmergency(trunks, results) {
 		rc = 1
 	}
+	// Silent without a contacts.toml, for the same reason.
+	if !printContacts(contacts.Load(contactSources, defaultCountryCode())) {
+		rc = 1
+	}
 	return rc
+}
+
+// defaultCountryCode is the country code assumed for a number written without
+// one. `doorman e164` reads the environment the same way, and both match what
+// the daemon does with DEFAULT_COUNTRY_CODE — a contact and a caller ID have to
+// normalise identically or the lookup misses.
+func defaultCountryCode() string {
+	if cc := os.Getenv("DEFAULT_COUNTRY_CODE"); cc != "" {
+		return cc
+	}
+	return "1"
 }
 
 // printOutbound reports what each line presents on an outbound call and which
@@ -854,11 +885,7 @@ func runE164(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: doorman e164 <number>")
 		return 2
 	}
-	cc := os.Getenv("DEFAULT_COUNTRY_CODE")
-	if cc == "" {
-		cc = "1"
-	}
-	n := policy.NormaliseCallerID(args[0], cc)
+	n := policy.NormaliseCallerID(args[0], defaultCountryCode())
 	switch n.Kind {
 	case policy.KindE164:
 		fmt.Printf("%s  →  %s  (usable for the allow-list)\n", args[0], n.Value)

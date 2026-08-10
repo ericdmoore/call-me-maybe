@@ -7,6 +7,7 @@ a JSON Schema cannot express. Machine-readable schema:
     https://callmemaybe.cc/schema/policy.json
     https://callmemaybe.cc/schema/handsets.json
     https://callmemaybe.cc/schema/trunks.json
+    https://callmemaybe.cc/schema/contacts.json
     https://callmemaybe.cc/schema/env.json
 
 **Everything below describes what the binary accepts today.** The project's
@@ -34,7 +35,7 @@ Authoritative check, always: `doorman check` validates a real config and prints
 what it resolves to. `doorman schema policy` prints the schema from the binary
 in hand, which beats this file if they ever disagree.
 
-## Four files, each owning its sections exclusively
+## Five files, each owning its sections exclusively
 
 The loader **rejects** a section that appears in the wrong file rather than
 merging it, and names the file it belongs in. This is the most common mistake.
@@ -42,6 +43,7 @@ merging it, and names the file it belongs in. This is the most common mistake.
     policy.toml     [line], [house], [[people]], [[extensions]], [[schedules]]
     handsets.toml   [[handsets]], [[groups]]        — hardware inventory
     trunks.toml     emergency_trunk, [[trunks]]     — providers; OPTIONAL
+    contacts.toml   [[sources]]                     — address books; OPTIONAL
     .env            secrets and tuning              — timeouts, lengths, keys
 
 Handset *ids* are defined in handsets.toml and referenced by name from
@@ -374,11 +376,85 @@ Rules a schema cannot express:
   working in a power cut, and it should not be a household's only route to
   emergency services.
 
+## The address books — contacts.toml
+
+**Optional, and most boxes do not have one.** With no `contacts.toml` nothing
+is read and `doorman check` prints nothing about contacts at all. It exists
+because `[[people]]` is hand-typed and therefore always out of date, while
+every household already curates a contact list on their phones.
+
+    [[sources]]
+    id   = "eric"                      # names the source in `doorman check`
+    path = "/var/lib/doorman/contacts/eric.vcf"   # a vCard export on this box
+
+    [[sources]]
+    id   = "nuisance"
+    path = "/var/lib/doorman/contacts/blocked.vcf"
+    kind = "block"                     # admit (the default) | block
+
+    # RESERVED — accepted, not fetched yet. Only path sources are read today,
+    # and `doorman check` says so per source.
+    # [[sources]]
+    # id        = "shared"
+    # url       = "https://example.com/contacts/shared.vcf"
+    # token_env = "CONTACTS_SHARED_TOKEN"   # the NAME of a .env variable
+
+**Nothing here is authoritative, and nothing on a call path reads it yet.**
+`[[people]]` in policy.toml remains the only list that admits anybody. A
+contact set is derived, disposable data: delete every source and the phone
+works exactly as it did, with those callers simply hearing the lobby.
+
+**The rule the whole file turns on: if a stranger can look the number up, it
+must not be automatic admission.** Caller ID is spoofable, but spoofing needs
+knowing *what* to spoof — a plumber's number is on their website, your
+sister's mobile is nowhere. So every number is classified from the vCard
+alone, with no lookups:
+
+| Signal on the card | Reads as |
+|---|---|
+| `ORG` is set | a business — **published** |
+| `TEL;TYPE=work` (or fax, pager, main) | probably **published** |
+| 800/888/877/866/855/844/833 | never personal — **published** |
+| a name, `TYPE=cell`/`mobile`/`iphone`/`home`, no `ORG` | **personal** |
+| anything else, including an untyped or unnamed number | **published** |
+
+The last row is the important one. Wrong-closed means the plumber hears a
+ten-second greeting; wrong-open means a findable number rings every phone in
+the house at 3am, so everything ambiguous falls to published.
+
+The same rule applies to `[[people]]`, where it is the mistake people make by
+default: **do not allow-list a number that appears on a website.** The plumber
+is exactly who you would think to add.
+
+Rules a schema cannot express:
+
+- Numbers are keyed by E.164, so the same mobile in two address books is one
+  entry, and one vCard with three numbers becomes three entries sharing a name.
+- Conflicts resolve to the restrictive answer. Same number, different names:
+  the first source in declaration order wins. Personal in one source and
+  published in another: published. In an admit source and a block source:
+  blocked, and `doorman check` counts it as a contradiction worth resolving.
+- A number that will not normalise to E.164 is skipped and counted per source.
+- doorman parses the vCard subset real exporters emit — iCloud, Google
+  Contacts, CardDAV, and 2.1 files with quoted-printable and folded lines —
+  and counts what it does not understand rather than guessing at it.
+- A relative `path` is relative to contacts.toml, not the working directory.
+- The exports hold entire address books. They belong outside any repository,
+  mode 0600; never write one into a commit or a payload that leaves the box.
+
 ## Common mistakes
 
 - Putting `[[handsets]]` in policy.toml. It belongs in handsets.toml.
 - Putting `[[trunks]]` in policy.toml, or `[line]` in trunks.toml. Each file
   owns its sections; the loader names the right file.
+- Putting `[[sources]]` in policy.toml. Contact sources are global and policy
+  is per line; they belong in contacts.toml.
+- Putting `[[people]]` in contacts.toml. That file names address books to
+  read; the allow-list is policy.toml's and stays hand-written.
+- Allow-listing a published number in `[[people]]` — a business, a school, a
+  surgery. Anyone who can read the number can present it.
+- Putting a real token in `token_env`. It names a variable, and the token
+  travels in a header rather than a URL.
 - Writing `[line] trunk` with no trunks.toml to point at.
 - `[line] trunk` without `[line] number`, then expecting the DID to route.
 - Putting a real password in `password_env`. It names a variable.
@@ -414,6 +490,10 @@ These appear in the project's planning documents. They are not implemented, and
   that hits zero stops the phone ringing with no error anywhere, and there is
   nothing in the config surface to warn about it. Outbound routing by trunk
   itself DOES exist — see `[line] trunk` above.
+- **Contacts admitting a caller.** `contacts.toml` parses, classifies, merges
+  and reports today, and `doorman check` prints what it adds up to — but
+  nothing on a call path consults it. Do not tell somebody that adding a
+  source will make their sister ring through; it will not, yet.
 - `ring` on `[[people]]` (per-person routing overrides).
 - `[house.afterhours]` — afterhours exists per-extension only.
 - `[[schedules]]` at line scope. A schedule is referenced from an extension.
@@ -427,6 +507,7 @@ that appears to deliver it. `docs/TASKS.md` has the current state.
 - `https://callmemaybe.cc/llms.txt` — what the whole system is
 - `https://callmemaybe.cc/schema/policy.json` — the machine-readable surface
 - `https://callmemaybe.cc/schema/trunks.json` — the provider inventory
+- `https://callmemaybe.cc/schema/contacts.json` — the address-book inventory
 - `doorman schema policy` — the same, from the binary in hand
 - `doorman check` — the authority on whether a file is valid
 - `doorman init` — generate a starting config whose placeholders cannot

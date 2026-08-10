@@ -1,0 +1,25 @@
+this file starts with a line that is not a property at all
+BEGIN:VCARD
+VERSION:3.0
+FN:Shortcode Alerts
+N:;;;;
+TEL;TYPE=CELL:22000
+TEL;TYPE=CELL:x1234
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+FN:Delivery Depot
+N:;;;;
+ORG:Delivery Depot
+TEL;TYPE=WORK:512-555-0140
+AGENT:BEGIN:VCARD
+VERSION:3.0
+FN:Night Dispatcher
+TEL;TYPE=CELL:512-555-0141
+END:VCARD
+END:VCARD
+another line that is not a property
+BEGIN:VCARD
+VERSION:3.0
+FN:Truncated Contact
+TEL;TYPE=CELL:512-555-0142

@@ -47,6 +47,37 @@ func TestEveryTrunkTOMLKeyIsDocumented(t *testing.T) {
 	}
 }
 
+// contacts.toml is a fourth root struct, and needs the same guard for the same
+// reason: nothing in the policy or trunk walk would ever reach it.
+func TestEveryContactTOMLKeyIsDocumented(t *testing.T) {
+	documented := map[string]bool{}
+	collectProperties(schema.Contacts(), documented)
+
+	for _, key := range tomlKeys(reflect.TypeOf(policy.ContactFile{})) {
+		if !documented[key] {
+			t.Errorf("policy.ContactFile exposes toml key %q but `doorman schema contacts` "+
+				"does not document it", key)
+		}
+	}
+}
+
+// The whole feature turns on one sentence, and a schema that documented the
+// keys without it would let a model produce a contacts.toml that validates and
+// admits the dentist.
+func TestContactsSchemaStatesTheDiscoverabilityRule(t *testing.T) {
+	joined := strings.Join(schema.Contacts().Rules, " ")
+	for _, want := range []string{"look the number up", "ambiguous is published", "blocked wins"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("contacts schema no longer says %q — it is the rule every "+
+				"classification turns on", want)
+		}
+	}
+	// And that it is not authoritative: [[people]] stays the deliberate list.
+	if !strings.Contains(joined, "[[people]]") {
+		t.Error("contacts schema no longer says [[people]] is untouched by this file")
+	}
+}
+
 // And the reverse for the one key whose absence is silent and whose presence
 // is load-bearing: [line] trunk is what puts a DID route in the right
 // provider's context, and an undocumented key is one a model will not emit.
@@ -183,7 +214,7 @@ func TestBundleCarriesTheAuthorityNote(t *testing.T) {
 	if !strings.Contains(b.Authority, "doorman check") {
 		t.Error("bundle no longer points at `doorman check` as the authority")
 	}
-	for _, want := range []string{"policy.toml", "handsets.toml", "trunks.toml", "env"} {
+	for _, want := range []string{"policy.toml", "handsets.toml", "trunks.toml", "contacts.toml", "env"} {
 		if _, ok := b.Schemas[want]; !ok {
 			t.Errorf("bundle is missing %q", want)
 		}

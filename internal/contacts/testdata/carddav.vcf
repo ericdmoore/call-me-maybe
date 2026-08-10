@@ -1,0 +1,24 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:urn:uuid:8f2b1c44-0d6e-4a1b-9c3a-6f0f6a2b1d55
+FN:Tomás Iversen
+N:Iversen;Tomás;;;
+TEL;VALUE=uri;TYPE="voice,cell";PREF=1:tel:+1-512-555-0120
+TEL;VALUE=uri;TYPE="voice,home":tel:+15125550121
+REV:20260714T093000Z
+END:VCARD
+BEGIN:VCARD
+VERSION:4.0
+FN:Riverside Veterinary
+ORG:Riverside Veterinary;Reception;Front Desk
+TEL;VALUE=uri;TYPE="voice,work":tel:+15125550122;ext=204
+TEL;VALUE=uri;TYPE="fax":tel:+1-512-555-0123
+URL:https://example.com/riverside
+END:VCARD
+BEGIN:VCARD
+VERSION:4.0
+FN:Priya Raghunathan
+N:Raghunathan;Priya;;;
+TEL;VALUE=uri:tel:+15125550124
+NICKNAME:Pri
+END:VCARD

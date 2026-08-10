@@ -32,8 +32,8 @@ import (
 // editor diagnostic, rather than being pre-formatted, because `doorman
 // check`, the daemon's warning log, and the LSP each want it differently.
 type UnknownKey struct {
-	// File is "policy", "handsets" or "trunks" — which of the three it was
-	// found in, matching the prefix the loader's other errors use.
+	// File is "policy", "handsets", "trunks" or "contacts" — which of them it
+	// was found in, matching the prefix the loader's other errors use.
 	File string
 	// Path is the full dotted path as TOML reports it: "house.voicmail".
 	Path string
@@ -110,20 +110,36 @@ var trunkFileShape = sync.OnceValue(func() *keyTable {
 	return describeType(reflect.TypeOf(TrunkFile{}), false)
 })
 
+// contactFileShape is the fourth, for contacts.toml.
+var contactFileShape = sync.OnceValue(func() *keyTable {
+	return describeType(reflect.TypeOf(ContactFile{}), false)
+})
+
 // misplaced names sections that exist, but not in the file they turned up in.
 // Keyed by "<file>.<dotted path>". Each file owning its sections exclusively is
 // the design; this is the design saying so out loud, because "unknown section"
 // sends someone hunting for a typo that is not there.
 var misplaced = map[string]string{
-	"policy.trunks":     "[[trunks]] belongs in trunks.toml",
-	"handsets.trunks":   "[[trunks]] belongs in trunks.toml",
-	"trunks.line":       "[line] belongs in policy.toml — one shared inventory cannot hold something true of only one line",
-	"trunks.house":      "[house] belongs in policy.toml",
-	"trunks.people":     "[[people]] belongs in policy.toml",
-	"trunks.extensions": "[[extensions]] belongs in policy.toml",
-	"trunks.schedules":  "[[schedules]] belongs in policy.toml",
-	"trunks.handsets":   "[[handsets]] belongs in handsets.toml",
-	"trunks.groups":     "[[groups]] belongs in handsets.toml",
+	"policy.trunks":       "[[trunks]] belongs in trunks.toml",
+	"handsets.trunks":     "[[trunks]] belongs in trunks.toml",
+	"trunks.line":         "[line] belongs in policy.toml — one shared inventory cannot hold something true of only one line",
+	"trunks.house":        "[house] belongs in policy.toml",
+	"trunks.people":       "[[people]] belongs in policy.toml",
+	"trunks.extensions":   "[[extensions]] belongs in policy.toml",
+	"trunks.schedules":    "[[schedules]] belongs in policy.toml",
+	"trunks.handsets":     "[[handsets]] belongs in handsets.toml",
+	"trunks.groups":       "[[groups]] belongs in handsets.toml",
+	"trunks.sources":      "[[sources]] belongs in contacts.toml",
+	"policy.sources":      "[[sources]] belongs in contacts.toml — contact sources are global, and policy is per line",
+	"handsets.sources":    "[[sources]] belongs in contacts.toml",
+	"contacts.line":       "[line] belongs in policy.toml — contact sources are global, and one shared inventory cannot hold something true of only one line",
+	"contacts.house":      "[house] belongs in policy.toml",
+	"contacts.people":     "[[people]] belongs in policy.toml — it is the deliberate allow-list, and contacts are the ambient one",
+	"contacts.extensions": "[[extensions]] belongs in policy.toml",
+	"contacts.schedules":  "[[schedules]] belongs in policy.toml",
+	"contacts.handsets":   "[[handsets]] belongs in handsets.toml",
+	"contacts.groups":     "[[groups]] belongs in handsets.toml",
+	"contacts.trunks":     "[[trunks]] belongs in trunks.toml",
 }
 
 func describeType(t reflect.Type, array bool) *keyTable {
@@ -159,8 +175,8 @@ func describeType(t reflect.Type, array bool) *keyTable {
 // ── detection ────────────────────────────────────────────────────────────
 
 // unknownKeys turns a decoder's leftovers into reportable problems. file is
-// "policy", "handsets" or "trunks"; root is the shape that file is expected to
-// have, since the three are different structs.
+// "policy", "handsets", "trunks" or "contacts"; root is the shape that file is
+// expected to have, since they are different structs.
 func unknownKeys(md toml.MetaData, file string, root *keyTable) []UnknownKey {
 	var out []UnknownKey
 	reported := map[string]bool{}
