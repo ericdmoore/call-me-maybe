@@ -402,6 +402,7 @@ func Contacts() *Schema {
 		Type:        "object",
 		Description: "Which address-book exports to read. Optional, and its absence is the compatibility gate: with no contacts.toml nothing is read, nothing is printed, and the phone behaves exactly as it always has. It exists because [[people]] is hand-typed and therefore always out of date, while every household already curates a contact list on their phones, continuously, without being asked.",
 		Rules: []string{
+			"The ladder the lobby walks, first match wins: a block source (dismissed, and never hears the lobby), then [[people]] (straight through), then a personal contact (straight through), then a published contact and everybody else (the lobby, dial an extension).",
 			"Nothing here is authoritative. A contact set is derived, disposable data: delete every source and the phone still works, and [[people]] in policy.toml — the deliberate list — is untouched. Never put a number here that you are not willing to lose.",
 			"It is a file of its own rather than a section of policy.toml because policy is per line and contact sources are global. One household's address books, not the home line's.",
 			"The line every classification turns on: if a stranger can look the number up, it must not be automatic admission. Spoofing caller ID requires knowing what to spoof, and a plumber's number is on their website while your sister's mobile is nowhere.",
@@ -468,7 +469,7 @@ func contactSourceItem() *Schema {
 				Enum:        []any{"admit", "block"},
 				Default:     "admit",
 				Description: "What this address book means. A block source is the spam list: those callers do not hear the lobby at all, which is the whole difference between \"not admitted\" and \"blocked\".",
-				Rules:       []string{"Block beats everything, including a personal classification and — once the ladder is wired into the lobby — including [[people]]. A number in both is a contradiction an operator should resolve, and `doorman check` counts them."},
+				Rules:       []string{"Block beats everything, including a personal classification and including [[people]]: a number in both is dismissed. That is a contradiction an operator should resolve rather than something to rank quietly, so `doorman check` exits non-zero and names the allow-list entry it is overruling."},
 			},
 		},
 		AdditionalProperties: falsy,
@@ -768,7 +769,7 @@ func Env() *Schema {
 		"POLICY_PATH":   env("Path to policy.toml.", "path", "./policy.toml"),
 		"HANDSETS_PATH": env("Path to handsets.toml.", "path", "./handsets.toml"),
 		"TRUNKS_PATH":   env("Path to trunks.toml, the provider inventory. The file is optional and absent is the default: with no trunks.toml `doorman render` generates only the handset config and a hand-written pjsip.conf keeps working. The daemon reads it to report, not to route — which trunk carries 911 at startup, and a warning when a line presents a caller ID its own trunk does not own. Outbound routing reads [line] trunk from the policy file, so a trunks.toml that will not load warns and the phone keeps answering.", "path", "./trunks.toml"),
-		"CONTACTS_PATH": env("Path to contacts.toml, the address-book inventory. The file is optional and absent is the default: with no contacts.toml nothing is read and nothing is printed. `doorman check` reads it today to report what the address books add up to; the daemon does not consult contacts on a call path yet, and [[people]] in policy.toml remains the only list that admits anybody.", "path", "./contacts.toml"),
+		"CONTACTS_PATH": env("Path to contacts.toml, the address-book inventory. The file is optional and absent is the default: with no contacts.toml nothing is read, nothing is printed, and [[people]] in policy.toml is the only list that admits anybody. With one, the daemon compiles the merged set at startup and the lobby consults it per call — a personal contact goes straight through, a published one hears the lobby, a blocked one is dismissed without it. Nothing here is authoritative: [[people]] still wins over the classifier, and deleting every source only sends those callers back to the lobby.", "path", "./contacts.toml"),
 		"POLICY_WATCH":  env("Re-read both config files on change so edits go live without a restart. An invalid file is rejected and the previous policy stays in service.", "boolean (1|true|yes|on)", true),
 
 		"DEFAULT_COUNTRY_CODE": env("Country code assumed when a caller ID arrives without one.", "string", "1"),

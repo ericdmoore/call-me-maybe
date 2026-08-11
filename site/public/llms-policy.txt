@@ -12,7 +12,7 @@ a JSON Schema cannot express. Machine-readable schema:
 
 **Everything below describes what the binary accepts today.** The project's
 planning docs discuss features that do not exist yet — per-person ring
-overrides, house-wide quiet hours, contacts that actually admit a caller.
+overrides, house-wide quiet hours, contact sources fetched over HTTP.
 
 **Do not emit configuration for any of them.** `doorman check` now rejects a
 key it does not recognise, and suggests the nearest real one:
@@ -397,9 +397,10 @@ Rules a schema cannot express:
 ## The address books — contacts.toml
 
 **Optional, and most boxes do not have one.** With no `contacts.toml` nothing
-is read and `doorman check` prints nothing about contacts at all. It exists
-because `[[people]]` is hand-typed and therefore always out of date, while
-every household already curates a contact list on their phones.
+is read, nothing is logged, `doorman check` prints nothing about contacts at
+all, and `[[people]]` is the only list that admits anybody. It exists because
+`[[people]]` is hand-typed and therefore always out of date, while every
+household already curates a contact list on their phones.
 
     [[sources]]
     id   = "eric"                      # names the source in `doorman check`
@@ -417,10 +418,24 @@ every household already curates a contact list on their phones.
     # url       = "https://example.com/contacts/shared.vcf"
     # token_env = "CONTACTS_SHARED_TOKEN"   # the NAME of a .env variable
 
-**Nothing here is authoritative, and nothing on a call path reads it yet.**
-`[[people]]` in policy.toml remains the only list that admits anybody. A
-contact set is derived, disposable data: delete every source and the phone
+**The lobby walks this as a ladder, first match wins:**
+
+    1. a block source      dismissed, and never hears the lobby
+    2. [[people]]          straight through — you said so explicitly
+    3. a personal contact  straight through
+    4. a published contact the lobby: dial an extension
+    5. anybody else        the lobby
+
+**Nothing here is authoritative.** `[[people]]` in policy.toml is the
+deliberate list and beats the classifier outright: if you want the dentist
+straight through, write them down and their card does not get a vote. A
+contact set is derived, disposable data — delete every source and the phone
 works exactly as it did, with those callers simply hearing the lobby.
+
+A number in both a block source and `[[people]]` is a **contradiction**, not a
+preference: the block wins on the call, and `doorman check` exits non-zero
+naming the allow-list entry it overrules so a human decides which file was
+wrong. Do not write config that relies on one silently outranking the other.
 
 **The rule the whole file turns on: if a stranger can look the number up, it
 must not be automatic admission.** Caller ID is spoofable, but spoofing needs
@@ -451,7 +466,13 @@ Rules a schema cannot express:
 - Conflicts resolve to the restrictive answer. Same number, different names:
   the first source in declaration order wins. Personal in one source and
   published in another: published. In an admit source and a block source:
-  blocked, and `doorman check` counts it as a contradiction worth resolving.
+  blocked, and `doorman check` counts it as a contradiction worth resolving —
+  and exits non-zero when the number is also in `[[people]]`.
+- A blocked caller is dismissed exactly as any dismissed caller is, and is not
+  a failed PIN attempt: the rate-limit budget is neither spent by them nor
+  applied to them.
+- An admitted contact's name reaches the ringing handset and the call log's
+  `known` field exactly as an allow-list name does.
 - A number that will not normalise to E.164 is skipped and counted per source.
 - doorman parses the vCard subset real exporters emit — iCloud, Google
   Contacts, CardDAV, and 2.1 files with quoted-printable and folded lines —
@@ -507,10 +528,11 @@ These appear in the project's planning documents. They are not implemented, and
 - **A `balance_min` anywhere but on a `[[trunks]]` block.** Balance checking
   exists now, and every key it uses lives in `trunks.toml` — never in a policy
   file. See the trunks section above.
-- **Contacts admitting a caller.** `contacts.toml` parses, classifies, merges
-  and reports today, and `doorman check` prints what it adds up to — but
-  nothing on a call path consults it. Do not tell somebody that adding a
-  source will make their sister ring through; it will not, yet.
+- **Fetching a contact source over HTTP.** `url` and `token_env` are accepted
+  and reserved; this release reads `path` sources only and `doorman check`
+  says so per source. Admission itself works — a personal contact from a local
+  export rings the house today — so point somebody at an export on the box
+  rather than at a URL.
 - `ring` on `[[people]]` (per-person routing overrides).
 - `[house.afterhours]` — afterhours exists per-extension only.
 - `[[schedules]]` at line scope. A schedule is referenced from an extension.
