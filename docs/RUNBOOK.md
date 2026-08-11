@@ -28,18 +28,32 @@ blocks into a chore; then `doorman render` also writes `pjsip_trunks.conf` and
 is the whole rollback.
 
 `contacts.toml` is the address-book inventory, and **not having it is likewise
-the normal state**: with no file nothing is read and `doorman check` prints
-nothing about contacts. Each `[[sources]]` block names a vCard export by
-`path` — a relative one resolves against `contacts.toml` itself — and
-`kind = "block"` marks one as the nuisance list. `doorman check` reports what
-each source contributed: cards read, and how many numbers came out personal,
-published, blocked or skipped, with counts only and never a name or a number.
-Today that report is all it does; nothing on a call path consults a contact
-set, and `[[people]]` in `policy.toml` remains the only list that admits
-anybody. **The exports are the most personal data on this box** — several
-people's entire address books — so keep them mode 0600, outside any
-repository, and never in a payload that leaves. Deleting the file is the whole
-rollback.
+the normal state**: with no file nothing is read, nothing is logged, and
+`doorman check` prints nothing about contacts. Each `[[sources]]` block names a
+vCard export by `path` — a relative one resolves against `contacts.toml`
+itself — and `kind = "block"` marks one as the nuisance list. `doorman check`
+reports what each source contributed: cards read, and how many numbers came out
+personal, published, blocked or skipped, with counts only and never a name or a
+number.
+
+With a file, the lobby walks a five-rung ladder and the first match wins:
+
+| | Source | Result |
+|---|---|---|
+| 1 | a **block** source | dismissed, and never hears the lobby |
+| 2 | `[[people]]` | straight through — you said so explicitly |
+| 3 | a **personal** contact | straight through |
+| 4 | a **published** contact | the lobby: dial an extension |
+| 5 | anybody else | the lobby |
+
+`[[people]]` still beats the classifier, so writing somebody down is the
+override and needs no new mechanism. **A number that is both allow-listed and
+blocked is a contradiction, not a preference**: the block wins on the call, and
+`doorman check` exits non-zero naming the `[[people]]` entry it overrules so
+somebody decides which file was wrong. **The exports are the most personal data
+on this box** — several people's entire address books — so keep them mode 0600,
+outside any repository, and never in a payload that leaves. Deleting the file
+is the whole rollback: everyone it admitted simply hears the lobby again.
 
 `policy.toml` cross-references handsets by id and is validated against them
 on every reload, but a typo in a bedtime can no longer invalidate the
@@ -1372,7 +1386,7 @@ only a `completed` event.
 `completed` fires once per call from the session's single teardown path,
 however the call ended. `outcome` is `answered`, `voicemail`, `dismissed` or
 `abandoned`, with `reason` on a dismissal (`no-digits`, `rate-limited`,
-`too-many-attempts`, `no-answer`).
+`too-many-attempts`, `no-answer`, `blocked`).
 
 On a box answering several numbers both events carry `line` — which is what an
 automation routes on, announcing the business line in the office and the house
@@ -1459,6 +1473,12 @@ spent a decade building STIR/SHAKEN. Live with it knowingly:
 - **The allow-list is a convenience, not an authorisation.** It decides who
   skips the lobby. It should never be the only thing standing between a caller
   and something consequential.
+- **A personal contact skips the lobby on the same evidence**, if you have a
+  `contacts.toml`. That is why the classifier is conservative rather than
+  generous: a number a stranger could look up — an `ORG`, a work number, an
+  800 number — is never automatic admission, because spoofing requires knowing
+  what to spoof and a published number tells them. The list getting longer is
+  not the risk; a *findable* number on it is.
 - Anything that *acts* on a caller's behalf — remote control of the house, for
   instance — needs a second factor. That is why the design in the remote-actions
   work uses dial-back rather than trusting the number in front of it.

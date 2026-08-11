@@ -29,7 +29,7 @@
             ],
             "default": "admit",
             "x-rules": [
-              "Block beats everything, including a personal classification and — once the ladder is wired into the lobby — including [[people]]. A number in both is a contradiction an operator should resolve, and `doorman check` counts them."
+              "Block beats everything, including a personal classification and including [[people]]: a number in both is dismissed. That is a contradiction an operator should resolve rather than something to rank quietly, so `doorman check` exits non-zero and names the allow-list entry it is overruling."
             ]
           },
           "path": {
@@ -78,6 +78,7 @@
   ],
   "additionalProperties": false,
   "x-rules": [
+    "The ladder the lobby walks, first match wins: a block source (dismissed, and never hears the lobby), then [[people]] (straight through), then a personal contact (straight through), then a published contact and everybody else (the lobby, dial an extension).",
     "Nothing here is authoritative. A contact set is derived, disposable data: delete every source and the phone still works, and [[people]] in policy.toml — the deliberate list — is untouched. Never put a number here that you are not willing to lose.",
     "It is a file of its own rather than a section of policy.toml because policy is per line and contact sources are global. One household's address books, not the home line's.",
     "The line every classification turns on: if a stranger can look the number up, it must not be automatic admission. Spoofing caller ID requires knowing what to spoof, and a plumber's number is on their website while your sister's mobile is nowhere.",

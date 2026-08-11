@@ -355,8 +355,16 @@ func runCheck(args []string) int {
 	if !printEmergency(trunks, results) {
 		rc = 1
 	}
-	// Silent without a contacts.toml, for the same reason.
-	if !printContacts(contacts.Load(contactSources, defaultCountryCode())) {
+	// Silent without a contacts.toml, for the same reason. Every line's
+	// allow-list goes with it: a number that is both allow-listed and blocked
+	// is the one thing this report cannot answer from the address books alone.
+	lists := make([]allowList, 0, len(results))
+	for _, r := range results {
+		if r.err == nil {
+			lists = append(lists, allowList{r.Path, r.pol})
+		}
+	}
+	if !printContacts(contacts.Load(contactSources, defaultCountryCode()), lists) {
 		rc = 1
 	}
 	return rc
@@ -1063,9 +1071,20 @@ func runService() {
 		log.Info("event webhook enabled", "host", hook.Host(), "redacted", cfg.WebhookRedactCallerID)
 	}
 
+	// The address books, when there are any — absent is the state every install
+	// is in, and then this is nil and nothing below it changes. Global rather
+	// than per line by design: one household has one set of address books, and
+	// policy.toml is the per-line file. Every line's allow-list goes in so a
+	// number that is both allow-listed and blocked is said out loud at startup.
+	lists := make([]allowList, 0, len(opened))
+	for _, o := range opened {
+		lists = append(lists, allowList{o.name, o.store.Current()})
+	}
+	book := openContacts(cfg.ContactsPath, cfg.DefaultCountryCode, lists, log)
+
 	// Everything a line does not own is shared: one ARI client, one prompt
-	// pack, one registry, one call log, one webhook, one concurrency cap. What
-	// a line owns is its policy and its rate-limit budget.
+	// pack, one registry, one call log, one webhook, one concurrency cap, one
+	// address book. What a line owns is its policy and its rate-limit budget.
 	lines := newLineSet()
 	var limiters []*lobby.RateLimiter
 	for _, o := range opened {
@@ -1079,6 +1098,10 @@ func runService() {
 			Prompts: prompts,
 			Log:     o.log,
 			Line:    recordedLine(o.name),
+			// Nil without a contacts.toml, which is what makes the ladder
+			// collapse to [[people]] and the lobby. openContacts returns an
+			// untyped nil for exactly this assignment.
+			Contacts: book,
 			Cfg: lobby.Config{
 				DefaultCountryCode: cfg.DefaultCountryCode,
 				ExtensionLength:    cfg.ExtensionLength,

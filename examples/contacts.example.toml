@@ -18,6 +18,20 @@
 # different file. Contacts are the ambient list; [[people]] stays the
 # deliberate one.
 #
+# THE LADDER THE LOBBY WALKS, first match wins:
+#
+#   1. a block source        dismissed, and never hears the lobby
+#   2. [[people]]            straight through — you said so explicitly
+#   3. a personal contact    straight through
+#   4. a published contact   the lobby: dial an extension
+#   5. anybody else          the lobby
+#
+# [[people]] beats the classifier, which is the override and needs no new
+# mechanism: write the dentist down and they go straight through however their
+# card reads. A number in both a block source and [[people]] is a contradiction
+# rather than a preference — the block wins on the call and `doorman check`
+# exits non-zero until somebody decides which file was wrong.
+#
 # THE LINE EVERYTHING TURNS ON: if a stranger can look the number up, it must
 # not be automatic admission. Caller ID is spoofable, but spoofing requires
 # knowing WHAT to spoof — and a plumber's number is on their website while your

@@ -93,15 +93,31 @@ Layout:
   ring and per completed call, so Home Assistant can announce or flash
   something. Same non-blocking shape as `internal/calls`, and doorman
   deliberately knows nothing about speakers — HA decides who hears it.
+- `internal/contacts` — address-book exports turned into an admission
+  decision: vCard parsing, E.164 normalisation, the published/personal
+  classifier, and the merge across sources. The lobby reads it through a
+  one-method interface on `Deps` (`lobby.Contacts`), so the state machine
+  never imports this package — the adapter in `cmd/doorman` is the one
+  translation point, exactly as it is for ARI. Derived and disposable:
+  deleting every source only sends those callers back to the lobby.
 - `internal/config` — env parsing; names match `examples/.env.example` exactly.
 
 Config interfaces: `.env` (secrets + tuning), `handsets.toml` (hardware
 inventory — source of truth for the generated Asterisk config), `policy.toml`
 (rules: allow-list, extensions, ladders, `[[schedules]]`), and optionally
 `trunks.toml` (the providers — source of truth for the generated trunk config
-and inbound contexts). Each file owns its sections exclusively; the loader
-rejects sections in the wrong file rather than merging and names the file they
-belong in, and the legacy single-file layout still loads.
+and inbound contexts) and `contacts.toml` (the address books to read — the
+ambient list, where `[[people]]` is the deliberate one). Each file owns its
+sections exclusively; the loader rejects sections in the wrong file rather than
+merging and names the file they belong in, and the legacy single-file layout
+still loads.
+
+**No `contacts.toml` is likewise the normal state and a compatibility gate.**
+Without one nothing is read, nothing is logged, and the admission ladder is the
+two tiers it has always been: `[[people]]`, then the lobby. With one it becomes
+five — a block source, `[[people]]`, a personal contact, a published contact,
+everybody else — first match wins. Block beats `[[people]]`, and a number in
+both fails `doorman check` rather than being ranked in silence.
 
 **No `trunks.toml` is the normal state and the compatibility gate.** Without
 one, `doorman render` generates only the handset files and the hand-written

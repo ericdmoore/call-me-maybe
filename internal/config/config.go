@@ -37,11 +37,11 @@ type Config struct {
 	// on the call path routes on a trunk.
 	TrunksPath string
 	// ContactsPath is the address-book inventory. Optional, and absent is the
-	// state every install is in. Parsed here so that every config file's
-	// location is discovered the same way; the daemon does not consult contacts
-	// on a call path yet, and `doorman check` is the only thing that reads the
-	// file today. Same posture as the VOICEMAIL_* keys in examples/.env.example,
-	// declared ahead of the feature so .env does not churn when it lands.
+	// state every install is in: no file, no lookup, and the lobby admits
+	// exactly who [[people]] says it admits. With one, the daemon reads it at
+	// startup and the merged set decides two of the ladder's five tiers — a
+	// personal contact goes straight through, a blocked one is dismissed
+	// without hearing the lobby.
 	ContactsPath string
 	PolicyWatch  bool
 

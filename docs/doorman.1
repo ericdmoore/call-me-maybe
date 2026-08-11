@@ -132,14 +132,22 @@ read and how many numbers came out
 or
 .B skipped
 \(em plus which signal decided each published one, and how the conflicts
-between two address books resolved. Counts only: no name and no number is ever
-printed, because "how many" answers every question this command exists to
-answer. It exits non\-zero for a source whose
+between two address books resolved. Counts only, with one exception: no name and
+no number is ever printed, because "how many" answers every question this
+command exists to answer. It exits non\-zero for a source whose
 .B path
 cannot be read, and merely reports a
 .B url
-source, which this release does not fetch. Silent without the file, and
-nothing on a call path consults a contact set yet.
+source, which this release does not fetch. Silent without the file.
+.IP
+The exception is a number that is both allow\-listed in
+.I policy.toml
+and named by a block source. The block wins on the call, so the
+.B [[people]]
+entry does nothing \(em a contradiction for an operator to resolve rather than
+a ranking to accept silently. That one exits non\-zero and prints the
+allow\-list name, which the operator typed themselves, beside a redacted
+number.
 This is the authority on whether a configuration is usable.
 .TP
 .BI "doorman schema [" name ]
@@ -381,12 +389,17 @@ nothing is printed. Holds no secrets \(em
 names a
 .I .env
 variable \(em but the exports it points at hold entire address books and
-belong outside any repository, mode 0600. Nothing here is authoritative:
+belong outside any repository, mode 0600. With one, the lobby walks a ladder
+and the first match wins: a block source (dismissed, and never hears the
+lobby), then
+.BR [[people]] ,
+then a personal contact (both straight through), then a published contact and
+everybody else (the lobby). Nothing here is authoritative:
 .B [[people]]
 in
 .I policy.toml
-remains the only list that admits anybody, and deleting every source changes
-nothing but who hears the lobby.
+stays the deliberate list and beats the classifier, and deleting every source
+changes nothing but who hears the lobby.
 .TP
 .I .env
 Secrets and tuning. Loaded by systemd's
@@ -430,9 +443,12 @@ application named in
 .BR POLICY_PATH ", " HANDSETS_PATH ", " TRUNKS_PATH ", " CONTACTS_PATH ", " POLICY_WATCH
 Where the config files are, and whether to reload them on change.
 .I CONTACTS_PATH
-is optional, a missing file is the normal state, and
-.B doorman check
-is the only thing that reads it today.
+is optional and a missing file is the normal state, in which nothing is read,
+nothing is logged, and the lobby admits exactly who
+.B [[people]]
+says it admits. With a file, the daemon compiles the merged set at startup and
+the lobby consults it per call; an inventory that will not load warns and the
+phone keeps answering.
 .I TRUNKS_PATH
 is optional and a missing file is the normal state; the daemon reads it only
 to announce which trunk carries 911 and to warn about a caller ID its own

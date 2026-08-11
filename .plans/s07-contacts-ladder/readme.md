@@ -3,7 +3,8 @@
 Let the people already in your address book reach the house, without letting
 anyone who can read a website do the same.
 
-**Status:** planned. Nothing started.
+**Status:** M1 and M2 landed — address books are parsed, classified, merged,
+and the lobby walks the ladder. M3 (fetching) and M4 (visibility) are open.
 Related: issue #12 (allow-list trusts spoofable caller ID), issue #6 (nominate
 to the allow-list), `docs/writing-policies.md`, `.plans/s04-standarddize-network-helpers`
 (URL-addressed sources, same instinct).
@@ -208,7 +209,7 @@ personal data than anything else this project stores.
 
 ## Milestones
 
-### M1 · Parse and classify, from a local file
+### M1 · Parse and classify, from a local file — **done**
 
 No network. `contacts.vcf` on disk, parsed, normalised, classified, unioned,
 de-duped. `doorman check` prints the resulting counts: admitted, published,
@@ -221,7 +222,7 @@ vCard is messier than it looks — 2.1/3.0/4.0, quoted-printable, folded lines,
 **Deliverable:** the ladder works end to end for anyone willing to drop a file
 in place. Testable with no network and no bullmoose.
 
-### M2 · The ladder in the state machine
+### M2 · The ladder in the state machine — **done**
 
 Wire tiers 1 and 3–4 into the lookup `internal/lobby` already does for
 `[[people]]`. Blocked callers dismissed without the lobby.
@@ -229,6 +230,18 @@ Wire tiers 1 and 3–4 into the lookup `internal/lobby` already does for
 Invariant 1 applies: a contact's name and number are caller data. Redact in
 logs, and the call record's existing `known` field carries the name exactly as
 an allow-list match does.
+
+**As built:** `lobby.Contacts` is a one-method interface on `Deps` — the shape
+`ARI` already has — so the state machine never imports `internal/contacts` and
+a ladder test says "this number is blocked" in one line rather than shipping a
+vCard fixture. The router compiles the merged set once at startup and hands it
+in whole, exactly as it does a policy; nil is no `contacts.toml`, which is what
+makes the ladder collapse to `[[people]]` and the lobby with nothing else to
+check. A blocked caller goes out through the existing `dismiss`, so teardown is
+still the deferred `cleanup` and cancellation is still the only state, and the
+rate limiter is untouched in both directions: a block is not a guess at a
+keypad. `doorman check` and the daemon both refuse to be quiet about a number
+that is allow-listed *and* blocked.
 
 ### M3 · The fetcher
 
