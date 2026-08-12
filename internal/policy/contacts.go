@@ -165,9 +165,10 @@ func ContactsFromTOML(data []byte) (*Contacts, error) {
 		return nil, err
 	}
 	// Unknown keys are refused outright, as they are for trunks.toml and
-	// handsets.toml: nothing on the call path reads this file, its audience is
-	// an operator at a terminal, and a dropped `kind = "block"` turns a block
-	// list into an allow-list with nothing at runtime to suggest why.
+	// handsets.toml. The reason is sharper here than there: the call path never
+	// reads this file, but it reads the set compiled from it, so a dropped
+	// `kind = "block"` turns a block list into an address book that admits —
+	// with nothing at runtime to suggest why the spam is ringing the house.
 	msgs := make([]string, 0, len(unknown))
 	for _, u := range unknown {
 		msgs = append(msgs, u.File+": "+u.String())

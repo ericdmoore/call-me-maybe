@@ -109,8 +109,13 @@ type Record struct {
 	// Inbound resolves it.
 	Direction string `json:"direction,omitempty"`
 
-	Caller string `json:"caller"`          // full E.164, or "" when withheld
-	Known  string `json:"known,omitempty"` // allow-list name that matched
+	Caller string `json:"caller"` // full E.164, or "" when withheld
+	// Known is the name that admitted this caller: an allow-list entry, or a
+	// personal contact from an address book. One field for both, because
+	// "somebody we know rang the house" is one fact however it was decided,
+	// and a reader looking for a name should not have to know which list it
+	// came from.
+	Known string `json:"known,omitempty"`
 	// Dialled is the number an outbound call was placed to, exactly as it was
 	// dialled — not normalised, because that is what reached the dialplan and
 	// what will appear on the bill, and a number doorman cannot normalise is

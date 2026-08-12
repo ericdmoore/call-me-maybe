@@ -82,6 +82,43 @@ type Recorder interface{ Post(calls.Record) }
 // event is a small statement of fact for another program.
 type Notifier interface{ Post(notify.Event) }
 
+// Contacts is the address book, as much of it as an admission decision needs:
+// one map read, by normalised number.
+//
+// An interface for the same reason ARI is one. The merged set is built by
+// internal/contacts out of vCards, sources, classification and a merge, and
+// none of that belongs behind a ringing telephone — so the state machine takes
+// the one question it actually asks and the router hands it something that can
+// answer it. internal/lobby importing internal/contacts would put a parser in
+// the call path's import graph and make every ladder test carry a fixture file
+// to say "this number is blocked".
+//
+// Nil is the whole compatibility gate: no contacts.toml means no lookup, and
+// the ladder is the two tiers it has always been.
+type Contacts interface {
+	// Lookup resolves a normalised E.164 number. Exact match, never a scan and
+	// never a prefix — the same posture extensions have, for a weaker reason:
+	// a contact is not a credential, but a fuzzy match here would admit a
+	// caller nobody put in a book.
+	Lookup(e164 string) (Contact, bool)
+}
+
+// Contact is what admission turns on, mirroring contacts.Entry the way
+// OriginateParams mirrors ari's. Deliberately narrower than the entry: which
+// source named this caller, and which signal classified them, are an
+// operator's questions and never the lobby's.
+type Contact struct {
+	// Name is displayed on a ringing handset and stamped on the call record,
+	// exactly as an allow-list name is. It is caller data: redact it in logs.
+	Name string
+	// Published means a stranger could have looked this number up, so it is
+	// not automatic admission — they hear the lobby and dial an extension.
+	Published bool
+	// Blocked means a block source named this number. It beats every other
+	// tier, including [[people]].
+	Blocked bool
+}
+
 type Deps struct {
 	ARI     ARI
 	Policy  func() *policy.Policy
@@ -102,6 +139,16 @@ type Deps struct {
 	// log entirely, which is why every use is behind a nil check rather
 	// than a config flag.
 	Calls Recorder
+	// Contacts is the merged address book. Nil is no contacts.toml, which is
+	// every install today: the ladder collapses to [[people]] and the lobby,
+	// and nothing about the call changes.
+	//
+	// Resolved by the router and handed in whole, exactly as Policy is. The
+	// set is global — one household's address books, not one line's — so
+	// every line's Deps carries the same one, and a fetcher can later swap
+	// what is behind this interface without the state machine learning that
+	// contacts are ever refetched.
+	Contacts Contacts
 	// Notify receives call events for the house to react to. Nil disables
 	// the webhook, same as Calls — absent config means the feature is off.
 	Notify Notifier
@@ -326,38 +373,59 @@ func (s *Session) callerNumberForDisplay() string {
 // Run drives the whole call and returns when it is over. Every exit path —
 // dismissal, bridged call ending, caller hanging up mid-anything — funnels
 // through the deferred cleanup.
+//
+// The ladder, first match wins:
+//
+//  1. a block source        dismissed, and never hears the lobby
+//  2. [[people]]            straight through
+//  3. a personal contact    straight through
+//  4. a published contact   the lobby: dial an extension
+//  5. anybody else          the lobby
+//
+// Tiers 1, 3 and 4 exist only when there is a contacts.toml. Without one the
+// lookup is nil, the ladder is tiers 2 and 5, and this is the function it has
+// always been.
 func (s *Session) Run() {
 	defer s.cleanup()
 
+	contact, inBook := s.contact()
+
+	// Tier 1. Block beats everything, including the allow-list: a number in
+	// both is a contradiction for an operator to resolve — `doorman check`
+	// says so and fails — rather than something to rank quietly here.
+	//
+	// Dismissed through the ordinary dismissal, so a blocked caller hears
+	// exactly what a dismissed caller has always heard and never reaches the
+	// lobby. That is the difference between "not admitted" and "blocked": the
+	// spam case wants the door not to open at all.
+	//
+	// The rate limiter is untouched in both directions, which is invariant 6
+	// read carefully. It counts guesses at a keypad, and being on a list is
+	// not a guess: a blocked caller must not spend a budget that exists to
+	// slow a redialler down, and must not be dismissed *as* rate-limited when
+	// the reason is on file.
+	if inBook && contact.Blocked {
+		s.log.Info("blocked caller, dismissing without the lobby", "name", contact.Name)
+		s.dismiss("blocked")
+		return
+	}
+
+	// Tier 2. Hand-typed and therefore explicit intent: the classifier does
+	// not get a vote, which is what keeps [[people]] meaningful rather than
+	// redundant and gives an override that needed no new mechanism.
 	if known, ok := s.pol.LookupCaller(s.callerE164); ok {
 		s.log.Info("known caller, welcoming", "name", known.Name)
-		s.rec.Known = known.Name
-		s.deps.Limiter.Success(s.limitKey())
+		s.welcome(known.Name)
+		return
+	}
 
-		// The greeting is the dial window, and the whole of it.
-		//
-		// A known caller who wants one extension rather than the whole house
-		// presses a digit over the welcome prompt and lands in the collector
-		// with it as the seed. One who does nothing — which is almost
-		// everybody, almost always, since the allow-list exists so that
-		// Grandma never has to dial anything — reaches the house the instant
-		// the prompt ends, with not one millisecond added.
-		//
-		// A tail of silence after the prompt was the obvious alternative and
-		// it is the wrong trade: it is paid by every known caller on every
-		// call to serve the rare one who dials, and a pause on a phone call
-		// is indistinguishable from a dead line. If a tail is ever wanted it
-		// is additive, with its own key, driven by somebody actually missing
-		// it.
-		seed := s.play(PromptWelcomeKnown, true)
-		if s.ctx.Err() != nil {
-			return
-		}
-		if seed != "" {
-			s.collect(seed, known.Name)
-			return
-		}
-		s.runPlan(s.pol.HousePlan(), known.Name)
+	// Tier 3. A number a stranger could not have looked up, in an address
+	// book somebody actually curates. Admitted exactly as an allow-list match
+	// is — same prompt, same dial window, same record — because "who may skip
+	// the lobby" is one question with two sources of answer.
+	if inBook && !contact.Published {
+		s.log.Info("contact admitted, welcoming", "name", contact.Name)
+		s.welcome(contact.Name)
 		return
 	}
 
@@ -367,7 +435,16 @@ func (s *Session) Run() {
 		return
 	}
 
-	s.log.Info("unknown caller, opening lobby")
+	// Tiers 4 and 5 are the same door, and deliberately so: a published
+	// contact is somebody a stranger could impersonate by reading a website,
+	// so knowing their name buys them nothing at it. They dial an extension
+	// like anybody else, with none of the exemptions an admitted caller has —
+	// the name is logged and goes no further.
+	if inBook {
+		s.log.Info("published contact, opening lobby", "name", contact.Name)
+	} else {
+		s.log.Info("unknown caller, opening lobby")
+	}
 	// Digits during the greeting barge in: a caller who already knows their
 	// extension should not have to sit through the pitch.
 	seed := s.play(PromptLobbyGreeting, true)
@@ -375,6 +452,53 @@ func (s *Session) Run() {
 		return
 	}
 	s.collect(seed, "")
+}
+
+// contact resolves this caller in the address book.
+//
+// Nil-safe on both counts that matter: no contacts.toml is no lookup, and an
+// anonymous or unparseable caller ID is never in a book, exactly as it is
+// never on the allow-list. A withheld number matching "" would admit every
+// anonymous caller the moment one blank slipped into an export.
+func (s *Session) contact() (Contact, bool) {
+	if s.deps.Contacts == nil || s.callerE164 == "" {
+		return Contact{}, false
+	}
+	return s.deps.Contacts.Lookup(s.callerE164)
+}
+
+// welcome is admission: the caller skips the lobby and reaches the house under
+// the name that admitted them. Reached from the allow-list and from a personal
+// contact, which is why the name is a parameter — the two tiers differ in
+// where the name came from and in nothing after that.
+func (s *Session) welcome(name string) {
+	s.rec.Known = name
+	s.deps.Limiter.Success(s.limitKey())
+
+	// The greeting is the dial window, and the whole of it.
+	//
+	// A known caller who wants one extension rather than the whole house
+	// presses a digit over the welcome prompt and lands in the collector
+	// with it as the seed. One who does nothing — which is almost
+	// everybody, almost always, since the allow-list exists so that
+	// Grandma never has to dial anything — reaches the house the instant
+	// the prompt ends, with not one millisecond added.
+	//
+	// A tail of silence after the prompt was the obvious alternative and
+	// it is the wrong trade: it is paid by every known caller on every
+	// call to serve the rare one who dials, and a pause on a phone call
+	// is indistinguishable from a dead line. If a tail is ever wanted it
+	// is additive, with its own key, driven by somebody actually missing
+	// it.
+	seed := s.play(PromptWelcomeKnown, true)
+	if s.ctx.Err() != nil {
+		return
+	}
+	if seed != "" {
+		s.collect(seed, name)
+		return
+	}
+	s.runPlan(s.pol.HousePlan(), name)
 }
 
 // play starts a prompt and waits for it to finish. With bargeIn, a DTMF digit

@@ -356,8 +356,10 @@ func TestNoContactsFileMeansAnAbsentSet(t *testing.T) {
 	}
 }
 
-// A nil set is as usable as an absent one — the daemon's case, once there is a
-// call path that consults contacts at all.
+// A nil set is as usable as an absent one. The daemon never builds one — with
+// no contacts.toml it hands the lobby a nil lookup instead — but the whole type
+// is written to be inert when empty, and a Lookup that panicked would do it on
+// a call.
 func TestNilSetIsUsable(t *testing.T) {
 	var set *Set
 	if set.Present() || set.Len() != 0 || set.Sources() != nil || set.Numbers() != nil {

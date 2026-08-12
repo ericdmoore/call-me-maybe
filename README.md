@@ -284,9 +284,14 @@ can look the number up, it must not be automatic admission.** An `ORG` or a
 work number or an 800 number reads as published and hears the lobby; a named
 card with a mobile and no organisation reads as personal. Anything ambiguous
 is published, because wrong-closed costs a plumber ten seconds and wrong-open
-rings every phone in the house at 3am. Today this is *reporting only* —
-`doorman check` prints what the address books add up to and nothing on a call
-path consults them. `[[people]]` in `policy.toml` stays the deliberate list.
+rings every phone in the house at 3am. The lobby walks that as a ladder, first
+match wins: a block source is dismissed without hearing the lobby at all, then
+`[[people]]`, then a personal contact — both straight through — and everybody
+else, published contacts included, dials an extension like any stranger.
+`[[people]]` stays the deliberate list and beats the classifier, so writing
+somebody down is the override; a number in both a block source and `[[people]]`
+is a contradiction `doorman check` fails on rather than ranks. Delete every
+source and the phone works exactly as it did.
 
 Editing those files gets IDE support: `doorman lsp` is a language server
 whose diagnostics come from the same validator that guards the daemon —

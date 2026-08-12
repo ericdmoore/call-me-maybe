@@ -3,7 +3,9 @@
 // It reads the sources named in contacts.toml, parses each as vCard, normalises
 // every telephone number to E.164, classifies each as personal or published,
 // and unions the lot into one set keyed by number. `doorman check` reports what
-// that adds up to.
+// that adds up to, and the lobby consults Lookup once per call: a personal
+// contact skips the lobby, a published one hears it, a blocked one hears
+// nothing at all.
 //
 // # Not authoritative, ever
 //
@@ -50,8 +52,9 @@ type Entry struct {
 	// Reason is which signal decided Class.
 	Reason Reason
 	// Blocked means some block source named this number. It beats everything,
-	// including a personal classification from an admit source — and, once the
-	// ladder is wired in, including `[[people]]`.
+	// including a personal classification from an admit source and including
+	// `[[people]]`: a number in both is dismissed, and `doorman check` fails
+	// rather than leaving the contradiction to a ranking.
 	Blocked bool
 	// Source is the id of the source that supplied Name: the first in
 	// declaration order to mention this number, which is the only ordering
