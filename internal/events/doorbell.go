@@ -1,0 +1,120 @@
+package events
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"math/rand/v2"
+	"net/http"
+	"time"
+)
+
+type Location struct {
+	ID      string `json:"id"`
+	Through int64  `json:"through,string"`
+}
+type Doorbell struct {
+	Type       string     `json:"type"`
+	Version    int        `json:"version"`
+	JournalID  string     `json:"journal_id"`
+	Generation string     `json:"generation"`
+	Locations  []Location `json:"locations"`
+}
+type DoorbellOptions struct {
+	URL, Token string
+	Timeout    time.Duration
+	Log        *slog.Logger
+}
+
+// Ring runs independently of the journal writer. Persisted progress is tied to
+// the target, so changing endpoints announces existing committed availability.
+func Ring(ctx context.Context, path string, o DoorbellOptions) {
+	if o.Timeout <= 0 {
+		o.Timeout = 3 * time.Second
+	}
+	if o.Log == nil {
+		o.Log = slog.Default()
+	}
+	client := &http.Client{Timeout: o.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	defer client.CloseIdleConnections()
+	key := sha256.Sum256([]byte(o.URL))
+	target := hex.EncodeToString(key[:])
+	delay := 250 * time.Millisecond
+	backoff := time.Second
+	warned := false
+	for {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		err := ringOnce(ctx, path, o, client, target)
+		if err != nil {
+			if !warned {
+				o.Log.Warn("journal doorbell unavailable; will retry")
+				warned = true
+			}
+			delay = backoff + time.Duration(rand.Int64N(int64(backoff/4)+1))
+			backoff = min(backoff*2, time.Minute)
+		} else {
+			delay = 250 * time.Millisecond
+			backoff = time.Second
+			warned = false
+		}
+	}
+}
+func ringOnce(ctx context.Context, path string, o DoorbellOptions, client *http.Client, target string) error {
+	db, err := connect(path, false)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	// A single statement sees one committed snapshot. No transaction is held
+	// across the HTTP request; slow consumers cannot pin the WAL.
+	var b Doorbell
+	var high, through int64
+	err = db.QueryRowContext(ctx, `SELECT journal_id,generation,high,COALESCE((SELECT through FROM delivery_state WHERE target=?),0) FROM metadata`, target).Scan(&b.JournalID, &b.Generation, &high, &through)
+	if err != nil {
+		return err
+	}
+	if high <= through {
+		return nil
+	}
+	b.Type = "journal.available"
+	b.Version = 1
+	b.Locations = []Location{{ID: "primary", Through: high}}
+	data, err := json.Marshal(b)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.URL, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "doorman")
+	if o.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+o.Token)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	_ = resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &deliveryError{}
+	}
+	_, err = db.ExecContext(ctx, `INSERT INTO delivery_state(target,through) VALUES(?,?) ON CONFLICT(target) DO UPDATE SET through=MAX(through,excluded.through)`, target, high)
+	return err
+}
+
+type deliveryError struct{}
+
+func (*deliveryError) Error() string { return "doorbell refused" }

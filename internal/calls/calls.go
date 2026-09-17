@@ -59,7 +59,8 @@ import (
 // OutcomePlaced, which is the whole of the outbound vocabulary that inbound
 // did not already have.
 const (
-	// OutcomeAnswered: a handset picked up and the caller was bridged.
+	// OutcomeAnswered: a handset picked up and the caller was bridged, or CEL
+	// observed the dialling channel enter a bridge.
 	OutcomeAnswered = "answered"
 	// OutcomeVoicemail: released into the dialplan to leave a message.
 	OutcomeVoicemail = "voicemail"
@@ -90,7 +91,8 @@ const (
 type Record struct {
 	ID    string    `json:"id"` // channel id; ties back to the slog lines
 	Start time.Time `json:"start"`
-	// MS is how long this call was doorman's. Inbound that is the call;
+	// MS is how long this call was doorman's (or the channel/attempt lifetime
+	// for a CEL-derived summary). Inbound that is the call;
 	// outbound it is the time spent at the console, because the call is handed
 	// to the dialplan and doorman never learns how long anybody talked.
 	MS int64 `json:"ms"`
@@ -372,7 +374,8 @@ type Filter struct {
 	Limit     int // most recent N, 0 for all
 }
 
-func (f Filter) match(r Record) bool {
+// Matches applies the same record semantics to JSONL and journal projections.
+func (f Filter) Matches(r Record) bool {
 	if !f.Since.IsZero() && r.Start.Before(f.Since) {
 		return false
 	}
@@ -441,7 +444,7 @@ func readOne(path string, f Filter) (records []Record, skipped int, err error) {
 			skipped++
 			continue
 		}
-		if f.match(r) {
+		if f.Matches(r) {
 			records = append(records, r)
 		}
 	}

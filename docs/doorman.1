@@ -603,3 +603,66 @@ for the project.
 .SH LICENSE
 Apache 2.0. Bundled audio is CC BY\-SA 4.0; see
 .IR LICENSES.md .
+
+.SH DURABLE EVENTS
+.B doorman events --json
+reads a page from the optional SQLite event journal, through an internal
+public_events_v1 view. No public SQL access or HTTP service is required.
+.TP
+.B --after cursor
+Exclusive sequence cursor. Default 0 explicitly starts at the earliest
+retained event.
+.TP
+.B --through cursor
+Inclusive upper cursor; reuse the returned through value to finish a finite
+batch.
+.TP
+.B --direction direction, --line name, --call id
+Filter by inbound/outbound direction, line, or full channel ID.
+.TP
+.B --limit count
+Maximum returned events, 1 to 10000; default 100.
+.TP
+.B --eventType type
+One exact event type, or omitted for all. See --help for the enum.
+.TP
+.B --path file
+Override EVENT_JOURNAL_PATH (environment, then .env).
+.TP
+.B --no-redact
+Explicitly export full phone numbers. PINs and entered digits are never stored.
+.TP
+.B --journal id, --generation id
+Assert the identity saved alongside the consumer cursor.
+.PP
+Output is one JSON object containing events, next_cursor, earliest_available,
+high_watermark, through, retention_floor, journal_id and generation. Cursors
+are decimal
+strings. Save progress only after successful processing. Expired cursors and
+identity mismatches fail rather than silently skipping history.
+.PP
+EVENT_JOURNAL_PATH enables storage in a private 0700 directory. Defaults are
+EVENT_JOURNAL_MAX_BYTES=67108864, EVENT_JOURNAL_MAX_EVENTS=100000 and
+EVENT_JOURNAL_MAX_AGE_DAYS=90. Storage failure never delays calls; it degrades
+observation and is reported. Only committed events are durable.
+.PP
+WEBHOOK_MODE defaults to legacy. Set doorbell to announce committed journal
+availability through WEBHOOK_URL, using WEBHOOK_TOKEN and WEBHOOK_TIMEOUT_MS.
+Doorbells contain no call payload. Consumers retrieve their own batches and
+check periodically as well as on notifications. Doorbell mode requires a
+journal.
+.PP
+doorman calls reads completed-session summaries from the journal when
+configured,
+preserving its table and JSON Lines formats. The daemon writes CALL_LOG_PATH
+only when the journal is disabled. Use --source jsonl to read old files
+explicitly;
+--source auto prefers the journal and never silently falls back on a read error.
+Summaries share journal retention; use the events command for consumer replay.
+.PP
+CEL_SPOOL_PATH enables Asterisk-wide lifecycle capture from a private SQLite CEL
+spool initialised with scripts/cel-spool.sql. It requires EVENT_JOURNAL_PATH.
+Install the supplied CEL configs, verify backend status, and validate with
+doorman check. Source progress and events commit together. A session finish
+or handoff is not proof the call ended. See docs/events.md for the full
+contract.

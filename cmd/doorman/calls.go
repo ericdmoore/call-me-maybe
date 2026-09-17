@@ -1,27 +1,32 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"callmemaybe/internal/calls"
-	"callmemaybe/internal/config"
+	"callmemaybe/internal/events"
 )
 
-const callsUsage = `doorman calls — read the call log
+const callsUsage = `doorman calls — read call summaries from the journal or a legacy call log
 
 Usage:
   doorman calls [flags]
 
 Flags:
+  --source <kind>    auto (default) | journal | jsonl
+  --path <file>      explicit journal or JSONL file (auto detects its format)
   --since <when>     only calls since then: a duration (24h, 7d) or a date
                      (2026-08-01). Default: everything.
-  --outcome <what>   answered | voicemail | dismissed | abandoned | placed
+  --outcome <what>   answered | voicemail | dismissed | abandoned | placed | ended
   --caller <digits>  match part of the number at the other end — the caller ID
                      on an inbound call, the number dialled on an outbound one
   --line <name>      only calls on one line. "default" is the line plain
@@ -41,42 +46,46 @@ Numbers are redacted unless --no-redact, so the default output is safe to
 paste into a bug report or hand to a model. Entered digits and PINs are never
 in the log at all — a record says whether a PIN was valid, never what it was.
 
-The log is written only when CALL_LOG_PATH is set. See doorman schema env.
+With EVENT_JOURNAL_PATH set, summaries come from the durable journal. Otherwise
+CALL_LOG_PATH selects the legacy JSONL log. --source jsonl explicitly reads old
+history; a missing/broken journal never silently falls back to JSONL. The journal
+holds Doorman summaries and, with CEL_SPOOL_PATH, Asterisk channel lifecycles.
+CEL outcome ended means channel termination with no outbound bridge observed;
+it does not assert why the call ended. See docs/events.md.
 `
 
-func runCalls(args []string) int {
-	fs := flag.NewFlagSet("calls", flag.ExitOnError)
-	fs.Usage = func() { fmt.Print(callsUsage) }
+func runCalls(args []string) int { return dumpCalls(args, os.Stdout, os.Stderr) }
+func dumpCalls(args []string, out, diagnostics io.Writer) int {
+	fs := flag.NewFlagSet("calls", flag.ContinueOnError)
+	fs.SetOutput(diagnostics)
+	fs.Usage = func() { fmt.Fprint(diagnostics, callsUsage) }
 
 	var (
 		since     = fs.String("since", "", "duration or date")
-		outcome   = fs.String("outcome", "", "answered|voicemail|dismissed|abandoned|placed")
+		outcome   = fs.String("outcome", "", "answered|voicemail|dismissed|abandoned|placed|ended")
 		caller    = fs.String("caller", "", "substring of a number at either end")
 		line      = fs.String("line", "", "only calls on one line")
 		direction = fs.String("direction", "", "inbound|outbound")
 		limit     = fs.Int("n", 20, "most recent N, 0 for all")
 		asJSON    = fs.Bool("json", false, "raw JSON Lines")
 		noRedact  = fs.Bool("no-redact", false, "print full numbers")
-		path      = fs.String("path", "", "override CALL_LOG_PATH")
+		path      = fs.String("path", "", "read an explicit journal or legacy JSONL file")
+		source    = fs.String("source", "auto", "auto|journal|jsonl")
 	)
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() != 0 || *limit < 0 || !events.ValidDirection(*direction) || (*source != "auto" && *source != "journal" && *source != "jsonl") {
+		fmt.Fprintln(diagnostics, "doorman calls: invalid source, direction, limit, or positional argument")
 		return 2
 	}
 
-	logPath := *path
-	if logPath == "" {
-		_ = loadDotEnv(".env")
-		cfg, err := config.Load()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "doorman calls: %v\n", err)
-			return 1
-		}
-		logPath = cfg.CallLogPath
-	}
-	if logPath == "" {
-		fmt.Fprint(os.Stderr, "doorman calls: no call log configured.\n\n"+
-			"Set CALL_LOG_PATH in .env to start recording, or pass --path to read\n"+
-			"a file directly. See `doorman schema env` for what it records.\n")
+	selectedPath, selectedSource, err := callHistorySource(*path, *source)
+	if err != nil {
+		fmt.Fprintln(diagnostics, "doorman calls:", err)
 		return 1
 	}
 
@@ -90,40 +99,59 @@ func runCalls(args []string) int {
 	if *since != "" {
 		t, err := parseSince(*since, time.Now())
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "doorman calls: %v\n", err)
+			fmt.Fprintf(diagnostics, "doorman calls: %v\n", err)
 			return 2
 		}
 		f.Since = t
 	}
 
-	records, skipped, err := calls.Read(logPath, f)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "doorman calls: %v\n", err)
-		return 1
+	var records []calls.Record
+	var skipped int
+	if selectedSource == "journal" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		history, err := events.ReadCalls(ctx, selectedPath, f, *noRedact)
+		if err != nil {
+			fmt.Fprintln(diagnostics, "doorman calls:", err)
+			return 1
+		}
+		records = history.Records
+		if history.RetentionFloor > 0 {
+			fmt.Fprintf(diagnostics, "Journal history through sequence %d has expired; showing retained call summaries.\n", history.RetentionFloor)
+		}
+		if history.GapEvents > 0 {
+			fmt.Fprintf(diagnostics, "Journal contains %d retained coverage-gap notice(s); call history may be incomplete.\n", history.GapEvents)
+		}
+	} else {
+		records, skipped, err = calls.Read(selectedPath, f)
+		if err != nil {
+			fmt.Fprintln(diagnostics, "doorman calls:", err)
+			return 1
+		}
 	}
 
-	if !*noRedact {
+	if !*noRedact && selectedSource == "jsonl" {
 		for i := range records {
 			records[i] = records[i].Redacted()
 		}
 	}
 
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(out)
 		for _, r := range records {
 			if err := enc.Encode(r); err != nil {
-				fmt.Fprintf(os.Stderr, "doorman calls: %v\n", err)
+				fmt.Fprintf(diagnostics, "doorman calls: %v\n", err)
 				return 1
 			}
 		}
 	} else {
-		printCalls(os.Stdout, records)
+		printCalls(out, records)
 	}
 
 	// A log with holes in it says so. Silence here would read as "this is
 	// everything that happened", which would be a lie.
 	if skipped > 0 {
-		fmt.Fprintf(os.Stderr, "\n%d unreadable line(s) skipped — most likely a write "+
+		fmt.Fprintf(diagnostics, "\n%d unreadable line(s) skipped — most likely a write "+
 			"interrupted by power loss.\n", skipped)
 	}
 	return 0
@@ -153,7 +181,7 @@ func parseSince(s string, now time.Time) (time.Time, error) {
 // something to say, which is the same rule `doorman check` applies to the word
 // "line": a box answering one number and placing no console calls reads
 // exactly as it did before either feature existed.
-func printCalls(w *os.File, records []calls.Record) {
+func printCalls(w io.Writer, records []calls.Record) {
 	if len(records) == 0 {
 		fmt.Fprintln(w, "No calls match.")
 		return
@@ -276,4 +304,40 @@ func orDash(s string) string {
 		return "withheld"
 	}
 	return s
+}
+
+// callHistorySource never falls back after selecting a journal: stale legacy
+// data must not make unavailable durable history look healthy.
+func callHistorySource(path, source string) (string, string, error) {
+	if path != "" {
+		if source != "auto" {
+			return path, source, nil
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return "", "", err
+		}
+		defer file.Close()
+		var header [16]byte
+		n, err := io.ReadFull(file, header[:])
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return "", "", err
+		}
+		if n == 16 && string(header[:]) == "SQLite format 3\x00" {
+			return path, "journal", nil
+		}
+		return path, "jsonl", nil
+	}
+	if source == "auto" || source == "journal" {
+		if path = configFileValue("EVENT_JOURNAL_PATH"); path != "" {
+			return path, "journal", nil
+		}
+		if source == "journal" {
+			return "", "", errors.New("set EVENT_JOURNAL_PATH or pass --path")
+		}
+	}
+	if path = configFileValue("CALL_LOG_PATH"); path != "" {
+		return path, "jsonl", nil
+	}
+	return "", "", errors.New("set EVENT_JOURNAL_PATH or CALL_LOG_PATH, or pass --path")
 }

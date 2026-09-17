@@ -111,6 +111,7 @@ type Options struct {
 	ReconnectMin time.Duration
 	ReconnectMax time.Duration
 	Log          *slog.Logger
+	OnConnection func(bool) // nonblocking observation callback, no error text
 }
 
 // Client speaks ARI: REST for commands, a WebSocket for events.
@@ -124,6 +125,7 @@ type Client struct {
 	reconnectMin time.Duration
 	reconnectMax time.Duration
 	log          *slog.Logger
+	onConnection func(bool)
 
 	closing atomic.Bool
 }
@@ -147,6 +149,7 @@ func New(o Options) *Client {
 		reconnectMin: o.ReconnectMin,
 		reconnectMax: o.ReconnectMax,
 		log:          o.Log,
+		onConnection: o.OnConnection,
 	}
 }
 
@@ -329,6 +332,10 @@ func (c *Client) runSocket(handler func(Event)) error {
 	}
 	defer conn.Close()
 	c.log.Info("ari event stream up", "app", c.app)
+	if c.onConnection != nil {
+		c.onConnection(true)
+		defer c.onConnection(false)
+	}
 
 	for {
 		if c.closing.Load() {

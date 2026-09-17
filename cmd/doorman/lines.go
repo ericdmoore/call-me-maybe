@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"callmemaybe/internal/events"
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/policy"
 )
@@ -27,7 +28,11 @@ type openLine struct {
 // arriving on it are served by the default line, the same place an unknown
 // name lands. A default line that will not load is returned as an error,
 // because that is the whole phone rather than one number.
-func openLines(files []policy.LineFile, handsetsPath string, watch bool, log *slog.Logger) ([]openLine, error) {
+func openLines(files []policy.LineFile, handsetsPath string, watch bool, log *slog.Logger, journals ...*events.Writer) ([]openLine, error) {
+	var journal *events.Writer
+	if len(journals) > 0 {
+		journal = journals[0]
+	}
 	var opened []openLine
 	for _, lf := range files {
 		// The default line's logger is left exactly as it was, so an install
@@ -53,10 +58,20 @@ func openLines(files []policy.LineFile, handsetsPath string, watch bool, log *sl
 
 		store, err := policy.OpenStoreWith(lf.Path, handsetsPath, watch, opts,
 			func(p *policy.Policy) {
+				if journal != nil {
+					e := events.System(events.ConfigReloaded, "policy", 0)
+					e.Line = lf.Name
+					journal.Post(e)
+				}
 				lineLog.Info("policy reloaded",
 					"allowList", p.AllowListCount(), "extensions", p.ExtensionCount())
 			},
 			func(err error) {
+				if journal != nil {
+					e := events.System(events.ConfigReloadFailed, "keeping-previous-policy", 0)
+					e.Line = lf.Name
+					journal.Post(e)
+				}
 				lineLog.Error("policy reload failed, keeping previous version", "err", err)
 			},
 		)

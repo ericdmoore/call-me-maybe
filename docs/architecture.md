@@ -202,3 +202,22 @@ Practical consequences here:
   into one reintroduces a bug where every handset transfer drops the call the
   moment it succeeds — covered by
   `TestHandsetTransferDoesNotKillTheTransferredCall`.
+
+
+## Durable observations
+
+The optional `internal/events` journal uses pure-Go SQLite with WAL and FULL
+synchronous commits, behind a bounded nonblocking producer queue. Policy and
+rate-limit state do not read it. The CLI exposes JSON pages from the internal
+`public_events_v1` view; consumers own cursors and batching, with no public SQL
+or HTTP endpoint. A separate notifier rings a webhook only for committed
+availability and persists its announcement progress. Legacy call-log and webhook
+formats remain supported. See [the event contract](events.md) for retention,
+recovery, privacy, and the current limits of Asterisk call coverage.
+
+With `CEL_SPOOL_PATH`, a separate Asterisk-owned SQLite spool supplies channel
+lifecycles, including ordinary outbound calls and calls made while Doorman is
+offline. The journal writer commits the source cursor, bounded channel correlation
+state, and public events atomically. Source gaps clear uncertain correlations
+and emit explicit notices. Asterisk's channel answer, bridge entry, session
+handoff, channel end, and linked-ID retirement remain distinct observations.

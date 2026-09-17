@@ -1,6 +1,24 @@
 # s08 · Durable event journal and webhook doorbells
 
-**Status:** proposed implementation plan; no runtime changes yet.
+**Status:** initial increment implemented: pure-Go SQLite journal, internal
+`public_events_v1`, JSON CLI, Doorman observation producers, one persisted
+webhook doorbell target, retention, and consumer example. Journal-backed call
+summaries now use `public_calls_v1`; event queries support combined filters and
+a fixed `--through` cursor. JSONL remains explicitly readable and is written only
+when the journal is disabled. Legacy webhooks remain compatible. See `docs/events.md` for the shipped contract.
+
+M4's CEL adapter is implemented with fixture tests; live Asterisk verification
+is pending deployment. M5 (replicas), multiple doorbell targets, and managed
+backup/restore generation renewal remain follow-up work. In-place rollback of a
+journal snapshot is not supported; restored snapshots are read-only history.
+The HTTP endpoint is deferred. This document retains the broader design below.
+
+Deployment clarification: the intended host is a Linux x86 PC, with deployment
+planned for Saturday. Validate the host's actual architecture before selecting
+the binary; ARM builds remain portability checks, not this deployment's target.
+The initial consumer integration will be Bash glue around the JSON CLI and its
+saved cursor; those scripts wait for the Bullmoose CLI changes. Additional webhook targets and replicas are optional follow-ups,
+not prerequisites for that integration.
 
 ## What done looks like
 
@@ -67,10 +85,35 @@ commits, not wall-clock occurrences across producers. Correlate channel legs
 separately from logical calls; preserve Asterisk identities where available.
 Do not treat multiple ringing legs as multiple human calls.
 
-Expose a supported paginated reader through `doorman events --json` and an
-optional authenticated HTTP read endpoint. Both use the same implementation.
-Proposed request fields: journal identity/generation, exclusive `after` cursor,
-bounded `limit`, optional type/call/line filters, and optional upper watermark.
+Expose JSON through the CLI, reading an internal versioned SQL view named
+`public_events_v1`. Consumers need no direct SQL access; the database is private.
+Its columns expose the event envelope above, payload JSON, and journal
+identity/generation. Preserve v1 across internal migrations; incompatible changes
+require a new view version. “Public” means a supported interface, not anonymous
+access or automatic redaction. File access exposes full stored identities.
+
+The agreed initial JSON dump interface is:
+
+```sh
+doorman events --json --after 1842 --limit 500 --eventType call.answered
+```
+
+- Query `public_events_v1`, ordered by ascending sequence.
+- `--after` is exclusive; omitted or `0` starts at the earliest retained event.
+  This explicit bootstrap request differs from an expired nonzero cursor.
+  Consumers retain journal identity/generation alongside their cursor and verify
+  it before processing a response.
+- `--limit` bounds returned events; proposed default 100, range 1–10000.
+- `--eventType` optionally selects one case-sensitive exact enum value. Omission
+  includes all types; unknown values fail with a useful error. Parameterize SQL.
+- Emit one JSON object containing an `events` array and pagination metadata.
+  Diagnostics go to stderr; invalid arguments or read failures return nonzero.
+  Payloads are JSON objects, not double-encoded strings.
+
+Keep default CLI redaction and an explicit authorized full-identity option.
+The internal view is not a public access endpoint. An authenticated HTTP endpoint can later
+reuse the reader when needed; it is not required for the initial increment.
+Call/line filters and an upper-watermark option are future extensions.
 Responses include events, next cursor, earliest available position, committed
 high watermark, and journal identity/generation. Serialize sequence cursors as
 decimal strings on JSON interfaces to avoid JavaScript integer precision loss.
@@ -89,8 +132,9 @@ external side effects are not promised.
 
 Start with the local journal exposed through the CLI or read endpoint. This
 provides a usable durable location without introducing cloud credentials or a
-network filesystem into the call path. Local expert readers may inspect SQLite,
-but private table layouts are not the integration contract.
+network filesystem into the call path. The CLI reads `public_events_v1` using
+short transactions. Consumers store checkpoints elsewhere and depend on the JSON
+contract, not private table layouts or SQL permissions.
 
 Add configured replica destinations in a separate phase using a narrow sink
 interface. The first concrete destination should be selected from deployment
@@ -145,7 +189,7 @@ Provide a reference consumer demonstrating this and checkpoint-after-processing.
 Use one background writer and a bounded producer queue. Commit promptly; any
 writer batching is an internal tuning choice unrelated to consumer batching.
 Evaluate WAL mode with FULL synchronous commits, bounded busy waits, short read
-transactions, and checkpoint policy on the Pi. Document the tested durability
+transactions, and checkpoint policy on the deployment host. Document the tested durability
 boundary: committed transactions survive within SQLite/storage guarantees;
 events still queued in RAM can be lost on a process crash or power loss.
 
@@ -180,9 +224,11 @@ transport. Do not widen ARI's bind or reuse its credentials.
 
 Add `internal/events` with typed envelopes, transactional writer, migrations,
 retention, health, and paginated reader. Select the pure-Go driver through the
-build spike above. Add CLI access and the optional read service.
+build spike above. Add `public_events_v1` and the agreed CLI JSON dump; defer the
+HTTP service until a remote consumer requires it.
 
 Done when restart preserves committed events and identity; sequence allocation,
+view/CLI parity, enum validation, limit boundaries, JSON output shape,
 filtered pagination, expiry, generation mismatch, concurrent readers, and bounded
 retention have tests. Kill-process tests demonstrate commit/replay behaviour and
 are explicitly distinguished from real power-loss testing. Database errors do

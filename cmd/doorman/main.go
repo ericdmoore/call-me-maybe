@@ -33,6 +33,7 @@ import (
 	"callmemaybe/internal/calls"
 	"callmemaybe/internal/config"
 	"callmemaybe/internal/contacts"
+	"callmemaybe/internal/events"
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/lsp"
 	"callmemaybe/internal/notify"
@@ -65,6 +66,8 @@ func main() {
 			os.Exit(runE164(os.Args[2:]))
 		case "schema":
 			os.Exit(runSchema(os.Args[2:]))
+		case "events":
+			os.Exit(runEvents(os.Args[2:]))
 		case "calls":
 			os.Exit(runCalls(os.Args[2:]))
 		case "balance":
@@ -119,12 +122,22 @@ const usage = `doorman — the Call Me Maybe lobby daemon
                                 OpenAI or Polly, "voices" lists what a backend
                                 offers. Rendering is content-addressed, so
                                 editing one line re-renders one clip.
+  doorman events --json         read durable events through the internal public_events_v1 view
+      --after cursor           exclusive sequence cursor (default 0)
+      --limit count            maximum events (default 100, maximum 10000)
+      --eventType type         exact event type; omitted means all
+      --through cursor         inclusive fixed upper bound for a batch
+      --direction direction    inbound or outbound call events
+      --line name --call id     narrow by line or full channel ID
+                                Needs EVENT_JOURNAL_PATH; no direct database access needed.
   doorman calls                 read the call log: who called, what happened,
                                 and why. Numbers redacted unless --no-redact.
                                 One log for every line, so a whole day reads
                                 in order; --line and --direction narrow it on
                                 a box answering several numbers or placing
-                                calls through *4. Needs CALL_LOG_PATH set.
+                                calls through *4. Uses EVENT_JOURNAL_PATH,
+                                otherwise CALL_LOG_PATH; --source jsonl reads
+                                the legacy log explicitly.
   doorman balance [flags]       what is left on each prepaid trunk, and a
                                 non-zero exit when any of it is below its
                                 threshold — so cron is a one-liner. Needs a
@@ -257,6 +270,35 @@ func runCheck(args []string) int {
 	// what makes a freshly copied config fail loudly until `doorman init` runs.
 	allowPlaceholders := fs.Bool("allow-placeholders", false, "accept example placeholder PINs (for CI, not operators)")
 	_ = fs.Parse(args)
+
+	dotenv := loadDotEnv(".env")
+	envCfg, envErr := config.LoadForCheck(func(key string) string {
+		if v, ok := os.LookupEnv(key); ok {
+			return v
+		}
+		return dotenv[key]
+	})
+	if envErr != nil {
+		fmt.Fprintln(os.Stderr, envErr)
+		return 1
+	}
+	if envCfg.EventJournalPath != "" {
+		if err := events.CheckPath(envCfg.EventJournalPath); err != nil {
+			fmt.Fprintln(os.Stderr, "event journal:", err)
+			return 1
+		}
+		fmt.Printf("Event journal: %s (CLI reads; webhook mode %s)\n", envCfg.EventJournalPath, envCfg.WebhookMode)
+	}
+	if envCfg.CELSpoolPath != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		err := events.CheckCELPath(ctx, envCfg.CELSpoolPath)
+		cancel()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "CEL spool:", err)
+			return 1
+		}
+		fmt.Println("CEL spool: readable; verify Asterisk backend with cel show status")
+	}
 	path := ""
 	if fs.NArg() > 0 {
 		path = fs.Arg(0)
@@ -986,6 +1028,25 @@ func runService() {
 		handler = slog.NewJSONHandler(os.Stdout, opts)
 	}
 	log := slog.New(handler)
+	var journal *events.Writer
+	if cfg.EventJournalPath != "" {
+		journal = events.Start(cfg.EventJournalPath, events.Options{CELPath: cfg.CELSpoolPath, MaxBytes: cfg.EventJournalMaxBytes, MaxEvents: cfg.EventJournalMaxEvents, MaxAge: cfg.EventJournalMaxAge, Log: log})
+		defer func() {
+			if err := journal.Close(); err != nil {
+				log.Error("journal drain incomplete", "err", err)
+			}
+		}()
+		journal.Post(events.System(events.DaemonStarted, "", 0))
+	}
+	if cfg.WebhookMode == "doorbell" && cfg.WebhookURL != "" {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			events.Ring(ctx, cfg.EventJournalPath, events.DoorbellOptions{URL: cfg.WebhookURL, Token: cfg.WebhookToken, Timeout: cfg.WebhookTimeout, Log: log})
+		}()
+		defer func() { cancel(); <-done }()
+	}
 
 	// The lines this box answers: the default line, whose file is POLICY_PATH
 	// itself, plus one per sibling policy.<name>.toml. Discovered rather than
@@ -998,7 +1059,7 @@ func runService() {
 			"path", ig.Path, "reason", ig.Reason)
 	}
 
-	opened, err := openLines(lineFiles, cfg.HandsetsPath, cfg.PolicyWatch, log)
+	opened, err := openLines(lineFiles, cfg.HandsetsPath, cfg.PolicyWatch, log, journal)
 	if err != nil {
 		log.Error("cannot load policy", "path", cfg.PolicyPath, "err", err)
 		os.Exit(1)
@@ -1017,6 +1078,15 @@ func runService() {
 		ReconnectMin: cfg.ReconnectMin,
 		ReconnectMax: cfg.ReconnectMax,
 		Log:          log,
+		OnConnection: func(up bool) {
+			if journal != nil {
+				kind := events.ARIDisconnected
+				if up {
+					kind = events.ARIConnected
+				}
+				journal.Post(events.System(kind, "", 0))
+			}
+		},
 	})
 
 	// Fail fast on bad credentials rather than looping on a 401 forever.
@@ -1033,12 +1103,13 @@ func runService() {
 	prompts := lobby.NewPrompts(cfg.PromptMediaPrefix)
 	reg := newRegistry()
 
-	// The call log is off unless a path is configured. A failure to open it
+	// The journal owns call history when enabled; JSONL remains a legacy mode.
+	// The legacy log is off unless a path is configured. A failure to open it
 	// is fatal at startup rather than silent: an operator who asked for a
 	// call log and did not get one should find out now, not in a month when
 	// they go looking for a call.
 	var callLog *calls.Writer
-	if cfg.CallLogPath != "" {
+	if cfg.CallLogPath != "" && cfg.EventJournalPath == "" {
 		var err error
 		callLog, err = calls.Open(cfg.CallLogPath, cfg.CallLogMaxBytes)
 		if err != nil {
@@ -1054,7 +1125,7 @@ func runService() {
 	// line after the first call nobody heard announced. Only the host is
 	// logged — the URL is a credential.
 	var hook *notify.Webhook
-	if cfg.WebhookURL != "" {
+	if cfg.WebhookURL != "" && cfg.WebhookMode == "legacy" {
 		var err error
 		hook, err = notify.Open(notify.Options{
 			URL:              cfg.WebhookURL,
@@ -1080,7 +1151,7 @@ func runService() {
 	for _, o := range opened {
 		lists = append(lists, allowList{o.name, o.store.Current()})
 	}
-	book := openContacts(cfg.ContactsPath, cfg.DefaultCountryCode, lists, log)
+	book := openContacts(cfg.ContactsPath, cfg.DefaultCountryCode, lists, log, journal)
 
 	// Everything a line does not own is shared: one ARI client, one prompt
 	// pack, one registry, one call log, one webhook, one concurrency cap, one
@@ -1118,6 +1189,9 @@ func runService() {
 		}
 		// A typed nil in an interface is not nil, so these fields are only set
 		// when there is a real sink — the state machine's nil checks depend on it.
+		if journal != nil {
+			deps.Events = journal
+		}
 		if callLog != nil {
 			deps.Calls = callLog
 		}
@@ -1168,6 +1242,9 @@ func runService() {
 	// Asterisk and fall out of Stasis when the humans finish talking.
 	log.Info("shutting down", "signal", s.String(), "activeCalls", reg.callerCount())
 	client.Close()
+	if journal != nil {
+		journal.Post(events.System(events.DaemonStopping, "active-sessions-may-continue-in-asterisk", int64(reg.callerCount())))
+	}
 }
 
 // route dispatches ARI events to sessions. It runs on the websocket read
@@ -1216,7 +1293,8 @@ func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log 
 				// The call log is shared by every line and owned by none, so
 				// the default line's copy of it is every line's copy — the same
 				// route the timeouts take, for the same reason.
-				Calls: lines.deflt.Calls,
+				Calls:  lines.deflt.Calls,
+				Events: lines.deflt.Events,
 				// Called on the console's own goroutine, so reading every
 				// line's current policy never happens on this one.
 				Lines:      func() []lobby.ConsoleLine { return lines.outbound().consoleLines() },

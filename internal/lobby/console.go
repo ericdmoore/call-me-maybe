@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"callmemaybe/internal/calls"
+	"callmemaybe/internal/events"
 	"callmemaybe/internal/policy"
 )
 
@@ -171,6 +172,8 @@ type ConsoleDeps struct {
 	// nothing in this house and ends somewhere doorman cannot see. Sending one
 	// anyway would mean announcing a call that is not happening here.
 	Calls Recorder
+	// Events records observations without reading historical state.
+	Events events.Sink
 	// OnFinished lets the router drop this console's registration.
 	OnFinished func(*Console)
 }
@@ -263,6 +266,7 @@ func (c *Console) post(ev event) {
 // mid-menu, which arrives as cancellation and nothing else.
 func (c *Console) Run() {
 	defer c.cleanup()
+	c.observe(events.CallObserved, "outbound-console")
 
 	lines := c.deps.Lines()
 	if len(lines) > consoleMaxLines {
@@ -572,6 +576,10 @@ func (c *Console) cleanup() {
 	if c.deps.Calls != nil {
 		c.deps.Calls.Post(c.rec)
 	}
+	if c.detached.Load() {
+		c.observe(events.CallHandedOff, "left-doorman")
+	}
+	c.observe(events.SessionFinished, "")
 
 	if c.deps.OnFinished != nil {
 		c.deps.OnFinished(c)
@@ -637,4 +645,10 @@ func orTrunkDefault(trunk string) string {
 		return "(the dialplan default)"
 	}
 	return trunk
+}
+
+func (c *Console) observe(kind events.Type, reason string) {
+	if c.deps.Events != nil {
+		c.deps.Events.Post(events.Call(kind, c.ChannelID, c.rec, reason))
+	}
 }

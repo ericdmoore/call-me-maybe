@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"callmemaybe/internal/calls"
+	"callmemaybe/internal/events"
 	"callmemaybe/internal/notify"
 	"callmemaybe/internal/policy"
 )
@@ -139,6 +140,8 @@ type Deps struct {
 	// log entirely, which is why every use is behind a nil check rather
 	// than a config flag.
 	Calls Recorder
+	// Events records observations without reading historical state.
+	Events events.Sink
 	// Contacts is the merged address book. Nil is no contacts.toml, which is
 	// every install today: the ladder collapses to [[people]] and the lobby,
 	// and nothing about the call changes.
@@ -387,6 +390,7 @@ func (s *Session) callerNumberForDisplay() string {
 // always been.
 func (s *Session) Run() {
 	defer s.cleanup()
+	s.observe(events.CallObserved, "")
 
 	contact, inBook := s.contact()
 
@@ -405,6 +409,7 @@ func (s *Session) Run() {
 	// slow a redialler down, and must not be dismissed *as* rate-limited when
 	// the reason is on file.
 	if inBook && contact.Blocked {
+		s.observe(events.AdmissionDecided, "blocked")
 		s.log.Info("blocked caller, dismissing without the lobby", "name", contact.Name)
 		s.dismiss("blocked")
 		return
@@ -414,6 +419,7 @@ func (s *Session) Run() {
 	// not get a vote, which is what keeps [[people]] meaningful rather than
 	// redundant and gives an override that needed no new mechanism.
 	if known, ok := s.pol.LookupCaller(s.callerE164); ok {
+		s.observe(events.AdmissionDecided, "allow-list")
 		s.log.Info("known caller, welcoming", "name", known.Name)
 		s.welcome(known.Name)
 		return
@@ -424,12 +430,14 @@ func (s *Session) Run() {
 	// is — same prompt, same dial window, same record — because "who may skip
 	// the lobby" is one question with two sources of answer.
 	if inBook && !contact.Published {
+		s.observe(events.AdmissionDecided, "personal-contact")
 		s.log.Info("contact admitted, welcoming", "name", contact.Name)
 		s.welcome(contact.Name)
 		return
 	}
 
 	if s.deps.Limiter.Blocked(s.limitKey(), time.Now()) {
+		s.observe(events.AdmissionDecided, "rate-limited")
 		s.log.Warn("caller rate limited, dismissing without greeting")
 		s.dismiss("rate-limited")
 		return
@@ -441,9 +449,11 @@ func (s *Session) Run() {
 	// like anybody else, with none of the exemptions an admitted caller has —
 	// the name is logged and goes no further.
 	if inBook {
+		s.observe(events.AdmissionDecided, "published-contact-lobby")
 		s.log.Info("published contact, opening lobby", "name", contact.Name)
 	} else {
 		s.log.Info("unknown caller, opening lobby")
+		s.observe(events.AdmissionDecided, "unknown-caller-lobby")
 	}
 	// Digits during the greeting barge in: a caller who already knows their
 	// extension should not have to sit through the pitch.
@@ -677,6 +687,7 @@ func (s *Session) evaluate(digits *string, attempts *int, reset func(time.Durati
 		s.deps.Limiter.Success(s.limitKey())
 		// The label and the verdict, never `entered`.
 		s.rec.Extension, s.rec.PIN = ext.Label, "valid"
+		s.observe(events.AdmissionDecided, "valid-extension")
 		if ext.Afterhours.Active(s.now()) {
 			// Quiet hours. Either the call is redirected somewhere that is
 			// awake — homework hours sending the kids' line to the adults, a
@@ -700,6 +711,7 @@ func (s *Session) evaluate(digits *string, attempts *int, reset func(time.Durati
 
 	*attempts++
 	s.rec.PIN, s.rec.Attempts = "invalid", *attempts
+	s.observe(events.AdmissionDecided, "invalid-extension")
 	failures := s.deps.Limiter.Failure(s.limitKey(), time.Now())
 	// The entered digits are never logged — a near-miss is almost a
 	// credential.
@@ -762,6 +774,7 @@ func (s *Session) runPlan(plan policy.RingPlan, label string) {
 	// event useful. A caller who is dismissed rings nothing and gets no
 	// ringing event, which is the truth.
 	s.notify(notify.EventRinging)
+	s.observe(events.RingStarted, "")
 
 	callerID := s.pol.FormatCallerID(label, s.callerNumberForDisplay())
 
@@ -803,6 +816,7 @@ func (s *Session) ringStep(endpoints []string, label, callerID string, timeout t
 			MS:       s.now().Sub(stageStart).Milliseconds(),
 			Result:   result,
 		})
+		s.observe(events.RingStageFinished, result)
 	}
 
 	// Escalation is a handoff, not a pile-on: the previous stage has already
@@ -843,6 +857,7 @@ func (s *Session) ringStep(endpoints []string, label, callerID string, timeout t
 			switch ev.kind {
 			case evLegAnswered:
 				s.rec.Outcome, s.rec.AnsweredBy = calls.OutcomeAnswered, dialled[ev.value]
+				s.observe(events.CallAnswered, "handset-answered")
 				rang("answered")
 				s.bridged(ev.value)
 				return true
@@ -1008,7 +1023,17 @@ func (s *Session) cleanup() {
 		s.deps.Calls.Post(s.rec)
 	}
 	s.notify(notify.EventCompleted)
+	if s.detached.Load() {
+		s.observe(events.CallHandedOff, "left-doorman")
+	}
+	s.observe(events.SessionFinished, "")
 
 	s.deps.OnFinished(s)
 	s.log.Info("session finished")
+}
+
+func (s *Session) observe(kind events.Type, reason string) {
+	if s.deps.Events != nil {
+		s.deps.Events.Post(events.Call(kind, s.ChannelID, s.rec, reason))
+	}
 }

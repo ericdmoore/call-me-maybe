@@ -74,6 +74,13 @@ type Config struct {
 	// generation is kept.
 	CallLogMaxBytes int64
 
+	CELSpoolPath          string
+	EventJournalPath      string
+	EventJournalMaxBytes  int64
+	EventJournalMaxEvents int
+	EventJournalMaxAge    time.Duration
+	WebhookMode           string // legacy | doorbell
+
 	// WebhookURL enables the event webhook. Empty — the default — means no
 	// webhook at all. Treat the value as a secret: a Home Assistant webhook
 	// id is the whole credential, which is why doorman logs only its host.
@@ -92,30 +99,35 @@ var truthy = regexp.MustCompile(`^(?i)(1|true|yes|on)$`)
 
 // Load reads and validates the environment. All problems are reported at
 // once — nobody enjoys fixing env vars one restart at a time.
-func Load() (Config, error) {
+func Load() (Config, error) { return load(os.Getenv, true) }
+
+// LoadForCheck validates tuning without requiring a live daemon's ARI secrets.
+func LoadForCheck(get func(string) string) (Config, error) { return load(get, false) }
+
+func load(get func(string) string, requireSecrets bool) (Config, error) {
 	var issues []string
 	need := func(key string) string {
-		v := os.Getenv(key)
-		if v == "" {
+		v := get(key)
+		if v == "" && requireSecrets {
 			issues = append(issues, fmt.Sprintf("  %s: required", key))
 		}
 		return v
 	}
 	str := func(key, fallback string) string {
-		if v := os.Getenv(key); v != "" {
+		if v := get(key); v != "" {
 			return v
 		}
 		return fallback
 	}
 	boolean := func(key string, fallback bool) bool {
-		v := os.Getenv(key)
+		v := get(key)
 		if v == "" {
 			return fallback
 		}
 		return truthy.MatchString(v)
 	}
 	integer := func(key string, fallback int) int {
-		v := os.Getenv(key)
+		v := get(key)
 		if v == "" {
 			return fallback
 		}
@@ -130,6 +142,11 @@ func Load() (Config, error) {
 		return time.Duration(integer(key, fallback)) * time.Millisecond
 	}
 
+	days := integer("EVENT_JOURNAL_MAX_AGE_DAYS", 90)
+	if days > 36500 {
+		issues = append(issues, "  EVENT_JOURNAL_MAX_AGE_DAYS: maximum is 36500")
+		days = 90
+	}
 	c := Config{
 		ARIBaseURL:   str("ARI_BASE_URL", "http://127.0.0.1:8088"),
 		ARIUsername:  need("ARI_USERNAME"),
@@ -165,6 +182,13 @@ func Load() (Config, error) {
 
 		CallLogPath:     str("CALL_LOG_PATH", ""),
 		CallLogMaxBytes: int64(integer("CALL_LOG_MAX_BYTES", 32<<20)),
+
+		CELSpoolPath:          str("CEL_SPOOL_PATH", ""),
+		EventJournalPath:      str("EVENT_JOURNAL_PATH", ""),
+		EventJournalMaxBytes:  int64(integer("EVENT_JOURNAL_MAX_BYTES", 64<<20)),
+		EventJournalMaxEvents: integer("EVENT_JOURNAL_MAX_EVENTS", 100000),
+		EventJournalMaxAge:    time.Duration(days) * 24 * time.Hour,
+		WebhookMode:           str("WEBHOOK_MODE", "legacy"),
 
 		WebhookURL:            str("WEBHOOK_URL", ""),
 		WebhookToken:          str("WEBHOOK_TOKEN", ""),
@@ -219,6 +243,7 @@ func Load() (Config, error) {
 		}
 	}
 
+	issues = append(issues, c.JournalIssues()...)
 	if len(issues) > 0 {
 		return Config{}, fmt.Errorf("invalid environment configuration:\n%s\n\nSee examples/.env.example", strings.Join(issues, "\n"))
 	}
@@ -253,4 +278,25 @@ func isLoopback(host string) bool {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+// JournalIssues is also used by doorman check without requiring ARI secrets.
+func (c Config) JournalIssues() []string {
+	var issues []string
+	if c.WebhookMode != "legacy" && c.WebhookMode != "doorbell" {
+		issues = append(issues, "  WEBHOOK_MODE: must be legacy or doorbell")
+	}
+	if c.WebhookMode == "doorbell" && c.EventJournalPath == "" {
+		issues = append(issues, "  WEBHOOK_MODE: doorbell requires EVENT_JOURNAL_PATH")
+	}
+	if c.CELSpoolPath != "" && c.EventJournalPath == "" {
+		issues = append(issues, "  CEL_SPOOL_PATH: requires EVENT_JOURNAL_PATH")
+	}
+	if c.EventJournalMaxBytes < 8<<20 {
+		issues = append(issues, "  EVENT_JOURNAL_MAX_BYTES: must be at least 8388608")
+	}
+	if c.EventJournalMaxAge <= 0 || c.EventJournalMaxAge > 36500*24*time.Hour {
+		issues = append(issues, "  EVENT_JOURNAL_MAX_AGE_DAYS: must be between 1 and 36500")
+	}
+	return issues
 }
