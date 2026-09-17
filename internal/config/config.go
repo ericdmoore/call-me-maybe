@@ -20,6 +20,8 @@ import (
 )
 
 type Config struct {
+	UpdateCheckEnabled bool
+
 	ARIBaseURL   string
 	ARIUsername  string
 	ARIPassword  string
@@ -131,6 +133,8 @@ func Load() (Config, error) {
 	}
 
 	c := Config{
+		UpdateCheckEnabled: boolean("UPDATE_CHECK_ENABLED", true),
+
 		ARIBaseURL:   str("ARI_BASE_URL", "http://127.0.0.1:8088"),
 		ARIUsername:  need("ARI_USERNAME"),
 		ARIPassword:  need("ARI_PASSWORD"),
@@ -253,4 +257,11 @@ func isLoopback(host string) bool {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+// UpdateChecksEnabled reads the operator preference without requiring ARI
+// credentials or any other daemon configuration to be valid.
+func UpdateChecksEnabled(getenv func(string) string) bool {
+	v := getenv("UPDATE_CHECK_ENABLED")
+	return v == "" || truthy.MatchString(v)
 }

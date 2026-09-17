@@ -418,7 +418,24 @@ is
 Prompts are built once with piper on a workstation and committed as WAVs, so
 the Pi never synthesises speech. Pointing the prefix at another directory is
 how a prompt pack is swapped in.
+.SH UPDATE NOTICES
+Successful interactive operator commands may print a newer-release notice on
+stderr after command output, at most once per 24 hours. Both stdout and stderr
+must be terminals. Checks overlap the command within a one-second startup
+budget. Failures are silent; failed commands never print notices. The daemon,
+LSP, CI, pipes and source builds (git distance or dirty stamps) never check.
+Only strictly newer semantic versions are advertised. Nothing auto-updates.
+Upgrade using install.sh on a workstation, or scp per docs/RUNBOOK.md on the Pi.
+State is stored in $XDG_STATE_HOME/doorman/update-check.json, defaulting to
+~/.local/state/doorman/update-check.json (0600 file, 0700 directory).
+A successful fetch is cached even before the command finishes, for later runs.
 .SH ENVIRONMENT
+.TP
+.B UPDATE_CHECK_ENABLED
+Boolean, default true. Set false to disable the interactive release check
+without loading or validating daemon configuration. Truthy values are
+1, true, yes and on (case-insensitive); other non-empty values disable it.
+A non-empty CI also disables checks.
 .B doorman schema env
 prints all of these with types, defaults, and explanations. The frequently
 relevant ones:

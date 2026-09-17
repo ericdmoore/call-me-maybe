@@ -537,3 +537,13 @@ Not tasks yet, but real. Worth fixing if you are in the area:
 - **`doorman rotate` and a concurrent manual edit race.** Rotation reads,
   edits, and renames; an editor writing in that window loses. Single-operator
   households will never see it; documented so nobody chases it as corruption.
+
+## Passive release notice — DONE
+
+Interactive operator commands check GitHub independently in the background,
+with a one-second startup budget and a private XDG state cache. Successful
+commands advertise strictly newer releases on stderr once per day.
+`UPDATE_CHECK_ENABLED=false` opts out. Daemon, LSP, CI, pipes and source builds
+never check; failures are silent. Tests cover gates, cadence, cache permissions,
+semver, overlap, failed commands and timeout budgets. Upgrade paths remain
+`install.sh` on workstations and `scp` to the Pi; no automatic updates.

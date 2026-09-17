@@ -39,6 +39,7 @@ import (
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/render"
 	"callmemaybe/internal/schema"
+	"callmemaybe/internal/updatecheck"
 )
 
 // version is the release identity. A release build stamps it from the git tag
@@ -46,43 +47,54 @@ import (
 // `go build` reports. It must stay a var — the linker cannot rewrite a const.
 var version = "0.4.1"
 
+var processStarted = time.Now()
+
 func main() {
+	os.Exit(updatecheck.Run(processStarted, version, os.Args[1:], runCommand))
+}
+
+func runCommand() int {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "init":
-			os.Exit(runInit(os.Args[2:]))
+			return runInit(os.Args[2:])
 		case "template":
-			os.Exit(runTemplate(os.Args[2:]))
+			return runTemplate(os.Args[2:])
 		case "check":
-			os.Exit(runCheck(os.Args[2:]))
+			return runCheck(os.Args[2:])
 		case "rotate":
-			os.Exit(runRotate(os.Args[2:]))
+			return runRotate(os.Args[2:])
 		case "render":
-			os.Exit(runRender(os.Args[2:]))
+			return runRender(os.Args[2:])
 		case "lsp":
-			os.Exit(runLsp())
+			return runLsp()
 		case "e164":
-			os.Exit(runE164(os.Args[2:]))
+			return runE164(os.Args[2:])
 		case "schema":
-			os.Exit(runSchema(os.Args[2:]))
+			return runSchema(os.Args[2:])
 		case "calls":
-			os.Exit(runCalls(os.Args[2:]))
+			return runCalls(os.Args[2:])
 		case "balance":
-			os.Exit(runBalance(os.Args[2:]))
+			return runBalance(os.Args[2:])
 		case "pack":
-			os.Exit(runPack(os.Args[2:]))
+			return runPack(os.Args[2:])
 		case "version", "-v", "--version":
 			fmt.Println("doorman", version)
-			return
+			return 0
 		case "help", "-h", "--help":
 			fmt.Print(usage)
-			return
+			return 0
 		}
 	}
 	runService()
+	return 0
 }
 
 const usage = `doorman — the Call Me Maybe lobby daemon
+
+Interactive operator commands may show a daily release notice on stderr.
+Set UPDATE_CHECK_ENABLED=false to disable it. No checks in the daemon, LSP,
+CI, pipes or source builds; a one-second startup budget, no automatic updates.
 
   doorman                       run the service (configuration via env, see examples/.env.example)
   doorman init [flags]          interview, generate every secret with crypto/rand,
