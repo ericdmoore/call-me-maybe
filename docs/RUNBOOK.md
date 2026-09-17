@@ -1242,6 +1242,11 @@ that silently disappears is the same silence this whole check exists to break.
 
 ## 6a. The call log
 
+With `EVENT_JOURNAL_PATH` configured, `doorman calls` reads summaries from the
+journal and the daemon does not write JSONL. Use `--source jsonl` to read older
+files explicitly; see [durable events](events.md). The following describes the
+legacy JSONL backend, used when the journal is disabled.
+
 Off by default. Set `CALL_LOG_PATH` and restart:
 
 ```bash
@@ -1564,3 +1569,22 @@ Not everything here is a matter of discipline. These are checked by machine:
 | Config cross-references resolve | `doorman check`, the LSP, and the daemon share one validator |
 | The provider API key stays out of the daemon | `internal/provider` is reachable only from `doorman balance`; tests assert nothing on the call path imports it and no other file in `cmd/doorman` reads the credential |
 | Every config key is one the schema names | `doorman check` and the LSP reject an unknown key; the daemon warns and keeps running |
+
+
+## Event journal and consumer recovery
+
+See [Durable events and webhook doorbells](events.md) for setup, the JSON page
+contract, and receiver migration. Enable `EVENT_JOURNAL_PATH` in a dedicated
+private directory, reinstall the updated systemd unit and daemon-reload, run
+`sudo -u doorman doorman check`, and restart. Use `doorman events --json`
+to inspect committed history without ARI access. `WEBHOOK_MODE=doorbell` changes
+notifications to availability hints; existing integrations stay on `legacy`.
+
+A stale consumer cursor must not be silently reset: determine whether the
+consumer needs archived history before explicitly bootstrapping at `--after 0`.
+Check storage ownership and free space when the daemon reports journal degradation.
+Do not copy a live SQLite main file without its WAL or overwrite an active
+journal with an older snapshot. Recovery and backup limits are detailed in the
+event guide. Ordinary outbound calls remain outside this initial journal's
+coverage without the CEL adapter; see the CEL setup and deployment checklist in
+[events](events.md). A console handoff is not an answered outbound call.

@@ -29,6 +29,9 @@ PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
 ReadWritePaths=/opt/call-me-maybe
+# Journal output; systemd grants this path through ProtectSystem=strict.
+StateDirectory=doorman
+StateDirectoryMode=0700
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 MemoryMax=128M
 

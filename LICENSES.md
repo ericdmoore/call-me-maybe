@@ -72,10 +72,14 @@ DCO sign-off (`git commit -s`) is welcome but not enforced. See
 
 ## Third-party components
 
-Two Go dependencies, both permissive:
+Direct Go dependencies are permissively licensed:
 
 - `github.com/BurntSushi/toml` — MIT
 - `github.com/gorilla/websocket` — BSD 2-Clause
+- `gopkg.in/yaml.v3` — MIT and Apache 2.0
+- `modernc.org/sqlite` — BSD 3-Clause; pure-Go SQLite runtime. SQLite itself is
+  public domain. Its pinned runtime dependencies are recorded in `go.mod` and
+  `go.sum`; retain their licence notices when distributing binaries.
 
 The system depends on Asterisk (GPLv2) but does not link against it — doorman
 talks to it over ARI, a network protocol, as a separate process. That is an

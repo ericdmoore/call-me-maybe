@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"callmemaybe/internal/contacts"
+	"callmemaybe/internal/events"
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/policy"
 )
@@ -64,9 +65,12 @@ func (b contactBook) Lookup(e164 string) (lobby.Contact, bool) {
 // allowed a say in whether the phone answers. The cost is honest and worth
 // stating — a block list that fails to load stops blocking, so it is logged
 // where an operator will see it rather than absorbed.
-func openContacts(path, defaultCountryCode string, lists []allowList, log *slog.Logger) lobby.Contacts {
+func openContacts(path, defaultCountryCode string, lists []allowList, log *slog.Logger, journal *events.Writer) lobby.Contacts {
+
 	sources, err := policy.LoadContacts(path)
 	if err != nil {
+		journal.Post(events.System(events.ContactsRefreshFailed, "inventory-unreadable", 0))
+
 		log.Warn("address-book inventory will not load — the phone is unaffected and [[people]] is untouched, "+
 			"but nobody in a contacts source is admitted or blocked until it does",
 			"path", path, "err", err)
@@ -85,11 +89,15 @@ func openContacts(path, defaultCountryCode string, lists []allowList, log *slog.
 		// phone keeps answering. Said out loud because the failure mode is
 		// silent — an address book that vanished looks exactly like an address
 		// book nobody is in.
+		journal.Post(events.System(events.ContactsRefreshFailed, "source-unreadable", 1))
+
 		log.Warn("address book contributed nothing", "source", r.ID, "kind", r.Kind,
 			"from", r.Where, "why", r.Unread)
 	}
 
 	t := set.Totals()
+	journal.Post(events.System(events.ContactsRefreshed, "startup-snapshot", int64(t.Numbers)))
+
 	// Counts, never names or numbers — and one line, because the whole point of
 	// an ambient list is that an operator did not have to type it.
 	log.Info("contacts loaded", "path", set.Where(), "sources", len(set.Sources()),
