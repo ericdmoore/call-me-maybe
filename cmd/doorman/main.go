@@ -260,7 +260,7 @@ func secretLookup(envPath string) func(string) (string, bool) {
 
 // ── doorman check ────────────────────────────────────────────────────────
 
-func runCheck(args []string) int {
+func runCheck(args []string) (code int) {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
 	handsetsFlag := fs.String("handsets", "", "handsets file (default $HANDSETS_PATH or ./handsets.toml)")
 	trunksFlag := fs.String("trunks", "", "provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)")
@@ -268,36 +268,16 @@ func runCheck(args []string) int {
 	// Structural validation of the shipped examples, whose PINs are the
 	// placeholder sentinel. CI uses this; an operator never should, which is
 	// what makes a freshly copied config fail loudly until `doorman init` runs.
+	policyOnly := fs.Bool("policy-only", false, "validate policy/inventory without local service environment or storage")
 	allowPlaceholders := fs.Bool("allow-placeholders", false, "accept example placeholder PINs (for CI, not operators)")
 	_ = fs.Parse(args)
 
-	dotenv := loadDotEnv(".env")
-	envCfg, envErr := config.LoadForCheck(func(key string) string {
-		if v, ok := os.LookupEnv(key); ok {
-			return v
-		}
-		return dotenv[key]
-	})
-	if envErr != nil {
-		fmt.Fprintln(os.Stderr, envErr)
-		return 1
-	}
-	if envCfg.EventJournalPath != "" {
-		if err := events.CheckPath(envCfg.EventJournalPath); err != nil {
-			fmt.Fprintln(os.Stderr, "event journal:", err)
-			return 1
-		}
-		fmt.Printf("Event journal: %s (CLI reads; webhook mode %s)\n", envCfg.EventJournalPath, envCfg.WebhookMode)
-	}
-	if envCfg.CELSpoolPath != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		err := events.CheckCELPath(ctx, envCfg.CELSpoolPath)
-		cancel()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "CEL spool:", err)
-			return 1
-		}
-		fmt.Println("CEL spool: readable; verify Asterisk backend with cel show status")
+	if !*policyOnly {
+		defer func() {
+			if checkEnvironment() != 0 {
+				code = 1
+			}
+		}()
 	}
 	path := ""
 	if fs.NArg() > 0 {
@@ -410,6 +390,43 @@ func runCheck(args []string) int {
 		rc = 1
 	}
 	return rc
+}
+
+func checkEnvironment() int {
+	dotenv := loadDotEnv(".env")
+	envCfg, envErr := config.LoadForCheck(func(key string) string {
+		if v, ok := os.LookupEnv(key); ok {
+			return v
+		}
+		return dotenv[key]
+	})
+	if envErr != nil {
+		fmt.Fprintln(os.Stderr, envErr)
+		return 1
+	}
+	if envCfg.EventJournalPath != "" {
+		if err := events.CheckPath(envCfg.EventJournalPath, events.Options{MaxBytes: envCfg.EventJournalMaxBytes}); err != nil {
+			fmt.Fprintln(os.Stderr, "event journal:", err)
+			return 1
+		}
+		active, err := events.WriterActive(envCfg.EventJournalPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "event journal writer lock:", err)
+			return 1
+		}
+		fmt.Printf("Event journal: %s (CLI reads; webhook mode %s; writer active: %t)\n", envCfg.EventJournalPath, envCfg.WebhookMode, active)
+	}
+	if envCfg.CELSpoolPath != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		err := events.CheckCELPath(ctx, envCfg.CELSpoolPath)
+		cancel()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "CEL spool:", err)
+			return 1
+		}
+		fmt.Println("CEL spool: readable; verify Asterisk backend with cel show status")
+	}
+	return 0
 }
 
 // defaultCountryCode is the country code assumed for a number written without
@@ -1013,11 +1030,17 @@ func runSchema(args []string) int {
 // ── the service ──────────────────────────────────────────────────────────
 
 func runService() {
+	if err := serve(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+func serve() error {
 	cfg, err := config.Load()
 	if err != nil {
 		// A stack trace helps nobody here — the fix is always in .env.
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return fmt.Errorf("service startup failed: %w", err)
 	}
 
 	var handler slog.Handler
@@ -1030,20 +1053,22 @@ func runService() {
 	log := slog.New(handler)
 	var journal *events.Writer
 	if cfg.EventJournalPath != "" {
-		journal = events.Start(cfg.EventJournalPath, events.Options{CELPath: cfg.CELSpoolPath, MaxBytes: cfg.EventJournalMaxBytes, MaxEvents: cfg.EventJournalMaxEvents, MaxAge: cfg.EventJournalMaxAge, Log: log})
+		journal, err = events.StartChecked(cfg.EventJournalPath, events.Options{DefaultCountryCode: cfg.DefaultCountryCode, CELPath: cfg.CELSpoolPath, MaxBytes: cfg.EventJournalMaxBytes, MaxEvents: cfg.EventJournalMaxEvents, MaxAge: cfg.EventJournalMaxAge, Log: log})
+		if err != nil {
+			return fmt.Errorf("open event journal: %w", err)
+		}
 		defer func() {
 			if err := journal.Close(); err != nil {
 				log.Error("journal drain incomplete", "err", err)
 			}
 		}()
-		journal.Post(events.System(events.DaemonStarted, "", 0))
 	}
 	if cfg.WebhookMode == "doorbell" && cfg.WebhookURL != "" {
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			events.Ring(ctx, cfg.EventJournalPath, events.DoorbellOptions{URL: cfg.WebhookURL, Token: cfg.WebhookToken, Timeout: cfg.WebhookTimeout, Log: log})
+			events.Ring(ctx, cfg.EventJournalPath, events.DoorbellOptions{MaxBytes: cfg.EventJournalMaxBytes, URL: cfg.WebhookURL, Token: cfg.WebhookToken, Timeout: cfg.WebhookTimeout, Log: log})
 		}()
 		defer func() { cancel(); <-done }()
 	}
@@ -1062,7 +1087,7 @@ func runService() {
 	opened, err := openLines(lineFiles, cfg.HandsetsPath, cfg.PolicyWatch, log, journal)
 	if err != nil {
 		log.Error("cannot load policy", "path", cfg.PolicyPath, "err", err)
-		os.Exit(1)
+		return fmt.Errorf("service startup failed: %w", err)
 	}
 	defer func() {
 		for _, o := range opened {
@@ -1096,7 +1121,7 @@ func runService() {
 	if err != nil {
 		log.Error("cannot reach ARI — check ARI_* settings and asterisk/ari.conf",
 			"baseUrl", cfg.ARIBaseURL, "err", err)
-		os.Exit(1)
+		return fmt.Errorf("service startup failed: %w", err)
 	}
 	log.Info("connected to asterisk", "version", astVersion)
 
@@ -1109,12 +1134,15 @@ func runService() {
 	// call log and did not get one should find out now, not in a month when
 	// they go looking for a call.
 	var callLog *calls.Writer
+	if cfg.CallLogPath != "" && cfg.EventJournalPath != "" {
+		log.Info("EVENT_JOURNAL_PATH replaces CALL_LOG_PATH writes; legacy JSONL remains readable")
+	}
 	if cfg.CallLogPath != "" && cfg.EventJournalPath == "" {
 		var err error
 		callLog, err = calls.Open(cfg.CallLogPath, cfg.CallLogMaxBytes)
 		if err != nil {
 			log.Error("could not open the call log", "err", err)
-			os.Exit(1)
+			return fmt.Errorf("service startup failed: %w", err)
 		}
 		defer func() { _ = callLog.Close() }()
 		log.Info("call log open", "path", cfg.CallLogPath)
@@ -1136,7 +1164,7 @@ func runService() {
 		})
 		if err != nil {
 			log.Error("could not start the event webhook", "err", err)
-			os.Exit(1)
+			return fmt.Errorf("service startup failed: %w", err)
 		}
 		defer func() { _ = hook.Close() }()
 		log.Info("event webhook enabled", "host", hook.Host(), "redacted", cfg.WebhookRedactCallerID)
@@ -1228,6 +1256,7 @@ func runService() {
 		announceEmergencyTrunk(trunks, lines.deflt.Policy().Line().Trunk, log)
 	}
 
+	journal.Post(events.System(events.DaemonStarted, "", 0))
 	client.Connect(func(ev ari.Event) { route(ev, reg, lines, client, log) })
 	log.Info("doorman is on duty", "app", cfg.ARIApp, "version", version)
 	if len(lines.byName) > 1 {
@@ -1242,9 +1271,9 @@ func runService() {
 	// Asterisk and fall out of Stasis when the humans finish talking.
 	log.Info("shutting down", "signal", s.String(), "activeCalls", reg.callerCount())
 	client.Close()
-	if journal != nil {
-		journal.Post(events.System(events.DaemonStopping, "active-sessions-may-continue-in-asterisk", int64(reg.callerCount())))
-	}
+	journal.Post(events.System(events.DaemonStopping, "active-sessions-may-continue-in-asterisk", int64(reg.callerCount())))
+
+	return nil
 }
 
 // route dispatches ARI events to sessions. It runs on the websocket read

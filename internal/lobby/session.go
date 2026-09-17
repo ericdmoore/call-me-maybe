@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"callmemaybe/internal/calls"
-	"callmemaybe/internal/events"
 	"callmemaybe/internal/notify"
+	events "callmemaybe/internal/observation"
 	"callmemaybe/internal/policy"
 )
 
@@ -419,6 +419,7 @@ func (s *Session) Run() {
 	// not get a vote, which is what keeps [[people]] meaningful rather than
 	// redundant and gives an override that needed no new mechanism.
 	if known, ok := s.pol.LookupCaller(s.callerE164); ok {
+		s.rec.Known = known.Name
 		s.observe(events.AdmissionDecided, "allow-list")
 		s.log.Info("known caller, welcoming", "name", known.Name)
 		s.welcome(known.Name)
@@ -430,6 +431,7 @@ func (s *Session) Run() {
 	// is — same prompt, same dial window, same record — because "who may skip
 	// the lobby" is one question with two sources of answer.
 	if inBook && !contact.Published {
+		s.rec.Known = contact.Name
 		s.observe(events.AdmissionDecided, "personal-contact")
 		s.log.Info("contact admitted, welcoming", "name", contact.Name)
 		s.welcome(contact.Name)

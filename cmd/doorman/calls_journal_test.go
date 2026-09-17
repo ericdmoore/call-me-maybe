@@ -120,3 +120,11 @@ func TestEventCLICombinedFiltersAndThrough(t *testing.T) {
 		}
 	}
 }
+
+func TestUnknownCELLineDoesNotCreateTableColumn(t *testing.T) {
+	var out bytes.Buffer
+	printCalls(&out, []calls.Record{{Direction: "outbound", Line: "unknown", Outcome: "ended"}})
+	if strings.Contains(out.String(), "LINE") {
+		t.Fatal(out.String())
+	}
+}

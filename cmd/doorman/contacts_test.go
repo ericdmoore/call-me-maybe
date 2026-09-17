@@ -329,7 +329,7 @@ func TestOpenContactsIsNilAndSilentWithoutAnInventory(t *testing.T) {
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	book := openContacts(filepath.Join(t.TempDir(), "contacts.toml"), "1", allowLists(t, allowGrandma), log)
+	book := openContacts(filepath.Join(t.TempDir(), "contacts.toml"), "1", allowLists(t, allowGrandma), log, nil)
 
 	if book != nil {
 		t.Errorf("openContacts returned %#v, want an untyped nil", book)
@@ -355,7 +355,7 @@ kind = "block"
 
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, nil))
-	book := openContacts(path, "1", nil, log)
+	book := openContacts(path, "1", nil, log, nil)
 	if book == nil {
 		t.Fatal("openContacts returned nil with an inventory on disk")
 	}
@@ -411,7 +411,7 @@ func TestOpenContactsWarnsAndCarriesOnWhenTheInventoryIsInvalid(t *testing.T) {
 
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, nil))
-	if book := openContacts(path, "1", nil, log); book != nil {
+	if book := openContacts(path, "1", nil, log, nil); book != nil {
 		t.Error("an invalid inventory produced a lookup")
 	}
 	if !strings.Contains(buf.String(), "the phone is unaffected") {
@@ -435,7 +435,7 @@ path = "$DIR/not-there.vcf"
 
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, nil))
-	book := openContacts(path, "1", nil, log)
+	book := openContacts(path, "1", nil, log, nil)
 	if book == nil {
 		t.Fatal("one unreadable source took the whole address book down")
 	}
@@ -462,7 +462,7 @@ kind = "block"
 
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, nil))
-	openContacts(path, "1", allowLists(t, allowGrandma), log)
+	openContacts(path, "1", allowLists(t, allowGrandma), log, nil)
 
 	out := buf.String()
 	if !strings.Contains(out, "both allow-listed and blocked") {

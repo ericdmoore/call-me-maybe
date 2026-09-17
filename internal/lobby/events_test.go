@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"callmemaybe/internal/events"
+	events "callmemaybe/internal/observation"
 )
 
 type eventCapture struct {

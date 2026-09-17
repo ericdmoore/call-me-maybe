@@ -189,7 +189,7 @@ func printCalls(w io.Writer, records []calls.Record) {
 
 	var showLine, showWay bool
 	for _, r := range records {
-		showLine = showLine || r.Line != ""
+		showLine = showLine || (r.Line != "" && r.Line != "unknown")
 		showWay = showWay || !r.Inbound()
 	}
 

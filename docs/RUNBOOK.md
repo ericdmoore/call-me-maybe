@@ -1575,7 +1575,8 @@ Not everything here is a matter of discipline. These are checked by machine:
 
 See [Durable events and webhook doorbells](events.md) for setup, the JSON page
 contract, and receiver migration. Enable `EVENT_JOURNAL_PATH` in a dedicated
-private directory, run `doorman check`, and restart. Use `doorman events --json`
+private directory, reinstall the updated systemd unit and daemon-reload, run
+`sudo -u doorman doorman check`, and restart. Use `doorman events --json`
 to inspect committed history without ARI access. `WEBHOOK_MODE=doorbell` changes
 notifications to availability hints; existing integrations stay on `legacy`.
 

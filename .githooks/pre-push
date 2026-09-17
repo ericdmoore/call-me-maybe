@@ -80,7 +80,7 @@ while IFS= read -r policy; do
 	dir=$(dirname "$policy")
 	args=(--handsets "$dir/handsets.example.toml")
 	[ -f "$dir/trunks.example.toml" ] && args+=(--trunks "$dir/trunks.example.toml")
-	go run ./cmd/doorman check --allow-placeholders "${args[@]}" "$policy" >/dev/null \
+	go run ./cmd/doorman check --policy-only --allow-placeholders "${args[@]}" "$policy" >/dev/null \
 		|| fail "$policy does not validate"
 done < <(find examples -name policy.example.toml | sort)
 

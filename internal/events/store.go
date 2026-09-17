@@ -31,7 +31,7 @@ type store struct {
 	opts Options
 }
 
-func connect(path string, readonly bool) (*sql.DB, error) {
+func connect(path string, readonly bool, pragmas ...string) (*sql.DB, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
@@ -42,10 +42,14 @@ func connect(path string, readonly bool) (*sql.DB, error) {
 		q.Set("mode", "ro")
 	} else {
 		q.Set("mode", "rw")
+		q.Set("_txlock", "immediate")
 	}
 	q.Add("_pragma", "busy_timeout(250)")
 	if readonly {
 		q.Add("_pragma", "query_only(1)")
+	}
+	for _, pragma := range pragmas {
+		q.Add("_pragma", pragma)
 	}
 	u.RawQuery = q.Encode()
 	db, err := sql.Open("sqlite", u.String())
@@ -118,24 +122,8 @@ func openStore(path string, opts Options) (_ *store, err error) {
 			return nil, err
 		}
 	}
-	if version < 2 {
-		if err = migrateQueries(db); err != nil {
-			return nil, err
-		}
-	}
-	if version == 2 {
-		tx, e := db.Begin()
-		if e != nil {
-			return nil, e
-		}
-		defer tx.Rollback()
-		if _, err = tx.Exec(`DROP VIEW public_calls_v1; CREATE VIEW public_calls_v1 AS ` + callsProjection + `;
-CREATE TABLE cel_progress (singleton INTEGER PRIMARY KEY CHECK(singleton=1), source_id TEXT NOT NULL, through INTEGER NOT NULL, anchor TEXT NOT NULL);
-CREATE TABLE cel_channels (id TEXT PRIMARY KEY, state TEXT NOT NULL);
-PRAGMA user_version=3;`); err != nil {
-			return nil, err
-		}
-		if err = tx.Commit(); err != nil {
+	if version < currentSchema {
+		if err = migrateQueries(db, version); err != nil {
 			return nil, err
 		}
 	}
@@ -143,13 +131,23 @@ PRAGMA user_version=3;`); err != nil {
 	if err = db.QueryRow("PRAGMA page_size").Scan(&pageSize); err != nil {
 		return nil, err
 	}
-	if st, e := os.Stat(path); e == nil && st.Size() > opts.MaxBytes/4 {
+	var pageCount int64
+	if err = db.QueryRow("PRAGMA page_count").Scan(&pageCount); err != nil {
+		return nil, err
+	}
+	if pageCount*pageSize > opts.MaxBytes/4 {
 		return nil, errors.New("existing journal exceeds database budget; archive and compact it before lowering the limit")
 	}
-	for _, stmt := range []string{"PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", "PRAGMA wal_autocheckpoint=64", "PRAGMA journal_size_limit=0", fmt.Sprintf("PRAGMA max_page_count=%d", opts.MaxBytes/4/pageSize)} {
-		if _, err = db.Exec(stmt); err != nil {
-			return nil, err
-		}
+	// Close the bootstrap connection: every future connection gets the budget.
+	if err = db.Close(); err != nil {
+		return nil, err
+	}
+	db, err = connect(path, false, "journal_mode(WAL)", "synchronous(FULL)", "wal_autocheckpoint(64)", "journal_size_limit(0)", fmt.Sprintf("max_page_count(%d)", opts.MaxBytes/4/pageSize))
+	if err != nil {
+		return nil, err
+	}
+	if err = db.Ping(); err != nil {
+		return nil, err
 	}
 	return &store{db: db, path: path, opts: opts}, nil
 }
@@ -229,7 +227,8 @@ func (s *store) prune(ctx context.Context, tx *sql.Tx, reserve int) error {
 	// that an internal sequence gap represents an event a consumer can recover.
 	var floor int64
 	err := tx.QueryRowContext(ctx, `SELECT MAX(boundary) FROM (
- SELECT COALESCE(MAX(sequence),0) AS boundary FROM events INDEXED BY events_recorded_at WHERE recorded_at < ?
+ SELECT COALESCE(MAX(sequence),0) AS boundary FROM events
+ WHERE sequence < (SELECT COALESCE(MIN(sequence),(SELECT high+1 FROM metadata)) FROM events WHERE recorded_at >= ?)
  UNION ALL SELECT COALESCE(MAX(sequence),0) FROM events WHERE sequence <= (SELECT high-? FROM metadata)
 )`, time.Now().UTC().Add(-s.opts.MaxAge).Format("2006-01-02T15:04:05.000000000Z07:00"), s.opts.MaxEvents-reserve).Scan(&floor)
 	if err != nil {
@@ -331,11 +330,14 @@ func Read(ctx context.Context, path string, q Query) (Page, error) {
 	if p.Through > p.HighWatermark {
 		return p, errors.New("through is ahead of this journal")
 	}
-	if p.Through < p.RetentionFloor {
+	if p.Through < p.RetentionFloor && p.Through != 0 {
 		return p, errors.New("batch expired: through precedes the retained history")
 	}
 	if err = tx.QueryRowContext(ctx, "SELECT COALESCE(MIN(sequence),0) FROM public_events_v1").Scan(&p.EarliestAvailable); err != nil {
 		return p, err
+	}
+	if q.Through != nil && *q.Through == 0 {
+		return p, nil
 	}
 	after := q.After
 	if after < p.RetentionFloor {
@@ -416,20 +418,40 @@ func Read(ctx context.Context, path string, q Query) (Page, error) {
 	return p, nil
 }
 
-func (s *store) appendRecover(ctx context.Context, e Event) error {
-	err := s.append(ctx, e)
-	var se *sqlite.Error
-	if errors.As(err, &se) && se.Code()&255 == 13 {
-		if s.reclaim(ctx) == nil {
-			return s.append(ctx, e)
+func retryBusy(ctx context.Context, op func() error) error {
+	for attempt := 0; ; attempt++ {
+		err := op()
+		var se *sqlite.Error
+		if !errors.As(err, &se) || se.Code()&255 != 5 || attempt >= 4 {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 20 * time.Millisecond):
 		}
 	}
-	return err
+}
+func (s *store) appendRecover(ctx context.Context, e Event) error {
+	return retryBusy(ctx, func() error {
+		err := s.append(ctx, e)
+		var se *sqlite.Error
+		if errors.As(err, &se) && se.Code()&255 == 13 {
+			if s.reclaim(ctx) == nil {
+				return s.append(ctx, e)
+			}
+		}
+		return err
+	})
 }
 
 // CheckPath validates an existing journal without creating one or acquiring the
 // writer lock. Missing storage is fine at setup time; the daemon creates it.
-func CheckPath(path string) error {
+func CheckPath(path string, options ...Options) error {
+	o := defaults(Options{})
+	if len(options) > 0 {
+		o = defaults(options[0])
+	}
 	if info, err := os.Stat(filepath.Dir(path)); err == nil {
 		if !info.IsDir() || info.Mode().Perm()&0077 != 0 {
 			return errors.New("journal parent directory must be private (0700)")
@@ -447,8 +469,29 @@ func CheckPath(path string) error {
 	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
 		return errors.New("journal must be a regular private file (0600)")
 	}
+	if info.Size() > o.MaxBytes/4 {
+		return errors.New("existing journal exceeds database budget; archive and compact it before lowering the limit")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, err = Read(ctx, path, Query{Limit: 1})
-	return err
+	if err != nil {
+		return err
+	}
+	db, err := connect(path, true)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var pages, size int64
+	if err = db.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pages); err != nil {
+		return err
+	}
+	if err = db.QueryRowContext(ctx, "PRAGMA page_size").Scan(&size); err != nil {
+		return err
+	}
+	if pages*size > o.MaxBytes/4 {
+		return errors.New("existing journal exceeds database budget; archive and compact it before lowering the limit")
+	}
+	return nil
 }

@@ -78,7 +78,7 @@ jobs:
             trunks=""
             [ -f "$dir/trunks.example.toml" ] && trunks="--trunks $dir/trunks.example.toml"
             # shellcheck disable=SC2086
-            go run ./cmd/doorman check --allow-placeholders \
+            go run ./cmd/doorman check --policy-only --allow-placeholders \
               --handsets "$dir/handsets.example.toml" \
               $trunks "$policy" || exit 1
           done

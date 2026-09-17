@@ -5,9 +5,7 @@ package events
 // this code runs on an ARI or dialplan call-control path.
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,19 +15,12 @@ import (
 	"time"
 
 	"callmemaybe/internal/calls"
+	"callmemaybe/internal/policy"
 	"modernc.org/sqlite"
 )
 
 // ChannelObservation is deliberately smaller than CEL. No application data,
 // user fields, channel names (which can embed destinations), or entered digits.
-type ChannelObservation struct {
-	SourceID       string `json:"source_id"`
-	SourceSequence int64  `json:"source_sequence,string"`
-	LinkedID       string `json:"linked_id"`
-	Direction      string `json:"direction,omitempty"`
-	Caller         string `json:"caller,omitempty"`
-	Dialled        string `json:"dialled,omitempty"`
-}
 type celRow struct {
 	seq                                                     int64
 	kind, at, id, linked, context, caller, destination, app string
@@ -56,14 +47,14 @@ func CheckCELPath(ctx context.Context, path string) error {
 	}
 	var id string
 	if err = db.QueryRowContext(ctx, "SELECT source_id FROM doorman_cel_meta WHERE singleton=1 AND version=1").Scan(&id); err != nil {
-		return errors.New("CEL spool is unavailable or not initialised with scripts/cel-spool.sql")
+		return fmt.Errorf("read CEL source identity: %w", err)
 	}
 	if !safeCELIdentifier.MatchString(id) {
 		return errors.New("invalid CEL source identity")
 	}
 	rows, err := db.QueryContext(ctx, "SELECT AcctId,eventtype,eventtime,uniqueid,linkedid,context,caller,destination,app FROM doorman_cel LIMIT 0")
 	if err != nil {
-		return errors.New("CEL spool schema mismatch")
+		return fmt.Errorf("read CEL spool columns: %w", err)
 	}
 	return rows.Close()
 }
@@ -173,14 +164,16 @@ func inboundLine(ctx string) (string, bool) {
 			return name, true
 		}
 	}
+	if strings.HasPrefix(ctx, "from-") {
+		return "unknown", true
+	}
 	return "", false
 }
 func outboundContext(ctx string) bool {
 	return ctx == "internal" || ctx == "cmm-outbound" || ctx == "outbound-console" || ctx == "cmm-emergency"
 }
 func celEventID(source string, seq int64, suffix string) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("cel:%s:%d:%s", source, seq, suffix)))
-	return hex.EncodeToString(sum[:])
+	return digest(fmt.Sprintf("cel:%s:%d:%s", source, seq, suffix))
 }
 
 // ingestCEL is called only by the journal's single writer. A failed transaction
@@ -195,6 +188,9 @@ func (s *store) ingestCEL(ctx context.Context, path string) error {
 	source, low, high, rows, err := readCEL(ctx, path, after, previous, anchor)
 	if err != nil {
 		return err
+	}
+	if source == previous && high == after && len(rows) == 0 {
+		return nil
 	}
 	if err = s.walBudget(ctx); err != nil {
 		return err
@@ -215,6 +211,11 @@ func (s *store) ingestCEL(ctx context.Context, path string) error {
 		return errors.New("CEL spool rewound under the same source identity; preserve it and initialise a new source")
 	}
 	if low > after+1 {
+		if gap != "" {
+			if err = s.appendTx(ctx, tx, System(CoverageGap, gap, 0)); err != nil {
+				return err
+			}
+		}
 		gap = "cel-source-retention-gap"
 		count = low - after - 1
 		after = low - 1
@@ -227,7 +228,11 @@ func (s *store) ingestCEL(ctx context.Context, path string) error {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM cel_channels"); err != nil {
 			return err
 		}
-		if err = s.appendTx(ctx, tx, System(CoverageGap, gap, count)); err != nil {
+		kind := CoverageGap
+		if strings.HasPrefix(gap, "cel-observation-started") {
+			kind = JournalNote
+		}
+		if err = s.appendTx(ctx, tx, System(kind, gap, count)); err != nil {
 			return err
 		}
 	}
@@ -289,13 +294,13 @@ func (s *store) ingestCELRow(ctx context.Context, tx *sql.Tx, source string, row
 	}
 	// Only root dialplan channels become call summaries; individual handset and
 	// trunk legs still have public channel events, linked by linked_id.
-	if line, ok := inboundLine(row.context); ok && (row.kind == "CHAN_START" || row.kind == "APP_START") {
+	if line, ok := inboundLine(row.context); ok && row.id == row.linked && (row.kind == "CHAN_START" || row.kind == "APP_START") {
 		st.Tracked = true
 		st.Record.Line = line
 		st.Record.Direction = calls.DirectionInbound
-		st.Record.Caller = row.caller
+		st.Record.Caller = policy.E164OrEmpty(row.caller, s.opts.DefaultCountryCode)
 	}
-	if !st.Tracked && row.kind == "APP_START" && strings.EqualFold(row.app, "Dial") && outboundContext(row.context) && phoneDestination.MatchString(row.destination) {
+	if !st.Tracked && row.id == row.linked && row.kind == "APP_START" && strings.EqualFold(row.app, "Dial") && outboundContext(row.context) && phoneDestination.MatchString(row.destination) {
 		st.Tracked = true
 		st.Record.Direction = calls.DirectionOutbound
 		st.Record.Dialled = row.destination
@@ -303,7 +308,7 @@ func (s *store) ingestCELRow(ctx context.Context, tx *sql.Tx, source string, row
 		// Start at the Dial attempt, excluding time spent in the *4 console.
 		st.Record.Start = at
 	}
-	if st.Tracked && st.Record.Direction == calls.DirectionOutbound && kind == ChannelBridgeEntered {
+	if st.Tracked && kind == ChannelBridgeEntered {
 		st.Bridged = true
 	}
 	c := ChannelObservation{SourceID: source, SourceSequence: row.seq, LinkedID: row.linked}
@@ -322,9 +327,12 @@ func (s *store) ingestCELRow(ctx context.Context, tx *sql.Tx, source string, row
 			if st.Record.MS < 0 {
 				st.Record.MS = 0
 			}
-			st.Record.Outcome = "ended"
+			st.Record.Outcome = calls.OutcomeEnded
 			st.Record.Reason = "asterisk-channel-ended; no bridge observed"
 			if st.Bridged {
+				st.Record.Reason = "asterisk-channel-ended; bridge observed, inbound answer not inferred"
+			}
+			if st.Bridged && st.Record.Direction == calls.DirectionOutbound {
 				st.Record.Outcome = calls.OutcomeAnswered
 				st.Record.Reason = "asterisk-bridge-observed"
 			}
@@ -356,8 +364,7 @@ func (s *store) ingestCELRow(ctx context.Context, tx *sql.Tx, source string, row
 }
 
 func celAnchor(r celRow) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%q", []string{r.kind, r.at, r.id, r.linked, r.context, r.caller, r.destination, r.app})))
-	return hex.EncodeToString(sum[:])
+	return digest(fmt.Sprintf("%q", []string{r.kind, r.at, r.id, r.linked, r.context, r.caller, r.destination, r.app}))
 }
 
 func (s *store) ingestCELRecover(ctx context.Context, path string) error {
@@ -378,7 +385,10 @@ func checkCELSequence(ctx context.Context, q interface {
 }) error {
 	var definition string
 	if err := q.QueryRowContext(ctx, "SELECT sql FROM sqlite_master WHERE type='table' AND name='doorman_cel'").Scan(&definition); err != nil {
-		return errors.New("CEL spool table missing; initialise with scripts/cel-spool.sql")
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("CEL spool table missing; initialise with scripts/cel-spool.sql")
+		}
+		return fmt.Errorf("read CEL spool schema: %w", err)
 	}
 	if !strings.Contains(strings.ToUpper(definition), "AUTOINCREMENT") {
 		return errors.New("CEL spool requires monotonic AUTOINCREMENT source IDs")

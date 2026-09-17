@@ -795,7 +795,7 @@ func Env() *Schema {
 
 		"CEL_SPOOL_PATH":             env("Optional Asterisk CEL SQLite spool (AST_LOG_DIR/master.db), initialised with scripts/cel-spool.sql. Requires EVENT_JOURNAL_PATH. Reads committed lifecycle events and resumes after restart; never used for call control.", "path", ""),
 		"EVENT_JOURNAL_PATH":         env("Optional SQLite event journal in a private 0700 directory; empty disables. Access through doorman events --json and doorman calls, not a public database service. When enabled, replaces legacy CALL_LOG_PATH writes. Storage failures degrade observation without delaying calls.", "path", ""),
-		"EVENT_JOURNAL_MAX_BYTES":    env("Physical storage budget, minimum 8 MiB. A quarter bounds database pages; the rest reserves WAL space for pinned history and a large transaction; a pinned WAL pauses writes rather than growing without bound.", "integer", 67108864),
+		"EVENT_JOURNAL_MAX_BYTES":    env("Physical storage budget, minimum 8 MiB. Usually the binding retention limit: default permits 16 MiB of database pages (roughly 27000 mixed events, workload dependent), not guaranteed 90-day history. A quarter bounds database pages; the rest reserves WAL space for pinned history and a large transaction; a pinned WAL pauses writes rather than growing without bound.", "integer", 67108864),
 		"EVENT_JOURNAL_MAX_EVENTS":   env("Maximum retained event count; slower consumers must recover explicitly when their cursor expires.", "positive integer", 100000),
 		"EVENT_JOURNAL_MAX_AGE_DAYS": env("Retain events for at most this many days (1–36500), also bounded by count and disk budget.", "positive integer", 90),
 		"WEBHOOK_MODE":               env("legacy preserves ringing/completed payloads. doorbell requires EVENT_JOURNAL_PATH and announces committed availability without call data; consumers read their own batches through the CLI.", "enum", "legacy"),
@@ -804,6 +804,7 @@ func Env() *Schema {
 		"WEBHOOK_TIMEOUT_MS":         env("Bounds one delivery attempt. Short on purpose: a notification that arrives late has already missed the ring it was describing. It also bounds shutdown — past this grace period a dead endpoint's backlog is abandoned rather than holding the process open.", "duration (milliseconds)", 3000),
 		"WEBHOOK_REDACT_CALLER_ID":   env("Redact the caller ID in the webhook payload, keeping only a fragment. On by default — the opposite of the call log, deliberately: the call log is a 0600 file that stays on the box, while this payload is handed to another program over the network. Set it false when the receiver needs the full number, for example to announce an unknown caller. Entered digits and PINs are never sent at any setting; a payload says whether a PIN was valid, never what was typed.", "boolean", true),
 	}
+	props["WEBHOOK_MODE"].Enum = []any{"legacy", "doorbell"}
 	props["LOG_LEVEL"].Enum = []any{"trace", "debug", "info", "warn", "error"}
 	props["LOG_FORMAT"].Enum = []any{"json", "pretty"}
 
@@ -818,6 +819,9 @@ func Env() *Schema {
 		Type:        "object",
 		Description: "Secrets and tuning. Loaded by systemd's EnvironmentFile in production and by `make run` in development. Names and defaults match examples/.env.example exactly.",
 		Rules: []string{
+			"WEBHOOK_MODE=doorbell requires EVENT_JOURNAL_PATH.",
+			"CEL_SPOOL_PATH requires EVENT_JOURNAL_PATH.",
+			"EVENT_JOURNAL_MAX_BYTES must be at least 8388608; database pages receive one quarter of this budget, which may expire history well before the count or age ceilings.",
 			"Every problem is reported at once — doorman does not make you fix env vars one restart at a time.",
 			"HANDSET_<NAME>_PASSWORD variables are named by password_env in handsets.toml and read by `doorman render`, not by the daemon.",
 			"The VOICEMAIL_*, STT_*, and SMTP_* keys in examples/.env.example are reserved for the unshipped voicemail feature. They are deliberately not read yet, so .env will not churn when it lands.",

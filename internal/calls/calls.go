@@ -59,6 +59,7 @@ import (
 // OutcomePlaced, which is the whole of the outbound vocabulary that inbound
 // did not already have.
 const (
+	OutcomeEnded = "ended" // CEL observed termination without inferring a human answer.
 	// OutcomeAnswered: a handset picked up and the caller was bridged, or CEL
 	// observed the dialling channel enter a bridge.
 	OutcomeAnswered = "answered"

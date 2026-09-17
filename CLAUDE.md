@@ -90,6 +90,8 @@ Layout:
   manages DIDs, sub-accounts and billing, so it stays out of the daemon
   entirely. Its errors never carry a URL — the credentials ride in the query
   string, so the URL *is* the credential.
+- `internal/observation` — lightweight event vocabulary and immutable call snapshots.
+  The lobby imports this, never the journal/database package (checked by test).
 - `internal/events` — optional pure-Go SQLite observation journal. The CLI reads
   its internal `public_events_v1` and `public_calls_v1` views; there is no public SQL or HTTP service.
   Doorbells announce committed availability; consumers own their checkpoints.
@@ -207,7 +209,8 @@ Break these and the phone fails in ways that look like working software.
    number has called five times, admit it" — the rate limiter's
    deliberately-in-memory design is undermined and doorman has acquired
    persistent state that can be corrupt, stale, or disagree with
-   policy.toml. The import direction enforces it: `internal/calls`
+   policy.toml. The lobby import-boundary test excludes journal and database dependencies.
+   The import direction also enforces it for JSONL: `internal/calls`
    imports `internal/policy`, so policy can never import calls without a
    cycle. It also holds full caller IDs, which is the point of a call log
    on a telephone — the file is 0600 and `doorman calls` redacts by

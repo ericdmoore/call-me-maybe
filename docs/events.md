@@ -29,6 +29,22 @@ stops writing the legacy `CALL_LOG_PATH` JSONL file. Existing files remain
 readable explicitly. There is no automatic historical import or silent fallback
 to JSONL when journal storage fails.
 
+## Upgrade and validation
+
+Reinstall `scripts/doorman.service` and run `systemctl daemon-reload` when
+upgrading an older unit: `StateDirectory=doorman` grants journal writes under
+`ProtectSystem=strict`. systemd reapplies `StateDirectoryMode=0700` on each start;
+other programs writing under `/var/lib/doorman` must use compatible ownership or
+a separate directory. Run `sudo -u doorman doorman check` from the configured
+working directory. It reports environment/storage issues after policy validation,
+including the effective page budget and whether a writer owns the journal.
+`check --policy-only` validates example policies independently of local service
+credentials, paths, or storage; CI and the pre-push hook use it.
+
+When both history paths are set, startup explicitly reports that the journal
+replaces JSONL writes. A failed initial journal open refuses startup, rather
+than silently disabling the only working history sink.
+
 ## Read a batch
 
 ```sh
@@ -114,10 +130,11 @@ doorman calls --source jsonl --path /var/lib/doorman/calls.jsonl
 
 `doorman calls` projects `session.finished` and CEL-derived `call.finished`
 records through the internal `public_calls_v1` view, returning one summary per
-full root channel ID. For outbound calls a CEL completion takes precedence over
-a console handoff, even if the handoff is ingested later. For inbound calls the
-Doorman summary takes precedence to preserve admission and voicemail details;
-CEL still exposes the actual channel termination separately. Repeated summaries
+full root channel ID. A Doorman summary retains its line, known name, admission
+details and outcome (including console `placed`). Outbound summaries take their
+duration from CEL once completion arrives, regardless of ingestion order. CEL
+bridge/answer/end observations remain separately queryable; they do not replace
+the console outcome or break `--line biz --outcome placed` filters. Repeated summaries
 of the same kind select the latest. Active calls do not yet have
 a summary. The existing table and JSON Lines formats, redaction, `--caller`,
 `--since`, `--outcome`, `--line`, `--direction`, and `-n` filters are preserved.
@@ -234,6 +251,14 @@ sudo asterisk -rx 'module load cel_sqlite3_custom.so'
 sudo asterisk -rx 'cel show status'
 ```
 
+If the backend ran before initialisation, it may have created `doorman_cel`
+without AUTOINCREMENT. Re-running the initialiser does not repair that table.
+Stop Asterisk and preserve the database and its sidecars first. Either initialise
+a fresh spool with a new source identity, or archive/rename the incorrect table,
+remove its old retention trigger and `doorman_cel_meta` row, then re-run
+`scripts/cel-spool.sql` to create the correct table and a new identity. Do not
+remove other applications' tables from a shared `master.db`.
+
 If `master.db-wal` or `master.db-shm` already existed before setting the default
 ACL, grant the same read ACL to those files. Protect the spool and Asterisk logs
 from other users: they contain full caller IDs. The mapping deliberately omits
@@ -241,6 +266,9 @@ application arguments, user fields, arbitrary extensions, channel names, and
 DTMF. Its destination expression accepts complete NANP numbers or `911` only;
 Doorman independently validates destinations before classifying outbound calls.
 Do not replace it with the upstream sample's unrestricted `appdata`/`exten` mapping.
+The filtered destination expression also requires `func_uri` (URIDECODE) and
+`func_strings` (FILTER). URIDECODE supplies FILTER's comma after the legacy CEL
+backend splits columns, and FILTER removes colons before IF evaluates its branches.
 The config files are examples to merge with an existing CEL deployment, not a
 reason to overwrite another application's CEL settings blindly.
 
@@ -272,9 +300,11 @@ is itself a hangup. Transfer observations deliberately omit raw transfer targets
 and CEL extra data.
 
 Only recognised root dialplan channels produce `call.finished` summaries:
-`inbound-trunk`, `inbound-fallback`, `from-trunk-*`, `cmm-line-*`, and validated
+`inbound-trunk`, `inbound-fallback`, `from-trunk-*`, `from-*`, `cmm-line-*`, and validated
 Dial attempts in `internal`, `cmm-outbound`, `outbound-console`, or
-`cmm-emergency`. Handset/trunk legs remain individual channel events, avoiding
+`cmm-emergency`. Root classification requires `uniqueid == linkedid`; outbound trunk legs can
+have an inbound endpoint context and must not become phantom inbound calls.
+Handset/trunk legs remain individual channel events, avoiding
 one history row for every ringing handset. Custom dialplan contexts need an
 explicit adapter extension; they still produce channel events.
 
@@ -285,8 +315,9 @@ no-answer, voicemail-recording, or hangup cause. Inbound CEL summaries always
 use `ended`; Doorman's own summary supplies its richer outcome when available.
 `ms` is channel lifetime for inbound CEL summaries and time since the first
 recognised Dial attempt for outbound ones. It is not billed talk time. Outbound
-CEL line attribution is `unknown`; the adapter does not infer a business line
-from caller ID. Unclassified leg events have no direction and are excluded by
+CEL-only outbound line attribution is `unknown`; the adapter does not infer a
+business line from caller ID. Unknown attribution alone does not add a LINE
+column to the table; named Doorman lines still do. Unclassified leg events have no direction and are excluded by
 `--direction` filters. Use `linked_id` to correlate them with their root.
 
 ### Recovery and bounds
@@ -298,10 +329,10 @@ batch deadline; this is sized for a home phone, not a high-volume PBX. Consumers
 still use the journal cursor, never the CEL source row number.
 
 A missed source range emits a coverage-gap notice and clears uncertain channel
-state. Starting observation also records that earlier coverage is unknown.
+state. Starting observation records an informational note that earlier coverage is unknown.
 Correlations are capped at 4096 channels and expire after seven days with a gap
 notice, never a fabricated hangup. Missing/unreadable sources pause ingestion
-and report a gap notice; source rows remain replayable within spool retention.
+and report an informational replay-pending note; source rows remain replayable within spool retention.
 Malformed rows are reported as gaps and skipped without persisting their content.
 Asterisk backend failures before a row is committed cannot be recovered by
 Doorman: inspect Asterisk's own logs and backend status.
@@ -338,13 +369,20 @@ flushes. A bounded RAM queue keeps storage off the call path; events still in
 that queue can be lost on abrupt termination. No software test here simulates
 actual hardware power loss.
 
-A missing/unwritable journal, a full queue, or failed writes never delay calls.
-The daemon reports degraded observation through its operational logger and
-retries opening unavailable storage. Recovered writes include a coverage-gap
+An explicitly configured journal must open successfully at startup; failures
+report the actual cause and stop startup. Once running, a full queue or failed
+write never delays calls: the daemon reports degraded observation and retries.
+Startup errors close the journal cleanly, and ARI shutdown joins the disconnect
+callback before the journal drains. Recovered writes include a coverage-gap
 record with the known lost count; unclean restart records uncertainty without
 inventing an exact count. A continuous sequence is not proof every real event
 was observed. A clean stop drains for up to three seconds; observations posted
-after the writer closes cannot be committed.
+after the writer closes cannot be committed. Producers must stop first: late
+posts increment rejected/pending counters and emit an operational error. A loss
+noticed during the drain is journaled; a post after the writer has fully exited
+cannot retroactively alter its clean-shutdown marker. Informational markers
+(`journal.note`, such as CEL observation starting or replay temporarily pausing)
+do not trigger the call-history loss warning.
 
 Retention deletes an oldest prefix by age, event count, or physical page pressure.
 The byte budget reserves a quarter for database pages and three quarters for
@@ -355,6 +393,14 @@ reports degradation. The CLI limits its read lifetime to five seconds. Freed
 pages are reused rather than routinely vacuuming the whole database. Lowering
 the budget below the existing database's size requires offline compaction or a
 new journal; it does not silently delete or rewrite the database.
+
+At the default 64 MiB budget only 16 MiB is available for database pages.
+This is often the binding retention limit, **not a promise of 100,000 events or
+90 days**. As a rough sizing example, 619 bytes/event fits about 27,000 events;
+34 events/call at 20 calls/day is about 40 days. Payloads, indexes and correlation
+state change these numbers. Increase the byte budget for the required consumer
+outage window and monitor the returned retention floor. Age pruning removes only
+a contiguous expired prefix, so a backwards clock step cannot delete fresh rows.
 
 Do not copy just a live `.db` file and assume it is a backup: committed data can
 still be in the WAL. Stop Doorman and its readers before a filesystem backup,

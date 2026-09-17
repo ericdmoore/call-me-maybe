@@ -666,3 +666,14 @@ Install the supplied CEL configs, verify backend status, and validate with
 doorman check. Source progress and events commit together. A session finish
 or handoff is not proof the call ended. See docs/events.md for the full
 contract.
+
+.PP
+The default byte budget permits 16 MiB of database pages, often binding before
+count or age: roughly 27000 mixed events, workload dependent, not guaranteed
+90-day retention. Size storage for the consumer outage window.
+.PP
+Reinstall the supplied systemd unit on upgrade for StateDirectory support.
+An explicitly configured journal must open at startup; runtime failures remain
+nonfatal to calls. check --policy-only skips local service environment/storage
+checks when validating examples.
+Normal check reports policy before environment.

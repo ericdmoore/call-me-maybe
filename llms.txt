@@ -85,7 +85,9 @@ object with events, identity, retention floor, high watermark and next cursor.
 `--through` holds a batch at a fixed upper cursor; `--direction`, `--line`, and
 `--call` combine with `--eventType`. `doorman calls` projects completed session
 summaries from the journal when configured; `--source jsonl` reads legacy files.
-The daemon writes JSONL only when the journal is disabled.
+The daemon writes JSONL only when the journal is disabled and reports this
+choice at startup. A configured journal must open at startup. Console summaries
+keep their line and placed outcome when CEL adds completion duration.
 `--eventType call.answered` selects one exact type; numbers are redacted unless
 `--no-redact`. Consumers own their checkpoints and batching; they need no direct
 SQL access. `public_events_v1` is internal to the CLI. `WEBHOOK_MODE=doorbell`

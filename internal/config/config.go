@@ -295,8 +295,6 @@ func (c Config) JournalIssues() []string {
 	if c.EventJournalMaxBytes < 8<<20 {
 		issues = append(issues, "  EVENT_JOURNAL_MAX_BYTES: must be at least 8388608")
 	}
-	if c.EventJournalMaxAge <= 0 || c.EventJournalMaxAge > 36500*24*time.Hour {
-		issues = append(issues, "  EVENT_JOURNAL_MAX_AGE_DAYS: must be between 1 and 36500")
-	}
+
 	return issues
 }

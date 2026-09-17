@@ -28,11 +28,8 @@ type openLine struct {
 // arriving on it are served by the default line, the same place an unknown
 // name lands. A default line that will not load is returned as an error,
 // because that is the whole phone rather than one number.
-func openLines(files []policy.LineFile, handsetsPath string, watch bool, log *slog.Logger, journals ...*events.Writer) ([]openLine, error) {
-	var journal *events.Writer
-	if len(journals) > 0 {
-		journal = journals[0]
-	}
+func openLines(files []policy.LineFile, handsetsPath string, watch bool, log *slog.Logger, journal *events.Writer) ([]openLine, error) {
+
 	var opened []openLine
 	for _, lf := range files {
 		// The default line's logger is left exactly as it was, so an install

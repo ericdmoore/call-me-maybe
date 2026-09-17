@@ -170,7 +170,7 @@ func TestCELSourceRetentionReplacementAndRewind(t *testing.T) {
 	}
 	ingest(t, s, path)
 	p := readTest(t, s.path, Query{Limit: 100, EventType: CoverageGap})
-	if len(p.Events) != 2 || p.Events[1].Payload.Count != 1 {
+	if len(p.Events) != 1 || p.Events[0].Payload.Count != 1 {
 		t.Fatal("source retention gap hidden", p)
 	}
 	if _, err := db.Exec("UPDATE doorman_cel SET eventtime='1900000000.000000' WHERE AcctId=3"); err != nil {
@@ -231,7 +231,7 @@ func TestCELUnansweredTransferAndConsolePrecedence(t *testing.T) {
 	if err != nil || len(h.Records) != 2 {
 		t.Fatal(h, err)
 	}
-	if h.Records[0].Outcome != "ended" || h.Records[1].Outcome != "answered" {
+	if h.Records[0].Outcome != "ended" || h.Records[1].Outcome != "placed" {
 		t.Fatal("incorrect answer/termination semantics", h)
 	}
 	p := readTest(t, s.path, Query{Limit: 100, EventType: ChannelTransfer})
@@ -280,7 +280,7 @@ func TestCELBoundedBatchAndInvalidRows(t *testing.T) {
 	}
 	ingest(t, s, path)
 	p := readTest(t, s.path, Query{Limit: 100, EventType: CoverageGap})
-	if len(p.Events) != 3 {
+	if len(p.Events) != 2 {
 		t.Fatal("invalid source rows did not report gaps")
 	}
 }

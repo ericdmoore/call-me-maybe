@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"callmemaybe/internal/calls"
-	"callmemaybe/internal/events"
+	events "callmemaybe/internal/observation"
 	"callmemaybe/internal/policy"
 )
 

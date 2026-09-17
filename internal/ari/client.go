@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -127,10 +128,18 @@ type Client struct {
 	log          *slog.Logger
 	onConnection func(bool)
 
-	closing atomic.Bool
+	closing    atomic.Bool
+	socketMu   sync.Mutex
+	socket     *websocket.Conn
+	loop       sync.WaitGroup
+	stop       chan struct{}
+	stopOnce   sync.Once
+	dialCtx    context.Context
+	cancelDial context.CancelFunc
 }
 
 func New(o Options) *Client {
+	dialCtx, cancelDial := context.WithCancel(context.Background())
 	if o.ReconnectMin <= 0 {
 		o.ReconnectMin = 500 * time.Millisecond
 	}
@@ -140,7 +149,7 @@ func New(o Options) *Client {
 	if o.Log == nil {
 		o.Log = slog.Default()
 	}
-	return &Client{
+	return &Client{stop: make(chan struct{}), dialCtx: dialCtx, cancelDial: cancelDial,
 		baseURL:      strings.TrimRight(o.BaseURL, "/"),
 		user:         o.Username,
 		pass:         o.Password,
@@ -299,7 +308,9 @@ func (c *Client) DestroyBridge(ctx context.Context, bridgeID string) error {
 // The connection reconnects forever with jittered exponential backoff so a
 // router reboot does not turn into a reconnect storm against Asterisk.
 func (c *Client) Connect(handler func(Event)) {
+	c.loop.Add(1)
 	go func() {
+		defer c.loop.Done()
 		attempt := 0
 		for !c.closing.Load() {
 			if err := c.runSocket(handler); err != nil && !c.closing.Load() {
@@ -310,7 +321,11 @@ func (c *Client) Connect(handler func(Event)) {
 			}
 			delay := c.backoff(attempt)
 			attempt++
-			time.Sleep(delay)
+			select {
+			case <-c.stop:
+				return
+			case <-time.After(delay):
+			}
 		}
 	}()
 }
@@ -323,14 +338,22 @@ func (c *Client) runSocket(handler func(Event)) error {
 		"api_key":      {c.user + ":" + c.pass},
 	}.Encode()
 
-	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, resp, err := websocket.DefaultDialer.DialContext(c.dialCtx, wsURL, nil)
 	if err != nil {
 		if resp != nil {
 			return fmt.Errorf("dial: %w (http %d)", err, resp.StatusCode)
 		}
 		return fmt.Errorf("dial: %w", err)
 	}
-	defer conn.Close()
+	c.socketMu.Lock()
+	if c.closing.Load() {
+		c.socketMu.Unlock()
+		_ = conn.Close()
+		return nil
+	}
+	c.socket = conn
+	c.socketMu.Unlock()
+	defer func() { c.socketMu.Lock(); c.socket = nil; c.socketMu.Unlock(); _ = conn.Close() }()
 	c.log.Info("ari event stream up", "app", c.app)
 	if c.onConnection != nil {
 		c.onConnection(true)
@@ -364,4 +387,12 @@ func (c *Client) backoff(attempt int) time.Duration {
 }
 
 // Close stops reconnecting. In-flight reads end when the socket drops.
-func (c *Client) Close() { c.closing.Store(true) }
+func (c *Client) Close() {
+	c.stopOnce.Do(func() { c.closing.Store(true); close(c.stop); c.cancelDial() })
+	c.socketMu.Lock()
+	if c.socket != nil {
+		_ = c.socket.Close()
+	}
+	c.socketMu.Unlock()
+	c.loop.Wait()
+}
