@@ -116,9 +116,11 @@ func ringDB(ctx context.Context, db *sql.DB, o DoorbellOptions, client *http.Cli
 	// across the HTTP request; slow consumers cannot pin the WAL.
 	var b Doorbell
 	var high, through int64
-	err := db.QueryRowContext(ctx, `SELECT journal_id,generation,high,COALESCE((SELECT through FROM delivery_state WHERE target=?),0) FROM metadata`, target).Scan(&b.JournalID, &b.Generation, &high, &through)
+	err := retryBusy(ctx, func() error {
+		return db.QueryRowContext(ctx, `SELECT journal_id,generation,high,COALESCE((SELECT through FROM delivery_state WHERE target=?),0) FROM metadata`, target).Scan(&b.JournalID, &b.Generation, &high, &through)
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("read doorbell progress: %w", err)
 	}
 	if high <= through {
 		return nil
@@ -148,8 +150,16 @@ func ringDB(ctx context.Context, db *sql.DB, o DoorbellOptions, client *http.Cli
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return &deliveryError{Status: resp.StatusCode}
 	}
-	_, err = db.ExecContext(ctx, `INSERT INTO delivery_state(target,through) VALUES(?,?) ON CONFLICT(target) DO UPDATE SET through=MAX(through,excluded.through)`, target, high)
-	return err
+	// Retry only the idempotent acknowledgement, not the already-delivered HTTP
+	// request. The writer may hold the lock longer than one busy timeout on disk.
+	err = retryBusy(ctx, func() error {
+		_, err := db.ExecContext(ctx, `INSERT INTO delivery_state(target,through) VALUES(?,?) ON CONFLICT(target) DO UPDATE SET through=MAX(through,excluded.through)`, target, high)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("save doorbell progress: %w", err)
+	}
+	return nil
 }
 
 type deliveryError struct{ Status int }
