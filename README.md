@@ -531,3 +531,12 @@ for how that squares with paying for the project's upkeep.
 Code is [Apache 2.0](LICENSE). Bundled audio and the pack format are licensed
 separately — see [`LICENSES.md`](LICENSES.md) for the full split, and
 [`CONTRIBUTING.md`](CONTRIBUTING.md) (no CLA required).
+
+### Linux host preparation
+
+[install-scripts/](install-scripts/README.md) prepares Ubuntu, Debian,
+CentOS Stream/Rocky/AlmaLinux/RHEL, Fedora and Arch hosts for Asterisk and
+doorman. Ubuntu Server is the initial rehearsal target. Package availability
+varies; adapters require Asterisk 20+ and accept an existing installation.
+Use `--dry-run` to preview. These scripts prepare the host; household call
+configuration and activation remain explicit steps in the runbook.

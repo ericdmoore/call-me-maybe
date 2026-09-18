@@ -547,3 +547,13 @@ commands advertise strictly newer releases on stderr once per day.
 never check; failures are silent. Tests cover gates, cadence, cache permissions,
 semver, overlap, failed commands and timeout budgets. Upgrade paths remain
 `install.sh` on workstations and `scp` to the Pi; no automatic updates.
+
+## Linux host installers — scripts complete; live rehearsal pending
+
+`install-scripts/` provides Ubuntu, Debian, CentOS Stream/RHEL-family, Fedora
+and Arch entrypoints with shared service/account/asset setup, dry runs and
+Asterisk 20+ package checks. Existing configurations are preserved; credentials
+and service activation remain operator steps. Script tests and ShellCheck
+cover the provisioning logic. Rehearse on a fresh Ubuntu Server VM before
+treating the mini x86 hub deployment as validated; other distro adapters also
+need live installation and call-flow verification.

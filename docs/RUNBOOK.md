@@ -112,7 +112,15 @@ the main account login this section just told you to keep off it.
 
 ---
 
-## 2. Provision the Pi
+## 2. Provision the host
+
+For a new Linux x86 hub, start with [install-scripts](../install-scripts/README.md).
+There are entrypoints for Ubuntu, Debian, CentOS Stream/Rocky/AlmaLinux/RHEL,
+Fedora and Arch. They prepare packages and the service layout, then leave call
+configuration and activation to the operator. Some distributions require an
+independently installed Asterisk 20+; the scripts check rather than silently
+installing an older PBX. The manual Pi procedure below remains available.
+
 
 ```bash
 # Base packages. Asterisk 20+ has the PJSIP features used here.
