@@ -33,7 +33,7 @@ make cover                 # -race plus per-package coverage floors
 make lint                  # nilness + the no-secrets-in-logs analyzer
 make hooks                 # install the pre-push gate (once per clone)
 make build                 # → bin/doorman for the host
-make cross                 # → bin/doorman-linux-{arm64,armv7} for the Pi
+make cross                 # → bin/doorman-linux-{amd64,arm64,armv7}
 make man                   # read the man page from the working tree
 make run                   # dev run with .env sourced (needs reachable Asterisk)
 ./bin/doorman schema       # the config surface as JSON Schema — read this first
@@ -42,6 +42,7 @@ make run                   # dev run with .env sourced (needs reachable Asterisk
 ./bin/doorman render       # handsets.toml (+ trunks.toml) → Asterisk config
 ./bin/doorman lsp          # language server for the config files (stdio)
 ./bin/doorman e164 <num>   # show how a raw caller ID normalises
+./bin/doorman events --json # durable events, --after/--limit/--eventType
 ./bin/doorman balance      # prepaid credit per trunk; exit 1 under threshold
 ./scripts/smoke.sh         # full deployment verification, run ON the Pi
 ```
@@ -89,7 +90,15 @@ Layout:
   manages DIDs, sub-accounts and billing, so it stays out of the daemon
   entirely. Its errors never carry a URL — the credentials ride in the query
   string, so the URL *is* the credential.
-- `internal/notify` — the event webhook. One endpoint, one JSON event per
+- `internal/observation` — lightweight event vocabulary and immutable call snapshots.
+  The lobby imports this, never the journal/database package (checked by test).
+- `internal/events` — optional pure-Go SQLite observation journal. The CLI reads
+  its internal `public_events_v1` and `public_calls_v1` views; there is no public SQL or HTTP service.
+  Doorbells announce committed availability; consumers own their checkpoints.
+  Optional `CEL_SPOOL_PATH` ingests Asterisk's private CEL spool with an atomic
+  source cursor. CEL captures channel lifecycles, never raw app arguments/DTMF.
+  See `docs/events.md`. Never feed journal history into call admission.
+- `internal/notify` — the legacy event webhook. One endpoint, one JSON event per
   ring and per completed call, so Home Assistant can announce or flash
   something. Same non-blocking shape as `internal/calls`, and doorman
   deliberately knows nothing about speakers — HA decides who hears it.
@@ -196,11 +205,12 @@ Break these and the phone fails in ways that look like working software.
    by convention.
 
 10. **The call log is never an input.** Nothing on the call path may read
-   `calls.jsonl` to decide anything. The moment something does — "this
+   `calls.jsonl` or the SQLite event journal to decide anything. The moment something does — "this
    number has called five times, admit it" — the rate limiter's
    deliberately-in-memory design is undermined and doorman has acquired
    persistent state that can be corrupt, stale, or disagree with
-   policy.toml. The import direction enforces it: `internal/calls`
+   policy.toml. The lobby import-boundary test excludes journal and database dependencies.
+   The import direction also enforces it for JSONL: `internal/calls`
    imports `internal/policy`, so policy can never import calls without a
    cycle. It also holds full caller IDs, which is the point of a call log
    on a telephone — the file is 0600 and `doorman calls` redacts by
@@ -247,8 +257,10 @@ live trunk; never add integration tests requiring a real Asterisk to CI.
 
 - No SIP stack of our own. Asterisk owns the protocol. Resist any change that
   starts parsing SIP in Go.
-- No database. Policy is a file; rate-limit state is in memory and is *meant*
-  to be lost on restart.
+- No database-backed call control. Policy is a file; rate-limit state is in
+  memory and is *meant* to be lost on restart. The optional SQLite journal is
+  observational output only; its loss must not delay calls. Its queue is bounded,
+  committed events are durable, and export defaults to redacting phone numbers.
 - No third-party ARI library. The client is ~300 lines covering exactly the
   surface we use, and owning it keeps the interface small enough to fake.
 - No separate lobby and bouncer services. They are two branches of one state

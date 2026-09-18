@@ -33,3 +33,9 @@ coverage.out
 
 # Agent worktrees — transient, and gitlinks if they get staged.
 .claude/worktrees/
+
+# Local event journal and SQLite sidecars hold full phone numbers.
+*.db
+*.db-wal
+*.db-shm
+*.db.lock

@@ -86,9 +86,10 @@ hooks:
 	git config core.hooksPath .githooks
 	@echo "✓ pre-push hook active (bypass once with: git push --no-verify)"
 
-## cross: binaries for the Pi. arm64 for 64-bit Pi OS (uname -m = aarch64),
+## cross: Linux binaries for x86 PCs and the Pi. arm64 for 64-bit Pi OS,
 ## armv7 for the 32-bit userland that many Pi installs still run (armv7l).
 cross:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -o bin/doorman-linux-amd64 ./cmd/doorman
 	GOOS=linux GOARCH=arm64 go build $(GOFLAGS) -o bin/doorman-linux-arm64 ./cmd/doorman
 	GOOS=linux GOARCH=arm GOARM=7 go build $(GOFLAGS) -o bin/doorman-linux-armv7 ./cmd/doorman
 

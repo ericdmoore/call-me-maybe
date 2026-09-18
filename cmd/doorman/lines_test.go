@@ -228,7 +228,7 @@ func policyDir(t *testing.T, files map[string]string) string {
 func openIn(t *testing.T, dir string) ([]openLine, error) {
 	t.Helper()
 	files, _ := policy.DiscoverLines(filepath.Join(dir, "policy.toml"))
-	opened, err := openLines(files, filepath.Join(dir, "handsets.toml"), false, quiet())
+	opened, err := openLines(files, filepath.Join(dir, "handsets.toml"), false, quiet(), nil)
 	t.Cleanup(func() {
 		for _, o := range opened {
 			o.store.Close()

@@ -19,7 +19,7 @@ otherwise have to be reconstructed from a commit log.
 | **s05** | [System alerts](s05-system-alerts/) — the house phone tells you about the house phone | planned | composite prompts |
 | **s06** | [Speakers as page targets](s06-speaker-page-targets/) — Sonos and Cast carry a page; they are not handsets | planned | TASKS §6 (HA webhook) |
 | **s07** | [The contacts ladder](s07-contacts-ladder/) — your address book admits people; published numbers still dial in | planned | — |
-| **s08** | [Durable event journal](s08-durable-event-journal/) — SQLite history, webhook doorbells, and consumer-owned replay | proposed | — |
+| **s08** | [Durable event journal](s08-durable-event-journal/) — SQLite history, webhook doorbells, and consumer-owned replay | journal/CLI/doorbell/CEL implemented; live validation pending | — |
 
 s01 has an [`arch.md`](s01-multiple-DIDs/arch.md); s03's reasoning is short
 enough to live in its plan.

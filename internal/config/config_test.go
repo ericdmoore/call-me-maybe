@@ -152,6 +152,53 @@ func TestAWebhookURLIsAcceptedAndNotLoopbackChecked(t *testing.T) {
 	}
 }
 
+func TestDoorbellRequiresJournalAndLegacyRemainsDefault(t *testing.T) {
+	withEnv(t, nil)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.WebhookMode != "legacy" || c.EventJournalPath != "" {
+		t.Fatal("existing installations changed")
+	}
+	t.Setenv("WEBHOOK_MODE", "doorbell")
+	if _, err := Load(); err == nil {
+		t.Fatal("doorbell without storage accepted")
+	}
+	t.Setenv("EVENT_JOURNAL_PATH", "/var/lib/doorman/journal/events.db")
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EVENT_JOURNAL_MAX_AGE_DAYS", "999999999")
+	if _, err := Load(); err == nil {
+		t.Fatal("overflowing retention accepted")
+	}
+}
+
+func TestCELRequiresJournal(t *testing.T) {
+	_, err := LoadForCheck(func(key string) string {
+		if key == "CEL_SPOOL_PATH" {
+			return "/tmp/cel.db"
+		}
+		return ""
+	})
+	if err == nil {
+		t.Fatal("CEL without a journal accepted")
+	}
+	cfg, err := LoadForCheck(func(key string) string {
+		switch key {
+		case "CEL_SPOOL_PATH":
+			return "/tmp/cel.db"
+		case "EVENT_JOURNAL_PATH":
+			return "/tmp/journal/events.db"
+		}
+		return ""
+	})
+	if err != nil || cfg.CELSpoolPath != "/tmp/cel.db" {
+		t.Fatal(cfg.CELSpoolPath, err)
+	}
+}
+
 func TestUpdateChecksWithoutDaemonConfiguration(t *testing.T) {
 	for _, tc := range []struct {
 		value string

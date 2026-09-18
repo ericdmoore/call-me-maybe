@@ -23,6 +23,8 @@ doorman check             # validate a real config and report what it resolves t
 doorman calls --json      # the call log as JSON Lines: one record per call,
                           # numbers redacted unless --no-redact. --line and
                           # --direction narrow it on a box with several numbers
+doorman events --json     # durable event page; --after, --limit, --eventType
+                          # reads internal public_events_v1; no public DB access
 doorman balance --json    # what is left on each prepaid trunk; exit 1 when any
                           # is under its threshold, so cron needs no wrapper
 doorman help              # every subcommand
@@ -44,6 +46,19 @@ declared. The running daemon only warns about the same key, because a policy
 that loaded yesterday must never start taking the phone down. `doorman check`
 also prints every extension's settings including the defaults it applied, so a
 key that was dropped reads as a feature you configured and did not get.
+
+Successful interactive operator commands can print a newer-release notice to
+stderr, after their output, at most once per 24 hours. Both stdout and stderr
+must be terminals. `UPDATE_CHECK_ENABLED=false` disables the check (default:
+`true`, using the same boolean values as `RATELIMIT_ENABLED`). `CI`, pipes,
+source builds (`-g<sha>` or `-dirty`), the daemon and `lsp` never check. The
+independent GitHub request overlaps the command with a one-second budget from
+startup; failures stay silent and failed commands never print a notice. Nothing
+updates automatically. Successful checks cache the timestamp and release in
+`$XDG_STATE_HOME/doorman/update-check.json` (default
+`~/.local/state/doorman/update-check.json`), mode 0600 in a 0700 directory,
+separate from configuration. A cached release can be shown on a later successful
+run. Only a strictly newer semantic version is advertised.
 
 ## Configuration model
 
@@ -74,6 +89,27 @@ Outbound, the same section carries `outbound_cid` — what a call placed as this
 Observability follows the same shape: **one** call log for every line, with `line` on the record, so a whole day reads in order and `doorman calls --line biz` narrows it afterwards. A `*4` call is recorded as `direction: outbound` with the number in `dialled` and an outcome of `placed` — doorman hands the channel to the dialplan and never learns whether anybody answered. Both fields are absent for the default line and for inbound, so an install with one number writes byte-identical records and never sees a line column. The event webhook carries `line` too, which is what a Home Assistant automation routes an announcement on; it stays inbound-only, because an outbound call rings nothing in this house.
 
 **Helping someone write a `policy.toml`? Read <https://callmemaybe.cc/llms-policy.txt> first.** It is the complete current key surface, two worked examples, the rules a JSON Schema cannot express, and — the part that matters — an explicit list of keys that appear in the planning docs but do not load. Machine-readable schema at <https://callmemaybe.cc/schema/policy.json>.
+
+## Durable event consumers
+
+Set `EVENT_JOURNAL_PATH` to enable the pure-Go SQLite observation journal in a
+private directory. `doorman events --json --after 0 --limit 100` returns one JSON
+object with events, identity, retention floor, high watermark and next cursor.
+`--through` holds a batch at a fixed upper cursor; `--direction`, `--line`, and
+`--call` combine with `--eventType`. `doorman calls` projects completed session
+summaries from the journal when configured; `--source jsonl` reads legacy files.
+The daemon writes JSONL only when the journal is disabled and reports this
+choice at startup. A configured journal must open at startup. Console summaries
+keep their line and placed outcome when CEL adds completion duration.
+`--eventType call.answered` selects one exact type; numbers are redacted unless
+`--no-redact`. Consumers own their checkpoints and batching; they need no direct
+SQL access. `public_events_v1` is internal to the CLI. `WEBHOOK_MODE=doorbell`
+uses the configured webhook to announce committed availability; `legacy` remains
+the default. Poll on startup and periodically to recover missed notifications.
+Set `CEL_SPOOL_PATH` after installing the supplied Asterisk CEL spool configuration
+to capture ordinary outbound calls and channel lifecycles across Doorman outages.
+CEL source progress commits atomically with ingestion; source gaps are reported.
+Session finish and handoff do not imply call termination. See [events](docs/events.md).
 
 ## Docs
 
