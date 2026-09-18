@@ -198,3 +198,19 @@ func TestCELRequiresJournal(t *testing.T) {
 		t.Fatal(cfg.CELSpoolPath, err)
 	}
 }
+
+func TestUpdateChecksWithoutDaemonConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{{"", true}, {"true", true}, {"YES", true}, {"1", true}, {"on", true}, {"false", false}, {"0", false}, {"off", false}, {"typo", false}} {
+		if got := UpdateChecksEnabled(func(k string) string {
+			if k != "UPDATE_CHECK_ENABLED" {
+				t.Errorf("read daemon variable %s", k)
+			}
+			return tc.value
+		}); got != tc.want {
+			t.Errorf("%q: %v", tc.value, got)
+		}
+	}
+}

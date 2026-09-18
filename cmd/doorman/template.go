@@ -13,6 +13,7 @@ import (
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/setup"
 	"callmemaybe/internal/tmpl"
+	"callmemaybe/internal/xdg"
 )
 
 // runTemplate handles `doorman template <list|show|apply>`.
@@ -66,10 +67,8 @@ your allow-list.
 func searchPaths() []string {
 	var out []string
 	out = append(out, "templates")
-	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
+	if x := xdg.Dir("CONFIG", os.Getenv, os.UserHomeDir); x != "" {
 		out = append(out, filepath.Join(x, "doorman", "templates"))
-	} else if home, err := os.UserHomeDir(); err == nil {
-		out = append(out, filepath.Join(home, ".config", "doorman", "templates"))
 	}
 	return out
 }

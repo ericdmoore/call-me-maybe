@@ -780,6 +780,7 @@ func Env() *Schema {
 		"RING_TIMEOUT_S":         env("How long the house rings before giving up.", "duration (seconds)", 30),
 		"MAX_PIN_ATTEMPTS":       env("Wrong-PIN retries allowed within one call before dismissal.", "positive integer", 2),
 
+		"UPDATE_CHECK_ENABLED":   env("Check for a newer release after successful interactive operator commands, at most once per 24 hours. No checks in CI, pipes, source builds, the daemon or LSP. Set false to opt out; one-second total budget, failures silent.", "boolean", true),
 		"RATELIMIT_ENABLED":      env("After repeated failures a caller skips the greeting entirely and goes straight to dismissal, leaving nothing to brute-force against.", "boolean", true),
 		"RATELIMIT_MAX_FAILURES": env("Failures from one number inside the window before that caller is dismissed without a greeting.", "positive integer", 3),
 		"RATELIMIT_WINDOW_MS":    env("Rate-limit window.", "duration (milliseconds)", 3600000),

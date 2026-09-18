@@ -136,6 +136,32 @@ $ scp bin/doorman-linux-arm64 pi@raspberrypi:/opt/call-me-maybe/bin/doorman
 $ ssh pi@raspberrypi /opt/call-me-maybe/bin/doorman version
 ```
 
+### Deploying upgrades
+
+On a workstation, rerun the documented `install.sh` installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ericdmoore/call-me-maybe/main/install.sh | bash
+```
+
+For the Pi, build the desired release with `make cross` and use the `scp`
+command above. Keep `bin/doorman.prev` for rollback, then restart the doorman
+service and verify `doorman version`. The interactive notice names `install.sh`
+on workstations and the `scp` path on Linux ARM hosts.
+
+Successful interactive operator commands can print a newer-release notice to
+stderr, after their output, at most once per 24 hours. Both stdout and stderr
+must be terminals. `UPDATE_CHECK_ENABLED=false` disables the check (default:
+`true`, using the same boolean values as `RATELIMIT_ENABLED`). `CI`, pipes,
+source builds (`-g<sha>` or `-dirty`), the daemon and `lsp` never check. The
+independent GitHub request overlaps the command with a one-second budget from
+startup; failures stay silent and failed commands never print a notice. Nothing
+updates automatically. Successful checks cache the timestamp and release in
+`$XDG_STATE_HOME/doorman/update-check.json` (default
+`~/.local/state/doorman/update-check.json`), mode 0600 in a 0700 directory,
+separate from configuration. A cached release can be shown on a later successful
+run. Only a strictly newer semantic version is advertised.
+
 ### Asterisk config
 
 ```bash

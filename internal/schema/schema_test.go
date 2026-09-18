@@ -327,3 +327,19 @@ func TestTemplateSchemaIsSelectable(t *testing.T) {
 		t.Error("the schema should say templates may not emit [[people]]")
 	}
 }
+
+func TestUpdatePreferenceDocumentation(t *testing.T) {
+	const name = "UPDATE_CHECK_ENABLED"
+	if prop := schema.Env().Properties[name]; prop == nil || prop.Default != true {
+		t.Fatal("update preference must default to true")
+	}
+	for _, path := range []string{"../config/config.go", "../../examples/.env.example", "../../docs/doorman.1", "../../llms.txt"} {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), name) {
+			t.Errorf("%s missing %s", path, name)
+		}
+	}
+}
