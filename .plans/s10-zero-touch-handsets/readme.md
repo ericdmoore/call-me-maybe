@@ -182,6 +182,30 @@ operator to give the box a DHCP reservation or a router-provided name
 before adding the first phone — a lease that moves takes every handset
 down, provisioning or not.
 
+**The phone book rides the same mechanism, as a second file, for dialing
+out.** Every vendor here lets the configuration name a phonebook URL that
+the phone fetches at boot and on its own interval; `render` writes one per
+handset beside its config, and the session serves it under the same base
+path. Its job is outbound and internal dialing — pick a name, press call —
+and *not* caller display: the lobby already sends the caller's name with
+the ring, from `[[people]].name` or a contact's `Name`, so names show on
+every phone including an analog one behind an ATA, whether or not any
+phonebook is current. Three tiers, chosen per handset the way `page` is:
+the **house directory** — every handset with a `number`, plus the feature
+codes a phone's user should have (page-all, voicemail; the outbound console
+only where it belongs) — on by default; **`[[people]]`**, the deliberate
+allow-list, on by default, because it is the house phone's address book by
+definition; and **`contacts.toml` sources**, off by default and opted in
+per handset *and* per source (`phonebook = ["people", "eric-icloud"]`),
+because a child's handset should not carry a parent's entire contact list,
+and s07 already treats those exports as data that never leaves the box
+unasked. A phonebook holds no passwords but it is caller data: it is served
+only with the phone's provisioning credentials, never on the unauthenticated
+first fetch; it is 0600 on disk; and its names are never logged. Between
+windows a phone keeps the last copy it fetched, so editing `[[people]]` and
+running `doorman provision --all` is how the book is pushed; whether a
+`check-sync` also re-fetches the phonebook is a per-model rehearsal fact.
+
 **DHCP option 66 is supported, documented, and never required.** A router
 that can hand out the provisioning URL makes the process literally zero-touch;
 one that cannot means typing that URL once per phone, after which every other
@@ -289,7 +313,21 @@ listed phone re-registered on its new password with nobody touching a phone,
 and a phone that was off during the rotation registers correctly the next
 time it boots into a window.
 
-### M5 · The documents
+### M5 · The phone book
+
+Per-handset `phonebook` selection in the inventory; vendor phonebook
+templates (Grandstream `phonebook.xml`, Yealink contact XML) rendered beside
+each config from the house directory, `[[people]]`, and any opted-in
+contacts source; served under the base path with the phone's credentials.
+Golden tests per vendor; a test that a handset with no `phonebook` key gets
+the house directory and `[[people]]` and nothing from `contacts.toml`; the
+`nologsecrets` analyzer extended to phonebook names.
+
+Done when a handset shows the house's other rooms and the allow-list in its
+directory after one session, dials "Grandma" from it, and a second handset
+opted into a contacts source shows that source while the first does not.
+
+### M6 · The documents
 
 FIRST-BOOT gains a "Phones" step of three lines. `RUNBOOK.md` → "Add a
 handset" shrinks to a block, `render`, and plugging in; the auto-answer
@@ -297,7 +335,8 @@ checkbox note disappears from `paging.md` because it is no longer true.
 Router notes for DHCP option 66 (the option value is the URL). The hardware
 table gains a column saying which models are templated.
 
-Done when no document tells anyone to type a password into a phone.
+Done when no document tells anyone to type a password — or a phone
+number — into a phone.
 
 ## Alternatives rejected
 
@@ -323,8 +362,9 @@ M1, then M2 for Grandstream with the jepsen rehearsal on a real handset, then
 M3 — the two rehearsals are the acceptance test, and neither happens without
 a phone on the desk. M4 follows once serving is trusted. Yealink templates
 land under M2's tests whenever a Yealink is available to rehearse against.
-M5 tracks whichever models are actually verified; it never claims a model
-that has not registered in this house.
+M5 needs M3's authenticated path and nothing else; it can land with the
+first rehearsal or the second. M6 tracks whichever models are actually
+verified; it never claims a model that has not registered in this house.
 
 s09 M1 (embedded assets) lets the templates ship inside the binary; until
 then they live in the checkout like the Asterisk files do. Nothing here waits
