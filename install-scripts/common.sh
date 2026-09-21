@@ -41,7 +41,10 @@ packages() {
   run apt-get update
   if [ "$existing" = 0 ]; then
    if [ "$dry_run" = 0 ]; then
-    candidate=$(apt-cache policy asterisk | awk '/Candidate:/ {print $2; exit}')
+    # Read to END rather than `exit` on the match: under pipefail, awk quitting
+    # early leaves apt-cache writing its version table into a closed pipe, and
+    # the resulting SIGPIPE (141) aborts the whole script after apt-get update.
+    candidate=$(apt-cache policy asterisk | awk '/Candidate:/ && !c {c=$2} END {print c}')
     [ -n "$candidate" ] && [ "$candidate" != '(none)' ] || fail 'No Asterisk candidate. On Ubuntu enable Universe; on Debian provision Asterisk 20+ separately, then use --existing-asterisk.'
     require_version "$candidate"
    fi

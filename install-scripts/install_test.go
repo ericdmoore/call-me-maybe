@@ -91,6 +91,26 @@ packages
 	}
 }
 
+// The real apt-cache keeps writing its version table after the Candidate
+// line. awk quitting on the match left it writing into a closed pipe, and
+// under pipefail that SIGPIPE (141) aborted every Ubuntu/Debian apply right
+// after apt-get update — found by the first install on real hardware.
+func TestCandidateLookupSurvivesLongPolicyOutput(t *testing.T) {
+	for _, distro := range []string{"ubuntu", "debian"} {
+		out, err := bash(t, `
+source ./common.sh
+dry_run=0; existing=0; profile=$DISTRO
+apt-get() { :; }
+apt-cache() { echo '  Candidate: 1:22.5.2-1'; for i in $(seq 1 2000); do echo "     $i http://archive.ubuntu.com/ubuntu noble/universe amd64 Packages"; done; }
+packages
+echo "candidate=$candidate"
+`, "DISTRO="+distro)
+		if err != nil || !strings.Contains(out, "candidate=1:22.5.2-1") {
+			t.Fatalf("%s: %v %s", distro, err, out)
+		}
+	}
+}
+
 func TestPackagePlans(t *testing.T) {
 	for distro, want := range map[string]string{"ubuntu": "apt-get install -y asterisk", "debian": "apt-get install -y asterisk", "centos": "dnf install -y asterisk", "fedora": "dnf install -y asterisk"} {
 		out, err := bash(t, `source ./common.sh; dry_run=1; existing=0; profile=$DISTRO; packages`, "DISTRO="+distro)
