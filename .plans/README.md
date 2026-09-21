@@ -20,6 +20,7 @@ otherwise have to be reconstructed from a commit log.
 | **s06** | [Speakers as page targets](s06-speaker-page-targets/) — Sonos and Cast carry a page; they are not handsets | planned | TASKS §6 (HA webhook) |
 | **s07** | [The contacts ladder](s07-contacts-ladder/) — your address book admits people; published numbers still dial in | planned | — |
 | **s08** | [Durable event journal](s08-durable-event-journal/) — SQLite history, webhook doorbells, and consumer-owned replay | journal/CLI/doorbell/CEL implemented; live validation pending | — |
+| **s09** | [One binary that installs itself](s09-distro-software-release-channel/) — `sudo doorman init` prepares the host; brew, deb/rpm, AUR, `go install` | planned | s08 for the release notice |
 
 s01 has an [`arch.md`](s01-multiple-DIDs/arch.md); s03's reasoning is short
 enough to live in its plan.
@@ -134,6 +135,23 @@ Same interpreter, verb set selected by where the graph came from.
 ## Known defects found while planning
 
 Not features. Things that are wrong now.
+
+### Dry-run and `go test` never reach the apply path of the installers
+
+`install-scripts/` and `install.sh` are tested by dry runs and stubbed
+commands; the first live run on real hardware (jepsen, 2026-09-21) found one
+apply-only defect per release for three releases. Any provisioning code that
+cannot run its apply path in CI will keep doing this. s09 moves the apply into
+Go behind a fakeable `Exec` and adds a tag-only rehearsal on a real runner.
+
+### Rerunning `install-scripts/ubuntu.sh` after an upgrade refuses on a doc
+
+`docs/INSTALL-LINUX.md`, `scripts/smoke.sh` and `scripts/cel-spool.sql` are
+copied with `install_once` (refuse on any difference), which is the rule meant
+for the binary, the unit and the Asterisk templates; every other doc goes
+through `rsync --ignore-existing`. The first upgrade (v0.5.1 → v0.5.2) stopped
+on the README. Superseded by s09 M3, where the scripts are deleted; fix it
+directly only if a release has to ship before then.
 
 ### Unknown keys in `policy.toml` are silently ignored
 
