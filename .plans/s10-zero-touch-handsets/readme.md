@@ -11,7 +11,8 @@ The server half of a handset has been generated from `handsets.toml` since
 A factory-fresh phone comes out of the box. The MAC address on its label goes
 into one `[[handsets]]` block next to a `model`. `doorman render` produces the
 phone's own configuration file alongside the PJSIP it already produces;
-`doorman provision serve` offers it on the LAN for a few minutes. The phone is
+`doorman provision` tells the operator what to press, offers the file on
+the LAN for a few minutes, and shows the phone arriving. The phone is
 plugged in — or told one URL, once — and boots into "Kitchen": registered with
 the right password, DTMF in the mode the lobby can hear, paging auto-answer
 on, codecs, clock and timezone correct, voicemail lamp wired to its mailbox,
@@ -97,6 +98,28 @@ daemon never links this code: an import-boundary test asserts it, the same
 guard `internal/provider` has, for the same reason — a LAN listener that
 hands out SIP passwords must not share a process with the thing that answers
 the phone.
+
+**One command runs the whole session: say, serve, watch.** The operator
+does not run a file server and then go looking for a log. `doorman
+provision [id…]` renders if the inventory is newer than the outputs, opens
+the window, and then does three things at once until every named handset
+has registered or the window closes: it **prints, per phone, exactly what
+to type or press** — the web path and the keypad path for that model, the
+one URL, the option-66 value for a router that can hand it out, and "or
+just plug it in" when the router does; it **serves**; and it **watches**,
+reporting each phone's progress as it happens — the TLS connection, the
+fetch, and then the registration, which it observes through ARI's endpoint
+state over loopback (read-only, the same client `check` pings with). A
+fetch from a MAC that is not in the inventory is refused, and the refusal
+is the most useful line in the log: *"a phone at 192.168.7.51 asked for
+cfg7c2e…xml — not in handsets.toml; if that is the new phone, add `mac =
+"7c:2e:…"` to its block and run this again."* The operator never reads a
+label with a magnifying glass. Exit is 0 when every named phone registered,
+non-zero on a closed window with phones still missing, and Ctrl-C closes the
+window cleanly. `render` alone prints the same instruction text, for the
+operator who wants the files and not the session. The verb is provisional:
+`provision` reads well with `[id…]`; `handset` as a noun (`doorman handset
+serve`) is the other candidate, and the rehearsal decides.
 
 **Rotation closes the loop.** `doorman provision notify` asks Asterisk to send
 each listed phone a SIP `check-sync` NOTIFY (`pjsip send notify`, from the
@@ -189,18 +212,46 @@ the registry: the LAN IP; a router-provided unicast name where one exists;
 `jepsen.local` over mDNS; DHCP option 66; and the model's own discovery
 path (Grandstream mDNS override, Yealink PnP) where it has one.
 
-### M3 · Serve it, briefly
+### M3 · The guided session
 
-`doorman provision serve`: HTTPS on the LAN address, the once-minted
-certificate (`doorman provision cert --export` for phones that validate),
-the window, the MAC allow-list, per-device auth after first contact, no
-listing, redacted logs. An import-boundary test that nothing reachable from
-the daemon imports the serving package.
+`doorman provision [id…]`: the instruction text per model, HTTPS on the LAN
+address with the once-minted certificate (`--export-cert` for phones that
+validate), the window, the MAC allow-list, per-device auth after first
+contact, no listing, redacted logs, the live watch through ARI endpoint
+state, the unknown-MAC hint, and the exit semantics above. An
+import-boundary test that nothing reachable from the daemon imports the
+serving package. A sketch of the session, to be corrected by the first real
+one:
 
-Done when `httptest` covers: outside the window → refused; unknown MAC → 404;
-listed MAC, first fetch inside the window → file with credentials; second
-fetch without them → 401; plain HTTP → refused. And the M2 rehearsal is
-repeated end to end through `serve` rather than a hand-copied file.
+```
+$ doorman provision kitchen
+→ rendered asterisk/generated/provisioning/cfg7c2e1a4b9c0d.xml (kitchen)
+→ serving https://192.168.7.133:8443/  for 15m  (Ctrl-C to close)
+
+  kitchen — Grandstream GRP2601P, 7c:2e:1a:4b:9c:0d
+    on the phone:  Menu → System → Provisioning → Config Server Path
+                   192.168.7.133:8443/prov      upgrade via: HTTPS
+                   then Provision Now (or reboot)
+    on the web:    https://<phone-ip> → Maintenance → Upgrade and Provisioning
+    router:        DHCP option 66 = https://192.168.7.133:8443/prov
+                   (then nothing on the phone at all)
+
+  waiting for kitchen …
+  14:02:11  kitchen   connected from 192.168.7.50
+  14:02:11  kitchen   fetched cfg7c2e1a4b9c0d.xml  (4.1 KB, 200)
+  14:02:39  kitchen   registered  PJSIP/kitchen  Avail  (rtt 3ms)
+✓ 1 of 1 handsets registered — window closed
+```
+
+Done when `httptest` covers: outside the window → refused; unknown MAC →
+404 plus the hint on stderr with the asking MAC; listed MAC, first fetch
+inside the window → file with credentials; second fetch without them → 401;
+plain HTTP → refused; and the watch, driven by a fake ARI endpoint feed,
+reports connect → fetch → registered in order, exits 0 when every named
+phone is registered and non-zero when the window closes first. The M2
+rehearsal is repeated end to end through the session rather than a
+hand-copied file, and the instruction text for each model is corrected to
+what the phone's menus actually say.
 
 ### M4 · Rotation and re-provisioning
 
