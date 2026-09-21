@@ -245,7 +245,10 @@ offer_asterisk() {
 	fi
 
 	# No terminal to ask on — a piped install must never silently sudo.
-	if [ ! -r /dev/tty ]; then
+	# `-r /dev/tty` is not the test: the node is readable by everyone even when
+	# the process has no controlling terminal (ssh without -t, cron, CI), and
+	# read then dies with "No such device or address". Try to open it.
+	if ! ( : </dev/tty ) 2>/dev/null; then
 		info "asterisk is not installed. Run: sudo apt-get install -y asterisk"
 		return
 	fi
