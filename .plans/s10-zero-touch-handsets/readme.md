@@ -121,6 +121,33 @@ operator who wants the files and not the session. The verb is provisional:
 `provision` reads well with `[id…]`; `handset` as a noun (`doorman handset
 serve`) is the other candidate, and the rehearsal decides.
 
+**No arguments is the inventory view.** `doorman provision` alone opens no
+window and starts no listener; it prints every configured handset with its
+model, MAC, the file it will fetch, the URL that file lives at, and where it
+stands — registered now (from ARI endpoint state), provisioned at a time and
+currently offline, never provisioned, or "no `mac` — manual path". It is the
+page to look at before touching a phone and the page to check after. Two
+URLs appear per phone, because they are different things: the **phone-facing
+base path** (`https://192.168.7.133:8443/prov/`) is the same for every phone
+— firmware appends its own filename, `cfg<mac>.xml` on Grandstream, `<mac>.cfg`
+on Yealink, and that is not ours to choose — and the **operator-facing name**
+(`https://192.168.7.133:8443/prov/kitchen.xml`) is an alias to the same
+content, served only with that phone's provisioning credentials, for a
+browser or `curl` to inspect what the phone will receive. A guessable room
+name is never a way to fetch a password unauthenticated; the MAC path is.
+
+```
+$ doorman provision
+  https://192.168.7.133:8443/prov/        window closed — `doorman provision <id…>` opens one
+
+  kitchen   GRP2601P   7c:2e:1a:4b:9c:0d   cfg7c2e1a4b9c0d.xml   registered   Avail  since 14:02
+  office    GRP2602P   7c:2e:1a:4b:a1:22   cfg7c2e1a4ba122.xml   never provisioned
+  porch     WP826      7c:2e:1a:4b:77:03   cfg7c2e1a4b7703.xml   provisioned 2026-09-14   offline
+  hall      DP752      —                   —                     no mac — manual path
+
+  inspect:  https://192.168.7.133:8443/prov/kitchen.xml   (asks for kitchen's provisioning login)
+```
+
 **Rotation closes the loop.** `doorman provision notify` asks Asterisk to send
 each listed phone a SIP `check-sync` NOTIFY (`pjsip send notify`, from the
 CLI via `os/exec`, with a `pjsip_notify.conf` shipped alongside the other
@@ -214,7 +241,8 @@ path (Grandstream mDNS override, Yealink PnP) where it has one.
 
 ### M3 · The guided session
 
-`doorman provision [id…]`: the instruction text per model, HTTPS on the LAN
+`doorman provision` with no arguments: the inventory view above, ARI-backed
+state, no listener. `doorman provision [id…]` (or `--all`): the instruction text per model, HTTPS on the LAN
 address with the once-minted certificate (`--export-cert` for phones that
 validate), the window, the MAC allow-list, per-device auth after first
 contact, no listing, redacted logs, the live watch through ARI endpoint
