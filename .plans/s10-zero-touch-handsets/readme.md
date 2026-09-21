@@ -109,12 +109,19 @@ that lives on eight phones is only rotatable because the phones can be told.
 **The URL is one the *phone* can reach, and `render` prints every form that
 is true.** Never `localhost` — on the phone that is the phone. The primary
 form is the box's LAN address, `https://192.168.7.133:8443/`, because every
-phone on the LAN can use it unconditionally. A unicast DNS name is printed
-*as well* when the box's own resolver — the one DHCP handed it, which is the
-one it handed the phones — resolves that name to that address; `.local`
-names are not offered to phones, because SIP phones do not speak mDNS, and
-a URL that works from a laptop and fails from the handset is the worst kind
-of documentation. A Tailscale address is never advertised by default: no
+phone on the LAN can use it unconditionally. A name is printed *as well* when
+it is one the phone can use — and which names a phone can use is a **fact
+per model, established by rehearsal and recorded in the model registry**,
+not an assumption. The IP is the worst ergonomics and the only form that
+needs no such fact. A unicast name qualifies when the box's own resolver —
+the one DHCP handed it, which is the one it handed the phones — maps it to
+the LAN address. An mDNS name (`jepsen.local`) qualifies for a model only
+once a handset has fetched through it in this house; phones resolve through
+unicast DNS by default, but some carry their own discovery paths (Grandstream's
+mDNS override server, Yealink's PnP multicast SUBSCRIBE) that are worth
+testing before ruling out, and a URL that works from a laptop and fails from
+the handset is the worst kind of documentation, so the default is "not until
+seen". A Tailscale address is never advertised by default: no
 phone is on the tailnet, so it is reachable from nothing that fetches
 configs; `--bind` accepts it explicitly for the remote-site or softphone
 case. `serve` binds the LAN interface by default, not every interface, for
@@ -176,7 +183,11 @@ settings above; files written 0600 under `asterisk/generated/provisioning/`.
 Done when a factory-reset GRP2601P given only that URL registers as its
 `label`, answers a page on speaker, and its web login is the generated admin
 password — rehearsed on jepsen with a real handset before the milestone
-closes. The DP752 rehearsal covers a base carrying two handsets.
+closes. The DP752 rehearsal covers a base carrying two handsets. The same
+rehearsal settles, per model, which address forms work and records them in
+the registry: the LAN IP; a router-provided unicast name where one exists;
+`jepsen.local` over mDNS; DHCP option 66; and the model's own discovery
+path (Grandstream mDNS override, Yealink PnP) where it has one.
 
 ### M3 · Serve it, briefly
 
