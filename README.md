@@ -326,7 +326,7 @@ Then `sudo cp scripts/doorman.service /etc/systemd/system/` and enable it.
 Or skip the build and take a release binary:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ericdmoore/call-me-maybe/main/install.sh | bash
+curl -fsSL https://callmemaybe.cc/install.sh | bash
 ```
 
 It detects your OS and architecture, verifies the SHA-256 against the

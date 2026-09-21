@@ -60,7 +60,8 @@ man:
 schema: build
 	@./$(BIN) schema
 
-## site-assets: generate everything the site serves to models
+## site-assets: generate everything the site serves to models — and the
+##   installer, so `curl -fsSL https://callmemaybe.cc/install.sh` is a real URL.
 ##   Generated, not copied: llms.txt drifted from site/public once already and
 ##   only CI caught it, after the push.
 .PHONY: site-assets
@@ -68,10 +69,11 @@ site-assets: build
 	@mkdir -p site/public/schema
 	@cp llms.txt site/public/llms.txt
 	@cp llms-policy.txt site/public/llms-policy.txt
+	@cp install.sh site/public/install.sh
 	@for n in policy handsets trunks contacts env; do \
 		./bin/doorman schema $$n > site/public/schema/$$n.json; \
 	done
-	@echo "✓ site/public: llms.txt, llms-policy.txt, schema/{policy,handsets,trunks,contacts,env}.json"
+	@echo "✓ site/public: llms.txt, llms-policy.txt, install.sh, schema/{policy,handsets,trunks,contacts,env}.json"
 
 ## check: everything that must be green before a commit
 check: fmt-check vet lint test build

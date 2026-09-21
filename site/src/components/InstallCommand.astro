@@ -5,10 +5,11 @@
  *
  * The command is real: it resolves the latest GitHub release, picks the build
  * for the host, and verifies a SHA-256 against the published checksums before
- * installing anything.
+ * installing anything. The URL is this site — public/install.sh is a copy of
+ * the repo's install.sh, kept current by `make site-assets` (CI fails if it
+ * drifts) — so the command has no GitHub username baked into it.
  */
-const command =
-  'curl -fsSL https://raw.githubusercontent.com/ericdmoore/call-me-maybe/main/install.sh | bash';
+const command = 'curl -fsSL https://callmemaybe.cc/install.sh | bash';
 ---
 
 <div class="install">
@@ -23,7 +24,8 @@ const command =
     Detects your OS and architecture, verifies a SHA-256 against the published
     checksums, and installs to <code>/usr/local/bin</code> — or
     <code>~/.local/bin</code> when that is not writable. It installs the man page
-    too, and touches nothing else: no Asterisk, no service, no config. Pass
+    too, and on Debian or Ubuntu offers to install Asterisk with apt — it asks
+    first. No service and no config: those are the runbook's job. Pass
     <code>--version</code>, <code>--prefix</code>, or <code>--force</code> if you
     want to be specific.
   </p>
