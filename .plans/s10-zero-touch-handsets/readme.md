@@ -106,6 +106,25 @@ SIP and admin passwords in `.env` with the same validate-then-write-atomically
 shape `RotatePins` has (invariant 4), then renders and notifies. A password
 that lives on eight phones is only rotatable because the phones can be told.
 
+**The URL is one the *phone* can reach, and `render` prints every form that
+is true.** Never `localhost` — on the phone that is the phone. The primary
+form is the box's LAN address, `https://192.168.7.133:8443/`, because every
+phone on the LAN can use it unconditionally. A unicast DNS name is printed
+*as well* when the box's own resolver — the one DHCP handed it, which is the
+one it handed the phones — resolves that name to that address; `.local`
+names are not offered to phones, because SIP phones do not speak mDNS, and
+a URL that works from a laptop and fails from the handset is the worst kind
+of documentation. A Tailscale address is never advertised by default: no
+phone is on the tailnet, so it is reachable from nothing that fetches
+configs; `--bind` accepts it explicitly for the remote-site or softphone
+case. `serve` binds the LAN interface by default, not every interface, for
+the same reason. The certificate is minted with every address it will be
+offered on as a SAN, so a phone that validates can. Because the phones
+register to an address as well as fetch from one, FIRST-BOOT tells the
+operator to give the box a DHCP reservation or a router-provided name
+before adding the first phone — a lease that moves takes every handset
+down, provisioning or not.
+
 **DHCP option 66 is supported, documented, and never required.** A router
 that can hand out the provisioning URL makes the process literally zero-touch;
 one that cannot means typing that URL once per phone, after which every other
