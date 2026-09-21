@@ -149,8 +149,28 @@ $ ssh pi@raspberrypi /opt/call-me-maybe/bin/doorman version
 On a workstation, rerun the documented `install.sh` installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ericdmoore/call-me-maybe/main/install.sh | bash
+curl -fsSL https://callmemaybe.cc/install.sh | bash
 ```
+
+On a Linux host prepared by `install-scripts/`, the same installer fetches the
+release as the operator; then move it over the service's copy, keeping the
+previous one, and rerun the distro script from the matching checkout so the
+rest of the layout follows:
+
+```bash
+curl -fsSL https://callmemaybe.cc/install.sh | bash        # → ~/.local/bin/doorman
+git -C ~/call-me-maybe fetch --tags
+git -C ~/call-me-maybe checkout "v$(~/.local/bin/doorman version | awk '{print $2}')"
+sudo cp /opt/call-me-maybe/bin/doorman /opt/call-me-maybe/bin/doorman.prev
+sudo install -m 0755 ~/.local/bin/doorman /opt/call-me-maybe/bin/doorman
+sudo install -m 0755 ~/.local/bin/doorman /usr/local/bin/doorman
+sudo bash ~/call-me-maybe/install-scripts/ubuntu.sh --binary ~/.local/bin/doorman
+sudo systemctl restart doorman && doorman version
+```
+
+The script refuses to continue if the unit file or a managed template in
+`/opt/call-me-maybe/asterisk` changed between releases — review the diff,
+copy the new one into place, then rerun.
 
 For the Pi, build the desired release with `make cross` and use the `scp`
 command above. Keep `bin/doorman.prev` for rollback, then restart the doorman
@@ -189,6 +209,10 @@ $ sudo systemctl restart asterisk
 ```
 
 ### doorman config
+
+If `install-scripts/` prepared the host, `/opt/call-me-maybe` already belongs
+to `doorman`: run the commands below as `sudo -u doorman doorman …` and skip
+the `chown` at the end — see `INSTALL-LINUX.md` → "Finish configuration".
 
 ```bash
 $ cd /opt/call-me-maybe

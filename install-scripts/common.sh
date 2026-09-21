@@ -28,7 +28,7 @@ Prepare a Linux/systemd host from this checkout. Run with sudo to apply.
 --help               show this help
 
 Installs packages, a doorman account, public assets under /opt/call-me-maybe,
-and the systemd unit. Preserves configuration and existing binaries/units;
+the doorman CLI on the system PATH, and the systemd unit. Preserves configuration and existing binaries/units;
 refuses a different binary or unit (use your normal upgrade procedure).
 Does not configure calls, start doorman, change firewall rules or disable SELinux.
 Distro package installation may start Asterisk according to distro defaults.
@@ -125,7 +125,7 @@ prepare() {
    require_version "$(asterisk -V | awk '{print $2}')"
   fi
   # Catch conflicts before spending time installing packages.
-  for target in /opt/call-me-maybe/bin/doorman /etc/systemd/system/doorman.service; do
+  for target in /opt/call-me-maybe/bin/doorman /usr/local/bin/doorman /etc/systemd/system/doorman.service; do
    source=$binary
    [ "$target" != /etc/systemd/system/doorman.service ] || source=$repo/scripts/doorman.service
    if [ -e "$target" ] || [ -L "$target" ]; then
@@ -142,7 +142,10 @@ prepare() {
  if [ "$dry_run" = 1 ] || ! getent passwd doorman >/dev/null; then
   run useradd --system --user-group --no-create-home --home-dir /opt/call-me-maybe --shell /usr/sbin/nologin doorman
  fi
- run install -d -o doorman -g doorman -m 0750 /opt/call-me-maybe
+ # 0755, not 0750: the directory holds nothing secret (the secrets are 0600
+ # files owned by doorman, and asterisk/generated is 0700), and 0750 locked the
+ # operator out of `cd /opt/call-me-maybe` — the first step of every next step.
+ run install -d -o doorman -g doorman -m 0755 /opt/call-me-maybe
  run install -d -m 0755 /opt/call-me-maybe/bin
  # Copy only installation assets, never ignored .env/config/generated files
  # from the workstation checkout. Reruns preserve destination edits.
@@ -161,17 +164,23 @@ prepare() {
  install_once "$repo/scripts/smoke.sh" /opt/call-me-maybe/scripts/smoke.sh 0755
  install_once "$repo/scripts/cel-spool.sql" /opt/call-me-maybe/scripts/cel-spool.sql 0644
  install_once "$binary" /opt/call-me-maybe/bin/doorman 0755
+ # The same binary on the system PATH — which is also sudo's secure_path — so
+ # the operator can say `sudo -u doorman doorman init` instead of spelling out
+ # /opt/call-me-maybe/bin/doorman. The unit keeps running the /opt copy.
+ run install -d -m 0755 /usr/local/bin
+ install_once "$binary" /usr/local/bin/doorman 0755
  install_once "$repo/scripts/doorman.service" /etc/systemd/system/doorman.service 0644
  run install -d -o doorman -g doorman -m 0700 /var/lib/doorman /var/lib/doorman/journal
  run systemctl daemon-reload
  cat <<'EOF_NEXT'
 Host preparation complete. No doorman service was started.
-Next: follow /opt/call-me-maybe/docs/RUNBOOK.md from "doorman config" and
-"Asterisk config": initialise configuration, install matching ARI credentials,
-render handsets/trunks, copy the rendered files and prerecorded prompts,
-validate with doorman check, then enable the services and run scripts/smoke.sh.
-The CLI is /opt/call-me-maybe/bin/doorman. Configuration must be readable by
-(and policy files writable by) doorman; see /opt/call-me-maybe/docs/INSTALL-LINUX.md.
+Next, from /opt/call-me-maybe/docs/INSTALL-LINUX.md "Finish configuration":
+  cd /opt/call-me-maybe && sudo -u doorman doorman init
+then RUNBOOK.md "Asterisk config": install matching ARI credentials, render
+handsets/trunks, copy the rendered files and prerecorded prompts, validate
+with doorman check, then enable the services and run scripts/smoke.sh.
+`doorman` is on the PATH; `sudo -u doorman` is about ownership, not privilege —
+the service account must be able to read (and rotate) what it writes.
 Keep ARI bound to 127.0.0.1. Review SIP/RTP firewall access for your own LAN
 and provider. SELinux/AppArmor remain enabled; check their logs during validation.
 EOF_NEXT

@@ -95,6 +95,31 @@ packages
 // line. awk quitting on the match left it writing into a closed pipe, and
 // under pipefail that SIGPIPE (141) aborted every Ubuntu/Debian apply right
 // after apt-get update — found by the first install on real hardware.
+// The operator must be able to `cd /opt/call-me-maybe` and type `doorman`,
+// including under `sudo -u doorman`, whose PATH is sudo's secure_path. 0750 on
+// the directory and a binary only under /opt broke both on the first real
+// install; the README's own "Finish configuration" failed at `cd`.
+func TestOperatorCanReachTheCLI(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "doorman")
+	if err := os.WriteFile(binary, []byte("must not execute"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := bash(t, `bash ./ubuntu.sh --dry-run --existing-asterisk --binary "$BINARY"`, "BINARY="+binary)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"install -d -o doorman -g doorman -m 0755 /opt/call-me-maybe",
+		"install -m 0755 " + binary + " /usr/local/bin/doorman",
+		"sudo -u doorman doorman init",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in %s", want, out)
+		}
+	}
+}
+
 func TestCandidateLookupSurvivesLongPolicyOutput(t *testing.T) {
 	for _, distro := range []string{"ubuntu", "debian"} {
 		out, err := bash(t, `

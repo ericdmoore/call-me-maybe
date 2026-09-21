@@ -39,30 +39,34 @@ separate service integration, so neither has an adapter here yet.
 
 ## Prepare the files
 
-Use a binary built from the **same checkout** as these scripts and configuration
-assets. Build on the workstation; the hub needs no Go compiler:
+Use a binary from the **same release** as this checkout. The normal way is the
+installer, run on the hub as the operator — it picks the build for the host
+and verifies its SHA-256 against the release's checksums. The hub needs no
+Go compiler:
 
 ```bash
-make cross
-# Copy this checkout's public files and bin/doorman-linux-amd64 to the x86 hub.
-# Do not transfer a workstation's real .env, policy.toml or SIP credentials.
+git clone https://github.com/ericdmoore/call-me-maybe && cd call-me-maybe
+curl -fsSL https://callmemaybe.cc/install.sh | bash      # → ~/.local/bin/doorman
+git checkout "v$(~/.local/bin/doorman version | awk '{print $2}')"
 ```
 
-On the hub, from that checkout:
+`make cross` on a workstation and copying `bin/doorman-linux-amd64` over is the
+development alternative. Either way, do not transfer a workstation's real
+`.env`, `policy.toml` or SIP credentials.
+
+Then, from that checkout:
 
 ```bash
 # Preview works without root or networking, including on a Mac.
-bash install-scripts/ubuntu.sh --dry-run --binary ./bin/doorman-linux-amd64
-sudo bash install-scripts/ubuntu.sh --binary ./bin/doorman-linux-amd64
+bash install-scripts/ubuntu.sh --dry-run --binary ~/.local/bin/doorman
+sudo bash install-scripts/ubuntu.sh --binary ~/.local/bin/doorman
 
 # Other hosts, after separately installing a suitable Asterisk and unit:
-sudo bash install-scripts/centos.sh --existing-asterisk --binary ./bin/doorman-linux-amd64
-sudo bash install-scripts/arch.sh --existing-asterisk --binary ./bin/doorman-linux-amd64
+sudo bash install-scripts/centos.sh --existing-asterisk --binary ~/.local/bin/doorman
+sudo bash install-scripts/arch.sh --existing-asterisk --binary ~/.local/bin/doorman
 ```
 
-For ARM hosts choose `doorman-linux-arm64` or `doorman-linux-armv7` for the
-userland's architecture. Apply mode verifies the binary runs before installing
-packages. Dry-run prints a conditional plan; it does not certify package
+Apply mode verifies the binary runs before installing packages. Dry-run prints a conditional plan; it does not certify package
 availability, distro compatibility, privileges or binary architecture.
 
 ## What gets installed
@@ -70,8 +74,11 @@ availability, distro compatibility, privileges or binary architecture.
 - Asterisk from the configured package manager, unless `--existing-asterisk`.
 - CA certificates, rsync, OpenSSL and the SQLite CLI.
 - A system `doorman` account with no login and no created home.
-- `/opt/call-me-maybe/bin/doorman`, public examples, templates, Asterisk
-  configuration templates, docs, smoke script and CEL schema.
+- `/opt/call-me-maybe` (0755, owned by `doorman`): `bin/doorman`, public
+  examples, templates, Asterisk configuration templates, docs, smoke script
+  and CEL schema.
+- The same binary at `/usr/local/bin/doorman`, so `doorman` resolves on the
+  operator's PATH and on sudo's `secure_path`. The unit runs the `/opt` copy.
 - The repository's `doorman.service` in `/etc/systemd/system/`.
 - Private `/var/lib/doorman` and `/var/lib/doorman/journal` directories (0700).
 
@@ -91,12 +98,13 @@ RPM-based installations may need local SELinux policy work after configuration.
 ## Finish configuration
 
 The service account owns the working directory so `init`, `render` and atomic
-policy rotation can create files. Initialise as that account:
+policy rotation can create files it can later read. `sudo -u doorman` is about
+ownership, not privilege — it just runs the CLI as that account:
 
 ```bash
 cd /opt/call-me-maybe
-sudo -u doorman ./bin/doorman init --rooms 'Kitchen,Office'
-sudo -u doorman ./bin/doorman check
+sudo -u doorman doorman init --rooms 'Kitchen,Office'
+sudo -u doorman doorman check
 ```
 
 Record the generated PINs securely. Continue with [RUNBOOK §2](../docs/RUNBOOK.md):
