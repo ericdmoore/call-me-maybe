@@ -58,6 +58,42 @@ codes, in the same way `internal/schema` allows no undocumented config keys.
 The runbook table becomes generated output with an agreement test, like
 `llms.txt`.
 
+**Codes are bindings the install chose; the registry reads them.** The hunt
+is on `*6` here and `*88` somewhere else; a story is whatever extension a
+child picked. Every entry in the registry carries the code *as configured*,
+resolved at render time, and the menu says that code. A feature with no
+binding is absent from the tree. Nothing about a code is a constant in the
+menu, ever.
+
+**Three kinds of leaf.** Each registry entry is one of: **do** — dial-able
+things (a room, `500`, `600`, the hunt, a story, an action); **set** — things
+you change (DND for thirty minutes, record the greeting), which the routing
+verbs perform on the spot; **ask** — things you find out (is the trunk
+registered, how many messages, the balance from s03), spoken with `digits:`
+and never written anywhere. The tree is the union of the three; the card
+prints all three; the soft keys get the first kind.
+
+**Two ways through, deliberately separate.** Browsing and targeting want
+different things and must not share one traversal:
+
+- *The tree serves browsing.* Shallow — at most five choices a node, three
+  levels deep — grouped by what a person is trying to do (rooms; page and
+  talk; messages; games; quiet; the house; status), most generally useful
+  first, `*` repeats, `#` goes up, and every leaf that can act, acts.
+- *Stability serves targeting.* Digit paths never change: if paging is
+  `411, 2, 1` this year it is next year; new features take free digits and
+  nothing is renumbered, the rule the streams themselves follow. The
+  interpreter takes digits by barge-in, so `411 2 1` typed without listening
+  is a shortcut a frequent user learns once — and every leaf says its own
+  feature code, because `*7830` is faster than any menu and the menu's job
+  is to teach it, not to be it.
+
+**Usage never reorders the tree.** "Most used first" would help browsing and
+silently destroy every learned path; it would also make the journal an input
+to call handling, which invariant 10 forbids for exactly this reason. Order
+is registry rank, fixed. Ergonomics come from grouping and labels, never from
+adaptivity.
+
 **`411` is the code.** Directory assistance, for the people who remember it,
 and short enough for the people who do not. It is a rendered extension in
 `[internal]` — reachable from a handset, never from the lobby (the lobby has
@@ -137,8 +173,11 @@ from the built-in pack, room names degraded to numbers until M3.
 
 Done when, on jepsen, dialling 411 from the kitchen reads the rooms with
 their numbers, pages the house from the paging leaf, rings the theater from
-the rooms leaf, offers DND and the hunt only if they are configured, and a
-fake-ARI test walks every branch of a rendered graph.
+the rooms leaf, offers DND and the hunt only if they are configured and with
+the codes they are bound to, `411 2 1` typed blind pages without a word
+being heard, and a fake-ARI test walks every branch of a rendered graph and
+asserts that re-rendering with a new room leaves every existing digit path
+unchanged.
 
 ### M3 · Names
 
@@ -163,6 +202,10 @@ no instruction pages the house within a minute of picking up a handset.
   someone write "press 3 for the garage" when there is no garage is the
   failure this stream exists to prevent.
 - **Runtime TTS for room names.** No. Build or record.
+- **Adaptive ordering by usage.** See above: it trades every learned path
+  for a marginal browsing gain, and it needs the journal as an input.
+- **One traversal for both browsing and targeting.** The compromise serves
+  neither; the split costs nothing because the codes already exist.
 - **A web page instead.** The person holding a handset is not holding a
   browser. The card and the soft keys are the non-audio surfaces, and both
   derive from the same registry.
