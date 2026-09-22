@@ -23,6 +23,7 @@ otherwise have to be reconstructed from a commit log.
 | **s09** | [One binary that installs itself](s09-distro-software-release-channel/) — `sudo doorman init` prepares the host; brew, deb/rpm, AUR, `go install` | planned | s08 for the release notice |
 | **s10** | [Zero-touch handsets](s10-zero-touch-handsets/) — `render` produces the phone's own config; a bounded LAN window serves it; rotation re-provisions | planned | s09 M1 to ship templates in the binary (soft) |
 | **s11** | [The hunt](s11-the-hunt/) — the verification ladder as a scavenger hunt: envelopes, `*6` + an answer plays a parent's recorded clue, `500` announces the winner; zero mechanism in doorman | planned | — |
+| **s12** | [Do not disturb](s12-do-not-disturb/) — `*78NN` quiets a handset for 15/30/45 min; rings and pages skip it, except a page from an override handset; state is Asterisk's, time-boxed, read by doorman never written | planned | per-handset voicemail; the `0` ring-all group; s10 for line keys |
 
 s01 has an [`arch.md`](s01-multiple-DIDs/arch.md); s03's reasoning is short
 enough to live in its plan.
@@ -44,7 +45,8 @@ A prompt assembled from parts rather than one clip: a pre-rendered WAV, then
 untouched — `digits:` is not speech synthesis — but the shape is new.
 
 Wanted by: reading a line's own number back in a greeting (s01) · "call from
-area code XXX" in a screened answer · speaking a balance aloud (s03).
+area code XXX" in a screened answer · speaking a balance aloud (s03) · "do not
+disturb for thirty minutes" (s12).
 
 ### Variable-length, `#`-terminated collection — **two customers**
 
