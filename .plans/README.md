@@ -178,6 +178,11 @@ offline on upgrade, which argues for warn-then-reject over two releases.
 ## Conventions
 
 - Number streams `sNN`; do not renumber when one is dropped.
+- A stream moves to `_archives/` — same folder name, same number — when every
+  milestone has either landed or been explicitly dropped in its status line.
+  Partly-shipped streams stay here: a plan with one open milestone is still
+  the place that milestone is reasoned about. The table above lists archived
+  streams under their own heading so the numbering stays legible.
 - A plan says what "done" looks like before it says how.
 - Record **rejected** alternatives with the reason. The reason is the valuable
   part and it is the thing that gets lost.
