@@ -67,6 +67,17 @@ checking each target's DND. This is not a convenience: it is what makes DND
 safe to hand to a child. A phone in a bedroom that a parent cannot reach is
 the WP826's own DND button, and that is exactly the feature being replaced.
 
+**Inside the house, DND is said out loud; outside, it is not.** Someone in
+the kitchen dialling `102` while the theater is quiet hears "the theater
+isn't taking calls for another twenty minutes" — a clip, `digits:` of the
+minutes left (expiry minus now, so it is exact, never "about"), a clip — and
+then the theater's mailbox if they want to leave something. A page from a
+handset without override hears "the theater is quiet; the others heard
+you," so nobody concludes the page failed. A friend dialling the theater's
+lobby extension from outside hears the ordinary unavailable greeting and the
+mailbox, nothing more: a child's DND is not the caller's information, and
+"try again in twenty minutes" is a schedule handed to a stranger.
+
 **DND never touches outbound, 911, or the party line.** Dialling out is the
 phone's own action; `911` is invariant 11's business and no state may gate
 it; `600` is somewhere you go, not something that comes to you.
@@ -127,11 +138,13 @@ doorman's ring plans skip quiet handsets and send a quiet room's own
 extension to its mailbox. Fake-ARI tests for the doorman side; rendered-
 dialplan golden tests for the Asterisk side.
 
-Done when, on jepsen: theater on DND, `102` from the kitchen goes to the
-theater mailbox; `500` from the kitchen still pages the theater; `500` from
-the theater (no override) pages the kitchen only; a known caller from
-outside rings the kitchen only; the theater's lobby extension goes to
-voicemail; and `600` and outbound are untouched.
+Done when, on jepsen: theater on DND, `102` from the kitchen says how many
+minutes remain and then offers the theater mailbox; `500` from the kitchen
+still pages the theater; `500` from the theater (no override) pages the
+kitchen only and tells the theater so; a known caller from outside rings the
+kitchen only; the theater's lobby extension plays the ordinary unavailable
+greeting and the mailbox with no mention of DND; and `600` and outbound are
+untouched.
 
 ### M3 · Showing it
 
