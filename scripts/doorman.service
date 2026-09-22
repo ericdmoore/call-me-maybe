@@ -8,6 +8,12 @@ After=network-online.target asterisk.service
 Wants=network-online.target
 # Asterisk going down takes doorman with it; ARI is useless without it.
 BindsTo=asterisk.service
+# Give up and alert rather than crash-looping forever on a bad config.
+# These are [Unit] options: in [Service], systemd ≥ 230 ignores
+# StartLimitIntervalSec ("Unknown key") and the burst applies to a 10 s default
+# window — silently, which the first install's journal was the first to say.
+StartLimitBurst=5
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple
@@ -19,9 +25,6 @@ EnvironmentFile=/opt/call-me-maybe/.env
 ExecStart=/opt/call-me-maybe/bin/doorman
 Restart=always
 RestartSec=2
-# Give up and alert rather than crash-looping forever on a bad config.
-StartLimitBurst=5
-StartLimitIntervalSec=60
 
 # Hardening. doorman only needs loopback and its own directory.
 NoNewPrivileges=yes

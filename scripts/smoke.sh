@@ -30,7 +30,9 @@ rung() { printf '\n%s%s%s\n' "$B" "$1" "$N"; }
 
 # Degrade quietly on machines without sudo or systemd rather than spraying
 # stderr — this script is often the first thing run on a half-built box.
-if command -v sudo >/dev/null; then SUDO=sudo; else SUDO=""; fi
+# Already root (the documented `sudo bash scripts/smoke.sh`) needs no sudo prefix;
+# a nested sudo with the script on stdin can swallow the rest of the script.
+if [ "$(id -u)" = 0 ]; then SUDO=""; elif command -v sudo >/dev/null; then SUDO=sudo; else SUDO=""; fi
 ast() { $SUDO asterisk -rx "$1" 2>/dev/null; }
 svc_active() { systemctl is-active --quiet "$1" 2>/dev/null; }
 
@@ -175,6 +177,19 @@ fi
 # _911 in [internal] (one provider, and every box that has no trunks.toml).
 rung "5b. Emergency route"
 
+# `dialplan show` prints globals unexpanded, so the single-trunk _911 reads
+# PJSIP/911@${DEFAULT_TRUNK} — which the parser below would call "no route".
+# Substitute Asterisk's own view of its globals first.
+expand_globals() {
+  local plan="$1" name value
+  while IFS='=' read -r name value; do
+    name="${name#"${name%%[![:space:]]*}"}"
+    value="${value%\"}"; value="${value#\"}"
+    [ -n "$name" ] || continue
+    plan="${plan//\$\{${name}\}/${value}}"
+  done < <(ast 'dialplan show globals' | grep -E '^[[:space:]]*[A-Za-z0-9_-]+=')
+  printf '%s' "$plan"
+}
 emergency_endpoints() { # print every trunk a 911 route dials, in order
   printf '%s\n' "$1" | sed -n 's|.*PJSIP/911@\([A-Za-z0-9_-][A-Za-z0-9_-]*\).*|\1|p'
 }
@@ -194,7 +209,7 @@ elif ! ast 'core show function DIALPLAN_EXISTS' | grep -q 'DIALPLAN_EXISTS'; the
   E_WHERE="_911 in [internal], because DIALPLAN_EXISTS is unavailable"
 fi
 
-E_TRUNKS="$(emergency_endpoints "$E_PLAN")"
+E_TRUNKS="$(emergency_endpoints "$(expand_globals "$E_PLAN")")"
 if [ -z "$E_TRUNKS" ]; then
   fail "911 has no route at all" \
        "sudo asterisk -rx 'dialplan show 911@internal' — reinstall extensions.conf and reload"
@@ -258,7 +273,9 @@ fi
 rung "7. Policy"
 
 if [ -f "$REPO/policy.toml" ]; then
-  if "$DOORMAN" check "$REPO/policy.toml" >/tmp/.cmm-policy 2>&1; then
+  # From $REPO: handsets.toml and .env resolve relative to the working
+  # directory, exactly as they do for the daemon (WorkingDirectory in the unit).
+  if (cd "$REPO" && "$DOORMAN" check policy.toml) >/tmp/.cmm-policy 2>&1; then
     pass "policy.toml valid"
     sed 's/^/      /' /tmp/.cmm-policy | grep -E 'allow-listed|extensions|pin length' || true
   else
@@ -284,7 +301,7 @@ fi
 # *97 is reachable from any handset on the LAN.
 VM_CONF=/etc/asterisk/voicemail.conf
 if [ -f "$VM_CONF" ]; then
-  if grep -qE '=>[[:space:]]*4242,' "$VM_CONF"; then
+  if grep -qE '^[^;]*=>[[:space:]]*4242,' "$VM_CONF"; then  # live lines only, not comments
     fail "voicemail.conf still uses the placeholder PIN 4242" \
       "any handset can read those mailboxes with *97 — set real PINs"
   else

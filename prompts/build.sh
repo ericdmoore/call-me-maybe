@@ -57,10 +57,11 @@ while IFS=$'\t' read -r name text; do
     -af "loudnorm=I=-18:TP=-2:LRA=7" \
     -ar 8000 -ac 1 -acodec pcm_s16le "${OUT}/${name}.wav"
 
-  # 16 kHz wideband for g722.
+  # 16 kHz wideband for g722. ".wav16" is Asterisk's extension for the format,
+  # and ffmpeg cannot infer a container from it — name the format explicitly.
   ffmpeg -nostdin -loglevel error -y -i "${raw}" \
     -af "loudnorm=I=-18:TP=-2:LRA=7" \
-    -ar 16000 -ac 1 -acodec pcm_s16le "${OUT}/${name}.wav16"
+    -ar 16000 -ac 1 -acodec pcm_s16le -f wav "${OUT}/${name}.wav16"
 
   rm -f "${raw}"
 done < /tmp/cmm-prompts.tsv
