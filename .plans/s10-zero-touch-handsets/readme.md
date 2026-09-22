@@ -201,10 +201,27 @@ because a child's handset should not carry a parent's entire contact list,
 and s07 already treats those exports as data that never leaves the box
 unasked. A phonebook holds no passwords but it is caller data: it is served
 only with the phone's provisioning credentials, never on the unauthenticated
-first fetch; it is 0600 on disk; and its names are never logged. Between
-windows a phone keeps the last copy it fetched, so editing `[[people]]` and
-running `doorman provision --all` is how the book is pushed; whether a
-`check-sync` also re-fetches the phonebook is a per-model rehearsal fact.
+first fetch; it is 0600 on disk; and its names are never logged. Unlike the
+provisioning files, **the phonebook is served always-on**, because the
+phone's own refresh — at boot and on its configured interval — is the
+lifecycle that keeps it current, and a fetch that lands on a closed window
+would leave a stale copy on the handset indefinitely. It can be always-on
+precisely because it holds no credentials: a small read-only endpoint in its
+own systemd unit (`doorman directory serve`, installed by `init` once s09
+lands), HTTPS with per-device login, never inside the daemon, answering only
+phonebook requests — a provisioning URL against it is a 404. Editing
+`[[people]]` or a contacts source then reaches every phone within its
+interval with nobody touching anything. Whether a `check-sync` also forces a
+phonebook re-fetch is a per-model rehearsal fact; it is a nicety, not the
+mechanism. Incoming caller names never depend on any of this — the lobby
+sends them with the ring — so staleness costs only outbound dialing.
+
+Live LDAP directories, which both vendors support, are the genuinely
+cache-free alternative and are **deferred, not rejected**: for thirty names
+in a house, an LDAP server on the LAN buys the difference between "live" and
+"hourly", at the price of a dependency that is always on and holds caller
+data. The endpoint above can back an LDAP responder later if a real need
+appears.
 
 **DHCP option 66 is supported, documented, and never required.** A router
 that can hand out the provisioning URL makes the process literally zero-touch;
@@ -318,14 +335,20 @@ time it boots into a window.
 Per-handset `phonebook` selection in the inventory; vendor phonebook
 templates (Grandstream `phonebook.xml`, Yealink contact XML) rendered beside
 each config from the house directory, `[[people]]`, and any opted-in
-contacts source; served under the base path with the phone's credentials.
+contacts source; the always-on read-only directory endpoint as its own unit,
+with the phone's credentials, refusing anything but phonebook paths; the
+phone's refresh interval and the endpoint URL pinned by the M2 template.
 Golden tests per vendor; a test that a handset with no `phonebook` key gets
 the house directory and `[[people]]` and nothing from `contacts.toml`; the
 `nologsecrets` analyzer extended to phonebook names.
 
 Done when a handset shows the house's other rooms and the allow-list in its
-directory after one session, dials "Grandma" from it, and a second handset
-opted into a contacts source shows that source while the first does not.
+directory after one session, dials "Grandma" from it, a second handset opted
+into a contacts source shows that source while the first does not, and a
+name added to `[[people]]` appears on both phones within one refresh
+interval with no session opened — while a provisioning URL against the
+directory endpoint returns 404 and the daemon's import boundary still
+excludes it.
 
 ### M6 · The documents
 
