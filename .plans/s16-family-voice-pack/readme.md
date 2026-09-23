@@ -91,8 +91,16 @@ key after it is DTMF the booth hears — which makes the dialed code always
 
 The booth's opening line is the menu; digits are taken by barge-in, so
 `*99` then `2` typed without listening records the lobby greeting, and that
-path never changes (s14's stability rule). One dialplan extension instead of
-four, and no dependence on how a phone decides a number is complete.
+path never changes (s14's stability rule).
+
+**`*99*N` goes straight to message N.** The direct form, with the digit in
+the dialed string (`_*99*X` in the dialplan), for the person who knows the
+number: deterministic, because a key pressed while a call is still setting
+up can be swallowed by the phone, and a digit in the dial string cannot.
+Same booth; it skips its first question. `*99` is the menu and `*99*N` is
+the code — s14's two layers, browsing and targeting, on one feature — and
+`*99*N` is what the registry lists as each message's code. Restoring stays
+inside the call, behind `#`, because it wants a confirmation anyway.
 
 **Who may record: any handset.** The hunt established who the content team
 is. The floor cannot be damaged and putting it back is one call away; if it ever
