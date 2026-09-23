@@ -74,6 +74,10 @@ func grandstreamValues(p Phone) []pvalue {
 		{1361, p.ProvisionPassword, "config server HTTP/HTTPS password"},
 		{1359, "", "XML config file password: none — the file is plain XML"},
 		{194, "0", "automatic firmware upgrade: off"},
+		// Without this the phone follows every configuration fetch with a
+		// firmware fetch from the same server, finds nothing, and tells the
+		// person holding it "failed to download firmware" (first rehearsal).
+		{238, "2", "firmware upgrade and provisioning: always skip the firmware check"},
 
 		// Directory: this phone's own book, polled on the phone's schedule.
 		// P330 is the mode and P331 the path (the rehearsal had them swapped).

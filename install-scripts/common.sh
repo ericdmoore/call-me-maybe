@@ -161,21 +161,27 @@ prepare() {
  run install -d -o doorman -g doorman -m 0755 /opt/call-me-maybe
  run install -d -m 0755 /opt/call-me-maybe/bin
  # Copy only installation assets, never ignored .env/config/generated files
- # from the workstation checkout. Reruns preserve destination edits.
+ # from the workstation checkout. These staged copies — examples, docs,
+ # templates, the Asterisk files the runbook copies from, smoke.sh — are
+ # outputs of the release and are REPLACED on every run: the operator's own
+ # edits live in /etc/asterisk and in .env/*.toml, never here. (The first
+ # upgrade, v0.6.3 → v0.6.4, refused on a changed pjsip.conf.example and
+ # stopped before the sudoers rule; that was this loop preserving the wrong
+ # thing.) The binary and the units keep the explicit conflict check above.
  run install -d -m 0755 /opt/call-me-maybe/examples /opt/call-me-maybe/templates /opt/call-me-maybe/docs
  for file in "$repo"/examples/*.example.toml "$repo/examples/.env.example"; do
-  install_once "$file" "/opt/call-me-maybe/examples/${file##*/}" 0644
+  run install -m 0644 "$file" "/opt/call-me-maybe/examples/${file##*/}"
  done
- run rsync -rt --ignore-existing --include='*/' --include='*.md' --include='*.1' --exclude='*' --chmod=D755,F644 "$repo/docs/" /opt/call-me-maybe/docs/
- run rsync -rt --ignore-existing --include='*/' --include='*.toml' --exclude='*' --chmod=D755,F644 "$repo/templates/" /opt/call-me-maybe/templates/
+ run rsync -rt --include='*/' --include='*.md' --include='*.1' --exclude='*' --chmod=D755,F644 "$repo/docs/" /opt/call-me-maybe/docs/
+ run rsync -rt --include='*/' --include='*.toml' --exclude='*' --chmod=D755,F644 "$repo/templates/" /opt/call-me-maybe/templates/
  run install -d -m 0755 /opt/call-me-maybe/asterisk /opt/call-me-maybe/scripts
  run install -d -o doorman -g doorman -m 0700 /opt/call-me-maybe/asterisk/generated
  for name in ari.conf.example pjsip.conf.example voicemail.conf.example extensions.conf http.conf rtp.conf musiconhold.conf res_parking.conf cel.conf cel_sqlite3_custom.conf pjsip_notify.conf; do
-  install_once "$repo/asterisk/$name" "/opt/call-me-maybe/asterisk/$name" 0644
+  run install -m 0644 "$repo/asterisk/$name" "/opt/call-me-maybe/asterisk/$name"
  done
- install_once "$repo/install-scripts/README.md" /opt/call-me-maybe/docs/INSTALL-LINUX.md 0644
- install_once "$repo/scripts/smoke.sh" /opt/call-me-maybe/scripts/smoke.sh 0755
- install_once "$repo/scripts/cel-spool.sql" /opt/call-me-maybe/scripts/cel-spool.sql 0644
+ run install -m 0644 "$repo/install-scripts/README.md" /opt/call-me-maybe/docs/INSTALL-LINUX.md
+ run install -m 0755 "$repo/scripts/smoke.sh" /opt/call-me-maybe/scripts/smoke.sh
+ run install -m 0644 "$repo/scripts/cel-spool.sql" /opt/call-me-maybe/scripts/cel-spool.sql
  install_once "$binary" /opt/call-me-maybe/bin/doorman 0755
  # The same binary on the system PATH — which is also sudo's secure_path — so
  # the operator can say `sudo -u doorman doorman init` instead of spelling out

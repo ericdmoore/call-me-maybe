@@ -59,7 +59,7 @@ func TestGrandstreamFilePinsTheInvariants(t *testing.T) {
 		"P73": "0", "P74": "1", "P75": "0", // RFC 2833 only — invariant 9's other half (GXP/GRP)
 		"P2301": "0", "P2302": "1", "P2303": "0", // and the WP8xx numbering of the same
 		"P57": "0", "P58": "9", // ulaw then g722
-		"P237": "192.168.7.133:8443/prov", "P212": "2", "P1360": "kitchen", "P1361": "prov-secret", "P1359": "", "P194": "0",
+		"P237": "192.168.7.133:8443/prov", "P212": "2", "P1360": "kitchen", "P1361": "prov-secret", "P1359": "", "P194": "0", "P238": "2",
 		"P330": "3", "P331": "192.168.7.133:8444/prov/kitchen", "P332": "60",
 		"P246": "CST6CDT,M3.2.0,M11.1.0",
 	}

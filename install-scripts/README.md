@@ -84,7 +84,10 @@ availability, distro compatibility, privileges or binary architecture.
   phones' phone book and exits quietly until `PROVISION_ADDRESS` is set).
 - Private `/var/lib/doorman` and `/var/lib/doorman/journal` directories (0700).
 
-The scripts preserve existing config. Different installed binaries, units or
+The scripts preserve your configuration — `/etc/asterisk`, `.env`, the TOML
+files, generated output — and replace their own staged copies (examples, docs,
+templates, the Asterisk files under `/opt/call-me-maybe/asterisk`, `smoke.sh`)
+on every run, because those are outputs of the release. Different installed binaries, units or
 managed templates cause a refusal instead of an implicit upgrade. Public docs
 and templates copied by rsync keep destination edits. This is repeatable host
 preparation, not a transactional rollback or an upgrade tool: a failure can
