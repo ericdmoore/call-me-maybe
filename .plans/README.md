@@ -25,6 +25,7 @@ otherwise have to be reconstructed from a commit log.
 | **s11** | [The hunt](s11-the-hunt/) — the verification ladder as a scavenger hunt: envelopes, `*6` + an answer plays a parent's recorded clue, `500` announces the winner; zero mechanism in doorman | planned | — |
 | **s12** | [Do not disturb](s12-do-not-disturb/) — `*78NN` quiets a handset for 15/30/45 min; rings and pages skip it, except a page from an override handset; state is Asterisk's, time-boxed, read by doorman never written | planned | per-handset voicemail; the `100` ring-all group; s10 for line keys |
 | **s14** | [411 — the phone explains itself](s14-411-feature-discovery/) — one registry of everything you can dial; a generated, checkable IVR at `411`; the runbook table, a wall card and the soft keys from the same source | planned | the graph-provenance primitive; composite prompts |
+| **s15** | [Messages — the house answers texts](s15-messages/) — SMS on the house number: email as the archive, a URL callback through Tailscale Funnel as the trigger; words per person open the garage via HA; `menu` types the `411` tree; handsets text each other over SIP MESSAGE; nothing on the hub | planned | s13 for the journal event; s14 for `menu` |
 
 s01 has an [`arch.md`](s01-multiple-DIDs/arch.md); s03's reasoning is short
 enough to live in its plan.
