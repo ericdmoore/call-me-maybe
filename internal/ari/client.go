@@ -241,6 +241,31 @@ func (c *Client) SetChannelVar(ctx context.Context, channelID, name, value strin
 	return c.do(ctx, http.MethodPost, "/channels/"+channelID+"/variable", q, nil)
 }
 
+// EndpointState is what ARI knows about one endpoint's registration: online
+// when at least one contact is registered, offline when none is, unknown when
+// the technology cannot say. Read by `doorman provision` to watch a phone
+// arrive; never by the call path, which learns about phones by ringing them.
+type EndpointState struct {
+	Technology string   `json:"technology"`
+	Resource   string   `json:"resource"`
+	State      string   `json:"state"`
+	ChannelIDs []string `json:"channel_ids"`
+}
+
+// Endpoint reads one endpoint's state — GET /endpoints/{tech}/{resource}.
+func (c *Client) Endpoint(ctx context.Context, tech, resource string) (EndpointState, error) {
+	var out EndpointState
+	err := c.do(ctx, http.MethodGet, "/endpoints/"+url.PathEscape(tech)+"/"+url.PathEscape(resource), nil, &out)
+	return out, err
+}
+
+// Endpoints lists every endpoint Asterisk has — GET /endpoints.
+func (c *Client) Endpoints(ctx context.Context) ([]EndpointState, error) {
+	var out []EndpointState
+	err := c.do(ctx, http.MethodGet, "/endpoints", nil, &out)
+	return out, err
+}
+
 // ContinueToDialplan releases a channel from Stasis into the dialplan at the
 // given location. The channel is alive but no longer ours; a StasisEnd
 // follows, and nothing may hang the channel up after this call.

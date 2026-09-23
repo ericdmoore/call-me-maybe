@@ -80,6 +80,8 @@ func runCommand() int {
 			return runCalls(os.Args[2:])
 		case "balance":
 			return runBalance(os.Args[2:])
+		case "provision":
+			return runProvision(os.Args[2:])
 		case "pack":
 			return runPack(os.Args[2:])
 		case "version", "-v", "--version":
@@ -195,6 +197,30 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -trunks path              provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)
       -out dir                  output directory (default ./asterisk/generated)
       -env path                 secrets file for handset and trunk passwords (default ./.env)
+  doorman provision [flags] [id ...]
+                                a phone configures itself. With no ids: the
+                                inventory view — every handset with its model,
+                                MAC, the file it fetches, and whether it is
+                                registered (read over ARI); no listener. With
+                                ids or --all: renders, opens a bounded HTTPS
+                                window on PROVISION_ADDRESS that answers only
+                                the listed MACs (first fetch open, every later
+                                one with that phone's own credential), prints
+                                exactly what to type on each phone, and watches
+                                connect → fetch → registered. Exit 0 when every
+                                named phone registered, 1 when the window closed
+                                first, 2 when the inventory or flags were wrong
+      -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
+      -env path                 secrets file (default ./.env)
+      -out dir                  render output; files served from <dir>/provisioning (default ./asterisk/generated)
+      -state dir                certificate and first-contact records (default $XDG_STATE_HOME/doorman/provision)
+      -window d                 how long the window stays open (default 15m)
+      -forever                  until Ctrl-C; warns, because the first fetch is unauthenticated
+      -all                      every handset that has a mac and model
+      -models                   list the model ids handsets.toml accepts
+      -export-cert              print the window's certificate for phones that validate
+  doorman provision notify [id ...]
+                                ask registered phones to fetch their configuration again
   doorman e164 <number>         show how a raw caller ID normalises
   doorman lsp                   language server (stdio) for policy.toml and
                                 handsets.toml — diagnostics from the same
