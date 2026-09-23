@@ -14,8 +14,8 @@ is the house's voice, six messages, hang up whenever. For each message she
 hears the current one, a tone, records her own, hears it back, and presses
 one to keep it, two to try again, or three to leave that one alone. Every
 kept take is live for the next caller the moment she presses one. Later a
-parent dials `*990` and the house is back to the bundled voice in a second —
-or `*9902` to put back just the lobby greeting. `doorman check` says
+parent dials `*99`, presses `#` then `*`, and the house is back to the bundled
+voice in a second — or `#` then `2` to put back just the lobby greeting. `doorman check` says
 `prompt pack: family (overlay on call-me-maybe; 2 of 6 recorded)`. Nothing
 in doorman changed, no pack half-works, and the family's six files can be
 copied out as a pack of their own.
@@ -77,20 +77,25 @@ is now" followed by the actual current clip beats any description, and it
 removes six name clips from the set. What you are replacing is what you
 just heard.
 
-**Four codes, all dialplan, no doorman:**
+**One code; everything else is a digit inside the call.** On a Grandstream
+handset `#` is the *send* key, so `*99#` places the call at once and every
+key after it is DTMF the booth hears — which makes the dialed code always
+`*99` and moves the choice into the call, where it belongs:
 
-| Code | Does |
+| After `*99` | Does |
 |---|---|
-| `*99` | the whole voice: all six, in the order a caller meets them — `welcome-known`, `lobby-greeting`, `invalid-extension`, `connecting`, `no-answer`, `good-day`; each kept take is saved immediately, so hanging up keeps what was kept |
-| `*99N` | clip N alone, same loop once |
-| `*990N` | put clip N back to the default |
-| `*990` | put everything back |
+| `1`–`6` | that message alone: current → tone → record (`#` ends) → playback → `1` keep, `2` again, `3` skip |
+| `*` | the whole voice: all six, in the order a caller meets them — `welcome-known`, `lobby-greeting`, `invalid-extension`, `connecting`, `no-answer`, `good-day` — each kept take saved the moment `1` is pressed, so hanging up keeps what was kept |
+| `#` | put things back: then `1`–`6` for one message, `*` for all, with one confirmation |
+| hang up | nothing changed |
 
-Inside a loop: current → tone → record (`#` ends) → playback → `1` keep,
-`2` again, `3` skip (leave as is), hang up = nothing changed for this clip.
+The booth's opening line is the menu; digits are taken by barge-in, so
+`*99` then `2` typed without listening records the lobby greeting, and that
+path never changes (s14's stability rule). One dialplan extension instead of
+four, and no dependence on how a phone decides a number is complete.
 
 **Who may record: any handset.** The hunt established who the content team
-is. The floor cannot be damaged and `*990` is one call away; if it ever
+is. The floor cannot be damaged and putting it back is one call away; if it ever
 turns out wrong, s12's `page_override` is the obvious gate and a one-line
 change. A recording is logged as an event (`prompt.recorded { clip, by }`)
 once s13 lands, so "who made the lobby say that" has an answer.
@@ -134,13 +139,14 @@ place.
 
 ### M2 · The studio
 
-The eight `studio-*` lines in the manifest's optional section, rendered by
+The nine `studio-*` lines in the manifest's optional section, rendered by
 `build.sh`; the contract test amended to know the section is optional; the
-`*99`, `*99N`, `*990N`, `*990` dialplan; the `.wav16` sibling rule; `.prev`
-on every keep. Done when, on jepsen, a child records the lobby greeting
-from the theater phone, a `*67` call hears it within a second of pressing
-one, `*9902` puts the bundled line back, and a full `*99` pass with two
-skips leaves exactly four files and two symlinks.
+single `*99` extension with its in-call menu; the `.wav16` sibling rule;
+`.prev` on every keep. Done when, on jepsen, a child records the lobby
+greeting from the theater phone with `*99` then `2`, a `*67` call hears it
+within a second of pressing one, `*99` `#` `2` puts the bundled line back,
+and a full `*99` `*` pass with two skips leaves exactly four files and two
+symlinks.
 
 ### M3 · Overlay packs on paper
 
@@ -163,6 +169,6 @@ second box, where the bundled voice fills whatever they did not record.
 
 ## Rollout order
 
-M1 is small and self-contained. M2 is a day of dialplan and eight lines of
+M1 is small and self-contained. M2 is a day of dialplan and nine lines of
 manifest, and it is the feature. M3 is a page. Rehearsed by the children,
 who will find the loophole nobody thought of, as usual.
