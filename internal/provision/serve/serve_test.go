@@ -252,3 +252,50 @@ func TestTheWindowClosesByItself(t *testing.T) {
 }
 
 var _ = strings.Contains
+
+// The directory is the other process: phonebooks with the credential and
+// nothing else, ever — a configuration request against it is 404 even from
+// a listed phone, and the book comes from the renderer, not a file.
+func TestTheDirectoryServesPhonebooksAndNeverAConfiguration(t *testing.T) {
+	dir, state := t.TempDir(), t.TempDir()
+	m, _ := provision.Lookup("grandstream-wp826")
+	kitchen := provision.Phone{ID: "kitchen", MAC: "ec:74:d7:88:a2:54", Model: m, ProvisionPassword: "prov-k",
+		Address: provision.Address{Host: "192.168.7.133", Port: 8443}}
+	if err := os.WriteFile(filepath.Join(dir, kitchen.FileName()), []byte("<gs_provision/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	renders := 0
+	var events []Event
+	s, err := New(Options{Dir: dir, StateDir: state, Phones: []provision.Phone{kitchen}, Address: kitchen.Address, Directory: true,
+		Phonebook: func(id string) ([]byte, error) {
+			renders++
+			return []byte("<AddressBook>" + id + "</AddressBook>"), nil
+		},
+		OnEvent: func(e Event) { events = append(events, e) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	if rec := get(h, "/prov/cfgec74d788a254.xml", "", ""); rec.Code != 404 {
+		t.Fatalf("the directory must never serve a configuration, got %d", rec.Code)
+	}
+	if rec := get(h, "/prov/cfgec74d788a254.xml", "kitchen", "prov-k"); rec.Code != 404 {
+		t.Fatalf("not even with the credential, got %d", rec.Code)
+	}
+	if rec := get(h, "/prov/kitchen.xml", "kitchen", "prov-k"); rec.Code != 404 {
+		t.Fatalf("nor the operator alias, got %d", rec.Code)
+	}
+	if s.Seen(kitchen.MAC) {
+		t.Fatal("the directory never records first contact")
+	}
+	if rec := get(h, "/prov/kitchen/phonebook.xml", "", ""); rec.Code != 401 {
+		t.Fatalf("phonebook without credential must be 401, got %d", rec.Code)
+	}
+	rec := get(h, "/prov/kitchen/phonebook.xml", "kitchen", "prov-k")
+	if rec.Code != 200 || rec.Body.String() != "<AddressBook>kitchen</AddressBook>" || renders != 1 {
+		t.Fatalf("phonebook should come from the renderer: %d %q (renders %d)", rec.Code, rec.Body.String(), renders)
+	}
+	if len(events) == 0 || events[0].Kind != "refused" || !strings.Contains(events[0].Detail, "asked the directory") {
+		t.Fatalf("the misdirected configuration request should be reported: %+v", events)
+	}
+}

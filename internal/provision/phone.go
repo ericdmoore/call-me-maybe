@@ -61,9 +61,25 @@ func (a Address) BaseURL() string { return "https://" + a.HostPort() + "/prov/" 
 // no scheme. The phone appends cfg<mac>.xml itself.
 func (a Address) ConfigServerPath() string { return a.HostPort() + "/prov" }
 
+// DirectoryPort is where the always-on directory listens: one above the
+// window, because the two are different processes with different lifetimes
+// and cannot share a socket. Phones poll this one on a timer; the window
+// they fetch configuration from is opened by an operator and closes.
+func (a Address) DirectoryPort() int { return a.Port + 1 }
+
+// DirectoryHostPort is host:port for the directory.
+func (a Address) DirectoryHostPort() string {
+	return net.JoinHostPort(a.Host, strconv.Itoa(a.DirectoryPort()))
+}
+
 // PhonebookPath is the per-handset directory the phone polls; it appends
 // phonebook.xml itself.
-func (a Address) PhonebookPath(id string) string { return a.HostPort() + "/prov/" + id }
+func (a Address) PhonebookPath(id string) string { return a.DirectoryHostPort() + "/prov/" + id }
+
+// PhonebookURL is the operator's view of the same thing.
+func (a Address) PhonebookURL(id string) string {
+	return "https://" + a.PhonebookPath(id) + "/phonebook.xml"
+}
 
 // Phone is everything a template needs to know about one handset: the
 // inventory row plus the secrets render resolved and the house's address.

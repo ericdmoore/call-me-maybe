@@ -41,6 +41,7 @@ import (
 	"callmemaybe/internal/provision"
 	"callmemaybe/internal/render"
 	"callmemaybe/internal/schema"
+	"callmemaybe/internal/setup"
 	"callmemaybe/internal/updatecheck"
 )
 
@@ -181,6 +182,10 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
   doorman rotate [flags] [label ...]
                                 rotate extension PINs; all extensions when no labels given
       -policy path              policy file (default $POLICY_PATH or ./policy.toml)
+      -phones [id ...]          rotate handset SIP passwords in .env instead — never
+                                printed; render, install, then "doorman provision
+                                notify" hands each phone its new one
+      -env path                 secrets file, with -phones (default ./.env)
   doorman render [flags]        generate per-handset Asterisk config from
                                 handsets.toml, including the outbound caller ID
                                 each phone presents — read from every line's
@@ -195,6 +200,7 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
       -policy path              policy file, for outbound caller ID and DID routes (default $POLICY_PATH or ./policy.toml)
       -trunks path              provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)
+      -contacts path            address-book inventory, optional, for phone books (default $CONTACTS_PATH or ./contacts.toml)
       -out dir                  output directory (default ./asterisk/generated)
       -env path                 secrets file for handset and trunk passwords (default ./.env)
   doorman provision [flags] [id ...]
@@ -221,6 +227,10 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -export-cert              print the window's certificate for phones that validate
   doorman provision notify [id ...]
                                 ask registered phones to fetch their configuration again
+  doorman provision directory   the phones' directory — house, people, opted-in
+                                sources — served always, read-only, one port above
+                                the window, with each phone's own credential; the
+                                doorman-directory.service unit runs this
   doorman e164 <number>         show how a raw caller ID normalises
   doorman lsp                   language server (stdio) for policy.toml and
                                 handsets.toml — diagnostics from the same
@@ -813,7 +823,12 @@ func runRotate(args []string) int {
 	fs := flag.NewFlagSet("rotate", flag.ExitOnError)
 	pathFlag := fs.String("policy", "", "policy file (default $POLICY_PATH or ./policy.toml)")
 	handsetsFlag := fs.String("handsets", "", "handsets file (default $HANDSETS_PATH or ./handsets.toml)")
+	phones := fs.Bool("phones", false, "rotate handset SIP passwords in .env instead of PINs; ids narrow it")
+	envFlag := fs.String("env", "./.env", "secrets file, for --phones")
 	_ = fs.Parse(args)
+	if *phones {
+		return runRotatePhones(handsetsPathArg(*handsetsFlag), *envFlag, fs.Args())
+	}
 	path := policyPathArg(*pathFlag)
 	labels := fs.Args()
 
@@ -841,6 +856,55 @@ func runRotate(args []string) int {
 	return 0
 }
 
+// runRotatePhones is `doorman rotate --phones [id…]`: a fresh SIP password
+// for every registering handset (or the named ones) written into .env, and
+// nothing printed but the count — the phone fetches its new password through
+// `doorman provision notify`, so no human ever needs to see it.
+func runRotatePhones(handsetsPath, envPath string, ids []string) int {
+	handsets, _, err := policy.LoadHandsets(handsetsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 1
+	}
+	want := map[string]bool{}
+	for _, id := range ids {
+		want[id] = true
+	}
+	narrowed := len(want) > 0
+	var keys, chosen []string
+	for _, h := range handsets {
+		if h.PasswordEnv == "" || (narrowed && !want[h.ID]) {
+			continue
+		}
+		keys = append(keys, h.PasswordEnv)
+		chosen = append(chosen, h.ID)
+		delete(want, h.ID)
+	}
+	for id := range want {
+		fmt.Fprintf(os.Stderr, "✗ %q is not a registering handset in %s\n", id, handsetsPath)
+		return 1
+	}
+	if len(keys) == 0 {
+		fmt.Fprintf(os.Stderr, "✗ no handset in %s registers with a password_env\n", handsetsPath)
+		return 1
+	}
+	if err := setup.RotateSecrets(envPath, keys, func() (string, error) { return setup.Secret(18) }); err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 1
+	}
+	fmt.Printf("✓ rotated %d handset password(s) in %s: %s\n\n", len(keys), envPath, strings.Join(chosen, ", "))
+	fmt.Println("The phones are still registered on the old passwords, and Asterisk still")
+	fmt.Println("accepts them until the new config is installed. In this order:")
+	fmt.Println()
+	fmt.Println("  doorman render                      # new passwords into the generated files")
+	fmt.Println("  (install and `pjsip reload` as render prints)")
+	fmt.Printf("  doorman provision notify %s   # each phone fetches and re-registers\n", strings.Join(chosen, " "))
+	fmt.Println()
+	fmt.Println("A phone that is off right now fetches its new password the next time it")
+	fmt.Println("boots inside a window — `doorman provision <id>` opens one.")
+	return 0
+}
+
 // ── doorman render ───────────────────────────────────────────────────────
 
 func runRender(args []string) int {
@@ -848,6 +912,7 @@ func runRender(args []string) int {
 	handsetsFlag := fs.String("handsets", "", "inventory file (default $HANDSETS_PATH or ./handsets.toml)")
 	policyFlag := fs.String("policy", "", "policy file, for outbound caller ID (default $POLICY_PATH or ./policy.toml)")
 	trunksFlag := fs.String("trunks", "", "provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)")
+	contactsFlag := fs.String("contacts", "", "address-book inventory, optional, for phone books (default $CONTACTS_PATH or ./contacts.toml)")
 	outFlag := fs.String("out", "./asterisk/generated", "output directory")
 	envFlag := fs.String("env", "./.env", "secrets file for handset and trunk passwords")
 	_ = fs.Parse(args)
@@ -957,6 +1022,30 @@ func runRender(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return 1
+	}
+	// Each phone's directory beside its configuration, from the same three
+	// files the daemon reads. Refused, not skipped, when a handset names a
+	// book that does not exist: a phone quietly showing nothing is the
+	// failure the inventory exists to prevent.
+	if len(prov.Phones) > 0 {
+		books, err := loadBooks(bookPaths{handsets: handsetsPath, policy: policyPathArg(*policyFlag),
+			contacts: contactsPathArg(*contactsFlag), countryCode: defaultCountryCode()})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "✗ phone books: %v\n", err)
+			return 1
+		}
+		byID := map[string]policy.Handset{}
+		for _, h := range handsets {
+			byID[h.ID] = h
+		}
+		for _, ph := range prov.Phones {
+			body, err := renderBooks(byID[ph.ID], ph.Model, books)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+				return 1
+			}
+			prov.Files[provision.PhonebookFileName(ph.ID)] = body
+		}
 	}
 	provDir := filepath.Join(*outFlag, "provisioning")
 	if len(prov.Files) > 0 {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
@@ -51,8 +52,12 @@ const (
 )
 
 func runProvision(args []string) int {
-	if len(args) > 0 && args[0] == "notify" {
-		return runProvisionNotify(args[1:])
+	if len(args) > 0 && args[0] == "directory" {
+		return runProvisionDirectory(args[1:])
+	}
+	notify := len(args) > 0 && args[0] == "notify"
+	if notify {
+		args = args[1:]
 	}
 	fs := flag.NewFlagSet("provision", flag.ExitOnError)
 	handsetsFlag := fs.String("handsets", "", "inventory file (default $HANDSETS_PATH or ./handsets.toml)")
@@ -104,7 +109,7 @@ func runProvision(args []string) int {
 	reader := provisionARIReader(ctx, env)
 
 	// The inventory view.
-	if fs.NArg() == 0 && !*all && !*exportCert {
+	if fs.NArg() == 0 && !*all && !*exportCert && !notify {
 		srv, err := provserve.New(provserve.Options{Dir: provDir, StateDir: stateDir, Phones: built.Phones, Address: address})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
@@ -185,7 +190,33 @@ func runProvision(args []string) int {
 		events: events, out: os.Stdout,
 		listen: func(ctx context.Context) error { return srv.ListenAndServe(ctx, window) },
 	}
+	if notify {
+		if *all && len(named) == 0 {
+			fmt.Fprintln(os.Stderr, "✗ nothing to notify")
+			return provisionExitUsage
+		}
+		session.notify = asteriskNotify
+	}
 	return session.run(ctx)
+}
+
+// asteriskNotify tells a registered phone to fetch its configuration again,
+// through the Asterisk console — there is no ARI call for a NOTIFY, and the
+// console is already how the runbook reloads. Needs the pjsip_notify.conf
+// this repo ships, which defines check-sync.
+func asteriskNotify(id string) (string, error) {
+	out, err := exec.Command("asterisk", "-rx", "pjsip send notify check-sync endpoint "+id).CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if err != nil {
+		if text == "" {
+			text = err.Error()
+		}
+		return text, fmt.Errorf("asterisk -rx failed — run as a user in the asterisk group, or with sudo: %s", text)
+	}
+	if strings.Contains(text, "Unable to find") || strings.Contains(text, "not found") {
+		return text, errors.New(text)
+	}
+	return text, nil
 }
 
 // provisionStateDir is where the certificate and first-contact records
@@ -334,6 +365,10 @@ func modelShort(id string) string {
 type provisionSession struct {
 	phones []provision.Phone
 	server *provserve.Server
+	// notify, when set, is sent to each phone once the window is open: the
+	// re-provisioning path, where the phone is already registered and needs
+	// telling that its configuration changed.
+	notify func(id string) (string, error)
 	reader endpointReader // nil: fetch-only watch
 	window time.Duration  // 0: until cancelled
 	poll   time.Duration
@@ -366,6 +401,19 @@ func (s *provisionSession) run(ctx context.Context) int {
 
 	listenErr := make(chan error, 1)
 	go func() { listenErr <- s.listen(ctx) }()
+
+	if s.notify != nil {
+		// The listener binds before the phone can possibly answer a NOTIFY,
+		// but give it the head start anyway.
+		time.Sleep(200 * time.Millisecond)
+		for _, p := range s.phones {
+			if _, err := s.notify(p.ID); err != nil {
+				fmt.Fprintf(s.out, "  %s  %-10s notify failed: %v\n", time.Now().Format("15:04:05"), p.ID, err)
+				continue
+			}
+			fmt.Fprintf(s.out, "  %s  %-10s sent check-sync — the phone should fetch within seconds\n", time.Now().Format("15:04:05"), p.ID)
+		}
+	}
 
 	progress := map[string]*phoneProgress{}
 	for _, p := range s.phones {
@@ -501,10 +549,88 @@ func joinIDs(phones []provision.Phone) string {
 	return strings.Join(ids, ", ")
 }
 
-var errNotImplemented = errors.New("not implemented")
+// ── the directory ────────────────────────────────────────────────────────
 
-// runProvisionNotify is M4: tell registered phones to re-fetch.
-func runProvisionNotify(args []string) int {
-	fmt.Fprintf(os.Stderr, "✗ doorman provision notify: %v\n", errNotImplemented)
-	return provisionExitUsage
+// runProvisionDirectory is the always-on process: phone books over HTTPS
+// with each phone's credential, one port above the window, and never a
+// configuration. It re-reads the inventory, the policy and the contacts
+// when they change, so a name added to [[people]] is on every phone at its
+// next poll with no render and no session. With no PROVISION_ADDRESS it
+// exits 0 — a house of hand-configured phones has nothing to serve.
+func runProvisionDirectory(args []string) int {
+	fs := flag.NewFlagSet("provision directory", flag.ExitOnError)
+	handsetsFlag := fs.String("handsets", "", "inventory file (default $HANDSETS_PATH or ./handsets.toml)")
+	policyFlag := fs.String("policy", "", "policy file, for [[people]] (default $POLICY_PATH or ./policy.toml)")
+	contactsFlag := fs.String("contacts", "", "address-book inventory, optional (default $CONTACTS_PATH or ./contacts.toml)")
+	envFlag := fs.String("env", "./.env", "secrets file")
+	stateFlag := fs.String("state", "", "certificate directory (default $XDG_STATE_HOME/doorman/provision)")
+	_ = fs.Parse(args)
+
+	env := secretLookup(*envFlag)
+	if raw, ok := env("PROVISION_ADDRESS"); !ok || strings.TrimSpace(raw) == "" {
+		fmt.Println("PROVISION_ADDRESS is not set: no phone fetches a directory from this box, so there is none to serve.")
+		return 0
+	}
+	paths := bookPaths{handsets: handsetsPathArg(*handsetsFlag), policy: policyPathArg(*policyFlag),
+		contacts: contactsPathArg(*contactsFlag), countryCode: defaultCountryCode()}
+	handsets, _, err := policy.LoadHandsets(paths.handsets)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return provisionExitUsage
+	}
+	built, err := provision.BuildAll(handsets, provision.Env(env), hostTimezone())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return provisionExitUsage
+	}
+	if len(built.Phones) == 0 {
+		fmt.Println("No handset carries a mac and model, so no phone polls a directory. Nothing to serve.")
+		return 0
+	}
+	cache := &bookCache{paths: paths}
+	if _, err := cache.current(); err != nil {
+		fmt.Fprintf(os.Stderr, "✗ phone books: %v\n", err)
+		return provisionExitUsage
+	}
+	byID := map[string]policy.Handset{}
+	for _, h := range handsets {
+		byID[h.ID] = h
+	}
+	models := map[string]provision.Model{}
+	for _, p := range built.Phones {
+		models[p.ID] = p.Model
+	}
+	address := built.Phones[0].Address
+	address.Port = address.DirectoryPort()
+	srv, err := provserve.New(provserve.Options{
+		StateDir: provisionStateDir(*stateFlag), Phones: built.Phones, Address: address, Directory: true,
+		Phonebook: func(id string) ([]byte, error) {
+			books, err := cache.current()
+			if err != nil {
+				return nil, err
+			}
+			return renderBooks(byID[id], models[id], books)
+		},
+		OnEvent: func(e provserve.Event) {
+			// Journal lines: a handset id and an address, never a name.
+			switch e.Kind {
+			case "phonebook":
+				fmt.Printf("%s phonebook %s from %s\n", e.Time.Format(time.RFC3339), e.Handset, e.Remote)
+			case "refused", "error":
+				fmt.Printf("%s %s %s\n", e.Time.Format(time.RFC3339), e.Kind, e.Detail)
+			}
+		},
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return provisionExitUsage
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	fmt.Printf("directory: serving %d phone book(s) on https://%s/prov/<id>/phonebook.xml\n", len(built.Phones), address.HostPort())
+	if err := srv.ListenAndServe(ctx, 0); err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 1
+	}
+	return 0
 }

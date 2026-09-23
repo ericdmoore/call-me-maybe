@@ -327,3 +327,44 @@ func TestNothingUnderInternalImportsTheServingPackage(t *testing.T) {
 	}
 	walk(root)
 }
+
+// Re-provisioning: the NOTIFY goes out once the window is open, each phone
+// is named, and a phone that fetches afterwards counts as done.
+func TestNotifySessionSendsCheckSyncThenWatchesTheFetch(t *testing.T) {
+	h := newSession(t, []string{"kitchen"}, 3*time.Second)
+	var notified []string
+	h.session.notify = func(id string) (string, error) {
+		notified = append(notified, id)
+		go func() {
+			time.Sleep(30 * time.Millisecond)
+			req, _ := http.NewRequest(http.MethodGet, h.url+"/prov/cfgec74d788a254.xml", nil)
+			req.SetBasicAuth("kitchen", "prov-k")
+			resp, err := http.DefaultClient.Do(req)
+			if err == nil {
+				resp.Body.Close()
+			}
+			h.feed.set("kitchen", true)
+		}()
+		return "Sending NOTIFY of type 'check-sync' to endpoint kitchen", nil
+	}
+	if code := h.session.run(context.Background()); code != 0 {
+		t.Fatalf("exit = %d\n%s", code, h.out.String())
+	}
+	if len(notified) != 1 || notified[0] != "kitchen" {
+		t.Fatalf("notified = %v", notified)
+	}
+	if !strings.Contains(h.out.String(), "sent check-sync") {
+		t.Fatalf("should report the NOTIFY:\n%s", h.out.String())
+	}
+}
+
+func TestNotifyFailureIsReportedAndTheWindowStaysOpen(t *testing.T) {
+	h := newSession(t, []string{"kitchen"}, 300*time.Millisecond)
+	h.session.notify = func(id string) (string, error) { return "", context.DeadlineExceeded }
+	if code := h.session.run(context.Background()); code != provisionExitMissing {
+		t.Fatalf("exit = %d\n%s", code, h.out.String())
+	}
+	if !strings.Contains(h.out.String(), "notify failed") {
+		t.Fatalf("the failure must be visible:\n%s", h.out.String())
+	}
+}

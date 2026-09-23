@@ -1062,6 +1062,23 @@ func (p *Policy) Extensions() []ResolvedExtension {
 }
 
 func (p *Policy) AllowListCount() int { return len(p.allow) }
+
+// Callers is the allow-list as people: every [[people]] number with its
+// name, sorted by name then number, for a phone's directory. Caller data —
+// it goes into a phonebook file, never a log line.
+func (p *Policy) Callers() []KnownCaller {
+	out := make([]KnownCaller, 0, len(p.allow))
+	for _, c := range p.allow {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].E164 < out[j].E164
+	})
+	return out
+}
 func (p *Policy) ExtensionCount() int { return len(p.exts) }
 
 // CallerIDFormat is the resolved format string — the configured one, or

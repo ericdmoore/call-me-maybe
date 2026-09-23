@@ -56,6 +56,14 @@ type Options struct {
 	Address provision.Address
 	// OnEvent receives every event; nil means silent.
 	OnEvent func(Event)
+	// Directory makes this the always-on directory: phonebook paths only,
+	// every configuration path 404, no first contact ever. It is a
+	// different process with a different lifetime from the window.
+	Directory bool
+	// Phonebook, when set, renders a handset's directory on demand instead
+	// of reading <id>-phonebook.xml from Dir — so a name added to
+	// [[people]] is on the phones at their next poll, with no render run.
+	Phonebook func(id string) ([]byte, error)
 }
 
 // Server is one provisioning window.
@@ -69,8 +77,8 @@ type Server struct {
 
 // New validates the options and loads first-contact state.
 func New(opts Options) (*Server, error) {
-	if opts.Dir == "" || opts.StateDir == "" {
-		return nil, errors.New("serve: Dir and StateDir are required")
+	if opts.StateDir == "" || (opts.Dir == "" && opts.Phonebook == nil) {
+		return nil, errors.New("serve: StateDir is required, and Dir unless Phonebook renders on demand")
 	}
 	if err := os.MkdirAll(opts.StateDir, 0o700); err != nil {
 		return nil, err
@@ -166,6 +174,15 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	// the operator opened; every later fetch presents the credential the
 	// first one delivered.
 	if strings.HasPrefix(rest, "cfg") && strings.HasSuffix(rest, ".xml") && !strings.Contains(rest, "/") {
+		if s.opts.Directory {
+			// The directory never hands out a configuration, whoever asks:
+			// a listed phone gets 404 here exactly like a stranger, and the
+			// event says so, because a phone pointed at the wrong port is a
+			// mistake worth a line.
+			s.emit(Event{Kind: "refused", Remote: remote, Detail: fmt.Sprintf("a phone at %s asked the directory for %s — configuration is only served by `doorman provision <id>`", remote, rest)})
+			http.NotFound(w, r)
+			return
+		}
 		p, ok := s.byFile[rest]
 		if !ok {
 			mac := strings.TrimSuffix(strings.TrimPrefix(rest, "cfg"), ".xml")
@@ -208,7 +225,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(rest, ".xml") && !strings.Contains(rest, "/") {
 		id := strings.TrimSuffix(rest, ".xml")
 		p, ok := s.byID[id]
-		if !ok {
+		if !ok || s.opts.Directory {
 			http.NotFound(w, r)
 			return
 		}
@@ -244,8 +261,15 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		body, err := os.ReadFile(filepath.Join(s.opts.Dir, p.ID+"-phonebook.xml"))
+		var body []byte
+		var err error
+		if s.opts.Phonebook != nil {
+			body, err = s.opts.Phonebook(p.ID)
+		} else {
+			body, err = os.ReadFile(filepath.Join(s.opts.Dir, p.ID+"-phonebook.xml"))
+		}
 		if err != nil {
+			s.emit(Event{Kind: "error", Handset: p.ID, MAC: p.MAC, Detail: "phonebook: " + err.Error()})
 			http.NotFound(w, r)
 			return
 		}

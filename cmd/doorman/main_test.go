@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -656,5 +657,67 @@ afterhours = "school-night"
 	got := describeAfterhours(e, time.Now())
 	if !strings.Contains(got, "school-night") || !strings.Contains(got, "switched off") {
 		t.Errorf("afterhours = %q, want the disabled schedule still named", got)
+	}
+}
+
+// `doorman rotate --phones`: new SIP passwords land in .env, none are
+// printed, and the next steps are named.
+func TestRotatePhonesWritesNewPasswordsAndPrintsNone(t *testing.T) {
+	dir := t.TempDir()
+	handsets := filepath.Join(dir, "handsets.toml")
+	env := filepath.Join(dir, ".env")
+	if err := os.WriteFile(handsets, []byte(`
+[[handsets]]
+id = "kitchen"
+label = "Kitchen"
+endpoint = "PJSIP/kitchen"
+number = 101
+password_env = "HANDSET_KITCHEN_PASSWORD"
+
+[[handsets]]
+id = "theater"
+label = "Theater"
+endpoint = "PJSIP/theater"
+number = 102
+password_env = "HANDSET_THEATER_PASSWORD"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(env, []byte("HANDSET_KITCHEN_PASSWORD=old-kitchen\nHANDSET_THEATER_PASSWORD=old-theater\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var code int
+	out := capture(t, func() { code = runRotate([]string{"-phones", "-handsets", handsets, "-env", env, "kitchen"}) })
+	if code != 0 {
+		t.Fatalf("exit = %d\n%s", code, out)
+	}
+	got, _ := os.ReadFile(env)
+	if strings.Contains(string(got), "old-kitchen") || !strings.Contains(string(got), "old-theater") {
+		t.Fatalf("only kitchen should have rotated:\n%s", got)
+	}
+	newValue := strings.TrimPrefix(strings.Split(string(got), "\n")[0], "HANDSET_KITCHEN_PASSWORD=")
+	if strings.Contains(out, newValue) {
+		t.Fatalf("the new SIP password was printed:\n%s", out)
+	}
+	if !strings.Contains(out, "rotated 1 handset password(s)") || !strings.Contains(out, "doorman provision notify kitchen") {
+		t.Fatalf("should count and name the next step:\n%s", out)
+	}
+}
+
+func TestRotatePhonesRefusesAnUnknownHandset(t *testing.T) {
+	dir := t.TempDir()
+	handsets := filepath.Join(dir, "handsets.toml")
+	if err := os.WriteFile(handsets, []byte("[[handsets]]\nid = \"kitchen\"\nlabel = \"Kitchen\"\nendpoint = \"PJSIP/kitchen\"\nnumber = 101\npassword_env = \"HANDSET_KITCHEN_PASSWORD\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := filepath.Join(dir, ".env")
+	if err := os.WriteFile(env, []byte("HANDSET_KITCHEN_PASSWORD=old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := runRotate([]string{"-phones", "-handsets", handsets, "-env", env, "porch"}); code == 0 {
+		t.Fatal("an unknown id must be refused before anything is rotated")
+	}
+	if got, _ := os.ReadFile(env); string(got) != "HANDSET_KITCHEN_PASSWORD=old\n" {
+		t.Fatalf(".env must be untouched:\n%s", got)
 	}
 }

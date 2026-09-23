@@ -59,7 +59,7 @@ func TestGrandstreamFilePinsTheInvariants(t *testing.T) {
 		"P73": "0", "P74": "1", "P75": "0", // RFC 2833 only — invariant 9's other half
 		"P57": "0", "P58": "9", // ulaw then g722
 		"P237": "192.168.7.133:8443/prov", "P212": "2", "P1359": "kitchen", "P1360": "prov-secret", "P194": "0",
-		"P330": "192.168.7.133:8443/prov/kitchen", "P331": "3", "P332": "60",
+		"P330": "192.168.7.133:8444/prov/kitchen", "P331": "3", "P332": "60",
 		"P246": "CST6CDT,M3.2.0,M11.1.0",
 	}
 	for k, w := range want {
