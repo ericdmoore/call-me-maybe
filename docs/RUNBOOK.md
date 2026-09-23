@@ -510,6 +510,7 @@ valid **transfer target**.
 | 701–720 | Pick up a parked call from any handset |
 | *4 | **Outbound console**: call as another one of your numbers. Only interesting with more than one line, and it refuses 911 — see "Outbound caller ID" below. This is the one that goes through doorman |
 | *97 | Check **voicemail** (prompts for mailbox + password) |
+| *6 + digits | **The hunt** (optional, commented out by default): plays the greeting of the mailbox with that number and hangs up — a scavenger hunt whose answers are what you dial. `*6X.` is reserved for it whether or not you play. See `HUNT.md` |
 | 9196 | Echo test — your voice comes straight back; isolates RTP problems |
 | 9197 | Speaking clock — proves audio path without a second person |
 | 555 | **Home Assistant Assist** (optional, disabled by default) |

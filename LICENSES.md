@@ -15,6 +15,7 @@ author chooses.
 | Pack format specification | `docs/PACKS.md` | CC0 1.0 — implement it freely, no attribution needed |
 | Bundled prompt text | `prompts/manifest.json` | CC BY-SA 4.0 |
 | Bundled prompt audio | `prompts/build/*.wav` (generated) | CC BY-SA 4.0 |
+| The hunt's card set | `docs/hunt/` | CC BY-SA 4.0 — content, not documentation; archetypes only, no audio |
 | Third-party packs | not in this repository | whatever their author says |
 
 When a file's licence is unclear, the repository-root `LICENSE` (Apache 2.0)

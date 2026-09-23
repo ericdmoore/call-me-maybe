@@ -448,6 +448,9 @@ cent.</sub>
 
 `CLAUDE.md` is loaded automatically by Claude Code and carries the invariants —
 the things that, if broken, fail in ways that look like working software.
+[`docs/HUNT.md`](docs/HUNT.md) is the verification ladder as a scavenger hunt
+a child runs with a cordless handset — every feature exercised by Saturday
+dinner, prize: extra rice.
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md) has provisioning, a bottom-up verification
 ladder, a symptom-to-cause troubleshooting table, and the raw ARI calls for
 probing by hand. [`docs/TASKS.md`](docs/TASKS.md) is the backlog with acceptance

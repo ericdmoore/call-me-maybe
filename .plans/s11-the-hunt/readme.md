@@ -1,7 +1,14 @@
 # s11 · The hunt — the verification ladder, played by children
 
-**Status:** planned (2026-09-21, late). Drafted the night the first customer's
-phone rang in both directions. The idea arrived as "a scavenger hunt that hits
+**Status:** M1 and M2 shipped 2026-09-23 (v0.6.2); M3, the rehearsal, waits
+for a Saturday, two handsets and rice. As built, `*6` plays the mailbox's
+greeting *file* directly (`Playback` of `unavail`) rather than running
+`VoiceMail()`, so the clue is never followed by a beep and nothing is ever
+recorded, and a wrong answer hears the stock "that is not a valid extension"
+prompt — four commented lines instead of three. The kit is `docs/HUNT.md`,
+`docs/hunt/cards.md` (CC BY-SA, listed in `LICENSES.md`), and
+<https://callmemaybe.cc/hunt/>. Drafted 2026-09-21, late, the night the first
+customer's phone rang in both directions. The idea arrived as "a scavenger hunt that hits
 every checklist feature, ending with dialling 500 to tell the house you won,"
 and the prize was settled before the design was: extra rice at dinner.
 
@@ -130,7 +137,7 @@ handhelds were chosen, and the hunt is the first thing that uses it.
 
 ## Milestones and acceptance criteria
 
-### M1 · The line
+### M1 · The line — **done**
 
 The commented `*6X.` block in `asterisk/extensions.conf`; a commented hunt
 section in `voicemail.conf.example` (mailboxes named for answers, random PINs,
@@ -142,7 +149,7 @@ greeting through `*97`, dialling `*66` from a handset plays it and hangs up,
 `*67` says there is no such mailbox, `*97` still reaches the family mailbox,
 `500`/`600`/`101` are untouched, and `smoke.sh` is unchanged and green.
 
-### M2 · The kit
+### M2 · The kit — **done**
 
 `docs/HUNT.md`: how to set it up in fifteen minutes (uncomment, add mailboxes,
 record greetings, hide envelopes), the ladder table above with blanks for the

@@ -251,6 +251,9 @@ If inbound rings nothing, the usual cause is DTMF: **`dtmf_mode=rfc4733` on the
 trunk *and* every handset.** Without it the lobby is deaf and every stranger is
 dismissed, with no other symptom.
 
+Or play it: `docs/HUNT.md` turns this same list into a scavenger hunt a child
+runs with a cordless handset, and the prize is extra rice.
+
 ---
 
 ## 9 · Before you rely on it

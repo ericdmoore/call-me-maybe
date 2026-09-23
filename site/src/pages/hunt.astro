@@ -1,0 +1,106 @@
+---
+import Base from '../layouts/Base.astro';
+import Divider from '../components/Divider.astro';
+---
+
+<Base
+  title="The hunt — Call Me Maybe"
+  description="A scavenger hunt that walks every feature of the house phone, played by a child with a cordless handset and won by paging the whole house. The prize is extra rice."
+>
+  <header class="lobby" style="padding-block:clamp(2.5rem,6vw,4rem) 0;">
+    <div class="wrap">
+      <p class="eyebrow">Saturday afternoon</p>
+      <h1 class="wordmark" style="font-size:clamp(2rem,6vw,3.6rem);">The hunt</h1>
+      <p class="tagline">
+        You installed a phone system this morning. Here is how the family finds
+        out what it does without anybody reading a runbook.
+      </p>
+      <Divider />
+    </div>
+  </header>
+
+  <section class="panel">
+    <div class="wrap">
+      <div class="prose">
+        <p>
+          The house phone rings. Dad is calling from the driveway, and his name
+          is on the little screen, because he is on the list. &ldquo;Answer it
+          in the kitchen,&rdquo; he says, and hangs up. On the kitchen table
+          there is an envelope.
+        </p>
+        <p>
+          <em>How many chairs are there at the table where this family
+          eats?</em> Six. She dials <code>*6</code> and then <code>6</code>, and
+          the phone speaks to her in her father&rsquo;s voice: take this phone to
+          the theater, call <code>101</code>, and ask for the password. Say
+          please.
+        </p>
+        <p>
+          Her brother is in the theater with the other handset. He has the
+          password and will not say it until she calls him on the phone, which is
+          the rule, and which is the point. Under a seat, another envelope:
+          everyone dial <code>600</code>. Three handsets land in the same
+          bridge and they say the password together, badly, and laugh.
+        </p>
+        <p>
+          The next clue sends her to call Grandma, who is a name on the screen
+          now and who has been briefed. Grandma knows how many stairs there are.
+          At the top of the stairs there is an envelope that asks her to count
+          them anyway. <code>*6</code>, fourteen. Her father&rsquo;s voice again:
+          you have won. Dial <code>500</code> and tell the whole house.
+        </p>
+        <p>
+          Every phone in the house answers itself on speaker at once, and she
+          tells the whole house. At dinner there is an envelope under her plate.
+          The prize is extra rice.
+        </p>
+
+        <h2>What just happened</h2>
+        <p>
+          Every rung of the verification ladder &mdash; inbound, the allow-list,
+          handset to handset, the conference bridge, an outside call, paging
+          &mdash; got exercised by a child holding a cordless handset. The
+          operator learned the same things a terminal would have told them, and
+          the family learned the phone.
+        </p>
+        <p>
+          There is no game engine. The mechanism is four commented-out lines of
+          dialplan: <code>*6</code> followed by a number plays the greeting of
+          the mailbox with that number. A parent records each clue as a greeting
+          from any handset. A wrong answer is a mailbox with no greeting, and the
+          phone says so. Progress lives in the envelopes, which is where a
+          scavenger hunt keeps it anyway.
+        </p>
+        <p>
+          The kit ships no audio. Every family records its own clues, in its own
+          voices, because the clue that sends a child to the theater should sound
+          like the person who hid it there.
+        </p>
+
+        <h2>One rule</h2>
+        <p>
+          <strong>Children never hold a credential.</strong> The answers are counts
+          of things in the house, never a PIN and never a password the phone
+          really uses. A player only ever dials <code>*6</code> and a number.
+        </p>
+
+        <h2>Run it in your house</h2>
+        <ol>
+          <li>Uncomment the hunt lines in <code>extensions.conf</code> and add a
+            mailbox per clue, named for its answer.</li>
+          <li>Record each clue as that mailbox&rsquo;s greeting from any handset:
+            <code>*97</code>, the mailbox, its PIN, <code>0</code>, <code>1</code>.</li>
+          <li>Print the cards, fill in your house&rsquo;s answers, hide the
+            envelopes, and call the house.</li>
+        </ol>
+        <p>
+          The full guide is
+          <a href="https://github.com/ericdmoore/call-me-maybe/blob/main/docs/HUNT.md">docs/HUNT.md</a>,
+          and the printable cards are
+          <a href="https://github.com/ericdmoore/call-me-maybe/blob/main/docs/hunt/cards.md">docs/hunt/cards.md</a>
+          (CC BY-SA 4.0, archetypes only, blanks for your own).
+        </p>
+      </div>
+    </div>
+  </section>
+</Base>
