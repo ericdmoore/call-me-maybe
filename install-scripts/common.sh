@@ -125,9 +125,10 @@ prepare() {
    require_version "$(asterisk -V | awk '{print $2}')"
   fi
   # Catch conflicts before spending time installing packages.
-  for target in /opt/call-me-maybe/bin/doorman /usr/local/bin/doorman /etc/systemd/system/doorman.service; do
+  for target in /opt/call-me-maybe/bin/doorman /usr/local/bin/doorman /etc/systemd/system/doorman.service /etc/systemd/system/doorman-directory.service; do
    source=$binary
    [ "$target" != /etc/systemd/system/doorman.service ] || source=$repo/scripts/doorman.service
+   [ "$target" != /etc/systemd/system/doorman-directory.service ] || source=$repo/scripts/doorman-directory.service
    if [ -e "$target" ] || [ -L "$target" ]; then
     cmp -s "$source" "$target" || fail "$target differs; use the documented upgrade procedure."
    fi
@@ -157,7 +158,7 @@ prepare() {
  run rsync -rt --ignore-existing --include='*/' --include='*.toml' --exclude='*' --chmod=D755,F644 "$repo/templates/" /opt/call-me-maybe/templates/
  run install -d -m 0755 /opt/call-me-maybe/asterisk /opt/call-me-maybe/scripts
  run install -d -o doorman -g doorman -m 0700 /opt/call-me-maybe/asterisk/generated
- for name in ari.conf.example pjsip.conf.example voicemail.conf.example extensions.conf http.conf rtp.conf musiconhold.conf res_parking.conf cel.conf cel_sqlite3_custom.conf; do
+ for name in ari.conf.example pjsip.conf.example voicemail.conf.example extensions.conf http.conf rtp.conf musiconhold.conf res_parking.conf cel.conf cel_sqlite3_custom.conf pjsip_notify.conf; do
   install_once "$repo/asterisk/$name" "/opt/call-me-maybe/asterisk/$name" 0644
  done
  install_once "$repo/install-scripts/README.md" /opt/call-me-maybe/docs/INSTALL-LINUX.md 0644
@@ -170,7 +171,8 @@ prepare() {
  run install -d -m 0755 /usr/local/bin
  install_once "$binary" /usr/local/bin/doorman 0755
  install_once "$repo/scripts/doorman.service" /etc/systemd/system/doorman.service 0644
- run install -d -o doorman -g doorman -m 0700 /var/lib/doorman /var/lib/doorman/journal
+ install_once "$repo/scripts/doorman-directory.service" /etc/systemd/system/doorman-directory.service 0644
+ run install -d -o doorman -g doorman -m 0700 /var/lib/doorman /var/lib/doorman/journal /var/lib/doorman/provision
  run systemctl daemon-reload
  cat <<'EOF_NEXT'
 Host preparation complete. No doorman service was started.

@@ -160,6 +160,10 @@ func TestEnvFileSubstitutesAndPrunes(t *testing.T) {
 	if !strings.Contains(out, "HANDSET_KITCHEN_PASSWORD="+p.HandsetPasswords["kitchen"]) {
 		t.Error("the kitchen password was not substituted")
 	}
+	if !strings.Contains(out, "HANDSET_KITCHEN_ADMIN_PASSWORD="+p.HandsetAdminPasswords["kitchen"]) ||
+		!strings.Contains(out, "HANDSET_KITCHEN_PROVISION_PASSWORD="+p.HandsetProvisionPasswords["kitchen"]) {
+		t.Error("the provisioning secrets should be written beside the SIP password")
+	}
 	if strings.Contains(out, "HANDSET_OFFICE_PASSWORD=") {
 		t.Error("an empty variable for a handset that does not exist was left behind")
 	}
@@ -202,5 +206,20 @@ func TestWriteFileIsPrivateAndBackupPreserves(t *testing.T) {
 	// Nothing to back up is not an error.
 	if b, err := Backup(filepath.Join(dir, "absent.toml")); err != nil || b != "" {
 		t.Errorf("backup of a missing file: %q %v", b, err)
+	}
+}
+
+func TestAdminSecretSatisfiesPhonePasswordRules(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		s, err := AdminSecret()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.ContainsAny(s, "abcdefghijklmnopqrstuvwxyz") || !strings.ContainsAny(s, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") || !strings.ContainsAny(s, "0123456789") {
+			t.Fatalf("AdminSecret %q lacks a class a phone's web UI insists on", s)
+		}
+	}
+	if AdminEnvVarFor("living-room") != "HANDSET_LIVING_ROOM_ADMIN_PASSWORD" || ProvisionEnvVarFor("living-room") != "HANDSET_LIVING_ROOM_PROVISION_PASSWORD" {
+		t.Error("env var naming")
 	}
 }

@@ -66,12 +66,30 @@
             "description": "Human name, shown in `doorman check` output.",
             "type": "string"
           },
+          "mac": {
+            "description": "The phone's hardware address, from the sticker under the battery or on the box. Any written form is accepted — aa:bb:cc:dd:ee:ff, AA-BB-CC-DD-EE-FF, aabbccddeeff — and normalised. With model, it lets `doorman render` write the phone's own configuration file and `doorman provision` hand it over, which is what turns adding a phone into two touches instead of a web form.",
+            "type": "string",
+            "pattern": "^[0-9A-Fa-f]{2}([:.\\- ]?[0-9A-Fa-f]{2}){5}$",
+            "x-rules": [
+              "Two handsets may not share a MAC.",
+              "mac and model travel together: set both or neither."
+            ]
+          },
           "mailbox": {
             "description": "Mailbox whose message-waiting lamp this phone follows.",
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9_-]*$",
             "x-cross-references": [
               "asterisk/voicemail.conf [household] context"
+            ]
+          },
+          "model": {
+            "description": "Which provisioning template the phone gets. `doorman provision --models` lists the known ids (grandstream-wp826, grandstream-grp2601p, …); `doorman check` refuses an unknown one with a suggestion.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "x-rules": [
+              "mac and model travel together: set both or neither.",
+              "A known model without a template yet is accepted; `doorman render` says so and the phone keeps the manual path."
             ]
           },
           "number": {
@@ -95,6 +113,22 @@
             "x-rules": [
               "Required by `doorman render`, which reports it as an error when missing.",
               "Names a variable; never put the password here."
+            ]
+          },
+          "phonebook": {
+            "description": "Which directories this phone shows: \"house\" (every handset with a number and the feature codes), \"people\" (policy.toml's [[people]]), or a contacts.toml source id — a whole address book, which is why it is opt-in per phone. Absent means house and people. A child's phone might be just [\"house\"].",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]*$"
+            },
+            "x-cross-references": [
+              "policy.toml [[people]]",
+              "contacts.toml [[sources]] id"
+            ],
+            "x-rules": [
+              "Entries may not repeat.",
+              "A contacts.toml source id is checked by `doorman check` against that file; the loader only checks the shape."
             ]
           }
         },

@@ -260,12 +260,16 @@ $ rm -rf /tmp/cmm-prompts
 ### Service
 
 ```bash
-$ sudo cp scripts/doorman.service /etc/systemd/system/
+$ sudo cp scripts/doorman.service scripts/doorman-directory.service /etc/systemd/system/
 $ sudo systemctl daemon-reload
-$ sudo systemctl enable --now doorman
+$ sudo systemctl enable --now doorman doorman-directory
 $ sudo systemctl status doorman
 $ journalctl -u doorman -f
 ```
+
+`doorman-directory` is the phones' directory (see "Add a handset"). With no
+`PROVISION_ADDRESS` in `.env` it exits 0 and stays quiet, so enabling it on a
+box with hand-configured phones is harmless.
 
 ---
 
@@ -632,18 +636,36 @@ error and tells you which key it should have been.
 
 ### Add a handset
 
-One file, one command — the render step replaces the old three-places-must-
-agree procedure:
+One block, one command, and the phone does the rest — nobody types a password
+or a phone number into a phone:
 
-1. Add a `[[handsets]]` block to `handsets.toml` (id, endpoint `PJSIP/<id>`,
-   number, page/mailbox as wanted) and its `HANDSET_*_PASSWORD` to `.env`.
-2. `./bin/doorman render`, copy the two generated files to `/etc/asterisk/`,
+1. Add a `[[handsets]]` block to `handsets.toml`: id, endpoint `PJSIP/<id>`,
+   number, page/mailbox as wanted, `password_env`, and — from the sticker on
+   the phone — `mac` and `model` (`doorman provision --models` lists the
+   ids). Add its three `HANDSET_<ID>_*PASSWORD` lines to `.env`, or let
+   `doorman init` generate them.
+2. `doorman render`, copy the generated Asterisk files to `/etc/asterisk/`,
    `pjsip reload` + `dialplan reload` (render prints the exact commands).
-3. Point the phone at the Pi with that username/password; confirm `Avail`
-   via `pjsip show contacts`.
+3. `doorman provision <id>`. It opens a 15-minute window and prints, for
+   that model, what to type on the phone: the config server path and
+   "HTTPS", or DHCP option 66 on a router that hands it out. The phone
+   fetches its configuration, registers, and the command exits 0 when it
+   has. A phone you forgot to list is refused, and the refusal prints the
+   MAC to paste.
 4. Reference the id from `policy.toml` ([house], a group, or an extension) —
    live within a second.
-5. `./bin/doorman check`
+5. `doorman check`. `doorman provision` with no arguments is the inventory
+   view: every phone, its file, and whether it is registered right now.
+
+A model without a template (`--models` says which) registers by hand: point
+the phone at the box with the id and its `HANDSET_<ID>_PASSWORD`, confirm
+`Avail` with `pjsip show contacts`.
+
+The phones' directory — the other rooms, the feature codes, and `[[people]]`
+— comes from `doorman-directory.service`, always on, read-only, one port above
+the provisioning window. A name added to `[[people]]` is on every phone at
+its next poll (hourly) with nothing rendered and no window opened. A handset's
+`phonebook` key narrows what it shows: `["house"]` for a child's room.
 
 ### Add a second number
 
@@ -1193,6 +1215,26 @@ The old PINs are dead the moment the reload lands, so hand the new ones out
 immediately. Rotate any PIN that has been spoken aloud to someone you would
 not add to the allow-list, and rotate everything if the bouncer logs show
 sustained probing.
+
+### Rotate handset passwords
+
+The SIP password every phone registers with, all of them or the named ones,
+with nobody walking to a phone:
+
+```bash
+$ sudo -u doorman doorman rotate --phones            # every registering handset
+$ sudo -u doorman doorman rotate --phones kitchen    # or one
+$ sudo -u doorman doorman render                     # then install + pjsip reload as it prints
+$ sudo -u doorman doorman provision notify kitchen   # each phone fetches and re-registers
+```
+
+Nothing prints the new passwords: `.env` is rewritten atomically beside a
+timestamped backup, and the phone fetches its own through `provision notify`,
+which opens the window, sends a `check-sync` NOTIFY through the Asterisk
+console (the shipped `pjsip_notify.conf` defines it), and watches the phone
+fetch and register. A phone that is off during the rotation fetches its new
+password the next time it boots inside a window — `doorman provision <id>`
+opens one.
 
 ### Rotate the ARI password
 

@@ -52,6 +52,8 @@ var sensitive = []string{
 	"password",
 	"passwd",
 	"token",
+	"phonebook",   // a directory is caller data: names beside numbers
+	"contactname", // and so is one entry of it
 }
 
 // narrowing names functions whose result is safe to log even when their input

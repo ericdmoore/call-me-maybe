@@ -27,6 +27,11 @@ doorman events --json     # durable event page; --after, --limit, --eventType
                           # reads internal public_events_v1; no public DB access
 doorman balance --json    # what is left on each prepaid trunk; exit 1 when any
                           # is under its threshold, so cron needs no wrapper
+doorman provision         # inventory view: every phone, its file, registered or not
+doorman provision <id>    # open a 15-minute HTTPS window, print what to type on
+                          # that phone, watch it fetch and register; exit 0 when it has
+doorman rotate --phones   # new handset SIP passwords into .env, never printed;
+                          # `provision notify` then hands each phone its own
 doorman help              # every subcommand
 ```
 
@@ -65,7 +70,7 @@ run. Only a strictly newer semantic version is advertised.
 Three files, three cadences, plus two optional inventories. Do not merge them; the split is deliberate.
 
 - **`.env`** — secrets and tuning. Changes rarely. Template: [examples/.env.example](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/.env.example)
-- **`handsets.toml`** — the hardware: what phones exist. Changes when hardware is bought. `doorman render` generates the per-handset Asterisk config from it, so the inventory and the dialplan cannot drift. Template: [examples/handsets.example.toml](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/handsets.example.toml)
+- **`handsets.toml`** — the hardware: what phones exist. Changes when hardware is bought. `doorman render` generates the per-handset Asterisk config from it, so the inventory and the dialplan cannot drift. A handset with `mac` and `model` (both or neither; `doorman provision --models` lists the ids) also gets its own phone configuration file rendered and handed over by `doorman provision`, and `phonebook` chooses which directories that phone shows — `house`, `people`, or a `contacts.toml` source id — defaulting to house and people, never a whole address book. The directory itself is served by `doorman-directory.service` (`doorman provision directory`): always on, read-only, one port above the provisioning window, each phone's own credential, re-read when `policy.toml` changes — and it never serves a configuration, which only an operator's `doorman provision <id>` window does. Template: [examples/handsets.example.toml](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/handsets.example.toml)
 - **`policy.toml`** — the rules: who gets in, what rings, when. Changes weekly and is safe to hand-edit; an invalid file is rejected on reload and the last good policy stays in service. Template: [examples/policy.example.toml](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/policy.example.toml)
 - **`trunks.toml`** — *optional* — the providers: where numbers come from. Changes when you buy a number somewhere new. Template: [examples/trunks.example.toml](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/trunks.example.toml)
 - **`contacts.toml`** — *optional* — the address books: which vCard exports to read. Changes when somebody new joins the household. Template: [examples/contacts.example.toml](https://github.com/ericdmoore/call-me-maybe/blob/main/examples/contacts.example.toml)

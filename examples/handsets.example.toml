@@ -20,6 +20,12 @@ number = 101                     # internal extension + BLF hint (100-199)
 page = true                      # rings on dial-500 page-all
 mailbox = "adults"               # MWI lamp follows this voicemail.conf box
 password_env = "HANDSET_KITCHEN_PASSWORD"
+# The two lines that let the phone configure itself (`doorman provision`):
+# the MAC from the sticker, in any written form, and which template it gets.
+# `doorman provision --models` lists the ids. Leave both out and the phone
+# is set up by hand, exactly as before.
+mac = "00:0B:82:12:34:56"        # a Grandstream OUI with a made-up tail; use the sticker
+model = "grandstream-wp826"
 
 [[handsets]]
 id = "living-room"
@@ -55,6 +61,9 @@ number = 105
 page = true
 mailbox = "kids"
 password_env = "HANDSET_KIDS_ROOM_PASSWORD"
+phonebook = ["house"]            # rooms and feature codes only — not the
+                                 # allow-list, and never a whole address book.
+                                 # Absent means ["house", "people"].
 
 # A pseudo-handset: any dialplan destination can be a policy target. No SIP
 # registration, so no number/password — render skips it, policy can dial it.

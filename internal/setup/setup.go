@@ -44,9 +44,14 @@ type Plan struct {
 	// Generated secrets. Never logged.
 	ARIPassword      string
 	HandsetPasswords map[string]string // handset id -> password
-	ExtensionPINs    map[string]string // handset id -> PIN
-	HousePIN         string
-	VoicemailPINs    map[string]string // mailbox -> PIN
+	// HandsetAdminPasswords and HandsetProvisionPasswords are the two
+	// per-phone secrets provisioning needs (s10): the phone's web-admin
+	// login, and the credential it presents to fetch its own configuration.
+	HandsetAdminPasswords     map[string]string
+	HandsetProvisionPasswords map[string]string
+	ExtensionPINs             map[string]string // handset id -> PIN
+	HousePIN                  string
+	VoicemailPINs             map[string]string // mailbox -> PIN
 
 	// Paths that will be written.
 	EnvPath      string
@@ -87,7 +92,26 @@ func Slug(name string) string {
 // EnvVarFor is the .env variable name holding a handset's SIP password.
 // handsets.toml stores this name, never the secret.
 func EnvVarFor(id string) string {
-	return "HANDSET_" + strings.ToUpper(strings.ReplaceAll(id, "-", "_")) + "_PASSWORD"
+	return "HANDSET_" + envID(id) + "_PASSWORD"
+}
+
+// AdminEnvVarFor names the handset's web-admin password — the one its own
+// web page asks for. Provisioning sets it so no phone on the LAN keeps its
+// factory login, and nobody ever types it: the first customer's afternoon
+// of typing one into the wrong .env line is why it is generated here.
+func AdminEnvVarFor(id string) string {
+	return "HANDSET_" + envID(id) + "_ADMIN_PASSWORD"
+}
+
+// ProvisionEnvVarFor names the credential a provisioned phone presents to
+// fetch its configuration after first contact (s10). Per device, so one
+// phone's secret is never another's.
+func ProvisionEnvVarFor(id string) string {
+	return "HANDSET_" + envID(id) + "_PROVISION_PASSWORD"
+}
+
+func envID(id string) string {
+	return strings.ToUpper(strings.ReplaceAll(id, "-", "_"))
 }
 
 // BuildPlan turns answers into a complete, valid configuration — including
@@ -98,13 +122,15 @@ func BuildPlan(rooms []string, paths Paths) (*Plan, error) {
 	}
 
 	p := &Plan{
-		HandsetPasswords: map[string]string{},
-		ExtensionPINs:    map[string]string{},
-		VoicemailPINs:    map[string]string{},
-		Mailbox:          "family",
-		EnvPath:          paths.Env,
-		PolicyPath:       paths.Policy,
-		HandsetsPath:     paths.Handsets,
+		HandsetPasswords:          map[string]string{},
+		HandsetAdminPasswords:     map[string]string{},
+		HandsetProvisionPasswords: map[string]string{},
+		ExtensionPINs:             map[string]string{},
+		VoicemailPINs:             map[string]string{},
+		Mailbox:                   "family",
+		EnvPath:                   paths.Env,
+		PolicyPath:                paths.Policy,
+		HandsetsPath:              paths.Handsets,
 	}
 
 	seen := map[string]bool{}
@@ -143,6 +169,12 @@ func BuildPlan(rooms []string, paths Paths) (*Plan, error) {
 		if p.HandsetPasswords[h.ID], err = Secret(18); err != nil {
 			return nil, err
 		}
+		if p.HandsetAdminPasswords[h.ID], err = AdminSecret(); err != nil {
+			return nil, err
+		}
+		if p.HandsetProvisionPasswords[h.ID], err = Secret(18); err != nil {
+			return nil, err
+		}
 		if p.ExtensionPINs[h.ID], err = PIN(6, taken); err != nil {
 			return nil, err
 		}
@@ -154,6 +186,32 @@ func BuildPlan(rooms []string, paths Paths) (*Plan, error) {
 		return nil, err
 	}
 	return p, nil
+}
+
+// AdminSecret is a Secret that also satisfies the password rules phone web
+// UIs enforce — a letter of each case and a digit — so a provisioned phone
+// never rejects the password doorman set for it. Drawn again until it does.
+func AdminSecret() (string, error) {
+	for {
+		s, err := Secret(16)
+		if err != nil {
+			return "", err
+		}
+		var lower, upper, digit bool
+		for _, r := range s {
+			switch {
+			case r >= 'a' && r <= 'z':
+				lower = true
+			case r >= 'A' && r <= 'Z':
+				upper = true
+			case r >= '0' && r <= '9':
+				digit = true
+			}
+		}
+		if lower && upper && digit {
+			return s, nil
+		}
+	}
 }
 
 // Secret returns a URL-safe random string of roughly n bytes of entropy.
@@ -297,9 +355,15 @@ func (p *Plan) EnvFile(base string) string {
 	for id, pw := range p.HandsetPasswords {
 		set(EnvVarFor(id), pw)
 	}
+	for id, pw := range p.HandsetAdminPasswords {
+		set(AdminEnvVarFor(id), pw)
+	}
+	for id, pw := range p.HandsetProvisionPasswords {
+		set(ProvisionEnvVarFor(id), pw)
+	}
 	// Any handset variables the example shipped that this install has no
 	// handset for would otherwise sit empty and confuse `render`.
-	out = regexp.MustCompile(`(?m)^HANDSET_[A-Z0-9_]+_PASSWORD=$\n?`).ReplaceAllString(out, "")
+	out = regexp.MustCompile(`(?m)^HANDSET_[A-Z0-9_]+_(ADMIN_|PROVISION_)?PASSWORD=$\n?`).ReplaceAllString(out, "")
 	return out
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"callmemaybe/internal/policy"
+	"callmemaybe/internal/provision"
 )
 
 // DocKind classifies which of the config files a document is.
@@ -136,7 +137,7 @@ func AnalyseWithTrunks(policyText string, handsetsText, trunksText *string) (pol
 	// A trunks.toml that will not compile has its own diagnostics in its own
 	// document; here it simply means the cross-reference cannot be checked,
 	// which is better than reporting every [line] trunk as unknown.
-	opts := policy.Options{}
+	opts := policy.Options{ModelKnown: provision.Known}
 	if trunksText != nil {
 		if trunks, err := policy.TrunksFromTOML([]byte(*trunksText)); err == nil {
 			opts.Trunks = trunks
