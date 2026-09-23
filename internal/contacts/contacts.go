@@ -28,11 +28,12 @@
 package contacts
 
 import (
-	"errors"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"callmemaybe/internal/policy"
 )
@@ -89,6 +90,12 @@ type SourceReport struct {
 	Dropped   int
 	Malformed int
 
+	// FetchedAt is when this source's bytes were obtained — a file's
+	// modification time, or the last successful fetch. Zero when unknown.
+	FetchedAt time.Time
+	// Warning is set when the source is served from a cache the last fetch
+	// could not refresh: it still contributes, and an operator should know.
+	Warning string
 	// Unread says why this source contributed nothing, or "" when it was read.
 	Unread string
 	// Missing narrows Unread to the case an operator can fix: a path that is
@@ -231,15 +238,16 @@ type Document struct {
 	// and does not stop the others.
 	Err error
 	// Missing narrows Err to an operator mistake — a declared path that is not
-	// there — as opposed to a source this release cannot fetch yet.
+	// there — as opposed to a url source that has never been fetched.
 	Missing bool
+	// FetchedAt is when the bytes were obtained: a file's modification time,
+	// or the last successful fetch of a url source. Zero when unknown.
+	FetchedAt time.Time
+	// Warning is set when the bytes are being served despite the last fetch
+	// failing: the source still contributes, and an operator should know
+	// how old it is.
+	Warning string
 }
-
-// errNotFetched is what a url source gets in this release. Reserved rather
-// than refused: the key is in the schema so contacts.toml does not churn when
-// fetching lands, and saying so per source beats letting one quietly
-// contribute nothing.
-var errNotFetched = errors.New("url sources are not fetched yet — this release reads path sources only")
 
 // Load reads every source in the inventory and compiles the merged set. An
 // absent inventory produces an absent set.
@@ -249,8 +257,32 @@ var errNotFetched = errors.New("url sources are not fetched yet — this release
 // applied to a second kind of input: the phone must not stop answering because
 // somebody moved a file.
 func Load(c *policy.Contacts, defaultCountryCode string) *Set {
+	return load(c, defaultCountryCode, nil, nil)
+}
+
+// Fetch is Load with the network: every url source is fetched (conditionally,
+// through its cache) before the merge. What each fetch did comes back for
+// the log; a source that could not be fetched is served from its cache or
+// reported, and never fails the load.
+func Fetch(ctx context.Context, c *policy.Contacts, defaultCountryCode string, f *Fetcher) (*Set, []Outcome) {
+	var outcomes []Outcome
+	s := load(c, defaultCountryCode, f, func(src policy.ContactSource) Document {
+		d, o := f.Fetch(ctx, src, c.Refresh())
+		outcomes = append(outcomes, o)
+		return d
+	})
+	return s, outcomes
+}
+
+func load(c *policy.Contacts, defaultCountryCode string, f *Fetcher, fetch func(policy.ContactSource) Document) *Set {
 	if !c.Present() {
 		return &Set{}
+	}
+	if f == nil {
+		f = &Fetcher{}
+	}
+	if f.Dir == "" {
+		f.Dir = c.CacheDir()
 	}
 	// A relative path is relative to contacts.toml, not to whatever directory
 	// the command happened to be run from. The exports live beside the
@@ -272,8 +304,13 @@ func Load(c *policy.Contacts, defaultCountryCode string) *Set {
 				d.Err, d.Missing = err, true
 			}
 			d.Data = data
+			if info, err := os.Stat(path); err == nil {
+				d.FetchedAt = info.ModTime()
+			}
+		case fetch != nil:
+			d = fetch(src)
 		default:
-			d.Where, d.Err = src.URL, errNotFetched
+			d = f.Cached(src, c.Refresh())
 		}
 		docs = append(docs, d)
 	}
@@ -310,7 +347,7 @@ func Compile(docs []Document, defaultCountryCode string) *Set {
 		if kind == "" {
 			kind = policy.ContactAdmit
 		}
-		r := SourceReport{ID: d.ID, Kind: kind, Where: d.Where}
+		r := SourceReport{ID: d.ID, Kind: kind, Where: d.Where, FetchedAt: d.FetchedAt, Warning: d.Warning}
 		if d.Err != nil {
 			r.Unread, r.Missing = d.Err.Error(), d.Missing
 			s.reports = append(s.reports, r)

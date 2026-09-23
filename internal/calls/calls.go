@@ -89,6 +89,12 @@ const (
 
 // A Record is one call. Field names are short because they are read by people
 // and by models more often than by code.
+// Via values. ViaContacts is a prefix: "contacts/eric" names the source.
+const (
+	ViaPeople   = "people"
+	ViaContacts = "contacts/"
+)
+
 type Record struct {
 	ID    string    `json:"id"` // channel id; ties back to the slog lines
 	Start time.Time `json:"start"`
@@ -119,6 +125,11 @@ type Record struct {
 	// and a reader looking for a name should not have to know which list it
 	// came from.
 	Known string `json:"known,omitempty"`
+	// Via says which list Known came from: ViaPeople for [[people]], or
+	// ViaContacts followed by the contacts.toml source id. It is the answer
+	// to "why did the phone ring for someone I never allow-listed", and it
+	// is empty on every record written before address books existed.
+	Via string `json:"via,omitempty"`
 	// Dialled is the number an outbound call was placed to, exactly as it was
 	// dialled — not normalised, because that is what reached the dialplan and
 	// what will appear on the bill, and a number doorman cannot normalise is

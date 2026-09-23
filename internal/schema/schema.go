@@ -430,8 +430,24 @@ func Contacts() *Schema {
 			"A number that will not normalise to E.164 is skipped and counted, and `doorman check` reports the count per source.",
 			"doorman parses the vCard subset real exporters emit — iCloud, Google Contacts, CardDAV, and 2.1 files with quoted-printable and folded lines — and counts whatever it does not understand rather than guessing at it.",
 			"Secrets are named here, never written here. token_env holds the NAME of a .env variable, and the token it names travels in an Authorization header rather than a query string, so a URL stays safe to log and to print.",
+			"A url source is fetched by the daemon at startup and every refresh, in a goroutine that is never on a call path, into a per-source cache under cache_dir (0600). A fetch that fails keeps the last good copy for that source and the others are unaffected; a source that has never succeeded contributes nothing and stops nobody. `doorman check` reports what the cache holds and how old it is; `doorman check --fetch` fetches now.",
 		},
 		Properties: map[string]*Schema{
+			"cache_dir": {
+				Type:        "string",
+				Description: "Where each url source's last good copy is kept, one file per source, mode 0600. Optional: absent means a contacts-cache directory beside this file. A relative path is relative to contacts.toml.",
+				Rules: []string{
+					"The cache is an optimisation, never a source of truth. Delete it and the phone still works: url sources contribute nothing until the next fetch, [[people]] is untouched.",
+					"It holds several people's entire address books — more personal data than anything else this project stores. Keep it out of any repository and off any backup that leaves the house.",
+				},
+			},
+			"refresh": {
+				Type:        "string",
+				Default:     "6h",
+				Pattern:     "^[0-9]+(ns|us|µs|ms|s|m|h)+$",
+				Description: "How often the daemon fetches url sources, as a Go duration: \"6h\", \"30m\". Conditional requests (If-None-Match / If-Modified-Since) make an unchanged fetch nearly free.",
+				Rules:       []string{"At least 1m. Under that is a poll, not a refresh, and a source is somebody else's server."},
+			},
 			"sources": {
 				Type:        "array",
 				Description: "Every address book to read, in the order they are declared. Declaration order is the only ordering there is, and it is what settles which of two names a shared number keeps.",
@@ -469,13 +485,17 @@ func contactSourceItem() *Schema {
 			"url": {
 				Type:        "string",
 				Pattern:     "^https?://",
-				Description: "A vCard export fetched over HTTP. RESERVED — this release reads path sources only, and `doorman check` says so per source rather than letting one quietly contribute nothing. The key exists now so contacts.toml does not churn when fetching lands.",
-				Rules:       []string{"Exactly one of path and url.", "Not fetched yet. Same posture as the VOICEMAIL_* keys in .env: declared ahead of the feature so the config shape is settled."},
+				Description: "A vCard export fetched over HTTP by the daemon, at startup and every refresh, into cache_dir. Between fetches — and whenever a fetch fails — the last good copy is what the lobby consults.",
+				Rules: []string{
+					"Exactly one of path and url.",
+					"Fetched off the call path: no call ever waits on a fetch. Until the first successful fetch the source contributes nothing, and `doorman check` says so per source rather than letting one quietly contribute nothing.",
+					"A non-2xx answer, a timeout, or a missing token keeps the last good copy and is reported with the source's age. The error never carries the response body, which could echo the request and its credential.",
+				},
 			},
 			"token_env": {
 				Type:        "string",
 				Pattern:     "^[A-Z][A-Z0-9_]*$",
-				Description: "Name of the .env variable holding this source's bearer token. The secret itself never appears in this file. RESERVED with url.",
+				Description: "Name of the .env variable holding this source's bearer token, sent as `Authorization: Bearer <token>`. The secret itself never appears in this file. The convention is CONTACTS_<ID>_TOKEN.",
 				Rules: []string{
 					"Names a variable; never put the token here. The pattern is enforced so that a pasted token fails the load rather than reaching a commit.",
 					"The token goes in an Authorization header, never a query string. A token in a URL makes the URL itself a secret, and every net/http transport error wraps into a *url.Error carrying the whole URL — which the obvious log line then ships to journald.",
@@ -844,6 +864,7 @@ func Env() *Schema {
 			"EVENT_JOURNAL_MAX_BYTES must be at least 8388608; database pages receive one quarter of this budget, which may expire history well before the count or age ceilings.",
 			"Every problem is reported at once — doorman does not make you fix env vars one restart at a time.",
 			"HANDSET_<NAME>_PASSWORD variables are named by password_env in handsets.toml and read by `doorman render`, not by the daemon.",
+			"CONTACTS_<ID>_TOKEN variables are named by token_env in contacts.toml and read by the daemon's contacts refresher and by `doorman check --fetch`: the bearer token a url source is fetched with, sent in an Authorization header and never in the URL.",
 			"HANDSET_<NAME>_ADMIN_PASSWORD and HANDSET_<NAME>_PROVISION_PASSWORD are generated by `doorman init` for every handset and read only by `doorman render` and `doorman provision`: the phone's own web-admin password (so no phone keeps its factory login) and the credential a provisioned phone presents to fetch its configuration after first contact. Never typed, never in handsets.toml.",
 			"PROVISION_ADDRESS is read only by `doorman render` and `doorman provision`, never by the daemon: the address phones reach this box at — its LAN IP, optionally :port (default 8443) — required once any handset carries mac and model. Never localhost (on the phone, that is the phone), never a .local name (SIP phones resolve through unicast DNS), and not a Tailscale address unless a phone is on the tailnet.",
 			"The VOICEMAIL_*, STT_*, and SMTP_* keys in examples/.env.example are reserved for the unshipped voicemail feature. They are deliberately not read yet, so .env will not churn when it lands.",

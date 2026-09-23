@@ -31,10 +31,19 @@ is the whole rollback.
 the normal state**: with no file nothing is read, nothing is logged, and
 `doorman check` prints nothing about contacts. Each `[[sources]]` block names a
 vCard export by `path` — a relative one resolves against `contacts.toml`
-itself — and `kind = "block"` marks one as the nuisance list. `doorman check`
-reports what each source contributed: cards read, and how many numbers came out
-personal, published, blocked or skipped, with counts only and never a name or a
-number.
+itself — or by `url`, and `kind = "block"` marks one as the nuisance list. A
+`url` source is fetched by the daemon at startup and every `refresh` (default
+6h) into `cache_dir`, one file per source, 0600; a fetch that fails keeps the
+last good copy, a source that has never succeeded contributes nothing, and no
+call ever waits on a fetch. Its bearer token is named by `token_env`
+(`CONTACTS_<ID>_TOKEN` in `.env`) and sent in a header, never in the URL.
+`doorman check` reports what each source contributed — cards read, how many
+numbers came out personal, published, blocked or skipped, and how old the copy
+is — with counts only and never a name or a number; `doorman check --fetch`
+fetches the url sources now rather than reporting the daemon's cache. A caller
+admitted from an address book is recorded with the source that named them
+(`doorman calls` shows `Grandma (contacts/eric)`), which is the answer to "why
+did the phone ring for someone I never allow-listed".
 
 With a file, the lobby walks a five-rung ladder and the first match wins:
 

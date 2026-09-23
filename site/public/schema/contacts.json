@@ -5,6 +5,23 @@
   "description": "Which address-book exports to read. Optional, and its absence is the compatibility gate: with no contacts.toml nothing is read, nothing is printed, and the phone behaves exactly as it always has. It exists because [[people]] is hand-typed and therefore always out of date, while every household already curates a contact list on their phones, continuously, without being asked.",
   "type": "object",
   "properties": {
+    "cache_dir": {
+      "description": "Where each url source's last good copy is kept, one file per source, mode 0600. Optional: absent means a contacts-cache directory beside this file. A relative path is relative to contacts.toml.",
+      "type": "string",
+      "x-rules": [
+        "The cache is an optimisation, never a source of truth. Delete it and the phone still works: url sources contribute nothing until the next fetch, [[people]] is untouched.",
+        "It holds several people's entire address books — more personal data than anything else this project stores. Keep it out of any repository and off any backup that leaves the house."
+      ]
+    },
+    "refresh": {
+      "description": "How often the daemon fetches url sources, as a Go duration: \"6h\", \"30m\". Conditional requests (If-None-Match / If-Modified-Since) make an unchanged fetch nearly free.",
+      "type": "string",
+      "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)+$",
+      "default": "6h",
+      "x-rules": [
+        "At least 1m. Under that is a poll, not a refresh, and a source is somebody else's server."
+      ]
+    },
     "sources": {
       "description": "Every address book to read, in the order they are declared. Declaration order is the only ordering there is, and it is what settles which of two names a shared number keeps.",
       "type": "array",
@@ -43,7 +60,7 @@
             ]
           },
           "token_env": {
-            "description": "Name of the .env variable holding this source's bearer token. The secret itself never appears in this file. RESERVED with url.",
+            "description": "Name of the .env variable holding this source's bearer token, sent as `Authorization: Bearer \u003ctoken\u003e`. The secret itself never appears in this file. The convention is CONTACTS_\u003cID\u003e_TOKEN.",
             "type": "string",
             "pattern": "^[A-Z][A-Z0-9_]*$",
             "x-cross-references": [
@@ -56,12 +73,13 @@
             ]
           },
           "url": {
-            "description": "A vCard export fetched over HTTP. RESERVED — this release reads path sources only, and `doorman check` says so per source rather than letting one quietly contribute nothing. The key exists now so contacts.toml does not churn when fetching lands.",
+            "description": "A vCard export fetched over HTTP by the daemon, at startup and every refresh, into cache_dir. Between fetches — and whenever a fetch fails — the last good copy is what the lobby consults.",
             "type": "string",
             "pattern": "^https?://",
             "x-rules": [
               "Exactly one of path and url.",
-              "Not fetched yet. Same posture as the VOICEMAIL_* keys in .env: declared ahead of the feature so the config shape is settled."
+              "Fetched off the call path: no call ever waits on a fetch. Until the first successful fetch the source contributes nothing, and `doorman check` says so per source rather than letting one quietly contribute nothing.",
+              "A non-2xx answer, a timeout, or a missing token keeps the last good copy and is reported with the source's age. The error never carries the response body, which could echo the request and its credential."
             ]
           }
         },
@@ -86,6 +104,7 @@
     "Numbers are keyed by E.164, so the same mobile in two address books is one entry. Conflicts resolve conservatively: same number and different names, the first source in declaration order wins; personal in one source and published in another, published wins; present in an admit source and a block source, blocked wins.",
     "A number that will not normalise to E.164 is skipped and counted, and `doorman check` reports the count per source.",
     "doorman parses the vCard subset real exporters emit — iCloud, Google Contacts, CardDAV, and 2.1 files with quoted-printable and folded lines — and counts whatever it does not understand rather than guessing at it.",
-    "Secrets are named here, never written here. token_env holds the NAME of a .env variable, and the token it names travels in an Authorization header rather than a query string, so a URL stays safe to log and to print."
+    "Secrets are named here, never written here. token_env holds the NAME of a .env variable, and the token it names travels in an Authorization header rather than a query string, so a URL stays safe to log and to print.",
+    "A url source is fetched by the daemon at startup and every refresh, in a goroutine that is never on a call path, into a per-source cache under cache_dir (0600). A fetch that fails keeps the last good copy for that source and the others are unaffected; a source that has never succeeded contributes nothing and stops nobody. `doorman check` reports what the cache holds and how old it is; `doorman check --fetch` fetches now."
   ]
 }

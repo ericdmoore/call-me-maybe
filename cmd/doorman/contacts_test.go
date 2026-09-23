@@ -2,11 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"callmemaybe/internal/contacts"
 	"callmemaybe/internal/policy"
@@ -213,15 +218,15 @@ func TestCheckFailsOnASourceItCannotRead(t *testing.T) {
 
 // A url source is not somebody's mistake — it is a key this release reserves.
 // Reported, and not a failure.
-func TestCheckReportsAURLSourceWithoutFailing(t *testing.T) {
+func TestCheckReportsAnUnfetchedURLSourceWithoutFailing(t *testing.T) {
 	set := contactSet(t, "[[sources]]\nid = \"shared\"\nurl = \"https://example.com/shared.vcf\"\n", nil)
 	var ok bool
 	out := capture(t, func() { ok = printContacts(set, nil) })
 	if !ok {
 		t.Error("a reserved url source failed the check")
 	}
-	if !strings.Contains(out, "not fetched yet") {
-		t.Errorf("the url source was not explained:\n%s", out)
+	if !strings.Contains(out, "never fetched") || !strings.Contains(out, "--fetch") {
+		t.Errorf("the url source was not explained, with the way to fetch it:\n%s", out)
 	}
 	// The URL is safe to print precisely because the credential is not in it.
 	if !strings.Contains(out, "https://example.com/shared.vcf") {
@@ -503,5 +508,69 @@ func TestPlural(t *testing.T) {
 		if got := plural(c.n, c.word); got != c.want {
 			t.Errorf("plural(%d, %q) = %q, want %q", c.n, c.word, got, c.want)
 		}
+	}
+}
+
+// The refresher: url sources are fetched off the call path, the merged set
+// is swapped whole, and a fetch that fails keeps the last good set. Driven
+// with a short interval; the daemon's is hours.
+func TestContactsRefresherSwapsTheBookAndKeepsTheLastGoodSet(t *testing.T) {
+	var serving atomic.Value // string body; "" → 500
+	serving.Store(someVCards)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := serving.Load().(string)
+		if body == "" {
+			http.Error(w, "down", http.StatusInternalServerError)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer shh-not-a-real-token" {
+			http.Error(w, "who are you", http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "contacts.toml")
+	if err := os.WriteFile(path, []byte("[[sources]]\nid = \"eric\"\nurl = \""+srv.URL+"/eric.vcf\"\ntoken_env = \"CONTACTS_ERIC_TOKEN\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	book := openContacts(path, "1", nil, log, nil)
+	if book == nil {
+		t.Fatal("openContacts returned nil with an inventory on disk")
+	}
+	if _, ok := book.Lookup("+15125550101"); ok {
+		t.Fatal("before any fetch the url source contributes nothing")
+	}
+
+	r := &contactsRefresher{path: path, countryCode: "1", book: book, log: log, every: 20 * time.Millisecond,
+		secret: func(name string) (string, bool) { return "shh-not-a-real-token", name == "CONTACTS_ERIC_TOKEN" }}
+	r.once(context.Background())
+	if c, ok := book.Lookup("+15125550101"); !ok || c.Name != "Grandma Mertaugh" || c.Source != "eric" {
+		t.Fatalf("after one cycle Grandma should be in the book from source eric: %+v %v", c, ok)
+	}
+	// The server goes away: the book keeps the last good set and says so.
+	serving.Store("")
+	buf.Reset()
+	r.once(context.Background())
+	if _, ok := book.Lookup("+15125550101"); !ok {
+		t.Fatal("a failed refresh must keep the last good set")
+	}
+	if out := buf.String(); !strings.Contains(out, "served from its cache") || strings.Contains(out, "Grandma") || strings.Contains(out, "shh-not-a-real-token") {
+		t.Fatalf("the log should say the source is stale, and never a name or a token:\n%s", out)
+	}
+	// The whole loop runs and stops on cancel.
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { r.run(ctx); close(done) }()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the refresher did not stop on cancel")
 	}
 }

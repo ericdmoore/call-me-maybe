@@ -133,6 +133,8 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -trunks path              provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)
       -contacts path            address-book inventory, optional (default $CONTACTS_PATH or ./contacts.toml)
       -allow-placeholders       accept the example sentinels; for CI, not operators
+      -fetch                    fetch contacts.toml url sources now; otherwise report what the daemon last cached
+      -env path                 secrets file, for the tokens url sources name (with -fetch; default ./.env)
   doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
                                 "build" renders audio through piper, ElevenLabs,
                                 OpenAI or Polly, "voices" lists what a backend
@@ -319,6 +321,8 @@ func runCheck(args []string) (code int) {
 	// what makes a freshly copied config fail loudly until `doorman init` runs.
 	policyOnly := fs.Bool("policy-only", false, "validate policy/inventory without local service environment or storage")
 	allowPlaceholders := fs.Bool("allow-placeholders", false, "accept example placeholder PINs (for CI, not operators)")
+	fetchFlag := fs.Bool("fetch", false, "fetch url sources in contacts.toml now, instead of reporting what the daemon last cached")
+	envFlag := fs.String("env", "./.env", "secrets file, for the tokens url sources name (with -fetch)")
 	_ = fs.Parse(args)
 
 	if !*policyOnly {
@@ -436,7 +440,15 @@ func runCheck(args []string) (code int) {
 			lists = append(lists, allowList{r.Path, r.pol})
 		}
 	}
-	if !printContacts(contacts.Load(contactSources, defaultCountryCode()), lists) {
+	var set *contacts.Set
+	if *fetchFlag {
+		fetchCtx, cancelFetch := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancelFetch()
+		set, _ = contacts.Fetch(fetchCtx, contactSources, defaultCountryCode(), &contacts.Fetcher{Secret: secretLookup(*envFlag)})
+	} else {
+		set = contacts.Load(contactSources, defaultCountryCode())
+	}
+	if !printContacts(set, lists) {
 		rc = 1
 	}
 	return rc
@@ -1345,6 +1357,20 @@ func serve() error {
 		lists = append(lists, allowList{o.name, o.store.Current()})
 	}
 	book := openContacts(cfg.ContactsPath, cfg.DefaultCountryCode, lists, log, journal)
+	// The interface value the lobby sees: untyped nil when there is no
+	// inventory, so the state machine's one nil check keeps meaning "no
+	// address books" rather than "a book with nothing in it".
+	var contactsDep lobby.Contacts
+	if book != nil {
+		contactsDep = book
+		refreshCtx, stopRefresh := context.WithCancel(context.Background())
+		defer stopRefresh()
+		go (&contactsRefresher{
+			path: cfg.ContactsPath, countryCode: cfg.DefaultCountryCode,
+			secret: func(name string) (string, bool) { v, ok := os.LookupEnv(name); return v, ok && v != "" },
+			book:   book, lists: lists, log: log, journal: journal,
+		}).run(refreshCtx)
+	}
 
 	// Everything a line does not own is shared: one ARI client, one prompt
 	// pack, one registry, one call log, one webhook, one concurrency cap, one
@@ -1365,7 +1391,7 @@ func serve() error {
 			// Nil without a contacts.toml, which is what makes the ladder
 			// collapse to [[people]] and the lobby. openContacts returns an
 			// untyped nil for exactly this assignment.
-			Contacts: book,
+			Contacts: contactsDep,
 			Cfg: lobby.Config{
 				DefaultCountryCode: cfg.DefaultCountryCode,
 				ExtensionLength:    cfg.ExtensionLength,

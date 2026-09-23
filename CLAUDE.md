@@ -110,7 +110,12 @@ Layout:
   one-method interface on `Deps` (`lobby.Contacts`), so the state machine
   never imports this package — the adapter in `cmd/doorman` is the one
   translation point, exactly as it is for ARI. Derived and disposable:
-  deleting every source only sends those callers back to the lobby.
+  deleting every source only sends those callers back to the lobby. `url`
+  sources are fetched by `contacts.Fetcher` into a per-source cache
+  (`cache_dir`, 0600, last-good-on-failure, conditional requests, bearer
+  token in a header and never in the URL) by a refresher goroutine in
+  `cmd/doorman` that swaps the merged set whole; a call reads the last
+  fetch and never waits on one.
 - `internal/provision` — the phone's half of the inventory: the model
   registry, per-vendor configuration and phone-book templates, and
   `PROVISION_ADDRESS`. `internal/provision/serve` is the LAN listener (the

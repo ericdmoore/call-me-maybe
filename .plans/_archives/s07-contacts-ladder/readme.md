@@ -3,8 +3,36 @@
 Let the people already in your address book reach the house, without letting
 anyone who can read a website do the same.
 
-**Status:** M1 and M2 landed — address books are parsed, classified, merged,
-and the lobby walks the ladder. M3 (fetching) and M4 (visibility) are open.
+**Status: closed 2026-09-23 — archived.** M1–M4 shipped; M3 and M4 landed
+together in v0.6.1 with nothing touched on the first customer's box:
+
+- M1–M2 (`c468d6a`, `984d4af`, `52d8dc4`): vCards parsed, classified,
+  unioned; the lobby walks the five-rung ladder through a one-method
+  interface.
+- M3 — the fetcher. `contacts.Fetcher`: a `url` source becomes bytes on disk
+  under `cache_dir` (default `contacts-cache` beside the inventory, 0600,
+  written atomically), fetched at startup and every `refresh` (default 6h,
+  minimum 1m) by a goroutine in `cmd/doorman` that swaps the merged set
+  whole into an `atomic.Pointer`. Conditional requests with `ETag` and
+  `Last-Modified`; a failure keeps the last good copy and marks the source
+  stale; a source that never succeeded contributes nothing and stops nobody;
+  a missing token variable is refused before any request. The token rides
+  `Authorization: Bearer`, the response body never reaches a message, and
+  `*url.Error` is unwrapped to its operation and cause. `doorman check`
+  reads the cache with no network; `doorman check --fetch` fetches now.
+- M4 — visibility. `doorman check` shows each source's age and, when a
+  fetch has been failing, since when and why; the call record carries `via`
+  (`people`, or `contacts/<source id>`) and `doorman calls` prints
+  `Grandma (contacts/eric)`, which is the answer to "why did the phone ring
+  for someone I never allow-listed". The "first time ever" version of that
+  was deliberately not built: it needs the call log as an input, and
+  invariant 10 says no.
+- The published-number rule is in `docs/writing-policies.md`.
+
+**Open on close:** the first url source on jepsen is a bullmoose export,
+and bullmoose exports NDJSON where this fetches vCard — a second source
+`kind`, or a vCard endpoint on bullmoose, decides which side moves. Neither
+blocks anything: a `path` export works today.
 Related: issue #12 (allow-list trusts spoofable caller ID), issue #6 (nominate
 to the allow-list), `docs/writing-policies.md`, `.plans/s04-standarddize-network-helpers`
 (URL-addressed sources, same instinct).
@@ -243,12 +271,12 @@ rate limiter is untouched in both directions: a block is not a guess at a
 keypad. `doorman check` and the daemon both refuse to be quiet about a number
 that is allow-listed *and* blocked.
 
-### M3 · The fetcher
+### M3 · The fetcher — **done**
 
 Sources, schedule, per-source cache, conditional requests, last-good-on-failure.
 Local paths and URLs by the same config.
 
-### M4 · Visibility
+### M4 · Visibility — **done**
 
 Staleness and provenance where an operator will see them: `doorman check`
 showing each source's age and counts, and — the one that prevents the support

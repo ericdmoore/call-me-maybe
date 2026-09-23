@@ -118,6 +118,11 @@ type Contact struct {
 	// Blocked means a block source named this number. It beats every other
 	// tier, including [[people]].
 	Blocked bool
+	// Source is the id of the address book that named this caller. Not
+	// caller data — it is the operator's own label from contacts.toml — and
+	// it is what answers "why did the phone ring for someone I never
+	// allow-listed" in the call record.
+	Source string
 }
 
 type Deps struct {
@@ -420,6 +425,7 @@ func (s *Session) Run() {
 	// redundant and gives an override that needed no new mechanism.
 	if known, ok := s.pol.LookupCaller(s.callerE164); ok {
 		s.rec.Known = known.Name
+		s.rec.Via = calls.ViaPeople
 		s.observe(events.AdmissionDecided, "allow-list")
 		s.log.Info("known caller, welcoming", "name", known.Name)
 		s.welcome(known.Name)
@@ -432,8 +438,9 @@ func (s *Session) Run() {
 	// the lobby" is one question with two sources of answer.
 	if inBook && !contact.Published {
 		s.rec.Known = contact.Name
+		s.rec.Via = calls.ViaContacts + contact.Source
 		s.observe(events.AdmissionDecided, "personal-contact")
-		s.log.Info("contact admitted, welcoming", "name", contact.Name)
+		s.log.Info("contact admitted, welcoming", "name", contact.Name, "source", contact.Source)
 		s.welcome(contact.Name)
 		return
 	}

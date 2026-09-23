@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"callmemaybe/internal/contacts"
 	"callmemaybe/internal/events"
@@ -35,12 +39,23 @@ import (
 // this is the one translation point, and it is three fields wide. Everything
 // else the set knows (which source named this caller, which signal classified
 // them, how many cards were dropped) is an operator's question and stops here.
-type contactBook struct{ set *contacts.Set }
+// contactBook is the merged set the lobby consults, swapped whole by the
+// refresher: a call reads one consistent set, never a set mid-update, and
+// the swap is the only synchronisation there is.
+type contactBook struct{ set atomic.Pointer[contacts.Set] }
 
-var _ lobby.Contacts = contactBook{}
+var _ lobby.Contacts = (*contactBook)(nil)
 
-func (b contactBook) Lookup(e164 string) (lobby.Contact, bool) {
-	e, ok := b.set.Lookup(e164)
+func newContactBook(set *contacts.Set) *contactBook {
+	b := &contactBook{}
+	b.set.Store(set)
+	return b
+}
+
+func (b *contactBook) current() *contacts.Set { return b.set.Load() }
+
+func (b *contactBook) Lookup(e164 string) (lobby.Contact, bool) {
+	e, ok := b.current().Lookup(e164)
 	if !ok {
 		return lobby.Contact{}, false
 	}
@@ -48,6 +63,7 @@ func (b contactBook) Lookup(e164 string) (lobby.Contact, bool) {
 		Name:      e.Name,
 		Published: e.Class == contacts.Published,
 		Blocked:   e.Blocked,
+		Source:    e.Source,
 	}, true
 }
 
@@ -65,7 +81,7 @@ func (b contactBook) Lookup(e164 string) (lobby.Contact, bool) {
 // allowed a say in whether the phone answers. The cost is honest and worth
 // stating — a block list that fails to load stops blocking, so it is logged
 // where an operator will see it rather than absorbed.
-func openContacts(path, defaultCountryCode string, lists []allowList, log *slog.Logger, journal *events.Writer) lobby.Contacts {
+func openContacts(path, defaultCountryCode string, lists []allowList, log *slog.Logger, journal *events.Writer) *contactBook {
 
 	sources, err := policy.LoadContacts(path)
 	if err != nil {
@@ -76,30 +92,43 @@ func openContacts(path, defaultCountryCode string, lists []allowList, log *slog.
 			"path", path, "err", err)
 		return nil
 	}
+	// From disk and from the cache, with no network: the set the daemon
+	// starts on is whatever the last run left, which is the last good one.
+	// The refresher fetches in the background from the first second.
 	set := contacts.Load(sources, defaultCountryCode)
 	if !set.Present() {
 		return nil
 	}
+	reportContacts(set, lists, "startup-snapshot", nil, log, journal)
+	return newContactBook(set)
+}
 
+// reportContacts says what a set adds up to — counts, never names or numbers
+// — and what each source that contributed nothing is missing. One line for
+// the whole set, because the point of an ambient list is that nobody typed
+// it; one line per silent source, because that failure mode is silent by
+// nature: an address book that vanished looks exactly like one nobody is in.
+func reportContacts(set *contacts.Set, lists []allowList, why string, outcomes []contacts.Outcome, log *slog.Logger, journal *events.Writer) {
 	for _, r := range set.Sources() {
-		if r.Unread == "" {
-			continue
+		switch {
+		case r.Unread != "":
+			journal.Post(events.System(events.ContactsRefreshFailed, "source-unreadable", 1))
+			log.Warn("address book contributed nothing", "source", r.ID, "kind", r.Kind,
+				"from", r.Where, "why", r.Unread)
+		case r.Warning != "":
+			journal.Post(events.System(events.ContactsRefreshFailed, "source-stale", 1))
+			log.Warn("address book served from its cache", "source", r.ID, "kind", r.Kind,
+				"from", r.Where, "why", r.Warning)
 		}
-		// Reported, never fatal, per source: the others are unaffected and the
-		// phone keeps answering. Said out loud because the failure mode is
-		// silent — an address book that vanished looks exactly like an address
-		// book nobody is in.
-		journal.Post(events.System(events.ContactsRefreshFailed, "source-unreadable", 1))
-
-		log.Warn("address book contributed nothing", "source", r.ID, "kind", r.Kind,
-			"from", r.Where, "why", r.Unread)
+	}
+	for _, o := range outcomes {
+		if o.Status == "fresh" {
+			log.Info("address book fetched", "source", o.ID)
+		}
 	}
 
 	t := set.Totals()
-	journal.Post(events.System(events.ContactsRefreshed, "startup-snapshot", int64(t.Numbers)))
-
-	// Counts, never names or numbers — and one line, because the whole point of
-	// an ambient list is that an operator did not have to type it.
+	journal.Post(events.System(events.ContactsRefreshed, why, int64(t.Numbers)))
 	log.Info("contacts loaded", "path", set.Where(), "sources", len(set.Sources()),
 		"numbers", t.Numbers, "personal", t.Personal, "published", t.Published,
 		"blocked", t.Blocked, "skipped", t.Skipped)
@@ -112,7 +141,66 @@ func openContacts(path, defaultCountryCode string, lists []allowList, log *slog.
 			"name", c.Name, "number", policy.Redact(c.Number), "line", c.Where,
 			"hint", "remove them from the block source, or delete the [[people]] entry")
 	}
-	return contactBook{set}
+}
+
+// contactsRefresher fetches url sources at startup and every refresh, off
+// the call path, and swaps the merged set into the book. It re-reads
+// contacts.toml each cycle so a source can be added without a restart; an
+// inventory that stops loading keeps the last good set, the same rule
+// policy.toml gets.
+type contactsRefresher struct {
+	path, countryCode string
+	secret            func(string) (string, bool)
+	book              *contactBook
+	lists             []allowList
+	log               *slog.Logger
+	journal           *events.Writer
+	// every overrides the inventory's refresh when non-zero (tests).
+	every time.Duration
+	// client overrides the fetcher's HTTP client (tests).
+	client *http.Client
+}
+
+func (r *contactsRefresher) run(ctx context.Context) {
+	for {
+		wait := r.once(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+	}
+}
+
+// once is one cycle: fetch, merge, swap. It returns how long to wait.
+func (r *contactsRefresher) once(ctx context.Context) time.Duration {
+	sources, err := policy.LoadContacts(r.path)
+	if err != nil {
+		r.journal.Post(events.System(events.ContactsRefreshFailed, "inventory-unreadable", 0))
+		r.log.Warn("address-book inventory will not load — keeping the last good set", "path", r.path, "err", err)
+		return r.interval(nil)
+	}
+	if !sources.Present() {
+		return r.interval(sources)
+	}
+	if !sources.HasURLSources() {
+		// Nothing to fetch; path sources are re-read so a replaced export
+		// is picked up on the same schedule.
+		set := contacts.Load(sources, r.countryCode)
+		r.book.set.Store(set)
+		return r.interval(sources)
+	}
+	set, outcomes := contacts.Fetch(ctx, sources, r.countryCode, &contacts.Fetcher{Secret: r.secret, Client: r.client})
+	r.book.set.Store(set)
+	reportContacts(set, r.lists, "refresh", outcomes, r.log, r.journal)
+	return r.interval(sources)
+}
+
+func (r *contactsRefresher) interval(sources *policy.Contacts) time.Duration {
+	if r.every > 0 {
+		return r.every
+	}
+	return sources.Refresh()
 }
 
 // allowList is one line's hand-typed list, with something to call it. `doorman
@@ -201,8 +289,8 @@ func printContacts(set *contacts.Set, lists []allowList) bool {
 			continue
 		}
 		if !header {
-			fmt.Printf("\n  %-*s  %-6s %6s %9s %10s %8s %8s  %s\n",
-				width, "id", "kind", "cards", "personal", "published", "blocked", "skipped", "from")
+			fmt.Printf("\n  %-*s  %-6s %6s %9s %10s %8s %8s  %-9s %s\n",
+				width, "id", "kind", "cards", "personal", "published", "blocked", "skipped", "fetched", "from")
 			header = true
 		}
 		personal, published, blocked := fmt.Sprint(r.Personal), fmt.Sprint(r.Published), "—"
@@ -212,8 +300,14 @@ func printContacts(set *contacts.Set, lists []allowList) bool {
 			// would invite somebody to read meaning into it.
 			personal, published, blocked = "—", "—", fmt.Sprint(r.Numbers())
 		}
-		fmt.Printf("  %-*s  %-6s %6d %9s %10s %8s %8d  %s\n",
-			width, r.ID, r.Kind, r.Cards, personal, published, blocked, r.Skipped, r.Where)
+		fmt.Printf("  %-*s  %-6s %6d %9s %10s %8s %8d  %-9s %s\n",
+			width, r.ID, r.Kind, r.Cards, personal, published, blocked, r.Skipped, contacts.Age(time.Now(), r.FetchedAt), r.Where)
+	}
+	for _, r := range reports {
+		if r.Warning != "" {
+			// Still contributing, and the operator should know how old.
+			fmt.Printf("\n  ⚠ %s — %s\n      %s\n", r.ID, r.Where, r.Warning)
+		}
 	}
 
 	for _, r := range unread {

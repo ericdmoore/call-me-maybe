@@ -277,8 +277,10 @@ it and the check belongs wherever your alerting already runs.
 
 There is an optional fifth, **`contacts.toml`**, and not having it is likewise
 the normal state. It names vCard exports to read — your contacts, your
-spouse's, and one marked `kind = "block"` for the nuisance list — so the phone
-can see the address book your household already curates. Every number is
+spouse's, and one marked `kind = "block"` for the nuisance list — as files on
+the box or as URLs the daemon fetches every few hours into a cache it keeps
+serving when the fetch fails, so the phone can see the address book your
+household already curates. Every number is
 classified from the card alone, with no lookups, on one rule: **if a stranger
 can look the number up, it must not be automatic admission.** An `ORG` or a
 work number or an 800 number reads as published and hears the lobby; a named

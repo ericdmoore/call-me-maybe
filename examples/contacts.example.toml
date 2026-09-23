@@ -83,17 +83,24 @@ id   = "nuisance"
 path = "/var/lib/doorman/contacts/blocked.vcf"
 kind = "block"
 
-# ── Fetching, when it lands ──────────────────────────────────
-# A source may name a url instead of a path, with an optional token_env. Both
-# keys are accepted today and RESERVED: this release reads path sources only,
-# and `doorman check` says so per source rather than letting one quietly
-# contribute nothing. They are declared now so this file does not churn when
-# fetching arrives.
+# ── Fetching ──────────────────────────────────────────────────
+# A source may name a url instead of a path. The daemon fetches it at
+# startup and every `refresh` (default 6h), in a goroutine that is never on a
+# call path, into `cache_dir` — one file per source, 0600, the last good copy.
+# A fetch that fails keeps that copy and the others are unaffected; a source
+# that has never succeeded contributes nothing and stops nobody. Conditional
+# requests make an unchanged fetch nearly free.
+#
+# `doorman check` reports what the cache holds and how old each source is;
+# `doorman check --fetch` fetches now, with the tokens from .env.
 #
 # SECRETS ARE NAMED HERE, NEVER WRITTEN HERE. token_env holds the NAME of a
 # .env variable, and the token travels in an Authorization header rather than a
 # query string — a token in a URL makes the URL itself a secret, and every
 # net/http error wraps into a *url.Error carrying the whole thing.
+#
+# cache_dir = "/var/lib/doorman/contacts"   # default: contacts-cache beside this file
+# refresh   = "6h"
 #
 # [[sources]]
 # id        = "shared"

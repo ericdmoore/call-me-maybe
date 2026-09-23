@@ -68,7 +68,7 @@ below and
 Exits non\-zero if ARI is unreachable at startup, which is deliberate: a
 lobby daemon that cannot answer calls should fail loudly.
 .TP
-.BI "doorman check [\-handsets " path "] [\-trunks " path "] [\-contacts " path "] [" path ]
+.BI "doorman check [\-handsets " path "] [\-trunks " path "] [\-contacts " path "] [\-fetch] [" path ]
 Validate
 .IR policy.toml ,
 .I handsets.toml
@@ -124,8 +124,8 @@ word trunk.
 .IP
 With a
 .I contacts.toml
-it reports what the address books add up to: per source, how many vCards were
-read and how many numbers came out
+it reports what the address books add up to: per source, how old the copy is
+and how many vCards were read and how many numbers came out
 .BR personal ,
 .BR published ,
 .B blocked
