@@ -210,12 +210,26 @@ $ sudo cp asterisk/ari.conf.example   /etc/asterisk/ari.conf
 # Generate an ARI password and put the SAME value in both places.
 $ openssl rand -base64 24
 $ sudo nano /etc/asterisk/ari.conf     # password = <that value>
-$ sudo nano /etc/asterisk/pjsip.conf   # sub account, POP, handset passwords
+$ sudo nano /etc/asterisk/pjsip.conf   # sub account, POP, password — and the
+                                       # two identify patterns: sub account + every DID
 
 $ sudo chown asterisk:asterisk /etc/asterisk/*.conf
 $ sudo chmod 640 /etc/asterisk/pjsip.conf /etc/asterisk/ari.conf
 $ sudo systemctl restart asterisk
 ```
+
+Two things in that template are there because the first install lost an
+afternoon to them. The `identify` blocks match inbound calls by the
+sub-account name and the DID: VoIP.ms does not echo the `;line=` tag that
+`line=yes` relies on, so without them an inbound call is dropped as "No
+matching endpoint found" and nothing rings. And there is no `from_user` on
+the endpoint: with it, VoIP.ms answers 503 on every outbound call.
+
+On Debian and Ubuntu the installer also sets the distro's sample AEL and Lua
+dialplans aside (`extensions.ael.distro`, `extensions.lua.distro`) and adds
+`noload => pbx_ael.so` and `noload => pbx_lua.so` to `modules.conf`, so
+`extensions.conf` is the only dialplan loaded. On a hand-prepared host, do
+the same.
 
 ### doorman config
 
@@ -260,9 +274,10 @@ $ bash prompts/build.sh
 $ rsync -av prompts/build/ pi@raspberrypi:/tmp/cmm-prompts/
 
 # On the Pi:
-$ sudo mkdir -p /var/lib/asterisk/sounds/call-me-maybe
-$ sudo cp /tmp/cmm-prompts/* /var/lib/asterisk/sounds/call-me-maybe/
-$ sudo chown -R asterisk:asterisk /var/lib/asterisk/sounds/call-me-maybe
+$ ASTDATA=$(sudo asterisk -rx 'core show settings' | awk -F': *' '/Data directory/ {print $2}')
+$ sudo mkdir -p "$ASTDATA/sounds/call-me-maybe"        # /var/lib/asterisk on the Pi, /usr/share/asterisk on Ubuntu
+$ sudo cp /tmp/cmm-prompts/* "$ASTDATA/sounds/call-me-maybe/"
+$ sudo chown -R asterisk:asterisk "$ASTDATA/sounds/call-me-maybe"
 $ rm -rf /tmp/cmm-prompts
 ```
 
@@ -373,8 +388,8 @@ there before you rely on any of it.
 ### Rung 6 — prompts are present and in the right format
 
 ```bash
-$ ls -la /var/lib/asterisk/sounds/call-me-maybe/
-$ soxi /var/lib/asterisk/sounds/call-me-maybe/good-day.wav
+$ ls -la "$ASTDATA/sounds/call-me-maybe/"     # ASTDATA from the Prompts step: the data directory Asterisk reports
+$ soxi "$ASTDATA/sounds/call-me-maybe/good-day.wav"
 ```
 
 Want 8000 Hz, 1 channel, 16-bit. A prompt at 22050 Hz will either fail to play
@@ -403,9 +418,11 @@ Caller hears ringing forever, or a provider error.
 2. `sudo asterisk -rvvv` then place a call. No output at all means the packets
    are not arriving: check the DID routing in the portal.
 3. Output showing endpoint `anonymous` means the inbound call did not match the
-   trunk endpoint. **This is almost always a missing `line=yes` or
-   `endpoint=voipms` on the registration object.** That pairing is what binds
-   inbound traffic to the endpoint without an `identify` block.
+   trunk endpoint. **Check `line=yes` and `endpoint=voipms` on the
+   registration object, then the two `identify` blocks** — VoIP.ms does
+   not echo the `;line=` tag, so the identify patterns (sub-account and
+   every DID) are what actually match its calls. `pjsip set logger on`
+   shows the INVITE and "No matching endpoint found" when they do not.
 4. `sudo asterisk -rx "dialplan show inbound-trunk"` — confirm the context
    exists and matches `context=` on the endpoint.
 
@@ -453,13 +470,13 @@ Withheld caller ID is `anonymous` and always meets the bouncer by design.
 
 ```bash
 $ sudo asterisk -rx "core show channels"
-$ ls -la /var/lib/asterisk/sounds/call-me-maybe/
+$ ls -la "$ASTDATA/sounds/call-me-maybe/"
 $ journalctl -u doorman | grep "playback failed"
 ```
 
 Usually one of: prompts not installed, wrong ownership (`asterisk:asterisk`),
 or wrong sample rate. `PROMPT_MEDIA_PREFIX` in `.env` must match the directory
-name under `/var/lib/asterisk/sounds/`.
+name under `<astdatadir>/sounds/` (`asterisk -rx 'core show settings'` → Data directory).
 
 ### One-way audio
 

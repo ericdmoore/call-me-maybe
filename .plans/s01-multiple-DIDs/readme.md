@@ -357,11 +357,15 @@ records whether a street address is registered, which is the one fact the
 emergency decision turns on and the one doorman cannot discover; unset reads
 as *unknown* rather than as either answer.
 
-**No identify blocks are generated**, and the generated file says why. With
-`line=yes` and `endpoint=` on the registration they are redundant, and an IP
-allow-list is a list that goes stale silently the day a provider adds a media
-server. A provider that can only do IP authentication is out of scope, which
-issue #5 already says.
+**No identify blocks are generated** — *amended 2026-09-23 (v0.6.3)*: two
+are, per trunk, and neither is an IP. The first customer's box showed that
+VoIP.ms does not echo the `;line=` tag, so with `line=yes` + `endpoint=`
+alone its inbound calls were dropped as "No matching endpoint found". The
+generated blocks match the request URI and the To header against the
+trunk's own identity (username and every DID routed to it), which cannot go
+stale. An IP allow-list still is not generated, for the reason given here:
+it goes stale silently the day a provider adds a media server. A provider
+that can only do IP authentication is still out of scope.
 
 **Render generates the inbound contexts.** The plan argued for it and the
 argument held, with a third reason that only appeared while building it: a

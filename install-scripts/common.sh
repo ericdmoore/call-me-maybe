@@ -50,7 +50,7 @@ packages() {
    fi
    run apt-get install -y asterisk
   fi
-  run apt-get install -y ca-certificates rsync openssl sqlite3
+  run apt-get install -y ca-certificates rsync openssl sqlite3 acl
   ;;
  centos|fedora)
   if [ "$existing" = 0 ]; then
@@ -142,6 +142,18 @@ prepare() {
  fi
  if [ "$dry_run" = 1 ] || ! getent passwd doorman >/dev/null; then
   run useradd --system --user-group --no-create-home --home-dir /opt/call-me-maybe --shell /usr/sbin/nologin doorman
+ fi
+ # Debian and Ubuntu ship sample dialplans in AEL and Lua that load beside
+ # extensions.conf, adding contexts and startup warnings that are not ours.
+ # Set them aside (kept as .distro, like every original) and tell Asterisk
+ # not to load the two engines; extensions.conf is the only dialplan here.
+ for sample in extensions.ael extensions.lua; do
+  if [ -e "/etc/asterisk/$sample" ] && [ ! -e "/etc/asterisk/$sample.distro" ]; then
+   run mv "/etc/asterisk/$sample" "/etc/asterisk/$sample.distro"
+  fi
+ done
+ if [ -e /etc/asterisk/modules.conf ] && ! grep -qE '^noload => pbx_ael\.so' /etc/asterisk/modules.conf; then
+  run sh -c 'printf "\n; call-me-maybe: extensions.conf is the only dialplan\nnoload => pbx_ael.so\nnoload => pbx_lua.so\n" >> /etc/asterisk/modules.conf'
  fi
  # 0755, not 0750: the directory holds nothing secret (the secrets are 0600
  # files owned by doorman, and asterisk/generated is 0700), and 0750 locked the

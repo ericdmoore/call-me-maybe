@@ -215,7 +215,7 @@ For each handset that has `mac` and `model` in `handsets.toml`:
 ## 7 · Prompts
 
 The bundled pack ships with the repo — six WAVs, free, CC BY-SA. Copy it to
-`/var/lib/asterisk/sounds/call-me-maybe/` and you are done.
+`<astdatadir>/sounds/call-me-maybe/` — `/var/lib/asterisk` on the Pi, `/usr/share/asterisk` on Ubuntu; `asterisk -rx 'core show settings'` says which — and you are done.
 
 Rendering your own is a workstation job, never the Pi:
 

@@ -75,17 +75,59 @@ func TestEveryRegistrationBindsInboundToItsEndpoint(t *testing.T) {
 	}
 }
 
-// The other half of the same claim: with the binding right, an identify block
-// is redundant, and an IP allow-list is a list that goes stale silently.
-// Generating one would be a second mechanism to keep in agreement with the
-// first.
-func TestNoIdentifyBlocksAreGenerated(t *testing.T) {
+// The other half of the same claim, learned on the first customer's box:
+// VoIP.ms does not echo the ;line= tag, so every trunk is also identified by
+// its own identity — the sub-account and every DID routed to it — in the
+// request URI and the To header. Never by an IP: that list goes stale silently.
+func TestEveryTrunkIsIdentifiedByItsOwnIdentityNeverAnIP(t *testing.T) {
 	f := buildTrunks(t, trunkFixture(), trunkLines())
-	if strings.Contains(f.PJSIP, "type=identify") {
-		t.Error("an identify block was generated; line=yes + endpoint= makes it redundant")
+	if strings.Contains(f.PJSIP, "\nmatch=") {
+		t.Error("an IP allow-list was generated; identification must be by identity")
 	}
-	if !strings.Contains(f.PJSIP, "No identify blocks are generated") {
-		t.Error("the generated file should say why there is no identify block")
+	for _, want := range []struct{ trunk, user, did string }{
+		{"voipms", "123456_home", "5125550100"},
+		{"telnyx", "cmm-home", "5125550142"},
+	} {
+		for _, hdr := range []string{"[" + want.trunk + "-identify-uri]", "[" + want.trunk + "-identify-to]"} {
+			block, ok := section(f.PJSIP, hdr)
+			if !ok {
+				t.Fatalf("no %s block:\n%s", hdr, f.PJSIP)
+			}
+			if !strings.Contains(block, "endpoint="+want.trunk+"\n") {
+				t.Errorf("%s does not name endpoint %s:\n%s", hdr, want.trunk, block)
+			}
+			if !strings.Contains(block, want.user) || !strings.Contains(block, want.did) {
+				t.Errorf("%s must match the sub-account and the DID:\n%s", hdr, block)
+			}
+		}
+		if uri, _ := section(f.PJSIP, "["+want.trunk+"-identify-uri]"); !strings.Contains(uri, "match_request_uri=/(") {
+			t.Errorf("request-URI identify missing for %s:\n%s", want.trunk, uri)
+		}
+		if to, _ := section(f.PJSIP, "["+want.trunk+"-identify-to]"); !strings.Contains(to, "match_header=To: /(") {
+			t.Errorf("To-header identify missing for %s:\n%s", want.trunk, to)
+		}
+	}
+	// A DID routed to one trunk never identifies another.
+	if v, _ := section(f.PJSIP, "[voipms-identify-uri]"); strings.Contains(v, "5125550142") {
+		t.Error("telnyx's DID appears in voipms's identify pattern")
+	}
+}
+
+// from_user defaulted to the sub-account makes VoIP.ms answer 503 on every
+// outbound call, so the endpoint carries it only when trunks.toml set it to
+// something else.
+func TestFromUserIsOnlyEmittedWhenItDiffersFromTheUsername(t *testing.T) {
+	f := buildTrunks(t, trunkFixture(), trunkLines())
+	ep, _ := section(f.PJSIP, "[voipms]")
+	if strings.Contains(ep, "from_user=") {
+		t.Errorf("from_user emitted with the default value:\n%s", ep)
+	}
+	trunks := trunkFixture()
+	trunks[0].FromUser = "5125550100"
+	f = buildTrunks(t, trunks, trunkLines())
+	ep, _ = section(f.PJSIP, "[voipms]")
+	if !strings.Contains(ep, "from_user=5125550100\n") {
+		t.Errorf("an explicit from_user must be emitted:\n%s", ep)
 	}
 }
 
@@ -118,7 +160,7 @@ func TestTrunkPJSIPCarriesTheProviderFields(t *testing.T) {
 		"expiration=300",
 		"[voipms_aor]", "contact=sip:chicago.voip.ms",
 		"context=from-voipms", "allow=ulaw", "allow=g722",
-		"from_user=123456_home", "from_domain=chicago.voip.ms",
+		"from_domain=chicago.voip.ms", // and no from_user: it equals the username
 		"[telnyx]", "password=telnyx-secret", "context=from-telnyx",
 	} {
 		if !strings.Contains(f.PJSIP, want) {

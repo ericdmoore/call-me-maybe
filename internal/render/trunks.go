@@ -18,6 +18,7 @@ package render
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -124,12 +125,13 @@ const inboundNote = `; The DID routes come from every policy file's [line] numbe
 
 `
 
-const noIdentifyNote = `; No identify blocks are generated, and that is the design rather than an
-; omission. Inbound is bound to its endpoint by line=yes + endpoint= on each
-; registration below, so matching a provider's source address is redundant —
-; and an IP allow-list is a list that goes stale silently the day a provider
-; adds a media server. A provider that can only do IP authentication needs a
-; hand-written block and is out of scope here; see docs/RUNBOOK.md.
+const identifyNote = `; Every trunk is identified twice, and neither way is an IP address.
+; line=yes + endpoint= on each registration binds inbound calls on that
+; registration to its endpoint. Some providers (VoIP.ms) do not echo the
+; ;line= tag back, so beside it two identify blocks match the request URI
+; and the To header against the trunk's own identity: the sub-account name
+; and every DID a line routes to it. An IP allow-list (match=) is never
+; generated: it goes stale silently the day a provider adds a media server.
 
 `
 
@@ -180,7 +182,7 @@ func BuildTrunks(trunks []policy.Trunk, lines []TrunkLine, handsetIDs []string, 
 
 	var pjsip, plan strings.Builder
 	pjsip.WriteString(header("trunks.toml", true))
-	pjsip.WriteString(noIdentifyNote)
+	pjsip.WriteString(identifyNote)
 	plan.WriteString(header("trunks.toml", false))
 	plan.WriteString(inboundNote)
 
@@ -221,7 +223,7 @@ func BuildTrunks(trunks []policy.Trunk, lines []TrunkLine, handsetIDs []string, 
 			continue
 		}
 
-		writeTrunkPJSIP(&pjsip, tr, secret)
+		writeTrunkPJSIP(&pjsip, tr, secret, routes[tr.ID])
 		routeCount += writeTrunkContext(&plan, tr, routes[tr.ID])
 		generated++
 	}
@@ -248,7 +250,7 @@ func BuildTrunks(trunks []policy.Trunk, lines []TrunkLine, handsetIDs []string, 
 	}, nil
 }
 
-func writeTrunkPJSIP(b *strings.Builder, tr policy.Trunk, secret string) {
+func writeTrunkPJSIP(b *strings.Builder, tr policy.Trunk, secret string, routes []TrunkLine) {
 	title := tr.ID
 	if tr.Provider != "" {
 		title = tr.Provider + " — " + tr.ID
@@ -279,13 +281,47 @@ func writeTrunkPJSIP(b *strings.Builder, tr policy.Trunk, secret string) {
 		fmt.Fprintf(b, "allow=%s\n", c)
 	}
 	fmt.Fprintf(b, "outbound_auth=%s_auth\naors=%s_aor\n", tr.ID, tr.ID)
-	fmt.Fprintf(b, "from_user=%s\nfrom_domain=%s\n", tr.FromUser, tr.FromDomain)
+	// from_user only when trunks.toml said so. Defaulted to the sub-account
+	// it makes VoIP.ms answer 503 on every outbound call: the provider wants
+	// the DID in From, which CALLERID(num) supplies when this is left alone.
+	if tr.FromUser != "" && tr.FromUser != tr.Username {
+		fmt.Fprintf(b, "from_user=%s\n", tr.FromUser)
+	}
+	fmt.Fprintf(b, "from_domain=%s\n", tr.FromDomain)
 	// Transcoding is wasted CPU on a Pi, but media stays on the box so calls
 	// can be bridged and recorded.
 	b.WriteString("direct_media=no\nrtp_symmetric=yes\nforce_rport=yes\nrewrite_contact=yes\n")
 	// Invariant 9. Without it the lobby is deaf, every stranger is dismissed,
 	// and there is no runtime symptom other than "nobody can ever get in".
 	b.WriteString("dtmf_mode=rfc4733\n\n")
+
+	// Invariant 9b, second half: identify the trunk by what we own. The
+	// pattern is the sub-account name and every DID routed here, in the
+	// shortest form the provider could send (ten digits for NANP), matched
+	// as a substring so eleven digits and +E.164 match too.
+	pattern := identifyPattern(tr, routes)
+	b.WriteString("; Inbound calls VoIP.ms and others send without the ;line= tag: matched\n; by our own identity, never by the provider's addresses.\n")
+	fmt.Fprintf(b, "[%s-identify-uri]\ntype=identify\nendpoint=%s\nmatch_request_uri=%s\n\n", tr.ID, tr.ID, pattern)
+	fmt.Fprintf(b, "[%s-identify-to]\ntype=identify\nendpoint=%s\nmatch_header=To: %s\n\n", tr.ID, tr.ID, pattern)
+}
+
+// identifyPattern is the regex the identify blocks match: /(user|did|did)/.
+func identifyPattern(tr policy.Trunk, routes []TrunkLine) string {
+	alts := []string{regexp.QuoteMeta(tr.Username)}
+	seen := map[string]bool{tr.Username: true}
+	for _, l := range routes {
+		if l.Number == "" {
+			continue
+		}
+		forms := didForms(l.Number)
+		short := forms[len(forms)-1]
+		if seen[short] {
+			continue
+		}
+		seen[short] = true
+		alts = append(alts, regexp.QuoteMeta(short))
+	}
+	return "/(" + strings.Join(alts, "|") + ")/"
 }
 
 // writeTrunkContext emits one trunk's inbound context and returns how many DID

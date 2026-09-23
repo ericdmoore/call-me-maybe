@@ -191,15 +191,26 @@ Break these and the phone fails in ways that look like working software.
    lobby is deaf and every stranger is dismissed. No runtime symptom other
    than "nobody can ever get in".
 
-9b. **Every trunk registration carries `line=yes` *and* `endpoint=<id>`.**
-   That pair binds inbound traffic on a registration to its endpoint, which
-   is what removes the need for an `identify` block, a provider IP allow-list
-   and any port forward. Without both, inbound calls hit the `anonymous`
-   endpoint and vanish — no error, no log line, just a number that never
-   rings. `internal/render.registrationBinding` is the one place that emits
-   them and `TestEveryRegistrationBindsInboundToItsEndpoint` is the guard.
-   Do not generate an `identify` block instead: an IP allow-list goes stale
-   silently the day a provider adds a media server.
+9b. **Every trunk registration carries `line=yes` *and* `endpoint=<id>`,
+   and every trunk is also identified by its own identity — never by IP.**
+   The pair binds inbound traffic on a registration to its endpoint; it is
+   what removes the need for a provider IP allow-list and any port forward,
+   and `internal/render.registrationBinding` is the one place that emits it
+   (`TestEveryRegistrationBindsInboundToItsEndpoint` guards). It is not
+   sufficient on its own: VoIP.ms strips the `;line=` parameter from the
+   Contact it calls back, so the INVITE arrives untagged, matches nothing,
+   and is dropped as "No matching endpoint found" — no ring, no log line at
+   default verbosity (found on the first customer's box, 2026-09-21). So
+   beside the registration there are two `identify` blocks that match the
+   *request URI* and the *To header* against the sub-account name and every
+   DID the trunk answers. That is identification by something we own and
+   can never go stale; an IP allow-list (`match=`) goes stale silently the
+   day a provider adds a media server, and must never be generated or
+   written. The hand-written `asterisk/pjsip.conf.example` and the
+   generated `pjsip_trunks.conf` both carry the pair and the two blocks.
+   And never set `from_user` to the sub-account on the endpoint: VoIP.ms
+   answers 503 on outbound unless the DID rides in From, which
+   `CALLERID(num)` puts there when `from_user` is left alone.
 
 11. **A call never leaves by a trunk that does not own the number it
    presents, and emergency calls leave by the designated trunk or fail

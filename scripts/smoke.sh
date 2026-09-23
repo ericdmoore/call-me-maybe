@@ -242,7 +242,11 @@ printf '    connection is a supplementary phone, never the only way to call for 
 rung "6. Prompts"
 
 PREFIX="$(envval PROMPT_MEDIA_PREFIX || echo call-me-maybe)"
-SOUNDS="/var/lib/asterisk/sounds/$PREFIX"
+# Asterisk's data directory is /var/lib/asterisk on the Pi and /usr/share/asterisk
+# on Ubuntu and Debian; the dialplan plays call-me-maybe/<name> relative to
+# <astdatadir>/sounds, so that is where the prompts must be.
+ASTDATA="$(asterisk -rx 'core show settings' 2>/dev/null | awk -F': *' '/Data directory/ {print $2}')"
+SOUNDS="${ASTDATA:-/var/lib/asterisk}/sounds/$PREFIX"
 REQUIRED=(welcome-known lobby-greeting invalid-extension good-day no-answer connecting)
 
 if [ -d "$SOUNDS" ]; then

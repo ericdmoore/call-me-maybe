@@ -242,9 +242,10 @@ rsync -av prompts/build/ pi@raspberrypi:/tmp/cmm-prompts/
 Then on the Pi:
 
 ```bash
-sudo mkdir -p /var/lib/asterisk/sounds/call-me-maybe
-sudo cp /tmp/cmm-prompts/* /var/lib/asterisk/sounds/call-me-maybe/
-sudo chown -R asterisk:asterisk /var/lib/asterisk/sounds/call-me-maybe
+ASTDATA=$(sudo asterisk -rx 'core show settings' | awk -F': *' '/Data directory/ {print $2}')
+sudo mkdir -p "$ASTDATA/sounds/call-me-maybe"        # /var/lib/asterisk on the Pi, /usr/share/asterisk on Ubuntu
+sudo cp /tmp/cmm-prompts/* "$ASTDATA/sounds/call-me-maybe/"
+sudo chown -R asterisk:asterisk "$ASTDATA/sounds/call-me-maybe"
 ```
 
 ### 4. doorman

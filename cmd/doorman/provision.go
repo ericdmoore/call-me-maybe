@@ -525,14 +525,16 @@ func printInstructions(w io.Writer, p provision.Phone) {
 	switch p.Model.Family {
 	case "grandstream-xml":
 		if strings.HasPrefix(p.Model.ID, "grandstream-wp") {
-			fmt.Fprintf(w, "    on the phone:  Menu → Settings → Advanced Settings → Provisioning\n")
+			// The WP8xx handset menu has no config-server entry (Settings →
+			// Zero Config is Grandstream's cloud, not this); the web UI is
+			// the path. The handset shows its IP under Settings → Status.
+			fmt.Fprintf(w, "    on the phone:  (Wi-Fi first: Settings → Quick Network Configuration; then Settings → Status for its IP)\n")
 		} else {
-			fmt.Fprintf(w, "    on the phone:  Menu → System → Provisioning\n")
+			fmt.Fprintf(w, "    on the phone:  Menu → System → Provisioning → Config Server Path: %s   Upgrade via: HTTPS\n", p.Address.ConfigServerPath())
 		}
-		fmt.Fprintf(w, "                   Config Server Path: %s      Upgrade via: HTTPS\n", p.Address.ConfigServerPath())
-		fmt.Fprintf(w, "                   then Provision Now (or reboot)\n")
-		fmt.Fprintf(w, "    on the web:    https://<phone-ip> → Maintenance → Upgrade and Provisioning → Config File\n")
-		fmt.Fprintf(w, "                   Config Upgrade Via: HTTPS   Config Server Path: %s   → Save and Apply, then reboot\n", p.Address.ConfigServerPath())
+		fmt.Fprintf(w, "    on the web:    https://<phone-ip> (admin, the password on the sticker) → Maintenance → Upgrade and Provisioning → Config File\n")
+		fmt.Fprintf(w, "                   Config Upgrade Via: HTTPS   Config Server Path: %s\n", p.Address.ConfigServerPath())
+		fmt.Fprintf(w, "                   Save and Apply, then Provision Now (or reboot)\n")
 	default:
 		fmt.Fprintf(w, "    point the phone's provisioning server at %s (HTTPS)\n", p.Address.BaseURL())
 	}

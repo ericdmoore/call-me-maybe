@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -466,6 +467,13 @@ func checkEnvironment() int {
 		fmt.Fprintln(os.Stderr, envErr)
 		return 1
 	}
+	warnProvisionAddress(func(key string) (string, bool) {
+		if v, ok := os.LookupEnv(key); ok && v != "" {
+			return v, true
+		}
+		v, ok := dotenv[key]
+		return v, ok && v != ""
+	}, localAddresses())
 	if envCfg.EventJournalPath != "" {
 		if err := events.CheckPath(envCfg.EventJournalPath, events.Options{MaxBytes: envCfg.EventJournalMaxBytes}); err != nil {
 			fmt.Fprintln(os.Stderr, "event journal:", err)
@@ -1723,6 +1731,52 @@ func (a ariAdapter) Originate(ctx context.Context, p lobby.OriginateParams) (str
 		Timeout:    p.Timeout,
 		Originator: p.Originator,
 	})
+}
+
+// warnProvisionAddress says so when PROVISION_ADDRESS is not an address of
+// the box running check. The phones fetch their configuration from that
+// address and nothing else, so a box whose lease moved has phones pointed
+// at the wrong place with no symptom until the next window. A warning and
+// never a failure: check runs on workstation copies too, where the address
+// is rightly not ours.
+func warnProvisionAddress(env func(string) (string, bool), local []string) {
+	raw, ok := env("PROVISION_ADDRESS")
+	if !ok {
+		return
+	}
+	addr, err := provision.ParseAddress(raw)
+	if err != nil {
+		fmt.Printf("  ! PROVISION_ADDRESS: %v\n", err)
+		return
+	}
+	if net.ParseIP(addr.Host) == nil || len(local) == 0 {
+		return
+	}
+	for _, a := range local {
+		if a == addr.Host {
+			return
+		}
+	}
+	fmt.Printf("  ! PROVISION_ADDRESS is %s, but this box's addresses are %s. The phones fetch\n", addr.Host, strings.Join(local, ", "))
+	fmt.Println("    their configuration from that address and nothing else: pin the box's address")
+	fmt.Println("    with a DHCP reservation, or correct .env, re-render, and re-point the phones.")
+}
+
+// localAddresses is every non-loopback IPv4 this box has.
+func localAddresses() []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok || ipn.IP.IsLoopback() || ipn.IP.To4() == nil {
+			continue
+		}
+		out = append(out, ipn.IP.String())
+	}
+	return out
 }
 
 // provisioningSummary is check's one line on the phone side of the

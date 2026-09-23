@@ -3,8 +3,10 @@
 ;
 ; Trunk side: the Pi REGISTERs outbound to VoIP.ms. `line=yes` +
 ; `endpoint=voipms` binds inbound calls on that registration back to
-; the endpoint below, which is what removes the need for an
-; `identify` block, a static provider IP, or any port forwarding.
+; the endpoint below — no provider IP allow-list, no port forwarding.
+; VoIP.ms does not echo the ;line= tag back, so the two `identify`
+; blocks after the endpoint match the call by OUR identity (sub-account
+; and DID) instead. Both belong; neither is an IP.
 ;
 ; Handset side: Grandstreams register inward to Asterisk on the LAN.
 ; ─────────────────────────────────────────────────────────────
@@ -75,7 +77,10 @@ allow=ulaw
 allow=g722
 outbound_auth=voipms_auth
 aors=voipms_aor
-from_user=123456_home
+; No from_user. With it set to the sub-account, every outbound INVITE
+; presents the sub-account name as the caller and VoIP.ms answers 503:
+; it wants the DID you own in From, which is what CALLERID(num) —
+; OUTBOUND_CID from doorman render — puts there when this is left alone.
 from_domain=POP.voip.ms
 ; Transcoding is wasted CPU on a Pi; let the endpoints negotiate directly
 ; where they can, but keep media on the box so we can bridge and record.
@@ -86,6 +91,27 @@ rewrite_contact=yes
 ; DTMF: RFC2833 is what VoIP.ms sends. Without this the lobby never
 ; hears an extension.
 dtmf_mode=rfc4733
+
+; ─── Inbound identification ──────────────────────────────────
+; line=yes + endpoint= above is the first mechanism: Asterisk tags its
+; registered Contact with ;line=… and matches an inbound INVITE on that
+; tag. VoIP.ms strips the parameter, so the INVITE arrives untagged,
+; matches nothing, and is dropped as "No matching endpoint found" — no
+; ring, and no log line at the default verbosity. These two blocks
+; identify the trunk by our own identity: the sub-account name or the
+; DID, in the request URI or the To header. Unlike an IP allow-list
+; (match=) this can never go stale when the provider adds a server.
+; Put the sub-account and EVERY DID the account answers in the pattern.
+; match_request_uri needs Asterisk 20.5 or newer; match_header any.
+[voipms-identify-uri]
+type=identify
+endpoint=voipms
+match_request_uri=/(123456_home|5125550100)/
+
+[voipms-identify-to]
+type=identify
+endpoint=voipms
+match_header=To: /(123456_home|5125550100)/
 
 ; ─── Handsets ────────────────────────────────────────────────
 ; GENERATED from handsets.toml — run `doorman render`, copy the output
