@@ -922,6 +922,31 @@ func runRender(args []string) int {
 	if !write("pjsip_handsets.conf", frags.PJSIP) || !write("extensions_handsets.conf", frags.Dialplan) {
 		return 1
 	}
+
+	// The phone side (s10): one file per handset that carries mac and model,
+	// in the phone's own format, under provisioning/. Rendered before any of
+	// it is written, like everything else here, and 0600: each file holds
+	// that phone's SIP, admin and provisioning passwords.
+	prov, err := provision.BuildAll(handsets, provision.Env(env), hostTimezone())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 1
+	}
+	provDir := filepath.Join(*outFlag, "provisioning")
+	if len(prov.Files) > 0 {
+		if err := os.MkdirAll(provDir, 0o700); err != nil {
+			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+			return 1
+		}
+		for name, body := range prov.Files {
+			path := filepath.Join(provDir, name)
+			if err := os.WriteFile(path, body, 0o600); err != nil {
+				fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+				return 1
+			}
+			written = append(written, path)
+		}
+	}
 	if trunkFrags != nil {
 		if !write("pjsip_trunks.conf", trunkFrags.PJSIP) || !write("extensions_trunks.conf", trunkFrags.Dialplan) {
 			return 1
@@ -929,6 +954,16 @@ func runRender(args []string) int {
 	}
 
 	fmt.Printf("✓ rendered %d handset(s) from %s\n", frags.Generated, handsetsPath)
+	if len(prov.Phones) > 0 {
+		fmt.Printf("✓ rendered %d phone configuration(s) into %s\n", len(prov.Phones), provDir)
+		for _, ph := range prov.Phones {
+			fmt.Printf("    %-12s %s  →  tell the phone: %s via HTTPS (or run: doorman provision %s)\n",
+				ph.ID, ph.FileName(), ph.Address.ConfigServerPath(), ph.ID)
+		}
+	}
+	for _, note := range prov.Notes {
+		fmt.Printf("  · %s\n", note)
+	}
 	if trunkFrags != nil {
 		fmt.Printf("✓ rendered %d trunk(s) and %d DID route(s) from %s\n",
 			trunkFrags.Trunks, trunkFrags.Routes, trunksPath)
@@ -1582,4 +1617,25 @@ func provisioningSummary(handsets []policy.Handset) string {
 		return "(no handsets)"
 	}
 	return strings.Join(parts, "; ")
+}
+
+// hostTimezone is the box's IANA zone, for the phones' clocks: schedules are
+// local time, so a phone left on UTC puts the kids' line to bed at the wrong
+// hour. TZ, then /etc/timezone, then the /etc/localtime symlink; "" when
+// none of them say.
+func hostTimezone() string {
+	if tz := os.Getenv("TZ"); tz != "" {
+		return tz
+	}
+	if b, err := os.ReadFile("/etc/timezone"); err == nil {
+		if tz := strings.TrimSpace(string(b)); tz != "" {
+			return tz
+		}
+	}
+	if target, err := os.Readlink("/etc/localtime"); err == nil {
+		if i := strings.Index(target, "zoneinfo/"); i >= 0 {
+			return target[i+len("zoneinfo/"):]
+		}
+	}
+	return ""
 }
