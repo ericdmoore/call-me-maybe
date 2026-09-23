@@ -210,6 +210,10 @@ func runProvision(args []string) int {
 	return session.run(ctx)
 }
 
+// notifyScript is where the installer puts scripts/notify-check-sync and
+// what /etc/sudoers.d/doorman-notify allows the service account to run.
+const notifyScript = "/opt/call-me-maybe/scripts/notify-check-sync"
+
 // asteriskNotify tells a registered phone to fetch its configuration again,
 // through the Asterisk console — there is no ARI call for a NOTIFY, and the
 // console is already how the runbook reloads. Needs the pjsip_notify.conf
@@ -221,7 +225,10 @@ func asteriskNotify(id string) (string, error) {
 	// directly.
 	args := []string{"asterisk", "-rx", "pjsip send notify check-sync endpoint " + id}
 	if os.Geteuid() != 0 {
-		args = append([]string{"sudo", "-n"}, args...)
+		// Not root: through the one script sudoers allows. The console wants
+		// its command as one argument with spaces, which a sudoers rule
+		// cannot match word by word; the script takes the id and nothing else.
+		args = []string{"sudo", "-n", notifyScript, id}
 	}
 	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
 	text := strings.TrimSpace(string(out))
@@ -229,7 +236,7 @@ func asteriskNotify(id string) (string, error) {
 		if text == "" {
 			text = err.Error()
 		}
-		return text, fmt.Errorf("asterisk -rx failed — needs /etc/sudoers.d/doorman-notify from the installer, or run as root: %s", text)
+		return text, fmt.Errorf("check-sync failed — needs %s and /etc/sudoers.d/doorman-notify from the installer, or run as root: %s", notifyScript, text)
 	}
 	if strings.Contains(text, "Unable to find") || strings.Contains(text, "not found") {
 		return text, errors.New(text)

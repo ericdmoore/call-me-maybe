@@ -1,0 +1,16 @@
+#!/bin/sh
+# Call Me Maybe — tell one phone to fetch its configuration again.
+#
+# `doorman provision notify` runs this through sudo as the service account:
+# /etc/sudoers.d/doorman-notify allows exactly this script. It exists because
+# the Asterisk console wants its command as ONE argument with spaces in it,
+# and sudoers matches arguments word by word — a rule for the console itself
+# either refuses the real call or, split into words, hands Asterisk a command
+# it does not understand (first re-provision, 2026-09-23). A script with one
+# validated argument sidesteps both.
+set -eu
+id="${1:-}"
+case "$id" in
+  ''|*[!a-z0-9_-]*) echo "notify-check-sync: endpoint id must be [a-z0-9_-]+" >&2; exit 2 ;;
+esac
+exec /usr/sbin/asterisk -rx "pjsip send notify check-sync endpoint $id"

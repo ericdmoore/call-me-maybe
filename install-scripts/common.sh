@@ -181,6 +181,7 @@ prepare() {
  done
  run install -m 0644 "$repo/install-scripts/README.md" /opt/call-me-maybe/docs/INSTALL-LINUX.md
  run install -m 0755 "$repo/scripts/smoke.sh" /opt/call-me-maybe/scripts/smoke.sh
+ run install -o root -g root -m 0755 "$repo/scripts/notify-check-sync" /opt/call-me-maybe/scripts/notify-check-sync
  run install -m 0644 "$repo/scripts/cel-spool.sql" /opt/call-me-maybe/scripts/cel-spool.sql
  install_once "$binary" /opt/call-me-maybe/bin/doorman 0755
  # The same binary on the system PATH — which is also sudo's secure_path — so
@@ -191,9 +192,10 @@ prepare() {
  install_once "$repo/scripts/doorman.service" /etc/systemd/system/doorman.service 0644
  install_once "$repo/scripts/doorman-directory.service" /etc/systemd/system/doorman-directory.service 0644
  # `doorman provision notify` sends a check-sync through the Asterisk console,
- # which needs asterisk.conf and the control socket. Exactly that one command,
- # nothing else, for the service account — narrower than the asterisk group.
- install_once "$repo/scripts/doorman-notify.sudoers" /etc/sudoers.d/doorman-notify 0440
+ # which needs asterisk.conf and the control socket. The service account may
+ # run exactly scripts/notify-check-sync — one validated argument — and
+ # nothing else. Replaced on every run: it is an output of the release.
+ run install -o root -g root -m 0440 "$repo/scripts/doorman-notify.sudoers" /etc/sudoers.d/doorman-notify
  run install -d -o doorman -g doorman -m 0700 /var/lib/doorman /var/lib/doorman/journal /var/lib/doorman/provision
  run systemctl daemon-reload
  cat <<'EOF_NEXT'
