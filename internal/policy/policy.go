@@ -71,6 +71,36 @@ type Handset struct {
 	// PasswordEnv names the .env variable holding this handset's SIP
 	// password. The secret itself never appears in this file.
 	PasswordEnv string `toml:"password_env"`
+
+	// Provisioning identity. With both set, `doorman render` writes the
+	// phone's own configuration file and `doorman provision` hands it over —
+	// the two touches a new phone needs instead of a web form. Without them
+	// the handset registers by hand exactly as it always has.
+
+	// MAC is the hardware address from the sticker under the battery or on
+	// the box, in any written form; NormaliseMAC gives the canonical one.
+	MAC string `toml:"mac"`
+	// Model selects the provisioning template (grandstream-wp826, …).
+	// Unknown ids are refused with a suggestion when the caller supplies
+	// Options.ModelKnown; the inventory itself knows nothing about vendors.
+	Model string `toml:"model"`
+	// Phonebook lists the directories this phone shows: "house" (every
+	// handset with a number), "people" ([[people]]), or a contacts.toml
+	// source id. Absent means house and people. A child's phone might be
+	// just ["house"].
+	Phonebook []string `toml:"phonebook"`
+}
+
+// PhonebookSelection is what a handset shows when it says nothing: the
+// house directory and the deliberate allow-list, never a whole address book.
+var DefaultPhonebook = []string{"house", "people"}
+
+// Books returns the handset's phonebook selection with the default applied.
+func (h Handset) Books() []string {
+	if len(h.Phonebook) == 0 {
+		return append([]string(nil), DefaultPhonebook...)
+	}
+	return append([]string(nil), h.Phonebook...)
 }
 
 // Group names a set of handsets. A group id can appear anywhere a handset id
@@ -288,6 +318,14 @@ type Options struct {
 	// Only `doorman check --allow-placeholders` and CI set this. An operator
 	// never does, which is what makes a freshly copied config fail loudly.
 	AllowPlaceholders bool
+
+	// ModelKnown, when set, is asked whether a handset's model id is one
+	// doorman can provision, and what the author probably meant when it is
+	// not. The inventory deliberately knows nothing about vendors; check and
+	// the LSP pass internal/provision.Known, the daemon passes nothing and
+	// accepts any well-formed id, because a phone that registered by hand is
+	// still a phone.
+	ModelKnown func(id string) (known bool, suggestion string)
 
 	// StrictUnknownKeys makes a key that matched no field a hard error rather
 	// than something to warn about.
@@ -542,6 +580,50 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		numbers[h.Number] = h.ID
 		if h.Mailbox != "" && !mailboxPattern.MatchString(h.Mailbox) {
 			fail("handset %q mailbox %q must be lowercase alphanumeric/dash/underscore", h.ID, h.Mailbox)
+		}
+	}
+
+	// Provisioning identity. mac and model travel together: a MAC with no
+	// model has no template to render and a model with no MAC has no phone
+	// to serve, so a half-filled pair is almost always a forgotten line.
+	macs := make(map[string]string)
+	for _, h := range f.Handsets {
+		if h.MAC != "" {
+			canon, ok := NormaliseMAC(h.MAC)
+			switch {
+			case !ok:
+				fail("handset %q mac %q is not a MAC address (six hex pairs, any separator)", h.ID, h.MAC)
+			case macs[canon] != "":
+				fail("handsets %q and %q share mac %s", macs[canon], h.ID, canon)
+			default:
+				macs[canon] = h.ID
+			}
+		}
+		if (h.MAC == "") != (h.Model == "") {
+			fail("handset %q: mac and model travel together — set both (the phone can be provisioned) or neither (it registers by hand)", h.ID)
+		}
+		if h.Model != "" {
+			if !modelPattern.MatchString(h.Model) {
+				fail("handset %q model %q must be lowercase alphanumeric/dash, like grandstream-wp826", h.ID, h.Model)
+			} else if o.ModelKnown != nil {
+				if known, hint := o.ModelKnown(h.Model); !known {
+					if hint != "" {
+						fail("handset %q model %q is not a model doorman knows — did you mean %q?", h.ID, h.Model, hint)
+					} else {
+						fail("handset %q model %q is not a model doorman knows (doorman provision --models lists them)", h.ID, h.Model)
+					}
+				}
+			}
+		}
+		seenBooks := make(map[string]bool)
+		for _, b := range h.Phonebook {
+			if !phonebookPattern.MatchString(b) {
+				fail("handset %q phonebook entry %q must be house, people, or a contacts.toml source id", h.ID, b)
+			}
+			if seenBooks[b] {
+				fail("handset %q lists phonebook %q twice", h.ID, b)
+			}
+			seenBooks[b] = true
 		}
 	}
 
@@ -996,6 +1078,17 @@ func (p *Policy) FormatCallerID(name, number string) string {
 
 // HandsetIDs lists every handset id, sorted. Used to offer a picker rather
 // than making someone remember what they called the spare room.
+// HandsetList is every handset in the inventory, sorted by id — the
+// inventory view for `check` and `provision`, provisioning fields included.
+func (p *Policy) HandsetList() []Handset {
+	out := make([]Handset, 0, len(p.handsets))
+	for _, h := range p.handsets {
+		out = append(out, h)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 func (p *Policy) HandsetIDs() []string {
 	out := make([]string, 0, len(p.handsets))
 	for id := range p.handsets {

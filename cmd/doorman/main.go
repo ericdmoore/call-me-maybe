@@ -38,6 +38,7 @@ import (
 	"callmemaybe/internal/lsp"
 	"callmemaybe/internal/notify"
 	"callmemaybe/internal/policy"
+	"callmemaybe/internal/provision"
 	"callmemaybe/internal/render"
 	"callmemaybe/internal/schema"
 	"callmemaybe/internal/updatecheck"
@@ -325,6 +326,7 @@ func runCheck(args []string) (code int) {
 		AllowPlaceholders: *allowPlaceholders,
 		StrictUnknownKeys: true,
 		Trunks:            trunks,
+		ModelKnown:        provision.Known,
 	}
 
 	files, ignored := policy.DiscoverLines(path)
@@ -653,6 +655,7 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 	fmt.Printf("  caller id format     : %s\n", withDefault(
 		p.CallerIDFormat(), p.CallerIDFormat() == policy.DefaultCallerIDFormat))
 	fmt.Printf("  house ring group     : %s\n", strings.Join(p.HouseEndpoints(), ", "))
+	fmt.Printf("  provisioning         : %s\n", provisioningSummary(p.HandsetList()))
 	fmt.Printf("  house voicemail      : %s\n", orDefault(p.HousePlan().Mailbox, noMailbox))
 
 	// Every extension, every setting — including the ones nobody wrote down.
@@ -1544,4 +1547,39 @@ func (a ariAdapter) Originate(ctx context.Context, p lobby.OriginateParams) (str
 		Timeout:    p.Timeout,
 		Originator: p.Originator,
 	})
+}
+
+// provisioningSummary is check's one line on the phone side of the
+// inventory: which handsets can be provisioned, which are named but have no
+// template yet, and which register by hand. A stat of the inventory, not
+// state, so it is always true.
+func provisioningSummary(handsets []policy.Handset) string {
+	var ready, pending, manual []string
+	for _, h := range handsets {
+		switch {
+		case h.MAC == "" || h.Model == "":
+			manual = append(manual, h.ID)
+		default:
+			m, _ := provision.Lookup(h.Model)
+			if m.Templated {
+				ready = append(ready, h.ID)
+			} else {
+				pending = append(pending, h.ID+" ("+h.Model+", no template yet)")
+			}
+		}
+	}
+	var parts []string
+	if len(ready) > 0 {
+		parts = append(parts, fmt.Sprintf("%d provisionable (%s)", len(ready), strings.Join(ready, ", ")))
+	}
+	if len(pending) > 0 {
+		parts = append(parts, fmt.Sprintf("%d named, manual for now (%s)", len(pending), strings.Join(pending, ", ")))
+	}
+	if len(manual) > 0 {
+		parts = append(parts, fmt.Sprintf("%d by hand — add mac and model to provision (%s)", len(manual), strings.Join(manual, ", ")))
+	}
+	if len(parts) == 0 {
+		return "(no handsets)"
+	}
+	return strings.Join(parts, "; ")
 }
