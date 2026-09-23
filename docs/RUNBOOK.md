@@ -123,6 +123,14 @@ the main account login this section just told you to keep off it.
 
 ## 2. Provision the host
 
+> **On Ubuntu, Debian, Fedora, CentOS or Arch, do not do this section by
+> hand.** `curl -fsSL https://callmemaybe.cc/install.sh | bash` installs the
+> CLI, and `sudo bash install-scripts/<distro>.sh --binary ~/.local/bin/doorman`
+> from a checkout of the matching tag prepares the host: Asterisk, the
+> service account, `/opt/call-me-maybe`, both units. Then continue at
+> "Asterisk config" below. The steps here are the Pi path, and the manual
+> equivalent of what the installer does.
+
 For a new Linux x86 hub, start with [install-scripts](../install-scripts/README.md).
 There are entrypoints for Ubuntu, Debian, CentOS Stream/Rocky/AlmaLinux/RHEL,
 Fedora and Arch. They prepare packages and the service layout, then leave call
@@ -203,15 +211,18 @@ run. Only a strictly newer semantic version is advertised.
 
 ```bash
 $ cd /opt/call-me-maybe
-$ sudo cp asterisk/extensions.conf asterisk/http.conf asterisk/rtp.conf /etc/asterisk/
-$ sudo cp asterisk/pjsip.conf.example /etc/asterisk/pjsip.conf
-$ sudo cp asterisk/ari.conf.example   /etc/asterisk/ari.conf
+$ sudo cp asterisk/extensions.conf asterisk/http.conf asterisk/rtp.conf \
+          asterisk/musiconhold.conf asterisk/res_parking.conf asterisk/pjsip_notify.conf /etc/asterisk/
+$ sudo cp asterisk/pjsip.conf.example     /etc/asterisk/pjsip.conf
+$ sudo cp asterisk/ari.conf.example       /etc/asterisk/ari.conf
+$ sudo cp asterisk/voicemail.conf.example /etc/asterisk/voicemail.conf
 
-# Generate an ARI password and put the SAME value in both places.
-$ openssl rand -base64 24
-$ sudo nano /etc/asterisk/ari.conf     # password = <that value>
+# ari.conf takes the SAME password `doorman init` wrote to .env as ARI_PASSWORD
+# (run init first — see "doorman config" — then copy the value across):
+$ sudo nano /etc/asterisk/ari.conf     # password = <ARI_PASSWORD from .env>
 $ sudo nano /etc/asterisk/pjsip.conf   # sub account, POP, password — and the
                                        # two identify patterns: sub account + every DID
+$ sudo nano /etc/asterisk/voicemail.conf   # mailbox passwords: never 4242
 
 $ sudo chown asterisk:asterisk /etc/asterisk/*.conf
 $ sudo chmod 640 /etc/asterisk/pjsip.conf /etc/asterisk/ari.conf
@@ -239,30 +250,34 @@ the `chown` at the end — see `INSTALL-LINUX.md` → "Finish configuration".
 
 ```bash
 $ cd /opt/call-me-maybe
-$ doorman init                         # interview: which rooms get a phone
+$ sudo -u doorman doorman init         # interview: which rooms get a phone
                                        # generates every secret with crypto/rand,
                                        # writes .env, handsets.toml, policy.toml,
                                        # and prints the PINs once. Write them down.
-$ nano policy.toml                     # add your people to the allow-list
+$ sudo -u doorman nano policy.toml     # add your people to the allow-list
+$ sudo -u doorman nano handsets.toml   # mac + model per phone (see "Add a handset")
+$ sudo -u doorman nano .env            # PROVISION_ADDRESS = this box's reserved LAN IP
 
 # Non-interactive, for a scripted build:
-$ doorman init --rooms "Kitchen,Living Room,Kids Room,Office"
-$ ./bin/doorman check
+$ sudo -u doorman doorman init --rooms "Kitchen,Living Room,Kids Room,Office"
+$ sudo -u doorman doorman check
 
-# Generate the per-handset Asterisk config and install it:
-$ ./bin/doorman render
-$ sudo cp asterisk/generated/*_handsets.conf /etc/asterisk/
+# Generate the per-handset Asterisk config and install it. Name the files:
+# asterisk/generated is 0700 doorman, so a shell glob under sudo finds nothing.
+$ sudo -u doorman doorman render
+$ sudo cp asterisk/generated/pjsip_handsets.conf asterisk/generated/extensions_handsets.conf /etc/asterisk/
 $ sudo chown asterisk:asterisk /etc/asterisk/*_handsets.conf
 $ sudo chmod 640 /etc/asterisk/*_handsets.conf
 $ sudo asterisk -rx 'pjsip reload' && sudo asterisk -rx 'dialplan reload'
 
 # Never hand-pick PINs. Rotate every example PIN to a crypto/rand one in a
 # single step (comments and formatting in the file survive):
-$ ./bin/doorman rotate
-
-$ sudo chown -R doorman:doorman /opt/call-me-maybe
-$ sudo chmod 600 /opt/call-me-maybe/.env /opt/call-me-maybe/policy.toml
+$ sudo -u doorman doorman rotate
 ```
+
+On a hand-prepared host without the service account owning the directory,
+finish with `sudo chown -R doorman:doorman /opt/call-me-maybe` and
+`sudo chmod 600 /opt/call-me-maybe/.env /opt/call-me-maybe/policy.toml`.
 
 ### Prompts
 

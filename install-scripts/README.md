@@ -109,10 +109,13 @@ sudo -u doorman doorman init --rooms 'Kitchen,Office'
 sudo -u doorman doorman check
 ```
 
-Record the generated PINs securely. Continue with [RUNBOOK §2](../docs/RUNBOOK.md):
-set your people/provider/handset configuration, install Asterisk configuration,
-put the same generated ARI credentials in `.env` and `ari.conf`, and keep
-`http.conf` bound to **127.0.0.1:8088**. Render as doorman and install its generated
+Record the generated PINs securely. Continue with [RUNBOOK §2](../docs/RUNBOOK.md)
+from "Asterisk config": set your people/provider/handset configuration, install
+the Asterisk configuration, put the `ARI_PASSWORD` that `init` wrote to `.env`
+into `ari.conf`, and keep `http.conf` bound to **127.0.0.1:8088**. Render
+before restarting Asterisk: the shipped `pjsip.conf` and `extensions.conf`
+`#tryinclude` the generated files, so a missing one is tolerated, but nothing
+rings until they exist. Render as doorman and install its generated
 files with the permissions described there. Copy your prerecorded prompts.
 
 Review optional journal/CEL setup in [events.md](../docs/events.md). Enabling CEL
@@ -124,9 +127,12 @@ After configuration and validation, explicitly activate services:
 ```bash
 sudo systemctl enable --now asterisk
 sudo systemctl restart asterisk  # loads the configuration you just installed
-sudo systemctl enable --now doorman
+sudo systemctl enable --now doorman doorman-directory
 sudo bash scripts/smoke.sh
 ```
+
+`doorman-directory` is the phones' directory (RUNBOOK → "Add a handset");
+without `PROVISION_ADDRESS` in `.env` it exits 0 and stays quiet.
 
 Do this before putting the hub into use; restarting Asterisk interrupts calls.
 Follow the runbook for LAN/provider-specific SIP/RTP firewall access. The final

@@ -1107,8 +1107,16 @@ func runRender(args []string) int {
 	for _, p := range written {
 		fmt.Printf("  %s\n", p)
 	}
+	// Only the Asterisk files go to /etc/asterisk. The phones' own files under
+	// provisioning/ are served by `doorman provision` from where they are.
+	var confs []string
+	for _, p := range written {
+		if strings.HasSuffix(p, ".conf") {
+			confs = append(confs, p)
+		}
+	}
 	fmt.Println("\nInstall on the Pi:")
-	fmt.Println("  sudo cp " + strings.Join(written, " ") + " /etc/asterisk/")
+	fmt.Println("  sudo cp " + strings.Join(confs, " ") + " /etc/asterisk/")
 	fmt.Println("  sudo chown asterisk:asterisk /etc/asterisk/*_handsets.conf")
 	fmt.Println("  sudo chmod 640 /etc/asterisk/*_handsets.conf")
 	if trunkFrags != nil {

@@ -117,7 +117,11 @@ match_header=To: /(123456_home|5125550100)/
 ; GENERATED from handsets.toml — run `doorman render`, copy the output
 ; here, chown asterisk:asterisk, chmod 640 (it contains real passwords).
 ; Add a phone by editing handsets.toml, never this file.
-#include "pjsip_handsets.conf"
+; tryinclude, not include: on a fresh box this file is installed before
+; `doorman render` has produced the generated one, and a missing #include
+; makes Asterisk reject the WHOLE file — no endpoints, no dialplan, and the
+; only trace is "declined to load" in messages.log (first install, 2026-09-23).
+#tryinclude "pjsip_handsets.conf"
 
 ; ─── Home Assistant Assist (optional) ────────────────────────
 ; A static endpoint at HA's IP for the native VoIP integration — no
