@@ -423,6 +423,10 @@ type provisionSession struct {
 type phoneProgress struct {
 	fetched    bool
 	registered bool
+	// offline is set once the endpoint has been seen offline after the
+	// fetch — a notify session's phone reboots to apply, and it has not
+	// re-registered until it has been gone and come back.
+	offline bool
 }
 
 func (s *provisionSession) run(ctx context.Context) int {
@@ -529,7 +533,17 @@ func (s *provisionSession) run(ctx context.Context) int {
 				if !pr.fetched || pr.registered || s.reader == nil {
 					continue
 				}
-				if readRegistration(ctx, s.reader, p.ID).online {
+				reg := readRegistration(ctx, s.reader, p.ID)
+				// After a notify the phone reboots to apply: it is only
+				// re-registered once it has gone away and come back.
+				if s.notify != nil && !pr.offline {
+					if reg.known && !reg.online {
+						pr.offline = true
+						fmt.Fprintf(s.out, "  %s  %-10s restarting\n", stamp(), p.ID)
+					}
+					continue
+				}
+				if reg.online {
 					pr.registered = true
 					fmt.Fprintf(s.out, "  %s  %-10s registered  PJSIP/%s\n", stamp(), p.ID, p.ID)
 				}
@@ -550,7 +564,7 @@ func (s *provisionSession) printEvent(at string, e provserve.Event) {
 	case "refused":
 		fmt.Fprintf(s.out, "  %s  !          %s\n", at, e.Detail)
 	case "unauthorized":
-		fmt.Fprintf(s.out, "  %s  %-10s refused: %s\n", at, e.Handset, e.Detail)
+		fmt.Fprintf(s.out, "  %s  %-10s %s\n", at, e.Handset, e.Detail)
 	case "error":
 		fmt.Fprintf(s.out, "  %s  %-10s error: %s\n", at, e.Handset, e.Detail)
 	case "phonebook":

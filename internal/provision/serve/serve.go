@@ -205,7 +205,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		s.emit(Event{Kind: "connected", Handset: p.ID, MAC: p.MAC, Remote: remote})
 		if s.Seen(p.MAC) && !s.authorised(r, p) && !s.sameContact(p.MAC, remote) {
-			s.emit(Event{Kind: "unauthorized", Handset: p.ID, MAC: p.MAC, Remote: remote, Detail: "fetch after first contact without the phone's credential"})
+			// Usually not a fault: a Grandstream sends no credential until it is
+			// challenged, and retries with it a moment later.
+			s.emit(Event{Kind: "unauthorized", Handset: p.ID, MAC: p.MAC, Remote: remote, Detail: "challenged — no credential presented; a phone that has one retries with it"})
 			w.Header().Set("WWW-Authenticate", `Basic realm="doorman"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return

@@ -333,6 +333,7 @@ func TestNothingUnderInternalImportsTheServingPackage(t *testing.T) {
 // is named, and a phone that fetches afterwards counts as done.
 func TestNotifySessionSendsCheckSyncThenWatchesTheFetch(t *testing.T) {
 	h := newSession(t, []string{"kitchen"}, 3*time.Second)
+	h.feed.set("kitchen", true) // registered before the notify, as a live phone is
 	var notified []string
 	h.session.notify = func(id string) (string, error) {
 		notified = append(notified, id)
@@ -344,12 +345,19 @@ func TestNotifySessionSendsCheckSyncThenWatchesTheFetch(t *testing.T) {
 			if err == nil {
 				resp.Body.Close()
 			}
+			// The phone reboots to apply: gone, then back.
+			time.Sleep(40 * time.Millisecond)
+			h.feed.set("kitchen", false)
+			time.Sleep(60 * time.Millisecond)
 			h.feed.set("kitchen", true)
 		}()
 		return "Sending NOTIFY of type 'check-sync' to endpoint kitchen", nil
 	}
 	if code := h.session.run(context.Background()); code != 0 {
 		t.Fatalf("exit = %d\n%s", code, h.out.String())
+	}
+	if out := h.out.String(); !strings.Contains(out, "restarting") || strings.Index(out, "restarting") > strings.Index(out, "registered  PJSIP/kitchen") {
+		t.Fatalf("a notified phone must be seen restarting before it counts as registered:\n%s", out)
 	}
 	if len(notified) != 1 || notified[0] != "kitchen" {
 		t.Fatalf("notified = %v", notified)
