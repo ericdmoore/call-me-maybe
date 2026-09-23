@@ -139,7 +139,12 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 
 		fmt.Fprintf(&pjsip, "; ── %s ──\n[%s]\n", label, h.ID)
 		pjsip.WriteString("type=endpoint\ncontext=internal\ndisallow=all\nallow=ulaw\nallow=g722\n")
-		fmt.Fprintf(&pjsip, "auth=%s-auth\naors=%s\n", h.ID, h.ID)
+		// outbound_auth as well as auth: a Grandstream challenges every NOTIFY
+		// the box sends it (401, digest, the phone's own SIP credentials), and
+		// without this Asterisk never answers the challenge, so a check-sync
+		// is politely refused and `doorman provision notify` does nothing.
+		// The same auth object serves both directions.
+		fmt.Fprintf(&pjsip, "auth=%s-auth\noutbound_auth=%s-auth\naors=%s\n", h.ID, h.ID, h.ID)
 		pjsip.WriteString("direct_media=no\nforce_rport=yes\nrewrite_contact=yes\nrtp_symmetric=yes\ndtmf_mode=rfc4733\n")
 		if h.Number > 0 {
 			fmt.Fprintf(&pjsip, "callerid=%s <%d>\n", label, h.Number)

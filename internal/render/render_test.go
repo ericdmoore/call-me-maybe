@@ -203,3 +203,17 @@ func TestRenderLeavesUnclaimedHandsetsAlone(t *testing.T) {
 		t.Errorf("unclaimed handset got an outbound caller id:\n%s", kids)
 	}
 }
+
+// A Grandstream challenges every NOTIFY with the phone's own SIP credentials.
+// Without outbound_auth on the endpoint the challenge goes unanswered and
+// `doorman provision notify` does nothing (first re-provision, 2026-09-23).
+func TestEveryHandsetEndpointCanAnswerAPhonesNotifyChallenge(t *testing.T) {
+	handsets := []policy.Handset{{ID: "kitchen", Label: "Kitchen", Endpoint: "PJSIP/kitchen", Number: 101, PasswordEnv: "HANDSET_KITCHEN_PASSWORD"}}
+	f, err := Build(handsets, func(string) (string, bool) { return "sip-secret", true }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(f.PJSIP, "auth=kitchen-auth\noutbound_auth=kitchen-auth\n") {
+		t.Fatalf("endpoint must carry outbound_auth beside auth:\n%s", f.PJSIP)
+	}
+}

@@ -1272,9 +1272,10 @@ $ sudo -u doorman doorman provision notify kitchen   # each phone fetches and re
 
 Nothing prints the new passwords: `.env` is rewritten atomically beside a
 timestamped backup, and the phone fetches its own through `provision notify`,
-which opens the window, sends a `check-sync` NOTIFY through the Asterisk
-console (the shipped `pjsip_notify.conf` defines it), and watches the phone
-fetch and register. A phone that is off during the rotation fetches its new
+which opens the window, sends a `check-sync` NOTIFY with `reboot=true`
+through the Asterisk console (the shipped `pjsip_notify.conf` defines it;
+a Grandstream acknowledges the plain form and does nothing), and watches the
+phone restart, fetch and register — about a minute per phone. A phone that is off during the rotation fetches its new
 password the next time it boots inside a window — `doorman provision <id>`
 opens one.
 

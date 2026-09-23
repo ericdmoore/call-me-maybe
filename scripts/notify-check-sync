@@ -13,4 +13,6 @@ id="${1:-}"
 case "$id" in
   ''|*[!a-z0-9_-]*) echo "notify-check-sync: endpoint id must be [a-z0-9_-]+" >&2; exit 2 ;;
 esac
-exec /usr/sbin/asterisk -rx "pjsip send notify check-sync endpoint $id"
+# check-sync-reboot: a Grandstream acknowledges plain check-sync and does
+# nothing; with reboot=true it restarts, fetches, and registers within a minute.
+exec /usr/sbin/asterisk -rx "pjsip send notify check-sync-reboot endpoint $id"

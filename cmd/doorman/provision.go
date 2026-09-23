@@ -223,7 +223,10 @@ func asteriskNotify(id string) (string, error) {
 	// asterisk. The service account is given exactly this command through
 	// /etc/sudoers.d/doorman-notify (the installer writes it); root runs it
 	// directly.
-	args := []string{"asterisk", "-rx", "pjsip send notify check-sync endpoint " + id}
+	// check-sync;reboot=true, not plain check-sync: the WP826 answers the
+	// plain one 200 OK and then does nothing; with reboot=true it reboots,
+	// fetches, and registers inside a minute (first re-provision, 2026-09-23).
+	args := []string{"asterisk", "-rx", "pjsip send notify check-sync-reboot endpoint " + id}
 	if os.Geteuid() != 0 {
 		// Not root: through the one script sudoers allows. The console wants
 		// its command as one argument with spaces, which a sudoers rule
@@ -451,7 +454,7 @@ func (s *provisionSession) run(ctx context.Context) int {
 				fmt.Fprintf(s.out, "  %s  %-10s notify failed: %v\n", time.Now().Format("15:04:05"), p.ID, err)
 				continue
 			}
-			fmt.Fprintf(s.out, "  %s  %-10s sent check-sync — the phone should fetch within seconds\n", time.Now().Format("15:04:05"), p.ID)
+			fmt.Fprintf(s.out, "  %s  %-10s sent check-sync (reboot) — the phone restarts and fetches within a minute\n", time.Now().Format("15:04:05"), p.ID)
 		}
 	}
 
