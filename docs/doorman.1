@@ -191,8 +191,17 @@ in place with comments intact. Rotates every extension when no labels are
 given, or only the named ones. A running daemon picks the change up within a
 second. New PINs are printed to stdout \(em the one place they are ever
 shown \(em and are never written to the logs.
+.IP
+.BI "doorman rotate \-phones [\-env " path "] [" id ...]
+rotates handset SIP passwords instead, rewriting
+.I .env
+atomically beside a timestamped backup and printing none of them: after
+.B doorman render
+and a reload,
+.B doorman provision notify
+hands each phone its new one.
 .TP
-.BI "doorman render [\-handsets " path "] [\-policy " path "] [\-trunks " path "] [\-out " dir "] [\-env " path ]
+.BI "doorman render [\-handsets " path "] [\-policy " path "] [\-trunks " path "] [\-contacts " path "] [\-out " dir "] [\-env " path ]
 Generate the per\-handset Asterisk configuration from
 .IR handsets.toml :
 PJSIP endpoints, internal numbers, BLF hints, and the ring\-all and page\-all
@@ -327,6 +336,40 @@ Filters:
 .B \-\-json
 emits JSON Lines.
 .RE
+.TP
+.BI "doorman provision [\-window " d "] [\-forever] [\-all] [\-state " dir "] [" id ...]
+A phone configures itself. With no ids, the inventory view: every handset
+with its model, MAC, the file it fetches, and whether it is registered right
+now (read over ARI on loopback) \(em no listener. With ids or
+.BR \-all :
+render, open a bounded HTTPS window on
+.B PROVISION_ADDRESS
+with a certificate minted once into the state directory, answer only the
+listed MACs \(em the first fetch open, every later one with that phone's own
+credential \(em print exactly what to type on each phone, and watch
+connect, fetch and registration as they happen. A fetch from a MAC that is not
+in the inventory is refused, and the refusal prints the MAC to paste into
+.IR handsets.toml .
+Exit 0 when every named phone registered, 1 when the window closed first, 2
+when the inventory or the flags were wrong. Ctrl\-C closes the window
+cleanly.
+.B \-\-models
+lists the model ids;
+.B \-\-export\-cert
+prints the certificate for a phone that validates servers.
+.IP
+.BI "doorman provision notify [" id ...]
+opens the window and sends a check\-sync NOTIFY through the Asterisk console
+so registered phones fetch again \(em the second half of a rotation.
+.IP
+.B doorman provision directory
+is the phones' directory: the house, the allow\-list and any
+.I contacts.toml
+source a handset opted into, served always, read\-only, one port above the
+window, with each phone's own credential, re\-read when the inputs change.
+It never serves a configuration.
+.B doorman\-directory.service
+runs it.
 .TP
 .B doorman balance
 What is left on each prepaid trunk, per trunk, with a non\-zero exit when any

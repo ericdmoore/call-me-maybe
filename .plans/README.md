@@ -20,7 +20,6 @@ otherwise have to be reconstructed from a commit log.
 | **s06** | [Speakers as page targets](s06-speaker-page-targets/) — Sonos and Cast carry a page; they are not handsets | planned | TASKS §6 (HA webhook) |
 | **s07** | [The contacts ladder](s07-contacts-ladder/) — your address book admits people; published numbers still dial in | planned | — |
 | **s09** | [One binary that installs itself](s09-distro-software-release-channel/) — `sudo doorman init` prepares the host; brew, deb/rpm, AUR, `go install` | planned | s08 for the release notice |
-| **s10** | [Zero-touch handsets](s10-zero-touch-handsets/) — `render` produces the phone's own config; a bounded LAN window serves it; rotation re-provisions | planned | s09 M1 to ship templates in the binary (soft) |
 | **s11** | [The hunt](s11-the-hunt/) — the verification ladder as a scavenger hunt: envelopes, `*6` + an answer plays a parent's recorded clue, `500` announces the winner; zero mechanism in doorman | planned | — |
 | **s12** | [Do not disturb](s12-do-not-disturb/) — `*78NN` quiets a handset for 15/30/45 min; rings and pages skip it, except a page from an override handset; state is Asterisk's, time-boxed, read by doorman never written | planned | per-handset voicemail; the `100` ring-all group; s10 for line keys |
 | **s14** | [411 — the phone explains itself](s14-411-feature-discovery/) — one registry of everything you can dial; a generated, checkable IVR at `411`; the runbook table, a wall card and the soft keys from the same source | planned | the graph-provenance primitive; composite prompts |
@@ -35,6 +34,7 @@ enough to live in its plan.
 | | Stream | Closed |
 |---|---|---|
 | **s08** | [Durable event journal](_archives/s08-durable-event-journal/) — SQLite history, doorbells, CEL capture, consumer-owned replay | 2026-09-23 — verified live on jepsen; replicas and the HTTP endpoint dropped with reasons |
+| **s10** | [Zero-touch handsets](_archives/s10-zero-touch-handsets/) — `render` writes the phone's own file; `doorman provision` is the window, the instructions and the watch; `rotate --phones` re-provisions; the directory unit is the phone book | 2026-09-23 — shipped in v0.6.0 under test; the live rehearsal rides with the jepsen re-provision |
 
 ---
 

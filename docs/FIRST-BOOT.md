@@ -199,6 +199,17 @@ re-render.
 
 Copy them into place and reload Asterisk per `RUNBOOK.md` §2.
 
+### Phones
+
+For each handset that has `mac` and `model` in `handsets.toml`:
+
+1. `doorman provision <id>` — opens a 15-minute window and prints what to
+   type on that phone (or set DHCP option 66 once and type nothing).
+2. Type it, or plug the phone in. The command reports the fetch and the
+   registration and exits 0.
+3. Enable `doorman-directory` (RUNBOOK → "Service") so the phones show the
+   rooms and the family in their directory.
+
 ---
 
 ## 7 · Prompts

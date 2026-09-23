@@ -371,7 +371,9 @@ What actually matters more than the model:
 
 ### Handsets
 
-Grandstream's Wi-Fi handsets are what this was built and tested against:
+Grandstream's Wi-Fi handsets are what this was built and tested against, and
+both configure themselves from `handsets.toml` — `doorman provision` hands
+each one its own file, so nobody types a password into a phone:
 
 #### Grandstream Cordless WiFi IP Phone WP826 SIP Phone
 [on Amazon](https://amzn.to/44YDPRP)
@@ -382,24 +384,26 @@ Grandstream's Wi-Fi handsets are what this was built and tested against:
 ### Other good-value options
 
 Every one of these registers over SIP and drops into `handsets.toml`
-unchanged — the type column is the decision that matters, not the brand.
+unchanged — the type column is the decision that matters, not the brand. The
+last column says whether `doorman provision` can configure it for you yet;
+the rest are set up from their own web page, as before.
 
-| Model | Type | Notes |
-|---|---|---|
-| [Grandstream HT812 V2](https://amzn.to/4yS8Wwc) | ATA · 2× FXS | Puts analog phones you already own on the lobby — an existing cordless base, or a 1950s rotary. Two ports, so two `[[handsets]]` entries. Usually the cheapest way to cover rooms, and the most fun. |
-| [Grandstream DP752](https://amzn.to/4ftcHAr) | DECT base | Carries several DP7xx handsets, each registering as its own SIP account — one `[[handsets]]` entry per handset, exactly like a desk phone. |
-| [Grandstream DP730](https://amzn.to/4vYvEzV) | DECT handset | Pairs to the DP752. Buy one per room. |
-| [Yealink W73P](https://amzn.to/4wyMO8q) | DECT bundle | W70B base + W73H handset. The straightforward place to start. |
-| [Yealink W73P + extra W73H](https://amzn.to/3TLJSXn) | DECT bundle | Same, second handset in the box — cheaper than adding one later. |
-| [Yealink W79P](https://amzn.to/4fMKbZx) | DECT bundle | W70B base + W59R, the ruggedised handset — the one to pick if it's going to get dropped. |
-| [Yealink W79P + 1 extra W59R](https://amzn.to/4h4kR3x) | DECT bundle | Two rugged handsets. |
-| [Yealink W79P + 2 extra W59R](https://amzn.to/4pMK04N) | DECT bundle | Three handsets — cheapest route to a whole-house cordless set. |
-| [Grandstream GRP2601P](https://amzn.to/4fLsxFy) | Desk · PoE | Entry desk phone. `P` = PoE, so one cable carries power and network. |
-| [Grandstream GRP2602P](https://amzn.to/4hEZPZm) | Desk · PoE | Same family, the higher tier of the two. |
-| [Grandstream GRP2602W](https://amzn.to/3S3jI1R) | Desk · Wi-Fi | `W` = built-in Wi-Fi, for a room with no Ethernet drop. Prefer the `P` anywhere you have a cable. |
-| [Yealink T31P](https://amzn.to/4pKnQAe) | Desk · PoE | Very common, well built, cheap. A safe default. |
-| [Fanvil X3U](https://amzn.to/4xbLUyA) | Desk · PoE | About as cheap as this gets while still being pleasant to use. |
-| [Cisco SPA504](https://amzn.to/44Ww1QC) | Desk · PoE | The classic four-line workhorse, and abundant secondhand. Factory-reset anything used — it may still be provisioned to its last owner. |
+| Model | Type | Provisions itself | Notes |
+|---|---|---|---|
+| [Grandstream HT812 V2](https://amzn.to/4yS8Wwc) | ATA · 2× FXS | not yet | Puts analog phones you already own on the lobby — an existing cordless base, or a 1950s rotary. Two ports, so two `[[handsets]]` entries. Usually the cheapest way to cover rooms, and the most fun. |
+| [Grandstream DP752](https://amzn.to/4ftcHAr) | DECT base | not yet | Carries several DP7xx handsets, each registering as its own SIP account — one `[[handsets]]` entry per handset, exactly like a desk phone. |
+| [Grandstream DP730](https://amzn.to/4vYvEzV) | DECT handset | not yet | Pairs to the DP752. Buy one per room. |
+| [Yealink W73P](https://amzn.to/4wyMO8q) | DECT bundle | not yet | W70B base + W73H handset. The straightforward place to start. |
+| [Yealink W73P + extra W73H](https://amzn.to/3TLJSXn) | DECT bundle | not yet | Same, second handset in the box — cheaper than adding one later. |
+| [Yealink W79P](https://amzn.to/4fMKbZx) | DECT bundle | not yet | W70B base + W59R, the ruggedised handset — the one to pick if it's going to get dropped. |
+| [Yealink W79P + 1 extra W59R](https://amzn.to/4h4kR3x) | DECT bundle | not yet | Two rugged handsets. |
+| [Yealink W79P + 2 extra W59R](https://amzn.to/4pMK04N) | DECT bundle | not yet | Three handsets — cheapest route to a whole-house cordless set. |
+| [Grandstream GRP2601P](https://amzn.to/4fLsxFy) | Desk · PoE | yes | Entry desk phone. `P` = PoE, so one cable carries power and network. |
+| [Grandstream GRP2602P](https://amzn.to/4hEZPZm) | Desk · PoE | yes | Same family, the higher tier of the two. |
+| [Grandstream GRP2602W](https://amzn.to/3S3jI1R) | Desk · Wi-Fi | yes | `W` = built-in Wi-Fi, for a room with no Ethernet drop. Prefer the `P` anywhere you have a cable. |
+| [Yealink T31P](https://amzn.to/4pKnQAe) | Desk · PoE | not yet | Very common, well built, cheap. A safe default. |
+| [Fanvil X3U](https://amzn.to/4xbLUyA) | Desk · PoE | not yet | About as cheap as this gets while still being pleasant to use. |
+| [Cisco SPA504](https://amzn.to/44Ww1QC) | Desk · PoE | not yet | The classic four-line workhorse, and abundant secondhand. Factory-reset anything used — it may still be provisioned to its last owner. |
 
 **Wi-Fi vs DECT vs wired, honestly:** Wi-Fi handsets are convenient and give
 you one less base station, but they hand off between access points poorly —

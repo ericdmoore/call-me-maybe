@@ -44,6 +44,8 @@ make run                   # dev run with .env sourced (needs reachable Asterisk
 ./bin/doorman e164 <num>   # show how a raw caller ID normalises
 ./bin/doorman events --json # durable events, --after/--limit/--eventType
 ./bin/doorman balance      # prepaid credit per trunk; exit 1 under threshold
+./bin/doorman provision    # inventory view; with ids: window + instructions + watch
+./bin/doorman rotate --phones  # new handset SIP passwords; `provision notify` delivers
 ./scripts/smoke.sh         # full deployment verification, run ON the Pi
 ```
 
@@ -109,6 +111,13 @@ Layout:
   never imports this package — the adapter in `cmd/doorman` is the one
   translation point, exactly as it is for ARI. Derived and disposable:
   deleting every source only sends those callers back to the lobby.
+- `internal/provision` — the phone's half of the inventory: the model
+  registry, per-vendor configuration and phone-book templates, and
+  `PROVISION_ADDRESS`. `internal/provision/serve` is the LAN listener (the
+  bounded window and the always-on directory) and is reachable from
+  `cmd/doorman/provision.go` and nothing else — asserted by test, the same
+  guard the provider package has: a listener that hands out SIP passwords
+  never shares a process with the thing that answers the phone.
 - `internal/config` — env parsing; names match `examples/.env.example` exactly.
 
 Config interfaces: `.env` (secrets + tuning), `handsets.toml` (hardware
