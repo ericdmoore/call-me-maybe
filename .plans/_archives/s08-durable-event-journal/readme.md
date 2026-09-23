@@ -1,24 +1,50 @@
 # s08 · Durable event journal and webhook doorbells
 
-**Status:** initial increment implemented: pure-Go SQLite journal, internal
-`public_events_v1`, JSON CLI, Doorman observation producers, one persisted
-webhook doorbell target, retention, and consumer example. Journal-backed call
-summaries now use `public_calls_v1`; event queries support combined filters and
-a fixed `--through` cursor. JSONL remains explicitly readable and is written only
-when the journal is disabled. Legacy webhooks remain compatible. See `docs/events.md` for the shipped contract.
+**Status: closed 2026-09-23 — archived.** M1–M4 and the compatibility half of
+M6 are shipped and were verified live on the first customer's box (jepsen,
+Ubuntu 26.04, Asterisk 22.5.2) on 2026-09-23:
 
-M4's CEL adapter is implemented with fixture tests; live Asterisk verification
-is pending deployment. M5 (replicas), multiple doorbell targets, and managed
-backup/restore generation renewal remain follow-up work. In-place rollback of a
-journal snapshot is not supported; restored snapshots are read-only history.
-The HTTP endpoint is deferred. This document retains the broader design below.
+- M1–M2: the journal, switched on with `EVENT_JOURNAL_PATH`, recorded
+  `daemon.started`, `ari.connected`, and for a lobby call driven by an
+  originated `Local` channel with no caller ID, `call.observed →
+  admission.decided → call.handed_off → session.finished`.
+- M4: CEL enabled by the procedure in `docs/events.md` exactly as written
+  (spool initialised as `asterisk`, the two conf files, the `setfacl` grants —
+  the permission question is answered there, and `acl` is a package the host
+  needs). A dialplan-only echo call doorman never saw produced nine CEL rows
+  and the journal ingested them as `channel.*` events after an honest
+  `journal.note: cel-observation-started; prior system coverage unknown`.
+  doorman restarted six seconds into a twenty-second call: source sequences
+  10–18 journaled once each, no duplicates, no gaps, restart markers in place.
+- M6: SQLite's online backup read back with the same journal identity,
+  generation and watermark (in-place restore is unsupported by design and
+  documented as such); the reference consumer caught up from nothing, did
+  nothing on a second run, and after one more call processed only the new
+  events, with `after`, `journal_id` and `generation` in its checkpoint.
 
-Deployment clarification: the intended host is a Linux x86 PC, with deployment
-planned for Saturday. Validate the host's actual architecture before selecting
-the binary; ARM builds remain portability checks, not this deployment's target.
-The initial consumer integration will be Bash glue around the JSON CLI and its
-saved cursor; those scripts wait for the Bullmoose CLI changes. Additional webhook targets and replicas are optional follow-ups,
-not prerequisites for that integration.
+Decisions that close the rest, recorded so they are not rediscovered:
+
+- **M5 replicas: dropped.** Reopened as its own stream when a concrete
+  destination exists. **Multiple doorbell targets: dropped** for the same
+  reason. **Backup/restore generation renewal: documented, not managed** —
+  the procedure in `events.md` is the feature.
+- **The HTTP endpoint: not planned.** The CLI is the interface; a remote
+  consumer runs the CLI over the tailnet.
+- **The bullmoose consumer is bullmoose's backlog.** The in-repo reference
+  consumer satisfies M6; the Bash glue "waiting for the Bullmoose CLI
+  changes" is tracked there, not here.
+- **`WEBHOOK_MODE=legacy` stays the default**; doorbell mode is opt-in. The
+  household's Home Assistant uses legacy.
+- **Journal and CEL default off until s09's `init` can set them up** — the
+  ACLs and the spool initialisation are exactly the kind of root steps that
+  belong to `sudo doorman init`, and the first customer's first calls were
+  not journaled because nobody had turned it on. s09 carries that.
+- One installer gap for the ledger: `install-scripts/` does not copy
+  `examples/integrations/`, so the reference consumer was not on the box.
+  Moot once s09 deletes the scripts and embeds the examples.
+
+The design below is kept as written: it is the reasoning, and the parts that
+were not built say why.
 
 ## What done looks like
 

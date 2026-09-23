@@ -19,7 +19,6 @@ otherwise have to be reconstructed from a commit log.
 | **s05** | [System alerts](s05-system-alerts/) — the house phone tells you about the house phone | planned | composite prompts |
 | **s06** | [Speakers as page targets](s06-speaker-page-targets/) — Sonos and Cast carry a page; they are not handsets | planned | TASKS §6 (HA webhook) |
 | **s07** | [The contacts ladder](s07-contacts-ladder/) — your address book admits people; published numbers still dial in | planned | — |
-| **s08** | [Durable event journal](s08-durable-event-journal/) — SQLite history, webhook doorbells, and consumer-owned replay | journal/CLI/doorbell/CEL implemented; live validation pending | — |
 | **s09** | [One binary that installs itself](s09-distro-software-release-channel/) — `sudo doorman init` prepares the host; brew, deb/rpm, AUR, `go install` | planned | s08 for the release notice |
 | **s10** | [Zero-touch handsets](s10-zero-touch-handsets/) — `render` produces the phone's own config; a bounded LAN window serves it; rotation re-provisions | planned | s09 M1 to ship templates in the binary (soft) |
 | **s11** | [The hunt](s11-the-hunt/) — the verification ladder as a scavenger hunt: envelopes, `*6` + an answer plays a parent's recorded clue, `500` announces the winner; zero mechanism in doorman | planned | — |
@@ -29,6 +28,12 @@ otherwise have to be reconstructed from a commit log.
 
 s01 has an [`arch.md`](s01-multiple-DIDs/arch.md); s03's reasoning is short
 enough to live in its plan.
+
+### Archived
+
+| | Stream | Closed |
+|---|---|---|
+| **s08** | [Durable event journal](_archives/s08-durable-event-journal/) — SQLite history, doorbells, CEL capture, consumer-owned replay | 2026-09-23 — verified live on jepsen; replicas and the HTTP endpoint dropped with reasons |
 
 ---
 
