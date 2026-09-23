@@ -43,10 +43,16 @@ func grandstreamValues(p Phone) []pvalue {
 		{2, p.AdminPassword, "web-admin password"},
 
 		// DTMF: RFC 2833 only. The phone-side half of invariant 9 — without it
-		// the lobby is deaf and every stranger is dismissed. VERIFY numbers.
-		{73, "0", "DTMF in audio: off (VERIFY)"},
-		{74, "1", "DTMF via RTP RFC 2833: on (VERIFY)"},
-		{75, "0", "DTMF via SIP INFO: off (VERIFY)"},
+		// the lobby is deaf and every stranger is dismissed. Two numberings:
+		// the GXP/GRP desk phones read P73–P75, the WP8xx handsets P2301–P2303
+		// (per Grandstream's own WP820 template). A phone ignores the pair it
+		// does not know.
+		{73, "0", "DTMF in audio: off (GXP/GRP)"},
+		{74, "1", "DTMF via RTP RFC 2833: on (GXP/GRP)"},
+		{75, "0", "DTMF via SIP INFO: off (GXP/GRP)"},
+		{2301, "0", "DTMF in audio: off (WP8xx)"},
+		{2302, "1", "DTMF via RTP RFC 2833: on (WP8xx)"},
+		{2303, "0", "DTMF via SIP INFO: off (WP8xx)"},
 
 		// Codecs, in the order Asterisk allows them: ulaw then g722.
 		{57, "0", "vocoder 1: PCMU (VERIFY)"},
@@ -59,14 +65,20 @@ func grandstreamValues(p Phone) []pvalue {
 		// Provisioning: where the phone fetches this very file from, over
 		// HTTPS, presenting its own credential after first contact.
 		{237, p.Address.ConfigServerPath(), "config server path"},
-		{212, "2", "upgrade/provision via HTTPS (VERIFY)"},
-		{1359, p.ID, "config server username (VERIFY)"},
-		{1360, p.ProvisionPassword, "config server password (VERIFY)"},
+		{212, "2", "upgrade/provision via HTTPS"},
+		// The first rehearsal (WP826, 2026-09-23) put the credential in the
+		// wrong boxes: P1359 is the XML *file* password, not a username. It is
+		// set empty here on purpose, so a phone that once received a value
+		// there stops trying to decrypt plain XML with it.
+		{1360, p.ID, "config server HTTP/HTTPS username"},
+		{1361, p.ProvisionPassword, "config server HTTP/HTTPS password"},
+		{1359, "", "XML config file password: none — the file is plain XML"},
 		{194, "0", "automatic firmware upgrade: off"},
 
 		// Directory: this phone's own book, polled on the phone's schedule.
-		{330, p.Address.PhonebookPath(p.ID), "phonebook XML server path"},
-		{331, "3", "phonebook download via HTTPS (VERIFY)"},
+		// P330 is the mode and P331 the path (the rehearsal had them swapped).
+		{330, "3", "phonebook download mode: HTTPS"},
+		{331, p.Address.PhonebookPath(p.ID), "phonebook XML server path"},
 		{332, "60", "phonebook download interval, minutes"},
 		{333, "0", "keep manually added entries"},
 	}

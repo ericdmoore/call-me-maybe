@@ -73,6 +73,14 @@ type Server struct {
 	byID   map[string]provision.Phone
 	mu     sync.Mutex
 	seen   map[string]time.Time // MAC canonical -> first contact
+	// contact is which address made first contact in THIS window. A phone
+	// fetches its configuration more than once while applying it — the
+	// first rehearsal saw a second fetch one second after the first, before
+	// the credential in the file could possibly have been applied — so
+	// within the window the same address may fetch again without it. A
+	// different address may not: it is the window plus the MAC plus the
+	// address that gates, and the credential from the second window on.
+	contact map[string]string
 }
 
 // New validates the options and loads first-contact state.
@@ -83,7 +91,7 @@ func New(opts Options) (*Server, error) {
 	if err := os.MkdirAll(opts.StateDir, 0o700); err != nil {
 		return nil, err
 	}
-	s := &Server{opts: opts, byFile: map[string]provision.Phone{}, byID: map[string]provision.Phone{}, seen: map[string]time.Time{}}
+	s := &Server{opts: opts, byFile: map[string]provision.Phone{}, byID: map[string]provision.Phone{}, seen: map[string]time.Time{}, contact: map[string]string{}}
 	for _, p := range opts.Phones {
 		s.byFile[p.FileName()] = p
 		s.byID[p.ID] = p
@@ -196,7 +204,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.emit(Event{Kind: "connected", Handset: p.ID, MAC: p.MAC, Remote: remote})
-		if s.Seen(p.MAC) && !s.authorised(r, p) {
+		if s.Seen(p.MAC) && !s.authorised(r, p) && !s.sameContact(p.MAC, remote) {
 			s.emit(Event{Kind: "unauthorized", Handset: p.ID, MAC: p.MAC, Remote: remote, Detail: "fetch after first contact without the phone's credential"})
 			w.Header().Set("WWW-Authenticate", `Basic realm="doorman"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -215,6 +223,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(body)
 		}
 		s.markSeen(p.MAC)
+		s.markContact(p.MAC, remote)
 		s.emit(Event{Kind: "fetched", Handset: p.ID, MAC: p.MAC, Remote: remote, Detail: fmt.Sprintf("%s (%d bytes)", rest, len(body))})
 		return
 	}
@@ -283,6 +292,23 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.NotFound(w, r)
+}
+
+// markContact remembers, for this window only, the address a phone first
+// fetched from; sameContact is the check.
+func (s *Server) markContact(mac, remote string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.contact[mac]; !ok {
+		s.contact[mac] = remote
+	}
+}
+
+func (s *Server) sameContact(mac, remote string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	first, ok := s.contact[mac]
+	return ok && remote != "" && first == remote
 }
 
 func (s *Server) authorised(r *http.Request, p provision.Phone) bool {

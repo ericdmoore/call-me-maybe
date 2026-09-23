@@ -65,17 +65,33 @@ func TestFirstContactIsOpenThenTheCredentialIsRequired(t *testing.T) {
 	if at, ok := s.SeenAt("ec:74:d7:88:a2:54"); !ok || at.IsZero() {
 		t.Fatal("first contact should be recorded with its time")
 	}
-	if rec := get(h, "/prov/cfgec74d788a254.xml", "", ""); rec.Code != 401 {
-		t.Fatalf("second fetch without the credential must be 401, got %d", rec.Code)
+	// The same phone, applying what it fetched, fetches again from the same
+	// address inside the window: served. It cannot have the credential yet.
+	if rec := get(h, "/prov/cfgec74d788a254.xml", "", ""); rec.Code != 200 {
+		t.Fatalf("a re-fetch from the first-contact address inside the window must be served, got %d", rec.Code)
 	}
-	if rec := get(h, "/prov/cfgec74d788a254.xml", "kitchen", "wrong"); rec.Code != 401 {
+	// Anybody else, without the credential: not.
+	other := httptest.NewRequest(http.MethodGet, "/prov/cfgec74d788a254.xml", nil)
+	other.RemoteAddr = "192.168.7.99:40000"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, other)
+	if rec.Code != 401 {
+		t.Fatalf("a fetch from another address without the credential must be 401, got %d", rec.Code)
+	}
+	other.SetBasicAuth("kitchen", "wrong")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, other)
+	if rec.Code != 401 {
 		t.Fatalf("wrong credential must be 401, got %d", rec.Code)
 	}
-	if rec := get(h, "/prov/cfgec74d788a254.xml", "kitchen", "prov-k"); rec.Code != 200 {
-		t.Fatalf("the phone's own credential must be accepted, got %d", rec.Code)
+	other.SetBasicAuth("kitchen", "prov-k")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, other)
+	if rec.Code != 200 {
+		t.Fatalf("the phone's own credential must be accepted from anywhere, got %d", rec.Code)
 	}
 	got := kinds(*events)
-	want := []string{"connected", "fetched", "connected", "unauthorized", "connected", "unauthorized", "connected", "fetched"}
+	want := []string{"connected", "fetched", "connected", "fetched", "connected", "unauthorized", "connected", "unauthorized", "connected", "fetched"}
 	if len(got) != len(want) {
 		t.Fatalf("events %v", got)
 	}
@@ -84,10 +100,14 @@ func TestFirstContactIsOpenThenTheCredentialIsRequired(t *testing.T) {
 			t.Fatalf("events %v, want %v", got, want)
 		}
 	}
-	// First contact survives a new window: it is on disk.
+	// First contact survives a new window: it is on disk — and the address
+	// grace does not: a new window asks for the credential again.
 	s2, err := New(s.opts)
 	if err != nil || !s2.Seen("ec:74:d7:88:a2:54") {
 		t.Fatal("first contact must persist across windows")
+	}
+	if rec := get(s2.Handler(), "/prov/cfgec74d788a254.xml", "", ""); rec.Code != 401 {
+		t.Fatalf("in a new window the credential is required again, got %d", rec.Code)
 	}
 	s2.Forget("ec:74:d7:88:a2:54")
 	if s2.Seen("ec:74:d7:88:a2:54") {

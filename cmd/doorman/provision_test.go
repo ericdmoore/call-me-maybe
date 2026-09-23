@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"go/parser"
 	"go/token"
 	"net/http"
@@ -366,5 +367,45 @@ func TestNotifyFailureIsReportedAndTheWindowStaysOpen(t *testing.T) {
 	}
 	if !strings.Contains(h.out.String(), "notify failed") {
 		t.Fatalf("the failure must be visible:\n%s", h.out.String())
+	}
+}
+
+// `doorman provision kitchen --window 45m` is how a person types it; the
+// flag must not be mistaken for a handset id.
+func TestProvisionFlagsMayFollowTheIds(t *testing.T) {
+	fs := flag.NewFlagSet("provision", flag.ContinueOnError)
+	window := fs.Duration("window", 0, "")
+	all := fs.Bool("all", false, "")
+	ids := parseInterleaved(fs, []string{"kitchen", "--window", "45m", "theater", "-all"})
+	if len(ids) != 2 || ids[0] != "kitchen" || ids[1] != "theater" {
+		t.Fatalf("ids = %v", ids)
+	}
+	if *window != 45*time.Minute || !*all {
+		t.Fatalf("flags after ids were not parsed: window=%v all=%v", *window, *all)
+	}
+}
+
+// After a factory reset, or when the credential on the phone is wrong, the
+// operator reopens first contact for that phone and nothing else.
+func TestResetReopensFirstContactForTheNamedPhoneOnly(t *testing.T) {
+	dir, phones := sessionPhones(t)
+	state := t.TempDir()
+	srv, err := provserve.New(provserve.Options{Dir: dir, StateDir: state, Phones: phones, Address: phones[0].Address})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	fetch(t, ts.URL+"/prov/cfgec74d788a254.xml") // kitchen: first contact
+	fetch(t, ts.URL+"/prov/cfgec74d788bd5a.xml") // theater: first contact
+	srv2, _ := provserve.New(provserve.Options{Dir: dir, StateDir: state, Phones: phones, Address: phones[0].Address})
+	srv2.Forget(phones[0].MAC)
+	ts2 := httptest.NewServer(srv2.Handler())
+	defer ts2.Close()
+	if got := fetch(t, ts2.URL+"/prov/cfgec74d788a254.xml"); got != 200 {
+		t.Fatalf("kitchen after reset should be served without a credential, got %d", got)
+	}
+	if got := fetch(t, ts2.URL+"/prov/cfgec74d788bd5a.xml"); got != 401 {
+		t.Fatalf("theater was not reset and must still need its credential, got %d", got)
 	}
 }

@@ -184,6 +184,10 @@ prepare() {
  install_once "$binary" /usr/local/bin/doorman 0755
  install_once "$repo/scripts/doorman.service" /etc/systemd/system/doorman.service 0644
  install_once "$repo/scripts/doorman-directory.service" /etc/systemd/system/doorman-directory.service 0644
+ # `doorman provision notify` sends a check-sync through the Asterisk console,
+ # which needs asterisk.conf and the control socket. Exactly that one command,
+ # nothing else, for the service account — narrower than the asterisk group.
+ install_once "$repo/scripts/doorman-notify.sudoers" /etc/sudoers.d/doorman-notify 0440
  run install -d -o doorman -g doorman -m 0700 /var/lib/doorman /var/lib/doorman/journal /var/lib/doorman/provision
  run systemctl daemon-reload
  cat <<'EOF_NEXT'

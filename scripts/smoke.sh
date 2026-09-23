@@ -105,7 +105,9 @@ fi
 rung "3. Handsets"
 
 CONTACTS="$(ast 'pjsip show contacts')"
-AVAIL=$(grep -ci 'Avail' <<<"$CONTACTS" || true)
+# Handsets only: a trunk's AOR has a qualified contact too, and counting it
+# reported one phone on a box with none (first re-provision, 2026-09-23).
+AVAIL=$(grep -i 'Avail' <<<"$CONTACTS" | grep -vc '_aor/' || true)
 if [ "${AVAIL:-0}" -gt 0 ]; then
   pass "$AVAIL handset contact(s) available"
 else

@@ -69,7 +69,11 @@ func runProvision(args []string) int {
 	all := fs.Bool("all", false, "every handset with a mac and model")
 	models := fs.Bool("models", false, "list the model ids handsets.toml accepts")
 	exportCert := fs.Bool("export-cert", false, "print the window's certificate (PEM) for a phone that validates servers")
-	_ = fs.Parse(args)
+	reset := fs.Bool("reset", false, "treat the named phones as making first contact again: after a factory reset, or when a fetch was refused as unauthorized")
+	// Flags and ids in any order: `doorman provision kitchen --window 45m`
+	// reads naturally, and the stdlib parser would otherwise take --window
+	// as a handset id. The first rehearsal typed it that way.
+	ids := parseInterleaved(fs, args)
 
 	if *models {
 		printModels(os.Stdout)
@@ -109,7 +113,7 @@ func runProvision(args []string) int {
 	reader := provisionARIReader(ctx, env)
 
 	// The inventory view.
-	if fs.NArg() == 0 && !*all && !*exportCert && !notify {
+	if len(ids) == 0 && !*all && !*exportCert && !notify {
 		srv, err := provserve.New(provserve.Options{Dir: provDir, StateDir: stateDir, Phones: built.Phones, Address: address})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
@@ -128,7 +132,7 @@ func runProvision(args []string) int {
 		for _, p := range built.Phones {
 			byID[p.ID] = p
 		}
-		for _, id := range fs.Args() {
+		for _, id := range ids {
 			p, ok := byID[id]
 			if !ok {
 				fmt.Fprintf(os.Stderr, "✗ %q is not a handset with a mac and model in %s\n", id, handsetsPath)
@@ -170,6 +174,12 @@ func runProvision(args []string) int {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return provisionExitUsage
 	}
+	if *reset {
+		for _, p := range named {
+			srv.Forget(p.MAC)
+			fmt.Printf("→ %s: first contact reopened — the next fetch needs no credential\n", p.ID)
+		}
+	}
 	if *exportCert {
 		pemBytes, err := srv.CertificatePEM()
 		if err != nil {
@@ -205,18 +215,41 @@ func runProvision(args []string) int {
 // console is already how the runbook reloads. Needs the pjsip_notify.conf
 // this repo ships, which defines check-sync.
 func asteriskNotify(id string) (string, error) {
-	out, err := exec.Command("asterisk", "-rx", "pjsip send notify check-sync endpoint "+id).CombinedOutput()
+	// The console needs asterisk.conf and the control socket, both owned by
+	// asterisk. The service account is given exactly this command through
+	// /etc/sudoers.d/doorman-notify (the installer writes it); root runs it
+	// directly.
+	args := []string{"asterisk", "-rx", "pjsip send notify check-sync endpoint " + id}
+	if os.Geteuid() != 0 {
+		args = append([]string{"sudo", "-n"}, args...)
+	}
+	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil {
 		if text == "" {
 			text = err.Error()
 		}
-		return text, fmt.Errorf("asterisk -rx failed — run as a user in the asterisk group, or with sudo: %s", text)
+		return text, fmt.Errorf("asterisk -rx failed — needs /etc/sudoers.d/doorman-notify from the installer, or run as root: %s", text)
 	}
 	if strings.Contains(text, "Unable to find") || strings.Contains(text, "not found") {
 		return text, errors.New(text)
 	}
 	return text, nil
+}
+
+// parseInterleaved parses flags wherever they appear, returning the
+// positional arguments in order.
+func parseInterleaved(fs *flag.FlagSet, args []string) []string {
+	var positional []string
+	for {
+		_ = fs.Parse(args)
+		rest := fs.Args()
+		if len(rest) == 0 {
+			return positional
+		}
+		positional = append(positional, rest[0])
+		args = rest[1:]
+	}
 }
 
 // provisionStateDir is where the certificate and first-contact records

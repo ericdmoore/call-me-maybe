@@ -228,6 +228,8 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -all                      every handset that has a mac and model
       -models                   list the model ids handsets.toml accepts
       -export-cert              print the window's certificate for phones that validate
+      -reset                    the named phones make first contact again (after a
+                                factory reset, or when a fetch was refused as unauthorized)
   doorman provision notify [id ...]
                                 ask registered phones to fetch their configuration again
   doorman provision directory   the phones' directory — house, people, opted-in

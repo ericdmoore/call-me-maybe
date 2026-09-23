@@ -1,0 +1,5 @@
+# Call Me Maybe: the service account may ask Asterisk to send a NOTIFY, and
+# nothing else. `doorman provision notify` uses it to tell a phone to fetch its
+# configuration again after a rotation. Installed by install-scripts/ as
+# /etc/sudoers.d/doorman-notify, mode 0440.
+doorman ALL=(root) NOPASSWD: /usr/sbin/asterisk -rx pjsip send notify *
