@@ -1,6 +1,8 @@
 # s13 · Actions — a word, a digit or a passkey moves something in the house
 
-**Status:** planned (2026-09-24, evening). Drafted the hour the house first
+**Status:** M1 shipped 2026-09-24 (v0.7.2) — the registry exists and the
+text surface performs actions from it; M2 waits on the ratgdo answer and
+the HA automations. Planned the same evening, Drafted the hour the house first
 texted back, when `ping` → `pong` proved the text surface and the next word,
 `garage`, had nowhere to go. s15 has the text, s19 has the passkey, s14 has
 the menu; this stream is the thing they all point at.
@@ -104,13 +106,15 @@ over ARI's own channel. Nothing on the call path waits on any of it.
 
 ## Milestones and acceptance criteria
 
-### M1 · The registry
+### M1 · The registry — **done 2026-09-24 (v0.7.2)**
 
-`[[actions]]` in policy, schema, `doorman check` (cross-refs from words;
-warns on the word-level webhook); `messages.toml` words reference actions;
-`doorman inbox` performs an action by its registry entry. Done when the
-`ping` word is an action with no webhook and the tests that covered words
-cover actions.
+`[[actions]]` in policy (id, label, webhook, reply, people, confirm),
+schema, `doorman check` (the registry on its summary line; a word for an
+undeclared action or an id nobody carries fails; a word-level webhook is
+reported as the stopgap it is); `messages.toml` words name actions;
+`doorman inbox` performs from the registry, the action's people win over
+the word's, `confirm = "passkey"` moves nothing on a text and says so. The
+webhook payload carries action, person, via and id. Tests cover all of it.
 
 ### M2 · The garage
 
