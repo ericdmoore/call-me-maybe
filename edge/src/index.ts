@@ -63,12 +63,20 @@ async function sendSMS(env: Env, did: string, dst: string, message: string): Pro
   u.searchParams.set("did", did);
   u.searchParams.set("dst", dst);
   u.searchParams.set("message", message);
-  const resp = await fetch(u.toString(), { method: "GET" });
-  const text = await resp.text();
+  // Two tries: the first live send met a transient 525 between Cloudflare
+  // and the carrier, and the second went through. A reply is a courtesy;
+  // one retry is proportionate, more would be a spammer's loop.
   let status = "";
-  try { status = (JSON.parse(text) as { status?: string }).status ?? ""; } catch { status = text.slice(0, 40); }
-  // `success` means accepted, not delivered. There are no receipts.
-  return { ok: status === "success", detail: status };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const resp = await fetch(u.toString(), { method: "GET" });
+    const text = await resp.text();
+    try { status = (JSON.parse(text) as { status?: string }).status ?? ""; } catch { status = text.trim().slice(0, 40); }
+    // `success` means accepted, not delivered. There are no receipts.
+    if (status === "success") return { ok: true, detail: status };
+    if (resp.status < 500 && !status.startsWith("error code")) break; // the carrier answered; retrying will not change it
+    await new Promise((res) => setTimeout(res, 1500));
+  }
+  return { ok: false, detail: status };
 }
 
 export default {
