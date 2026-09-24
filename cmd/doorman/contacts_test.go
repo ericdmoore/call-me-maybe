@@ -592,3 +592,17 @@ func TestCheckRefusesAWordForAPersonWithNoID(t *testing.T) {
 		t.Fatal("no messages.toml is the normal state and passes")
 	}
 }
+
+// A word that names an action nobody declared fails the check.
+func TestCheckRefusesAWordForAnUndeclaredAction(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "messages.toml")
+	if err := os.WriteFile(path, []byte("[[words]]\nword = \"garage\"\npeople = [\"*\"]\naction = \"garage\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var ok bool
+	out := capture(t, func() { ok = printMessages(path, allowLists(t, allowGrandma)) })
+	if ok || !strings.Contains(out, `action "garage" is not an [[actions]] entry`) {
+		t.Fatalf("ok=%v\n%s", ok, out)
+	}
+}

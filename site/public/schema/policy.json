@@ -5,6 +5,71 @@
   "description": "The rules. Safe to hand-edit: a file that fails validation is logged and discarded on reload, and the last good policy stays in service. Handset and group ids referenced here must exist in handsets.toml.",
   "type": "object",
   "properties": {
+    "actions": {
+      "description": "The registry of things the house can do (s13): what each does, who may, what it says back, whether it confirms. A text word (messages.toml), a lobby digit and a passkey all name an action by id; the action owns the webhook.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "description": "\"passkey\": the request is intent, not authority — nothing moves until a passkey confirms it (s19). Until that door exists the house says so and does nothing.",
+            "type": "string",
+            "enum": [
+              "none",
+              "passkey"
+            ],
+            "default": "none"
+          },
+          "id": {
+            "description": "What every transport names: `action = \"garage\"` on a word, a lobby leaf, a passkey button.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-rules": [
+              "Unique."
+            ]
+          },
+          "label": {
+            "description": "For people. Defaults to the id.",
+            "type": "string"
+          },
+          "people": {
+            "description": "[[people]] ids who may perform it, or [\"*\"] for everyone on the allow-list. A transport may narrow this list, never widen it.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "x-cross-references": [
+              "[[people]] id"
+            ],
+            "x-rules": [
+              "Every id must be a [[people]] id in this file."
+            ]
+          },
+          "reply": {
+            "description": "What the house says back, where the transport can carry one.",
+            "type": "string",
+            "x-rules": [
+              "Plain ASCII, at most 160 characters, no digits, no links, no exclamation marks.",
+              "An action needs a webhook, a reply, or both."
+            ]
+          },
+          "webhook": {
+            "description": "POSTed to when the action is performed — Home Assistant's webhook, which decides what a garage is and may refuse. The body is JSON: action, person id, transport (sms, lobby, passkey), message id. Never a text, never a number.",
+            "type": "string",
+            "pattern": "^https?://",
+            "x-rules": [
+              "The URL is a credential: an HA webhook id is the whole secret. Logged as a host only."
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "people"
+        ],
+        "additionalProperties": false
+      }
+    },
     "extensions": {
       "description": "What an unknown caller may dial in the lobby.",
       "type": "array",

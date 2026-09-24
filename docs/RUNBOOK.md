@@ -724,9 +724,23 @@ answered. The pieces, in order:
    carrier API key so this box never does. Give VoIP.ms the callback URL
    with the house's callback token in the path, and admit Cloudflare's
    egress to the API allow-list.
-3. **The words.** `cp examples/messages.example.toml messages.toml`, give
-   the people it names an `id` in `policy.toml`, point each word at a Home
-   Assistant webhook, and `doorman check`.
+3. **The actions and the words.** An action in `policy.toml` says what the
+   house can do, who may, what it says back, and whether it confirms:
+
+   ```toml
+   [[actions]]
+   id = "garage"
+   webhook = "http://homeassistant:8123/api/webhook/cmm-garage-open"
+   reply = "The garage is open"
+   people = ["gabi", "eric"]        # [[people]] ids; "*" is everyone listed
+   confirm = "none"                 # "passkey" once s19 exists
+   ```
+
+   Then `cp examples/messages.example.toml messages.toml`, and each word
+   names its action: `action = "garage"`. Give the people an `id` in
+   `policy.toml`, and `doorman check` — it refuses a word for an action or a
+   person nobody declared. Home Assistant decides what a garage is and may
+   say no; the box only asks.
 4. **The consumer.** `INBOX_URL` and `INBOX_TOKEN` in `.env`, then
    `doorman inbox` in a tab to watch it work, and
    `sudo systemctl enable --now doorman-inbox` to keep it working.

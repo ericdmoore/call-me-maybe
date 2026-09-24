@@ -187,6 +187,7 @@ type Outcome struct {
 	// duplicate, refused, failed.
 	Result string
 	Word   string
+	Action string // the [[actions]] id the word performed, when it named one
 	Person string // [[people]] id or name, when the sender is on the list
 	Detail string
 }
@@ -281,13 +282,41 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 		return out
 	}
 	out.Word = word.Word
-	if !allowed(word, caller) {
+	if !allowed(word.People, caller) {
 		out.Result = "not-allowed"
 		return out
 	}
-	if word.Webhook != "" {
-		payload := map[string]string{"word": word.Word, "person": out.Person, "id": m.ID}
-		if err := r.d.Webhook(ctx, word.Webhook, payload); err != nil {
+	// What the word does: its action's webhook and reply (s13), or — the
+	// stopgap that shipped first — its own.
+	webhook, reply, confirm := word.Webhook, word.Reply, policy.ConfirmNone
+	if word.Action != "" {
+		action, ok := r.d.Policy.LookupAction(word.Action)
+		if !ok {
+			out.Result = "failed"
+			out.Detail = "action " + word.Action + " is not in policy.toml"
+			return out
+		}
+		out.Action = action.ID
+		// The action's people are the people; a word may only narrow.
+		if !allowed(action.People, caller) {
+			out.Result = "not-allowed"
+			return out
+		}
+		webhook, reply, confirm = action.Webhook, action.Reply, action.Confirm
+		if reply == "" {
+			reply = word.Reply
+		}
+	}
+	if confirm == policy.ConfirmPasskey {
+		// Intent, not authority (s19): nothing moves on a text alone. Until
+		// the passkey door exists, say so and do nothing.
+		out.Result = "needs-confirmation"
+		_ = r.d.Edge.Send(ctx, n.Value, "That one needs your passkey, which is not set up yet")
+		return out
+	}
+	if webhook != "" {
+		payload := map[string]string{"word": word.Word, "action": out.Action, "person": out.Person, "via": "sms", "id": m.ID}
+		if err := r.d.Webhook(ctx, webhook, payload); err != nil {
 			out.Result = "failed"
 			out.Detail = "webhook: " + err.Error()
 			return out
@@ -296,16 +325,16 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 	} else {
 		out.Result = "replied"
 	}
-	if word.Reply != "" {
-		if err := r.d.Edge.Send(ctx, n.Value, word.Reply); err != nil {
+	if reply != "" {
+		if err := r.d.Edge.Send(ctx, n.Value, reply); err != nil {
 			out.Detail = "reply failed: " + err.Error()
 		}
 	}
 	return out
 }
 
-func allowed(w policy.Word, c policy.KnownCaller) bool {
-	for _, id := range w.People {
+func allowed(people []string, c policy.KnownCaller) bool {
+	for _, id := range people {
 		if id == "*" || (c.ID != "" && id == c.ID) {
 			return true
 		}
@@ -316,9 +345,15 @@ func allowed(w policy.Word, c policy.KnownCaller) bool {
 func (r *Reader) allowedWords(c policy.KnownCaller) []string {
 	var out []string
 	for _, w := range r.d.Messages.Words() {
-		if allowed(w, c) {
-			out = append(out, w.Word)
+		if !allowed(w.People, c) {
+			continue
 		}
+		if w.Action != "" {
+			if a, ok := r.d.Policy.LookupAction(w.Action); !ok || !allowed(a.People, c) {
+				continue
+			}
+		}
+		out = append(out, w.Word)
 	}
 	if len(out) == 0 {
 		out = []string{"nothing yet"}

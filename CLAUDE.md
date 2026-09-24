@@ -134,7 +134,10 @@ Layout:
 
 Config interfaces: `.env` (secrets + tuning), `handsets.toml` (hardware
 inventory — source of truth for the generated Asterisk config), `policy.toml`
-(rules: allow-list, extensions, ladders, `[[schedules]]`), and optionally
+(rules: allow-list, extensions, ladders, `[[schedules]]`, and `[[actions]]` —
+the one registry of things the house can do, which a text word, a lobby
+digit and a passkey all name by id), `messages.toml` (optional: the words a
+text to the house number may carry, each naming an action), and optionally
 `trunks.toml` (the providers — source of truth for the generated trunk config
 and inbound contexts) and `contacts.toml` (the address books to read — the
 ambient list, where `[[people]]` is the deliberate one). Each file owns its

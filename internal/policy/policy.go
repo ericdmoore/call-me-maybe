@@ -3,6 +3,7 @@ package policy
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -27,7 +28,38 @@ type File struct {
 	Schedules  []Schedule  `toml:"schedules"`
 	People     []Person    `toml:"people"`
 	Extensions []Extension `toml:"extensions"`
+	// Actions are the things a word, a lobby digit or a passkey can make
+	// the house do (s13). One registry; every transport names an id.
+	Actions []Action `toml:"actions"`
 }
+
+// Action is one thing the house can do: what it does (a Home Assistant
+// webhook — HA decides what a garage is and may refuse), who may do it, what
+// it says back, and whether it must be confirmed before it happens.
+type Action struct {
+	ID    string `toml:"id"`
+	Label string `toml:"label"`
+	// Webhook is POSTed to when the action is performed. Home Assistant's,
+	// typically. The body is JSON — action, person id, transport, message
+	// id — never a text and never a number.
+	Webhook string `toml:"webhook"`
+	// Reply is what the house says back, when the transport can carry one.
+	// The boring rule applies: ASCII, one segment, no digits, no links, no
+	// exclamation marks.
+	Reply string `toml:"reply"`
+	// People are the [[people]] ids who may perform it, or ["*"] for
+	// everyone on the allow-list. A transport may narrow this, never widen.
+	People []string `toml:"people"`
+	// Confirm is "none" (default) or "passkey": the request is intent, not
+	// authority, and waits for a passkey (s19) before the webhook fires.
+	Confirm string `toml:"confirm"`
+}
+
+// Confirm values.
+const (
+	ConfirmNone    = "none"
+	ConfirmPasskey = "passkey"
+)
 
 // Schedule is a named time window, defined once and referenced by id from
 // extensions (afterhours = "school-night"). Turning a schedule off for the
@@ -294,6 +326,8 @@ type ResolvedExtension struct {
 
 // Policy is a validated policy file compiled into lookups.
 type Policy struct {
+	actions        map[string]Action
+	actionOrder    []string
 	allow          map[string]KnownCaller
 	exts           map[string]ResolvedExtension
 	house          RingPlan
@@ -773,6 +807,58 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		}
 	}
 
+	actions := make(map[string]Action)
+	var actionOrder []string
+	for _, a := range f.Actions {
+		where := fmt.Sprintf("action %q", a.ID)
+		if !handsetIDPattern.MatchString(a.ID) {
+			fail("action id %q must be lowercase alphanumeric/dash/underscore", a.ID)
+			continue
+		}
+		if _, dup := actions[a.ID]; dup {
+			fail("duplicate %s", where)
+			continue
+		}
+		if a.Webhook == "" && a.Reply == "" {
+			fail("%s does nothing — give it a webhook, a reply, or both", where)
+		}
+		if a.Webhook != "" {
+			if u, err := url.Parse(a.Webhook); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				fail("%s: webhook must be an http or https URL", where)
+			}
+		}
+		if a.Reply != "" {
+			if why := ReplyProblem(a.Reply); why != "" {
+				fail("%s: reply %s", where, why)
+			}
+		}
+		if len(a.People) == 0 {
+			fail("%s names nobody — list [[people]] ids, or [\"*\"] for everyone on the allow-list", where)
+		}
+		for _, id := range a.People {
+			if id == "*" {
+				continue
+			}
+			if !handsetIDPattern.MatchString(id) {
+				fail("%s: %q is not a [[people]] id or \"*\"", where, id)
+			} else if personIDs[id] == "" {
+				fail("%s names %q, which no [[people]] entry carries as its id", where, id)
+			}
+		}
+		switch a.Confirm {
+		case "":
+			a.Confirm = ConfirmNone
+		case ConfirmNone, ConfirmPasskey:
+		default:
+			fail("%s: confirm %q must be %q or %q", where, a.Confirm, ConfirmNone, ConfirmPasskey)
+		}
+		if a.Label == "" {
+			a.Label = a.ID
+		}
+		actions[a.ID] = a
+		actionOrder = append(actionOrder, a.ID)
+	}
+
 	exts := make(map[string]ResolvedExtension)
 	lengths := make(map[int]bool)
 	for _, e := range f.Extensions {
@@ -918,7 +1004,7 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 	}
 
 	return &Policy{
-		allow:          allow,
+		actions: actions, actionOrder: actionOrder, allow: allow,
 		exts:           exts,
 		house:          house,
 		callerIDFormat: format,
@@ -1079,6 +1165,21 @@ func (p *Policy) Extensions() []ResolvedExtension {
 }
 
 func (p *Policy) AllowListCount() int { return len(p.allow) }
+
+// Actions is the registry, in declaration order.
+func (p *Policy) Actions() []Action {
+	out := make([]Action, 0, len(p.actionOrder))
+	for _, id := range p.actionOrder {
+		out = append(out, p.actions[id])
+	}
+	return out
+}
+
+// LookupAction finds an action by id.
+func (p *Policy) LookupAction(id string) (Action, bool) {
+	a, ok := p.actions[id]
+	return a, ok
+}
 
 // PersonIDs is every [[people]] id that is set, sorted — what another file
 // may reference.

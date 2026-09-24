@@ -83,14 +83,29 @@ numbers = ["512-555-0102"]
 pin = "482913"
 label = "Family"
 handsets = ["kitchen"]
+[[actions]]
+id = "garage"
+label = "Garage door"
+webhook = "http://ha.example.invalid/api/webhook/garage"
+reply = "The garage is open"
+people = ["gabi"]
+[[actions]]
+id = "close"
+webhook = "http://ha.example.invalid/api/webhook/close"
+reply = "Closing the garage"
+people = ["gabi"]
+confirm = "passkey"
 `
 
 const houseWords = `
 [[words]]
 word = "garage"
-people = ["gabi"]
-webhook = "WEBHOOK"
-reply = "The garage is open"
+people = ["*"]
+action = "garage"
+[[words]]
+word = "close"
+people = ["*"]
+action = "close"
 [[words]]
 word = "ping"
 people = ["*"]
@@ -110,7 +125,7 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msgs, err := policy.MessagesFromTOML([]byte(strings.ReplaceAll(houseWords, "WEBHOOK", "http://ha.example.invalid/api/webhook/garage")))
+	msgs, err := policy.MessagesFromTOML([]byte(houseWords))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +151,7 @@ func TestAListedPersonsWordActsAndReplies(t *testing.T) {
 	if out.Result != "acted" || out.Word != "garage" || out.Person != "gabi" {
 		t.Fatalf("outcome = %+v", out)
 	}
-	if len(h.hooks) != 1 || h.hooks[0]["word"] != "garage" || h.hooks[0]["person"] != "gabi" || h.hooks[0]["id"] != "m1" {
+	if len(h.hooks) != 1 || h.hooks[0]["word"] != "garage" || h.hooks[0]["action"] != "garage" || h.hooks[0]["person"] != "gabi" || h.hooks[0]["via"] != "sms" || h.hooks[0]["id"] != "m1" {
 		t.Fatalf("webhook payload = %v", h.hooks)
 	}
 	if len(h.edge.sent) != 1 || h.edge.sent[0]["message"] != "The garage is open" || h.edge.sent[0]["to"] != "+15125550101" {
@@ -172,7 +187,33 @@ func TestAnUnknownWordFromAListedPersonGetsTheList(t *testing.T) {
 	if out.Result != "unknown-word" || out.Word != "" {
 		t.Fatalf("outcome = %+v (the typed text must not be recorded)", out)
 	}
-	if len(h.edge.sent) != 1 || h.edge.sent[0]["message"] != "I know these words: garage, ping" {
+	if len(h.edge.sent) != 1 || h.edge.sent[0]["message"] != "I know these words: garage, close, ping" {
+		t.Fatalf("sent = %v", h.edge.sent)
+	}
+}
+
+// The action's people are the people: the word says "*" but the action
+// says gabi, so Grandma is not allowed — and her list of words omits it.
+func TestTheActionsPeopleWinOverTheWords(t *testing.T) {
+	h := newHarness(t)
+	out := h.reader.Handle(context.Background(), Message{ID: "m9", From: "15125550102", Body: "garage"})
+	if out.Result != "not-allowed" || len(h.hooks) != 0 || len(h.edge.sent) != 0 {
+		t.Fatalf("outcome = %+v", out)
+	}
+	out = h.reader.Handle(context.Background(), Message{ID: "m10", From: "15125550102", Body: "what"})
+	if len(h.edge.sent) != 1 || h.edge.sent[0]["message"] != "I know these words: ping" {
+		t.Fatalf("sent = %v", h.edge.sent)
+	}
+}
+
+// An action that confirms with a passkey does nothing on a text alone.
+func TestAConfirmedActionWaitsForThePasskey(t *testing.T) {
+	h := newHarness(t)
+	out := h.reader.Handle(context.Background(), Message{ID: "m11", From: "15125550101", Body: "close"})
+	if out.Result != "needs-confirmation" || len(h.hooks) != 0 {
+		t.Fatalf("outcome = %+v hooks=%d", out, len(h.hooks))
+	}
+	if len(h.edge.sent) != 1 || !strings.Contains(h.edge.sent[0]["message"], "passkey") {
 		t.Fatalf("sent = %v", h.edge.sent)
 	}
 }

@@ -84,3 +84,36 @@ func TestPeopleIDsAreOptionalUniqueAndShaped(t *testing.T) {
 		}
 	}
 }
+
+func TestActionsAreARegistryWithOwnersAndRules(t *testing.T) {
+	base := "[house]\nhandsets = [\"kitchen\"]\n[[handsets]]\nid = \"kitchen\"\nendpoint = \"PJSIP/kitchen\"\n[[extensions]]\npin = \"482913\"\nlabel = \"Family\"\nhandsets = [\"kitchen\"]\n[[people]]\nname = \"Gabi\"\nid = \"gabi\"\nnumbers = [\"512-555-0101\"]\n"
+	pol, err := FromTOML([]byte(base + "[[actions]]\nid = \"garage\"\nlabel = \"Garage door\"\nwebhook = \"http://ha.example.invalid/api/webhook/x\"\nreply = \"The garage is open\"\npeople = [\"gabi\"]\nconfirm = \"passkey\"\n[[actions]]\nid = \"ping\"\nreply = \"pong\"\npeople = [\"*\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pol.Actions(); len(got) != 2 || got[0].ID != "garage" || got[0].Confirm != ConfirmPasskey || got[1].Confirm != ConfirmNone || got[1].Label != "ping" {
+		t.Fatalf("actions = %+v", got)
+	}
+	for name, body := range map[string]string{
+		"an unknown person": "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"eric\"]\n",
+		"nobody":            "[[actions]]\nid = \"garage\"\nreply = \"ok\"\n",
+		"a rude reply":      "[[actions]]\nid = \"garage\"\nreply = \"Open!\"\npeople = [\"*\"]\n",
+		"a bad confirm":     "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\nconfirm = \"sms\"\n",
+		"a duplicate id":    "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\n[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\n",
+		"nothing to do":     "[[actions]]\nid = \"garage\"\npeople = [\"*\"]\n",
+	} {
+		if _, err := FromTOML([]byte(base + body)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestAWordNamesAnActionOrCarriesItsOwnReply(t *testing.T) {
+	m, err := MessagesFromTOML([]byte("[[words]]\nword = \"garage\"\npeople = [\"*\"]\naction = \"garage\"\n"))
+	if err != nil || m.Words()[0].Action != "garage" || len(m.ActionsReferenced()) != 1 {
+		t.Fatalf("err=%v words=%+v", err, m.Words())
+	}
+	if _, err := MessagesFromTOML([]byte("[[words]]\nword = \"garage\"\npeople = [\"*\"]\naction = \"garage\"\nwebhook = \"http://x/y\"\n")); err == nil {
+		t.Fatal("a word may not name an action and carry its own webhook")
+	}
+}

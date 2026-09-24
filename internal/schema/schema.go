@@ -538,6 +538,7 @@ func Policy() *Schema {
 			"line":       line(),
 			"house":      house(),
 			"people":     {Type: "array", Description: "The allow-list. These callers hear the welcome prompt and ring the house.", Items: person()},
+			"actions":    {Type: "array", Description: "The registry of things the house can do (s13): what each does, who may, what it says back, whether it confirms. A text word (messages.toml), a lobby digit and a passkey all name an action by id; the action owns the webhook.", Items: action()},
 			"schedules":  {Type: "array", Description: "Named time windows, defined once and referenced by id from extensions.", Items: schedule()},
 			"extensions": {Type: "array", Description: "What an unknown caller may dial in the lobby.", Items: extension()},
 		},
@@ -691,6 +692,22 @@ func person() *Schema {
 	}
 }
 
+func action() *Schema {
+	return &Schema{
+		Type:     "object",
+		Required: []string{"id", "people"},
+		Properties: map[string]*Schema{
+			"id":      {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "What every transport names: `action = \"garage\"` on a word, a lobby leaf, a passkey button.", Rules: []string{"Unique."}},
+			"label":   {Type: "string", Description: "For people. Defaults to the id."},
+			"webhook": {Type: "string", Pattern: "^https?://", Description: "POSTed to when the action is performed — Home Assistant's webhook, which decides what a garage is and may refuse. The body is JSON: action, person id, transport (sms, lobby, passkey), message id. Never a text, never a number.", Rules: []string{"The URL is a credential: an HA webhook id is the whole secret. Logged as a host only."}},
+			"reply":   {Type: "string", Description: "What the house says back, where the transport can carry one.", Rules: []string{"Plain ASCII, at most 160 characters, no digits, no links, no exclamation marks.", "An action needs a webhook, a reply, or both."}},
+			"people":  {Type: "array", MinItems: one, Items: &Schema{Type: "string"}, Description: "[[people]] ids who may perform it, or [\"*\"] for everyone on the allow-list. A transport may narrow this list, never widen it.", CrossRefs: []string{"[[people]] id"}, Rules: []string{"Every id must be a [[people]] id in this file."}},
+			"confirm": {Type: "string", Enum: []any{"none", "passkey"}, Default: "none", Description: "\"passkey\": the request is intent, not authority — nothing moves until a passkey confirms it (s19). Until that door exists the house says so and does nothing."},
+		},
+		AdditionalProperties: falsy,
+	}
+}
+
 // ── messages.toml ────────────────────────────────────────────────────────
 
 // Messages describes messages.toml: who may text the house which word.
@@ -720,8 +737,9 @@ func Messages() *Schema {
 					Required: []string{"word", "people"},
 					Properties: map[string]*Schema{
 						"word":    {Type: "string", Pattern: "^[a-z0-9]+$", Description: "What the sender types: lowercase letters and digits, matched exactly against the trimmed, lowercased text.", Rules: []string{"Unique."}},
+						"action":  {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "The [[actions]] id in policy.toml this word performs. What it does, who may, what it says back and whether it confirms live there, once, for every transport.", CrossRefs: []string{"policy.toml [[actions]] id"}, Rules: []string{"A word names an action, or carries its own reply (and, as a stopgap, its own webhook) — never an action and a webhook both.", "The action's people are the people; a word's list may only narrow it."}},
 						"people":  {Type: "array", MinItems: one, Items: &Schema{Type: "string"}, Description: "[[people]] ids allowed to say it, or [\"*\"] for everyone on the allow-list.", CrossRefs: []string{"policy.toml [[people]] id"}},
-						"webhook": {Type: "string", Pattern: "^https?://", Description: "POSTed to when the word arrives from a listed sender — Home Assistant's webhook, typically. The body is JSON: the word, the sender's [[people]] id, and the message id; never the text."},
+						"webhook": {Type: "string", Pattern: "^https?://", Description: "The stopgap before [[actions]]: a webhook on the word itself. Still accepted; `doorman check` says to move it to an action; it goes in a later release."},
 						"reply":   {Type: "string", Description: "Texted back to the sender. Optional.", Rules: []string{"Plain ASCII, at most 160 characters, no digits, no links, no exclamation marks.", "A word needs a webhook, a reply, or both."}},
 					},
 					AdditionalProperties: falsy,

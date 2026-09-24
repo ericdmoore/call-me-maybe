@@ -36,8 +36,13 @@ type Word struct {
 	// by design: ringing the house and opening its garage are different
 	// trusts.
 	People []string `toml:"people"`
+	// Action is the [[actions]] id in policy.toml this word performs — what
+	// it does, who may, what it says back and whether it confirms all live
+	// there, once, for every transport (s13).
+	Action string `toml:"action"`
 	// Webhook is POSTed to when the word arrives from a listed sender —
-	// Home Assistant's webhook, typically. Optional: a word may only reply.
+	// Home Assistant's webhook, typically. The stopgap that shipped before
+	// [[actions]]: still accepted, reported by `doorman check`, and going.
 	Webhook string `toml:"webhook"`
 	// Reply is texted back. Optional, and boring on purpose: plain ASCII,
 	// under 160 characters, no digits, no links, no exclamation marks —
@@ -78,6 +83,22 @@ func (m *Messages) Lookup(word string) (Word, bool) {
 		}
 	}
 	return Word{}, false
+}
+
+// ActionsReferenced is every [[actions]] id any word names, sorted.
+func (m *Messages) ActionsReferenced() []string {
+	seen := map[string]bool{}
+	for _, w := range m.Words() {
+		if w.Action != "" {
+			seen[w.Action] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // PeopleReferenced is every [[people]] id any word names, sorted, for
@@ -155,8 +176,14 @@ func MessagesFromTOML(data []byte) (*Messages, error) {
 				fail("%s: %q is not a [[people]] id (lowercase alphanumeric/dash/underscore) or \"*\"", where, id)
 			}
 		}
-		if w.Webhook == "" && w.Reply == "" {
-			fail("%s does nothing — give it a webhook, a reply, or both", where)
+		if w.Action != "" && !handsetIDPattern.MatchString(w.Action) {
+			fail("%s: action %q is not an [[actions]] id", where, w.Action)
+		}
+		if w.Action != "" && w.Webhook != "" {
+			fail("%s names an action and carries its own webhook — the action owns the webhook", where)
+		}
+		if w.Action == "" && w.Webhook == "" && w.Reply == "" {
+			fail("%s does nothing — name an action, or give it a reply", where)
 		}
 		if w.Webhook != "" {
 			if u, err := url.Parse(w.Webhook); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {

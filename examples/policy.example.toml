@@ -90,10 +90,12 @@ caller_id_format = "Lobby: {name} <{number}>"
 
 [[people]]
 name = "Grandma"
+id = "grandma"          # a handle other files name this person by: messages.toml, [[actions]]
 numbers = ["512-555-0100"]
 
 [[people]]
 name = "Eric"
+id = "eric"          # a handle other files name this person by: messages.toml, [[actions]]
 numbers = ["+15125550101", "512-555-0102"]
 notes = "mobile + work line"
 
@@ -177,3 +179,33 @@ afterhours = "school-night"
 #label = "Conference"
 #handsets = ["conference"]
 # (the "conference" pseudo-handset ships in handsets.example.toml)
+
+# ── Actions ──────────────────────────────────────────────────
+# The one registry of things the house can do. A text word (messages.toml),
+# a lobby digit and a passkey all name an action by id; the action owns the
+# Home Assistant webhook, the reply, who may perform it, and whether it must
+# be confirmed. HA decides what a garage is and may refuse — not after
+# midnight, not while the car is out. The box only asks. `doorman check`
+# refuses an action naming a person with no id, and a word naming an action
+# nobody declared.
+[[actions]]
+id = "ping"
+reply = "pong"                   # boring on purpose: ASCII, one segment, no
+people = ["*"]                   # digits, no links, no exclamation marks
+
+[[actions]]
+id = "garage"
+label = "Garage door"
+webhook = "http://homeassistant:8123/api/webhook/cmm-garage-open"
+reply = "The garage is open"
+people = ["eric"]                # stricter than the ring allow-list on purpose
+confirm = "none"                 # "passkey": intent, not authority — nothing
+                                 # moves until a passkey confirms it (s19)
+
+[[actions]]
+id = "close"
+label = "Close the garage"
+webhook = "http://homeassistant:8123/api/webhook/cmm-garage-close"
+reply = "Closing the garage"
+people = ["eric"]
+confirm = "passkey"

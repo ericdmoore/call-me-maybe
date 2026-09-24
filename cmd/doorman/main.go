@@ -498,12 +498,21 @@ func printMessages(path string, lists []allowList) bool {
 			have[id] = true
 		}
 	}
+	actions := map[string]bool{}
+	for _, l := range lists {
+		for _, a := range l.pol.Actions() {
+			actions[a.ID] = true
+		}
+	}
 	fmt.Printf("\nTexts: %d %s   (%s)\n", len(msgs.Words()), plural(len(msgs.Words()), "word"), msgs.Where())
 	ok := true
 	for _, w := range msgs.Words() {
 		does := []string{}
+		if w.Action != "" {
+			does = append(does, "action "+w.Action)
+		}
 		if w.Webhook != "" {
-			does = append(does, "webhook")
+			does = append(does, "webhook (move it to an [[actions]] entry)")
 		}
 		if w.Reply != "" {
 			does = append(does, "replies")
@@ -514,6 +523,10 @@ func printMessages(path string, lists []allowList) bool {
 				fmt.Printf("    ✗ %q is not a [[people]] id in any policy file — add `id = %q` to that person\n", id, id)
 				ok = false
 			}
+		}
+		if w.Action != "" && !actions[w.Action] {
+			fmt.Printf("    ✗ action %q is not an [[actions]] entry in any policy file\n", w.Action)
+			ok = false
 		}
 	}
 	if len(lists) > 0 && len(have) == 0 && len(msgs.PeopleReferenced()) > 0 {
@@ -779,6 +792,7 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 		p.CallerIDFormat(), p.CallerIDFormat() == policy.DefaultCallerIDFormat))
 	fmt.Printf("  house ring group     : %s\n", strings.Join(p.HouseEndpoints(), ", "))
 	fmt.Printf("  provisioning         : %s\n", provisioningSummary(p.HandsetList()))
+	fmt.Printf("  actions              : %s\n", actionsSummary(p.Actions()))
 	fmt.Printf("  house voicemail      : %s\n", orDefault(p.HousePlan().Mailbox, noMailbox))
 
 	// Every extension, every setting — including the ones nobody wrote down.
@@ -1852,6 +1866,23 @@ func localAddresses() []string {
 		out = append(out, ipn.IP.String())
 	}
 	return out
+}
+
+// actionsSummary is check's one line on the registry: what the house can be
+// asked to do, and by whom.
+func actionsSummary(actions []policy.Action) string {
+	if len(actions) == 0 {
+		return "(none — [[actions]] in policy.toml)"
+	}
+	parts := make([]string, 0, len(actions))
+	for _, a := range actions {
+		who := strings.Join(a.People, ",")
+		if a.Confirm == policy.ConfirmPasskey {
+			who += " +passkey"
+		}
+		parts = append(parts, fmt.Sprintf("%s (%s)", a.ID, who))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // provisioningSummary is check's one line on the phone side of the

@@ -17,10 +17,11 @@
 # handset leaves through the house number; conversational texting would be a
 # second number and a line of its own.
 #
-# PEOPLE ARE NAMED BY ID. `people` lists [[people]] ids from policy.toml —
-# give an entry `id = "gabi"` — or ["*"] for everyone on the allow-list.
-# Never a number retyped here. A stricter list than the ring allow-list by
-# design: ringing the house and opening its garage are different trusts.
+# WORDS NAME ACTIONS. `action` is an [[actions]] id from policy.toml, which
+# owns the webhook, the reply, the people who may and the confirmation rule.
+# `people` here lists [[people]] ids — give an entry `id = "gabi"` — or ["*"]
+# for everyone on the allow-list, and may only narrow the action's own list.
+# Never a number retyped here.
 #
 # REPLIES ARE BORING ON PURPOSE. Plain ASCII, at most 160 characters, no
 # digits, no links, no exclamation marks. One segment on the bill and past
@@ -28,25 +29,21 @@
 # sent. `doorman check` refuses a reply that breaks the rule.
 # ─────────────────────────────────────────────────────────────
 
-# A word that acts: the webhook is Home Assistant's, and HA decides what a
-# garage is and whether now is a good time. The body it receives is JSON —
-# the word, the sender's id, the message id — and never the text itself.
+# Each word names an action from policy.toml's [[actions]]: what it does,
+# who may, what it says back and whether it confirms all live there, once,
+# for every transport. A word's `people` may only narrow the action's.
 [[words]]
 word = "garage"
-people = ["gabi", "eric"]
-webhook = "http://homeassistant.local:8123/api/webhook/cmm-garage-open"
-reply = "The garage is open"
+people = ["*"]
+action = "garage"
 
-# Closing is its own word, because closing a door nobody is watching is the
-# one thing to make deliberate. Adults only.
 [[words]]
 word = "close"
-people = ["eric"]
-webhook = "http://homeassistant.local:8123/api/webhook/cmm-garage-close"
-reply = "Closing the garage"
+people = ["*"]
+action = "close"
 
 # A word that only replies — the smoke test for the whole path.
 [[words]]
 word = "ping"
 people = ["*"]
-reply = "pong"
+action = "ping"
