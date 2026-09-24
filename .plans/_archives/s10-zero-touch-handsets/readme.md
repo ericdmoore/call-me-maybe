@@ -42,6 +42,32 @@ scheduled with the jepsen re-provision rather than before it:
 Each is a line in the rehearsal script, and each fix is a repo change and a
 release, never a patch on the box. The verb stayed `provision`.
 
+**Rehearsed 2026-09-23/24 on jepsen with two factory-reset WP826s** — every
+item above answered, and every answer shipped (v0.6.4 → v0.6.7):
+
+1. P-values: credentials are P1360/P1361 (P1359 is the XML *file* password,
+   set empty); DTMF on WP8xx is P2301–P2303 (both numberings emitted);
+   phonebook P330 = mode, P331 = path; P238=2 stops the phone reporting
+   "failed to download firmware" after every fetch. Menu wording: the
+   handset LCD has no config-server entry; the web UI is the path, four
+   fields.
+2. check-sync: the phone challenges every NOTIFY (401 digest, its own SIP
+   credentials) — every handset endpoint now carries `outbound_auth`; the
+   plain event is acknowledged and ignored, `check-sync;reboot=true` makes
+   the phone restart, fetch and register within a minute. `provision
+   notify` sends that form, through a one-argument sudo wrapper.
+3. Certificate: the WP826 accepts the window's self-signed certificate by
+   default; `--export-cert` was not needed. mDNS was not tested; the router
+   cannot hand out option 66, so the config server path is typed once per
+   phone.
+4. Phonebook refresh: not yet observed on the directory unit at close of the
+   rehearsal (the corrected P330/P331 reached the phones on their last
+   fetch); watch `journalctl -u doorman-directory` for the first poll.
+
+Result: kitchen fetch → register in 5 s, theater in 6 s; audio both ways;
+a rotation reboot with nobody touching a phone. Fourteen findings along the
+way, all in the repo.
+
 ## What done looks like
 
 A factory-fresh phone comes out of the box. The MAC address on its label goes
