@@ -110,6 +110,21 @@ the top level; a digit or a leaf name descends or acts; unknown words get
 "I know these words:" and the list. Deterministic before clever: no model in
 the loop, ever, for a word that moves a door.
 
+**One number, one purpose — decided 2026-09-24.** A text to the house
+number is control plane and archive, never readable content on a handset;
+and nothing typed on a handset ever leaves through the house number. The
+question that settled it: "the house texts Eric's cell, Eric replies —
+where is that readable?" Every answer was wrong on a number that also opens
+the garage: the person on the other end sees a conversation and a machine's
+replies from one sender, and the box has to guess whether "garage?" is a
+question or an instruction. The mechanism could carry both; the policy is
+that it does not. If the family ever wants conversational texting from
+handsets, that is a second DID and a `[line]` of its own — its texts to its
+handsets, every handset for a family line, one for a kid's own number, one
+shared thread per outside number — and a later milestone here, not a
+change to this one. Until then a handset that texts an outside number gets
+an error from the phone, not silence.
+
 **Handsets text each other without any of this.** SIP MESSAGE between
 PJSIP endpoints is one dialplan context; the WP826s show it in their
 messages app; nothing leaves the LAN and nothing is billed. Same stream,
