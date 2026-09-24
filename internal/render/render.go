@@ -223,7 +223,11 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 			fmt.Fprintf(&plan, " same => n,MessageSend(pjsip:%s,${MSG_FROM})\n", r.id)
 		}
 	}
-	plan.WriteString("exten => _X.,1,NoOp(no handset numbered ${EXTEN} to text)\n")
+	// No catch-all on purpose. Asterisk answers a MESSAGE to an extension
+	// this context does not have with 404, and the handset shows an error —
+	// which is the truth about an outside number typed into the messages
+	// app: the house number does not text from handsets (s15). A NoOp here
+	// would accept the message and drop it in silence.
 
 	// The From a text carries is the sender's endpoint id; the phone shows
 	// it and replies to it. Rewritten to the sender's room number and label,

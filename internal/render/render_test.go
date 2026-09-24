@@ -229,6 +229,9 @@ func TestHandsetTextsReachTheOtherPhoneAsMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(f.Dialplan, "exten => _X.,1,NoOp(no handset") {
+		t.Fatal("a text to an outside number must fail on the phone, not be accepted and dropped")
+	}
 	if strings.Count(f.PJSIP, "message_context=cmm-messages\n") != 2 {
 		t.Fatalf("every endpoint must route SIP MESSAGE to [cmm-messages]:\n%s", f.PJSIP)
 	}
