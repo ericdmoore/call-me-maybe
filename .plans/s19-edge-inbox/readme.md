@@ -97,14 +97,42 @@ token is a 404, a pull with the house token returns it and a pull with a
 wrong token is 401, an ack removes it, and `send` refuses a rude reply and
 accepts a boring one. Live acceptance is s15 M2's `ping` → `pong`.
 
-### M2 · The login
+### M2 · The login — decided 2026-09-24, not started
 
-`login.callmemaybe.cc`: enrolment (number + code + passkey), the signed
-attestation, the hub-side verifier (`doorman people verify`?), and the
-signed-command door on the Worker that lands in the queue. Done when a
-person enrolled once texts nothing and still opens the garage from a web
-page with a passkey, and the hub's journal shows `message.acted` with the
-same shape as an SMS.
+**The house introduces the person; the person answers in kind.** `doorman
+enroll gabi` on the hub mints a secret phrase — two or three words from a
+list, no digits, no link, one segment, past the carrier filter — texts it
+to Gabi's number through the edge, and registers at the edge only
+`SHA-512(house, number, phrase)`, never the phrase. Gabi proves she holds
+the phone by texting the phrase back to the house number: it arrives in the
+same inbox as any text, `doorman inbox` sees a listed person answering a
+pending introduction, and the intro is complete. No web page is needed for
+that half.
+
+**The passkey step is a web page that only a proven phone can reach.**
+`login.callmemaybe.cc/enroll`: Gabi enters her number and the phrase, the
+Worker hashes and matches against what the hub registered, and only then
+offers WebAuthn registration. The passkey's relying party is
+`callmemaybe.cc`, so every subdomain — the login page, the edge — can use
+it. The phrase is single-use, expires in fifteen minutes, and attempts are
+rate-limited at the edge, because a two-word phrase is not a password.
+
+**Per house, no global signing key.** The passkey's public key is stored at
+the edge under that house and that number; the hub pulls its enrolled
+people the way it pulls texts. Nothing is signed by a central authority,
+so there is no key whose leak would mint "verified" people for every house
+running the binary, and no rotation story to carry forever. Cross-house
+vouching — register once, every house trusts it — is M4 if it ever earns
+its keep; until then your brother's house texts your mother its own words.
+
+**A signed command lands in the same queue.** A passkey assertion for
+(house, word) is one more door on the edge, and the row it stores is
+indistinguishable to `doorman inbox` from a text.
+
+Done when a person enrolled once texts nothing and still opens the garage
+from a web page with a passkey, and the hub's journal shows the same shape
+as an SMS. Ordered after s15 live and s13, because enrolment is a text and
+a passkey that can say `garage` needs a door.
 
 ### M3 · Tenancy
 
