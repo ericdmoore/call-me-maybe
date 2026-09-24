@@ -194,7 +194,12 @@ before it leaves. The edge half is s19 M1.
 Done when Gabi texts `garage` and the door opens within two seconds, the
 reply arrives, `garage?` answers truthfully, and a text from a number not
 on the list produces exactly one email and nothing else. The `ping` → `pong`
-round trip is the smoke test until s13 gives the words a door.
+round trip is the smoke test until s13 gives the words a door — **and it
+passed live on 2026-09-24 at 17:34:50:** the owner's mobile texted `ping`,
+the carrier called the edge, `doorman-inbox.service` on jepsen replied,
+and `pong` arrived on the phone, with the VoIP.ms API allow-list set to
+`0.0.0.0` because the portal silently drops IPv6 entries and the Worker's
+egress is IPv6.
 
 Done when Gabi texts `garage` and the door opens within two seconds, the
 reply arrives, `garage?` answers truthfully, and a text from a number not
