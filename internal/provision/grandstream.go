@@ -82,7 +82,7 @@ func grandstreamValues(p Phone) []pvalue {
 		// Directory: this phone's own book, polled on the phone's schedule.
 		// P330 is the mode and P331 the path (the rehearsal had them swapped).
 		{330, "3", "phonebook download mode: HTTPS"},
-		{331, p.Address.PhonebookPath(p.ID), "phonebook XML server path"},
+		{331, p.Address.PhonebookPath(p.ID, PhonebookToken(p.ProvisionPassword)), "phonebook XML server path (the token is this phone's credential; its downloader sends no other)"},
 		{332, "60", "phonebook download interval, minutes"},
 		{333, "0", "keep manually added entries"},
 	}

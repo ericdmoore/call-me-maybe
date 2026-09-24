@@ -149,6 +149,17 @@ func TestNothingIsListableAndThePhonebookNeedsTheCredential(t *testing.T) {
 	if rec := get(h, "/prov/nobody/phonebook.xml", "nobody", "x"); rec.Code != 404 {
 		t.Errorf("unknown handset's phonebook must be 404, got %d", rec.Code)
 	}
+	// The token form: the phone's credential in the path, no header needed.
+	tok := provision.PhonebookToken("prov-k")
+	if rec := get(h, "/prov/kitchen/"+tok+"/phonebook.xml", "", ""); rec.Code != 200 || rec.Body.String() != "<AddressBook/>" {
+		t.Errorf("phonebook by token must be served, got %d", rec.Code)
+	}
+	if rec := get(h, "/prov/kitchen/"+provision.PhonebookToken("wrong")+"/phonebook.xml", "", ""); rec.Code != 404 {
+		t.Errorf("a wrong token must be 404, got %d", rec.Code)
+	}
+	if rec := get(h, "/prov/kitchen/"+tok+"/cfgec74d788a254.xml", "", ""); rec.Code != 404 {
+		t.Errorf("the token path serves phone books only, got %d", rec.Code)
+	}
 	// The operator alias: same bytes, never without the credential — a room
 	// name is guessable, a MAC is not, and only the MAC path is open at all.
 	if rec := get(h, "/prov/kitchen.xml", "", ""); rec.Code != 401 {

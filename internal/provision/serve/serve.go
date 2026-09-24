@@ -259,16 +259,25 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The phone's directory: <id>/phonebook.xml. Caller data, so never
-	// on the unauthenticated path — the phone always presents its credential.
-	if parts := strings.Split(rest, "/"); len(parts) == 2 && parts[1] == "phonebook.xml" {
+	// The phone's directory: <id>/<token>/phonebook.xml, or <id>/phonebook.xml
+	// with the phone's credential. Caller data, so never without one of the
+	// two: the token is the credential for a downloader that cannot send
+	// one any other way (the WP826), the basic-auth form is for everything
+	// else and for an operator's browser.
+	if parts := strings.Split(rest, "/"); (len(parts) == 2 || len(parts) == 3) && parts[len(parts)-1] == "phonebook.xml" {
 		p, ok := s.byID[parts[0]]
 		if !ok {
 			s.emit(Event{Kind: "refused", Remote: remote, Detail: fmt.Sprintf("a phone at %s asked for the phonebook of %q, which is not a handset", remote, parts[0])})
 			http.NotFound(w, r)
 			return
 		}
-		if !s.authorised(r, p) {
+		byToken := len(parts) == 3 && parts[1] != "" && parts[1] == provision.PhonebookToken(p.ProvisionPassword)
+		if len(parts) == 3 && !byToken {
+			s.emit(Event{Kind: "unauthorized", Handset: p.ID, MAC: p.MAC, Remote: remote, Detail: "phonebook: the token in the path is not this phone's"})
+			http.NotFound(w, r)
+			return
+		}
+		if !byToken && !s.authorised(r, p) {
 			// Said out loud: a phone that never sends its credential for the
 			// phonebook looks, from the handset, like "download failed".
 			user, _, has := r.BasicAuth()
