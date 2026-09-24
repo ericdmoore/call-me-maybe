@@ -60,9 +60,12 @@ item above answered, and every answer shipped (v0.6.4 → v0.6.7):
    default; `--export-cert` was not needed. mDNS was not tested; the router
    cannot hand out option 66, so the config server path is typed once per
    phone.
-4. Phonebook refresh: not yet observed on the directory unit at close of the
-   rehearsal (the corrected P330/P331 reached the phones on their last
-   fetch); watch `journalctl -u doorman-directory` for the first poll.
+4. Phonebook: the WP826's phone-book downloader sends no HTTP credential
+   at all (the directory's journal: "no credential presented"), so the
+   phone-book path carries a token derived from the provisioning password
+   (v0.6.10) and the directory serves `<id>/<token>/phonebook.xml` on that
+   alone. First observed fetches: theater 14:23:49, kitchen 14:23:52 on
+   2026-09-24, 19 entries each (2 rooms, 4 feature codes, 13 people).
 
 Result: kitchen fetch → register in 5 s, theater in 6 s; audio both ways;
 a rotation reboot with nobody touching a phone. Fourteen findings along the
