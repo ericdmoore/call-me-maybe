@@ -675,8 +675,8 @@ func runProvisionDirectory(args []string) int {
 			switch e.Kind {
 			case "phonebook":
 				fmt.Printf("%s phonebook %s from %s\n", e.Time.Format(time.RFC3339), e.Handset, e.Remote)
-			case "refused", "error":
-				fmt.Printf("%s %s %s\n", e.Time.Format(time.RFC3339), e.Kind, e.Detail)
+			case "refused", "error", "unauthorized":
+				fmt.Printf("%s %s %s %s\n", e.Time.Format(time.RFC3339), e.Kind, e.Handset, e.Detail)
 			}
 		},
 	})

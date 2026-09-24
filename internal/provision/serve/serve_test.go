@@ -130,7 +130,7 @@ func TestAnUnlistedPhoneIsRefusedAndNamed(t *testing.T) {
 }
 
 func TestNothingIsListableAndThePhonebookNeedsTheCredential(t *testing.T) {
-	s, _ := window(t)
+	s, events := window(t)
 	h := s.Handler()
 	for _, path := range []string{"/prov/", "/prov", "/", "/prov/kitchen/", "/prov/kitchen-phonebook.xml", "/prov/../etc/passwd"} {
 		if rec := get(h, path, "", ""); rec.Code == 200 {
@@ -139,6 +139,9 @@ func TestNothingIsListableAndThePhonebookNeedsTheCredential(t *testing.T) {
 	}
 	if rec := get(h, "/prov/kitchen/phonebook.xml", "", ""); rec.Code != 401 {
 		t.Errorf("phonebook without credential must be 401, got %d", rec.Code)
+	}
+	if last := (*events)[len(*events)-1]; last.Kind != "unauthorized" || last.Handset != "kitchen" || !strings.Contains(last.Detail, "phonebook") {
+		t.Errorf("a phonebook fetch without a credential must be reported, got %+v", last)
 	}
 	if rec := get(h, "/prov/kitchen/phonebook.xml", "kitchen", "prov-k"); rec.Code != 200 || rec.Body.String() != "<AddressBook/>" {
 		t.Errorf("phonebook with credential must be served, got %d", rec.Code)

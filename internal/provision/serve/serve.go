@@ -263,13 +263,22 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	// on the unauthenticated path — the phone always presents its credential.
 	if parts := strings.Split(rest, "/"); len(parts) == 2 && parts[1] == "phonebook.xml" {
 		p, ok := s.byID[parts[0]]
-		if !ok || !s.authorised(r, p) {
-			if ok {
-				w.Header().Set("WWW-Authenticate", `Basic realm="doorman"`)
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
+		if !ok {
+			s.emit(Event{Kind: "refused", Remote: remote, Detail: fmt.Sprintf("a phone at %s asked for the phonebook of %q, which is not a handset", remote, parts[0])})
 			http.NotFound(w, r)
+			return
+		}
+		if !s.authorised(r, p) {
+			// Said out loud: a phone that never sends its credential for the
+			// phonebook looks, from the handset, like "download failed".
+			user, _, has := r.BasicAuth()
+			why := "no credential presented"
+			if has {
+				why = fmt.Sprintf("credential presented for %q did not match", user)
+			}
+			s.emit(Event{Kind: "unauthorized", Handset: p.ID, MAC: p.MAC, Remote: remote, Detail: "phonebook: " + why})
+			w.Header().Set("WWW-Authenticate", `Basic realm="doorman"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		var body []byte
