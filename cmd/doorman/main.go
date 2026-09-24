@@ -137,6 +137,7 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -contacts path            address-book inventory, optional (default $CONTACTS_PATH or ./contacts.toml)
       -allow-placeholders       accept the example sentinels; for CI, not operators
       -fetch                    fetch contacts.toml url sources now; otherwise report what the daemon last cached
+      -messages path            texts the house answers, optional (default $MESSAGES_PATH or ./messages.toml)
       -env path                 secrets file, for the tokens url sources name (with -fetch; default ./.env)
   doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
                                 "build" renders audio through piper, ElevenLabs,
@@ -335,6 +336,7 @@ func runCheck(args []string) (code int) {
 	handsetsFlag := fs.String("handsets", "", "handsets file (default $HANDSETS_PATH or ./handsets.toml)")
 	trunksFlag := fs.String("trunks", "", "provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)")
 	contactsFlag := fs.String("contacts", "", "address-book inventory, optional (default $CONTACTS_PATH or ./contacts.toml)")
+	messagesFlag := fs.String("messages", "", "texts the house answers, optional (default $MESSAGES_PATH or ./messages.toml)")
 	// Structural validation of the shipped examples, whose PINs are the
 	// placeholder sentinel. CI uses this; an operator never should, which is
 	// what makes a freshly copied config fail loudly until `doorman init` runs.
@@ -470,7 +472,54 @@ func runCheck(args []string) (code int) {
 	if !printContacts(set, lists) {
 		rc = 1
 	}
+	// The words, when there are any. Absent is the state every install is in
+	// and prints nothing; present, every id a word names must be a [[people]]
+	// id on some line, or the word could never be said.
+	if !printMessages(messagesPathArg(*messagesFlag), lists) {
+		rc = 1
+	}
 	return rc
+}
+
+// printMessages reports messages.toml: each word, who may say it, and what
+// it does — and fails the check for an id no [[people]] entry carries.
+func printMessages(path string, lists []allowList) bool {
+	msgs, err := policy.LoadMessages(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %s is not valid\n\n%v\n", path, err)
+		return false
+	}
+	if !msgs.Present() {
+		return true
+	}
+	have := map[string]bool{}
+	for _, l := range lists {
+		for _, id := range l.pol.PersonIDs() {
+			have[id] = true
+		}
+	}
+	fmt.Printf("\nTexts: %d %s   (%s)\n", len(msgs.Words()), plural(len(msgs.Words()), "word"), msgs.Where())
+	ok := true
+	for _, w := range msgs.Words() {
+		does := []string{}
+		if w.Webhook != "" {
+			does = append(does, "webhook")
+		}
+		if w.Reply != "" {
+			does = append(does, "replies")
+		}
+		fmt.Printf("  %-12s from %-24s → %s\n", w.Word, strings.Join(w.People, ", "), strings.Join(does, " + "))
+		for _, id := range w.People {
+			if id != "*" && !have[id] {
+				fmt.Printf("    ✗ %q is not a [[people]] id in any policy file — add `id = %q` to that person\n", id, id)
+				ok = false
+			}
+		}
+	}
+	if len(lists) > 0 && len(have) == 0 && len(msgs.PeopleReferenced()) > 0 {
+		fmt.Println("    (no [[people]] entry has an id yet)")
+	}
+	return ok
 }
 
 func checkEnvironment() int {

@@ -574,3 +574,21 @@ func TestContactsRefresherSwapsTheBookAndKeepsTheLastGoodSet(t *testing.T) {
 		t.Fatal("the refresher did not stop on cancel")
 	}
 }
+
+// messages.toml names people by id; check refuses an id nobody carries.
+func TestCheckRefusesAWordForAPersonWithNoID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "messages.toml")
+	if err := os.WriteFile(path, []byte("[[words]]\nword = \"garage\"\npeople = [\"gabi\"]\nreply = \"ok\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lists := allowLists(t, allowGrandma) // Grandma has no id
+	var ok bool
+	out := capture(t, func() { ok = printMessages(path, lists) })
+	if ok || !strings.Contains(out, `"gabi" is not a [[people]] id`) {
+		t.Fatalf("ok=%v\n%s", ok, out)
+	}
+	if ok := printMessages(filepath.Join(dir, "absent.toml"), lists); !ok {
+		t.Fatal("no messages.toml is the normal state and passes")
+	}
+}
