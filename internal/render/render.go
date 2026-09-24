@@ -180,7 +180,7 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 		if h.Number > 0 {
 			fmt.Fprintf(&plan, "exten => %d,1,Dial(%s,30)\n", h.Number, h.Endpoint)
 			fmt.Fprintf(&plan, "exten => %d,hint,%s\n", h.Number, h.Endpoint)
-			messageRoutes = append(messageRoutes, messageRoute{number: h.Number, id: h.ID})
+			messageRoutes = append(messageRoutes, messageRoute{number: h.Number, id: h.ID, label: label})
 		}
 		all = append(all, h.Endpoint)
 		if h.Page {
@@ -212,15 +212,31 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 	sort.Slice(messageRoutes, func(i, j int) bool { return messageRoutes[i].number < messageRoutes[j].number })
 	plan.WriteString("\n; Texts between handsets (SIP MESSAGE): a room number, or 100 for everyone.\n[cmm-messages]\n")
 	for _, r := range messageRoutes {
-		fmt.Fprintf(&plan, "exten => %d,1,MessageSend(pjsip:%s,${MESSAGE(from)})\n", r.number, r.id)
+		fmt.Fprintf(&plan, "exten => %d,1,Gosub(cmm-message-from,s,1)\n same => n,MessageSend(pjsip:%s,${MSG_FROM})\n", r.number, r.id)
+		// A phone replies to the From it was given. Before the rewrite below
+		// that was the sender's endpoint id, so the reply must route too.
+		fmt.Fprintf(&plan, "exten => %s,1,Goto(%d,1)\n", r.id, r.number)
 	}
 	if len(messageRoutes) > 0 {
-		plan.WriteString("exten => 100,1,NoOp(text everyone)\n")
+		plan.WriteString("exten => 100,1,Gosub(cmm-message-from,s,1)\n")
 		for _, r := range messageRoutes {
-			fmt.Fprintf(&plan, " same => n,MessageSend(pjsip:%s,${MESSAGE(from)})\n", r.id)
+			fmt.Fprintf(&plan, " same => n,MessageSend(pjsip:%s,${MSG_FROM})\n", r.id)
 		}
 	}
 	plan.WriteString("exten => _X.,1,NoOp(no handset numbered ${EXTEN} to text)\n")
+
+	// The From a text carries is the sender's endpoint id; the phone shows
+	// it and replies to it. Rewritten to the sender's room number and label,
+	// so the receiving phone names the room from its phone book and a reply
+	// to it routes like any other text.
+	plan.WriteString("\n[cmm-message-from]\nexten => s,1,Set(MSGFROM=${MESSAGE(from)})\n")
+	plan.WriteString(" same => n,Set(SENDER=${CUT(MSGFROM,@,1)})\n same => n,Set(SENDER=${CUT(SENDER,:,2)})\n")
+	plan.WriteString(" same => n,Set(FROMDOM=${CUT(MSGFROM,@,2)})\n same => n,Set(FROMDOM=${CUT(FROMDOM,>,1)})\n")
+	plan.WriteString(" same => n,Set(MSG_FROM=${MSGFROM})\n")
+	for _, r := range messageRoutes {
+		fmt.Fprintf(&plan, " same => n,ExecIf($[\"${SENDER}\" = \"%s\"]?Set(MSG_FROM=\"%s\" <sip:%d@${FROMDOM}>))\n", r.id, r.label, r.number)
+	}
+	plan.WriteString(" same => n,Return()\n")
 
 	return &Fragments{PJSIP: pjsip.String(), Dialplan: plan.String(), Generated: generated}, nil
 }
@@ -229,4 +245,5 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 type messageRoute struct {
 	number int
 	id     string
+	label  string
 }

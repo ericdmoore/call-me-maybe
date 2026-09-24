@@ -234,9 +234,12 @@ func TestHandsetTextsReachTheOtherPhoneAsMessages(t *testing.T) {
 	}
 	for _, want := range []string{
 		"[cmm-messages]\n",
-		"exten => 101,1,MessageSend(pjsip:kitchen,${MESSAGE(from)})\n",
-		"exten => 102,1,MessageSend(pjsip:theater,${MESSAGE(from)})\n",
-		"exten => 100,1,NoOp(text everyone)\n same => n,MessageSend(pjsip:kitchen,${MESSAGE(from)})\n same => n,MessageSend(pjsip:theater,${MESSAGE(from)})\n",
+		"exten => 101,1,Gosub(cmm-message-from,s,1)\n same => n,MessageSend(pjsip:kitchen,${MSG_FROM})\n",
+		"exten => 102,1,Gosub(cmm-message-from,s,1)\n same => n,MessageSend(pjsip:theater,${MSG_FROM})\n",
+		"exten => theater,1,Goto(102,1)\n", // a reply to the raw endpoint id still routes
+		"exten => 100,1,Gosub(cmm-message-from,s,1)\n same => n,MessageSend(pjsip:kitchen,${MSG_FROM})\n same => n,MessageSend(pjsip:theater,${MSG_FROM})\n",
+		"[cmm-message-from]\n",
+		`ExecIf($["${SENDER}" = "theater"]?Set(MSG_FROM="Theater" <sip:102@${FROMDOM}>))`,
 	} {
 		if !strings.Contains(f.Dialplan, want) {
 			t.Errorf("dialplan missing %q:\n%s", want, f.Dialplan)
