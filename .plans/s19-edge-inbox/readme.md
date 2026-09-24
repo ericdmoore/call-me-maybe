@@ -125,9 +125,35 @@ running the binary, and no rotation story to carry forever. Cross-house
 vouching — register once, every house trusts it — is M4 if it ever earns
 its keep; until then your brother's house texts your mother its own words.
 
+**Consequential words confirm with a passkey — decided 2026-09-24.** A
+stolen phone can text `garage`, and phone possession was the only proof
+the text carried. So a word may be marked `confirm = "passkey"` in
+`messages.toml`, and then the text is intent, not authority:
+
+```
+Gabi  --(garage)-->            house      the intent, by text
+house --(Confirm on the login page)--> Gabi   a nudge with no link, no digits
+Gabi  --(passkey on login.callmemaybe.cc)-->  edge   proof of presence: the phone
+                                                     unlocked by her face or PIN
+edge  --(garage, confirmed, gabi)-->  house  one more row in the same inbox
+house --(webhook)-->           HA  --> ratgdo
+```
+
+No unique link is needed: the passkey identifies her, and the pending
+intent waits at the edge under her number for a few minutes. The confirmed
+row is indistinguishable to `doorman inbox` from a text except for the
+mark it carries, and only a word that asked for confirmation waits for
+one; `ping` still answers `pong` on the text alone. Ten to twenty seconds
+from text to door, deliberate by design. Revocation is `doorman people
+revoke gabi`: the edge forgets her passkeys, and no word she texts opens
+anything until she enrols again. The edge is trusted to attest the
+assertion — it is the house's own infrastructure and already holds the
+carrier key — and that trust is written down here rather than hidden.
+
 **A signed command lands in the same queue.** A passkey assertion for
-(house, word) is one more door on the edge, and the row it stores is
-indistinguishable to `doorman inbox` from a text.
+(house, word), with or without a preceding text, is one more door on the
+edge, and the row it stores is indistinguishable to `doorman inbox` from a
+text.
 
 Done when a person enrolled once texts nothing and still opens the garage
 from a web page with a passkey, and the hub's journal shows the same shape
