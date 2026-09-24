@@ -130,6 +130,18 @@ export default {
       return json({ acked: ids.length });
     }
 
+    // Setup aid: the address the carrier sees this Worker call from. getIP is
+    // the one VoIP.ms method that answers from a non-listed address, which is
+    // the whole point — it tells the operator what to allow-list.
+    if (area === "inbox" && tail === "whoami" && req.method === "GET") {
+      const u = new URL("https://voip.ms/api/v1/rest.php");
+      u.searchParams.set("api_username", env.VOIPMS_API_USERNAME);
+      u.searchParams.set("api_password", env.VOIPMS_API_PASSWORD);
+      u.searchParams.set("method", "getIP");
+      const r = await fetch(u.toString());
+      return json({ carrier_sees: (await r.json().catch(() => ({}))) });
+    }
+
     if (area === "inbox" && tail === "send" && req.method === "POST") {
       const { to, message } = (await req.json().catch(() => ({}))) as { to?: string; message?: string };
       const did = houseSecret(env, house, "DID");

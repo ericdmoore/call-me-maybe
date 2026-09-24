@@ -19,5 +19,8 @@ Then on VoIP.ms, the DID's SMS URL callback is
 `https://edge.callmemaybe.cc/h/midbury/sms/<callback token>?from={FROM}&to={TO}&message={MESSAGE}&id={ID}`
 and the box's `.env` gets `INBOX_URL=https://edge.callmemaybe.cc/h/midbury`
 and `INBOX_TOKEN=<inbox token>`. The VoIP.ms API IP allow-list must admit
-the Worker's egress, which is Cloudflare's address space: either the
-published ranges or `0.0.0.0` to disable the restriction.
+the Worker's egress, which is Cloudflare's address space — and it calls
+VoIP.ms over IPv6, from `2a06:98c0:3600::/40` (inside Cloudflare's published
+`2a06:98c0::/29`), so the IPv6 range is the one that matters. Ask the Worker
+what the carrier sees: `GET /h/<house>/inbox/whoami` with the inbox token.
+Or `0.0.0.0` to disable the restriction.
