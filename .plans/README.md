@@ -22,12 +22,12 @@ otherwise have to be reconstructed from a commit log.
 | **s11** | [The hunt](s11-the-hunt/) — the verification ladder as a scavenger hunt: envelopes, `*6` + an answer plays a parent's recorded clue, `500` announces the winner; zero mechanism in doorman | M1–M2 shipped (v0.6.2); M3 needs a Saturday | — |
 | **s12** | [Do not disturb](s12-do-not-disturb/) — `*78NN` quiets a handset for 15/30/45 min; rings and pages skip it, except a page from an override handset; state is Asterisk's, time-boxed, read by doorman never written | planned | per-handset voicemail; the `100` ring-all group; s10 for line keys |
 | **s14** | [411 — the phone explains itself](s14-411-feature-discovery/) — one registry of everything you can dial; a generated, checkable IVR at `411`; the runbook table, a wall card and the soft keys from the same source | planned | the graph-provenance primitive; composite prompts |
-| **s15** | [Messages — the house answers texts](s15-messages/) — SMS on the house number: email as the archive, a URL callback through Tailscale Funnel as the trigger; words per person open the garage via HA; `menu` types the `411` tree; handsets text each other over SIP MESSAGE; nothing on the hub | M2 reader + M4 shipped (v0.7.0); M1 needs the house mailbox; door needs s13 | s13 for the journal event; s14 for `menu` |
 | **s16** | [The family voice pack](s16-family-voice-pack/) — the bundled voice is the floor; a `family/` overlay one layer deep, recorded from any handset with `*99` (menu) or `*99*N` (straight to one); `#` inside the call drops back to the default; the studio's own lines are an optional second clip set | planned | — |
 
 s01 has an [`arch.md`](s01-multiple-DIDs/arch.md); s03's reasoning is short
 enough to live in its plan.
 
+| **s13** | [Actions](s13-actions/) — one `[[actions]]` registry (what it does, who may, what it says back, whether it confirms) that a text word, a lobby digit and a passkey all point at; HA acts and may refuse; the garage is the first door | planned | s15 (the text), s14 (the leaf), s19 (the confirm); the ratgdo in HA |
 | **s19** | [The edge inbox](s19-edge-inbox/) — the house's public front door: the carrier's SMS callback and, later, passkey-signed commands land in one queue at the edge; the hub pulls; the edge holds the carrier key; `login.callmemaybe.cc` as verifier, not authorizer | M1 shipped 2026-09-24 | s15 M2 consumes it; s13 gives the words a door |
 
 ### Archived
@@ -35,6 +35,7 @@ enough to live in its plan.
 | | Stream | Closed |
 |---|---|---|
 | **s08** | [Durable event journal](_archives/s08-durable-event-journal/) — SQLite history, doorbells, CEL capture, consumer-owned replay | 2026-09-23 — verified live on jepsen; replicas and the HTTP endpoint dropped with reasons |
+| **s15** | [Messages — the house answers texts](_archives/s15-messages/) — SMS on the house number as control plane and archive, never conversation: the edge inbox, `doorman inbox`, `messages.toml`, boring replies; handsets text each other on the LAN | 2026-09-24 — `ping` → `pong` live; the archive call waits on the mailbox; the door and the menu handed to s13 and s14 |
 | **s10** | [Zero-touch handsets](_archives/s10-zero-touch-handsets/) — `render` writes the phone's own file; `doorman provision` is the window, the instructions and the watch; `rotate --phones` re-provisions; the directory unit is the phone book | 2026-09-23 — shipped in v0.6.0 under test; the live rehearsal rides with the jepsen re-provision |
 | **s07** | [The contacts ladder](_archives/s07-contacts-ladder/) — address books as admission: vCards parsed and classified, the five-rung ladder, `url` sources fetched into a last-good cache off the call path, `via` on the call record | 2026-09-23 — shipped in v0.6.1; nothing on the box to touch |
 

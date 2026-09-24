@@ -1,13 +1,27 @@
 # s15 · Messages — the house answers texts
 
-**Status:** M2 (the reader) and M4 shipped 2026-09-24; M1 waits on the
-house mailbox; the door waits on s13; the edge half is s19. Originally
-planned 2026-09-22. Drafted the afternoon SMS was switched on for
-the house number: inbound worked at once, the first outbound vanished into a
-carrier's spam filter for containing a phone number, the second, plainer one
-arrived, and it became clear that "the house texts back" is a real surface —
-a different shape from the retro handsets, and worth keeping deliberately
-separate from them.
+**Status: closed 2026-09-24 — archived.** The text surface is built and
+proven live; what is left of the plan belongs to the streams that own the
+actuators, and is handed to them:
+
+- M2, the reader: shipped as `doorman inbox` on the hub (v0.7.0/v0.7.1)
+  with the edge inbox (s19 M1) holding the carrier key. Live: the owner's
+  mobile texted `ping` at 17:34:50 and `pong` came back with nobody
+  touching anything.
+- M4, handsets texting handsets: shipped (v0.6.11/v0.6.12).
+- **M1, the archive — open on close:** one `setSMS` call with
+  `email_enabled` the day `midbury@bullmoose.cc` exists. The callback half
+  is already set.
+- **M2's door and M5's journal → s13.** `garage` is an action; the
+  word-level `webhook` shipped here is s13's stopgap and goes away there.
+- **M3, `menu` → s14**, which owns the registry it speaks.
+- Two facts for the next house: VoIP.ms's portal silently drops IPv6
+  entries from the API allow-list and the edge Worker calls the carrier
+  over IPv6, so the allow-list is `0.0.0.0`; and `success` means accepted,
+  never delivered.
+
+Originally planned 2026-09-22, the afternoon SMS was switched on for the
+house number.
 
 ## What done looks like
 
