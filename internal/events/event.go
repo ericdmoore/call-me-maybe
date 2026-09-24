@@ -37,6 +37,8 @@ const (
 	ConfigReloadFailed    = observation.ConfigReloadFailed
 	ContactsRefreshed     = observation.ContactsRefreshed
 	ContactsRefreshFailed = observation.ContactsRefreshFailed
+	MessageReceived       = observation.MessageReceived
+	MessageActed          = observation.MessageActed
 	ARIConnected          = observation.ARIConnected
 	ARIDisconnected       = observation.ARIDisconnected
 	DaemonStarted         = observation.DaemonStarted

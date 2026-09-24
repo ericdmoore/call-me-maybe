@@ -1,6 +1,8 @@
 # s15 · Messages — the house answers texts
 
-**Status:** planned (2026-09-22). Drafted the afternoon SMS was switched on for
+**Status:** M2 (the reader) and M4 shipped 2026-09-24; M1 waits on the
+house mailbox; the door waits on s13; the edge half is s19. Originally
+planned 2026-09-22. Drafted the afternoon SMS was switched on for
 the house number: inbound worked at once, the first outbound vanished into a
 carrier's spam filter for containing a phone number, the second, plainer one
 arrived, and it became clear that "the house texts back" is a real surface —
@@ -53,20 +55,33 @@ carrier involved at all.
 
 ## Decisions and invariants
 
-**Push, never poll.** The DID gets two deliveries: **email forwarding** to
-a house mailbox in bullmoose — the archive, every text, every MMS photo,
-permanent — and a **URL callback** to the reader — the trigger. Email is the
-system of record and needs no code; the callback is what makes a door move
-in a second. Polling `getSMS` is rejected below.
+**Push to the edge; the hub long-polls its own edge.** The DID gets two
+deliveries: **email forwarding** to the house mailbox in bullmoose
+(`midbury@bullmoose.cc`, the house's own identity — the archive, every
+text, every MMS photo, permanent) and a **URL callback** to the edge inbox
+— the trigger. Email is the system of record and needs no code; the
+callback is what makes a door move in a second or two. Polling *VoIP.ms*
+with the API key is rejected below; long-polling our own edge with a
+house-scoped token is a different thing, and is the design.
 
-**The reader lives on the workstation, reachable through Tailscale Funnel.**
-A small program (`cmd/textline`, built from this module, never installed on
-the hub) listens on one HTTPS path that `tailscale funnel` exposes at the
-host's `*.ts.net` name. VoIP.ms cannot sign callbacks, so **the URL is the
-credential**: a random path segment, treated exactly as `internal/provider`
-treats API URLs — never logged, never in an error. The reader holds the API
-credentials for replies, the same place `doorman balance` holds them. jepsen
-is not involved; doorman is not involved.
+**The reader is `doorman inbox`, on the hub — amended 2026-09-24.** The
+first draft put a separate program on the workstation behind Tailscale
+Funnel, for two reasons: it needed a public listener and it needed the
+carrier API key. Funnel turned out not to be available, and the edge inbox
+(s19) answers both reasons at once: the Cloudflare Worker takes the
+carrier's callback and holds the carrier key; the hub only *pulls* from it
+over HTTPS with a token scoped to this house, and asks it to send replies.
+So the consumer is a subcommand of the one binary the customer already has
+— run it in a tab and watch, or under `doorman-inbox.service` for good —
+and everything the old design shuttled to the workstation is local: the
+sender list names `[[people]]` by id in `messages.toml`, `menu` is the
+registry the binary holds, the journal is right there, the seen-id set is
+a file under `/var/lib/doorman`, and the HA webhook goes out over the
+tailnet exactly as ring notifications do. VoIP.ms cannot sign callbacks,
+so at the edge **the URL is the credential**: a random path segment, never
+logged, never in an error. The box never sees the carrier key; a stolen
+box token can read the house's texts and send replies as the house, both
+revocable in one click, and neither can buy a number.
 
 **Words, per person, per capability.** A sender list maps a number to the
 words it may use. It is *not* the ring allow-list: who may open the garage is
@@ -160,18 +175,26 @@ house number is for, and it is not.
 text and an MMS photo to the house number arrive as mail with the photo
 attached, and the sender's number is the subject.
 
-### M2 · The reader and the door
+### M2 · The reader and the door — **shipped 2026-09-24 (v0.7.0), door pending s13**
 
-`cmd/textline`: the callback handler, the URL-path credential, the sender
-list (`textline.toml`: number → words), word dispatch, the HA webhook call,
-the reply with the ASCII/160 guard, the seen-id set, and `sendSMS` through a
-client that shares `internal/provider`'s never-log-the-URL discipline.
-`tailscale funnel` exposing the one path; the callback set on the DID.
-Tests with `httptest`: a valid callback from a listed sender opens (a fake
-HA records the call) and replies; the same id twice acts once; an unlisted
-sender is a 200 with no action and no reply; a bad path token is a 404 with
-nothing logged; a reply that would exceed one segment or leave ASCII is
-refused before it is sent.
+`internal/inbox` + `doorman inbox`: the edge client (pull, ack, send — token
+in a header, never the URL), the seen-id set, word dispatch over
+`messages.toml` (`[[words]]`: word, `people` = `[[people]]` ids or `"*"`,
+webhook, reply), the reply guard (ASCII, 160, no digits, no links, no
+exclamation marks — the loader refuses, the edge refuses again), the HA
+webhook POST (word, person id, message id — never the text), journal
+events `message.received` / `message.acted`, `doorman-inbox.service`.
+Tests with `httptest` against a fake edge: a listed person's word acts and
+replies; a stranger gets nothing; a listed person may not say every word;
+an unknown word from a listed person gets the list; the same id acts once
+and the set survives a restart; a failed webhook sends no reply; every
+request carries the token as a bearer header; a rude reply is refused
+before it leaves. The edge half is s19 M1.
+
+Done when Gabi texts `garage` and the door opens within two seconds, the
+reply arrives, `garage?` answers truthfully, and a text from a number not
+on the list produces exactly one email and nothing else. The `ping` → `pong`
+round trip is the smoke test until s13 gives the words a door.
 
 Done when Gabi texts `garage` and the door opens within two seconds, the
 reply arrives, `garage?` answers truthfully, and a text from a number not

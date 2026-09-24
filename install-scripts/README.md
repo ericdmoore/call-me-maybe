@@ -79,9 +79,11 @@ availability, distro compatibility, privileges or binary architecture.
   and CEL schema.
 - The same binary at `/usr/local/bin/doorman`, so `doorman` resolves on the
   operator's PATH and on sudo's `secure_path`. The unit runs the `/opt` copy.
-- The repository's `doorman.service` and `doorman-directory.service` in
-  `/etc/systemd/system/` (neither is enabled; the directory unit is the
-  phones' phone book and exits quietly until `PROVISION_ADDRESS` is set).
+- The repository's `doorman.service`, `doorman-directory.service` and
+  `doorman-inbox.service` in `/etc/systemd/system/` (none is enabled; the
+  directory unit is the phones' phone book and exits quietly until
+  `PROVISION_ADDRESS` is set; the inbox unit is texts to the house and exits
+  quietly until `INBOX_URL` is set and a `messages.toml` exists).
 - Private `/var/lib/doorman` and `/var/lib/doorman/journal` directories (0700).
 
 The scripts preserve your configuration — `/etc/asterisk`, `.env`, the TOML

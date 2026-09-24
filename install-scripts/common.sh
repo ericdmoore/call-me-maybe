@@ -125,10 +125,11 @@ prepare() {
    require_version "$(asterisk -V | awk '{print $2}')"
   fi
   # Catch conflicts before spending time installing packages.
-  for target in /opt/call-me-maybe/bin/doorman /usr/local/bin/doorman /etc/systemd/system/doorman.service /etc/systemd/system/doorman-directory.service; do
+  for target in /opt/call-me-maybe/bin/doorman /usr/local/bin/doorman /etc/systemd/system/doorman.service /etc/systemd/system/doorman-directory.service /etc/systemd/system/doorman-inbox.service; do
    source=$binary
    [ "$target" != /etc/systemd/system/doorman.service ] || source=$repo/scripts/doorman.service
    [ "$target" != /etc/systemd/system/doorman-directory.service ] || source=$repo/scripts/doorman-directory.service
+   [ "$target" != /etc/systemd/system/doorman-inbox.service ] || source=$repo/scripts/doorman-inbox.service
    if [ -e "$target" ] || [ -L "$target" ]; then
     cmp -s "$source" "$target" || fail "$target differs; use the documented upgrade procedure."
    fi
@@ -191,12 +192,13 @@ prepare() {
  install_once "$binary" /usr/local/bin/doorman 0755
  install_once "$repo/scripts/doorman.service" /etc/systemd/system/doorman.service 0644
  install_once "$repo/scripts/doorman-directory.service" /etc/systemd/system/doorman-directory.service 0644
+ install_once "$repo/scripts/doorman-inbox.service" /etc/systemd/system/doorman-inbox.service 0644
  # `doorman provision notify` sends a check-sync through the Asterisk console,
  # which needs asterisk.conf and the control socket. The service account may
  # run exactly scripts/notify-check-sync — one validated argument — and
  # nothing else. Replaced on every run: it is an output of the release.
  run install -o root -g root -m 0440 "$repo/scripts/doorman-notify.sudoers" /etc/sudoers.d/doorman-notify
- run install -d -o doorman -g doorman -m 0700 /var/lib/doorman /var/lib/doorman/journal /var/lib/doorman/provision
+ run install -d -o doorman -g doorman -m 0700 /var/lib/doorman /var/lib/doorman/journal /var/lib/doorman/provision /var/lib/doorman/inbox
  run systemctl daemon-reload
  cat <<'EOF_NEXT'
 Host preparation complete. No doorman service was started.

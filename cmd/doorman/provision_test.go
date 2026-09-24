@@ -417,3 +417,26 @@ func TestResetReopensFirstContactForTheNamedPhoneOnly(t *testing.T) {
 		t.Fatalf("theater was not reset and must still need its credential, got %d", got)
 	}
 }
+
+// A text is never read on the call path: internal/inbox is reachable from
+// `doorman inbox` and nothing else, the same guard the provider and the
+// LAN listener have.
+func TestOnlyTheInboxCommandNamesTheInboxPackage(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".go") || name == "inbox.go" || name == "provision_test.go" {
+			continue
+		}
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(src), "internal/inbox") {
+			t.Errorf("%s mentions internal/inbox — texts are consumed by `doorman inbox` and nothing else", name)
+		}
+	}
+}

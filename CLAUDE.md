@@ -46,6 +46,7 @@ make run                   # dev run with .env sourced (needs reachable Asterisk
 ./bin/doorman balance      # prepaid credit per trunk; exit 1 under threshold
 ./bin/doorman provision    # inventory view; with ids: window + instructions + watch
 ./bin/doorman rotate --phones  # new handset SIP passwords; `provision notify` delivers
+./bin/doorman inbox        # texts to the house: consume the edge inbox per messages.toml
 ./scripts/smoke.sh         # full deployment verification, run ON the Pi
 ```
 
@@ -123,6 +124,12 @@ Layout:
   `cmd/doorman/provision.go` and nothing else — asserted by test, the same
   guard the provider package has: a listener that hands out SIP passwords
   never shares a process with the thing that answers the phone.
+- `internal/inbox` — texts to the house number: the edge client (pull,
+  ack, send — token in a header, never in the URL), the seen-id set, and
+  the word dispatcher over `messages.toml`. Reachable from
+  `cmd/doorman/inbox.go` and nothing else, asserted by test: nothing on the
+  call path reads a text, and the carrier API key is at the edge (`edge/`,
+  the Cloudflare Worker), never on the box.
 - `internal/config` — env parsing; names match `examples/.env.example` exactly.
 
 Config interfaces: `.env` (secrets + tuning), `handsets.toml` (hardware

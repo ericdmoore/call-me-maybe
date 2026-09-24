@@ -371,6 +371,30 @@ It never serves a configuration.
 .B doorman\-directory.service
 runs it.
 .TP
+.BI "doorman inbox [\-messages " path "] [\-env " path "] [\-state " dir "] [\-once] [\-wait " d ]
+Texts to the house number. Long\-polls the house's edge inbox \(em the
+Cloudflare Worker in
+.I edge/
+that the carrier calls back, named by
+.B INBOX_URL
+and
+.B INBOX_TOKEN
+\(em acts on the words
+.I messages.toml
+allows from the
+.B [[people]]
+ids it names, and replies through the edge, which holds the carrier API key
+so this box never does. One number, one purpose: control plane and archive,
+never conversation; strangers and unknown words are never answered. Prints
+each outcome with the sender redacted and never the text. Exits 0 with
+nothing to do when
+.B INBOX_URL
+or
+.I messages.toml
+is absent;
+.B doorman\-inbox.service
+runs it for good.
+.TP
 .B doorman balance
 What is left on each prepaid trunk, per trunk, with a non\-zero exit when any
 of it is below its threshold \(em so a cron entry needs no wrapper script. A

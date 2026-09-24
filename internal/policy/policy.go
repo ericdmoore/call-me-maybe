@@ -116,6 +116,10 @@ type Person struct {
 	Name    string   `toml:"name"`
 	Numbers []string `toml:"numbers"`
 	Notes   string   `toml:"notes"`
+	// ID is an optional short handle — "gabi" — for other files to name this
+	// person by: messages.toml says who may text which word. Never a number
+	// retyped, never an index that shifts when the list is edited.
+	ID string `toml:"id"`
 }
 
 type Extension struct {
@@ -200,6 +204,8 @@ type KnownCaller struct {
 	Name  string
 	E164  string
 	Notes string
+	// ID is the [[people]] id, or "" when the entry has none.
+	ID string
 }
 
 // RingStep is one stage of a ring plan with handset ids resolved to
@@ -738,6 +744,7 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 	line := compileLine(f.Line, f.House.Voicemail, expandIDs, o.Trunks, fail)
 
 	allow := make(map[string]KnownCaller)
+	personIDs := map[string]string{}
 	for _, p := range f.People {
 		if p.Name == "" {
 			fail("a [[people]] entry is missing a name")
@@ -746,13 +753,23 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		if len(p.Numbers) == 0 {
 			fail("person %q has no numbers", p.Name)
 		}
+		if p.ID != "" {
+			switch {
+			case !handsetIDPattern.MatchString(p.ID):
+				fail("person %q: id %q must be lowercase alphanumeric/dash/underscore", p.Name, p.ID)
+			case personIDs[p.ID] != "":
+				fail("person %q: id %q is already %s's", p.Name, p.ID, personIDs[p.ID])
+			default:
+				personIDs[p.ID] = p.Name
+			}
+		}
 		for _, raw := range p.Numbers {
 			n := NormaliseCallerID(raw, "1")
 			if n.Kind != KindE164 {
 				fail("number %q for %q is not a valid phone number", raw, p.Name)
 				continue
 			}
-			allow[n.Value] = KnownCaller{Name: p.Name, E164: n.Value, Notes: p.Notes}
+			allow[n.Value] = KnownCaller{Name: p.Name, E164: n.Value, Notes: p.Notes, ID: p.ID}
 		}
 	}
 
@@ -1062,6 +1079,23 @@ func (p *Policy) Extensions() []ResolvedExtension {
 }
 
 func (p *Policy) AllowListCount() int { return len(p.allow) }
+
+// PersonIDs is every [[people]] id that is set, sorted — what another file
+// may reference.
+func (p *Policy) PersonIDs() []string {
+	seen := map[string]bool{}
+	for _, c := range p.allow {
+		if c.ID != "" {
+			seen[c.ID] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // Callers is the allow-list as people: every [[people]] number with its
 // name, sorted by name then number, for a phone's directory. Caller data —

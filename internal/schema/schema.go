@@ -82,7 +82,7 @@ var (
 )
 
 // Names are the selectable schema names for `doorman schema <name>`.
-var Names = []string{"policy", "handsets", "trunks", "contacts", "env", "template"}
+var Names = []string{"policy", "handsets", "trunks", "contacts", "messages", "env", "template"}
 
 // Get returns one schema by name.
 func Get(name string) (*Schema, error) {
@@ -95,6 +95,8 @@ func Get(name string) (*Schema, error) {
 		return Trunks(), nil
 	case "contacts":
 		return Contacts(), nil
+	case "messages":
+		return Messages(), nil
 	case "env":
 		return Env(), nil
 	case "template":
@@ -116,6 +118,7 @@ func All(version string) *Bundle {
 			"handsets.toml": Handsets(),
 			"trunks.toml":   Trunks(),
 			"contacts.toml": Contacts(),
+			"messages.toml": Messages(),
 			"env":           Env(),
 			"template":      TemplateFormat(),
 		},
@@ -676,7 +679,56 @@ func person() *Schema {
 				Rules:       []string{"An unparseable number fails the load rather than never matching."},
 			},
 			"notes": {Type: "string", Description: "Free text for whoever edits this next."},
+			"id": {
+				Type:        "string",
+				Pattern:     "^[a-z0-9][a-z0-9_-]*$",
+				Description: "Optional short handle — \"gabi\" — for other files to name this person by. messages.toml says who may text which word by these ids.",
+				Rules:       []string{"Unique across [[people]].", "A handle, never a number retyped elsewhere and never an index that shifts when the list is edited."},
+				CrossRefs:   []string{"messages.toml [[words]] people"},
+			},
 		},
+		AdditionalProperties: falsy,
+	}
+}
+
+// ── messages.toml ────────────────────────────────────────────────────────
+
+// Messages describes messages.toml: who may text the house which word.
+func Messages() *Schema {
+	return &Schema{
+		SchemaURI:   "https://json-schema.org/draft/2020-12/schema",
+		ID:          "https://callmemaybe.cc/schema/messages.json",
+		Title:       "messages.toml — texts the house answers",
+		Type:        "object",
+		Description: "Which words a text to the house number may carry, from whom, and what each one does. Optional, and its absence is the compatibility gate: with no messages.toml the house answers no texts. A text to the house number is control plane, never conversation (\"one number, one purpose\"): a known word from a listed person does one thing and gets one boring reply; everything else is archived by the carrier's email forwarding and never answered.",
+		Rules: []string{
+			"One number, one purpose: a text to the house number is control plane and archive, never conversation, and nothing typed on a handset leaves through it. Conversational texting would be a second number and a line of its own.",
+			"Read by `doorman inbox`, the consumer of the house's edge inbox, and by `doorman check`; never by the daemon on the call path.",
+			"People are named by their [[people]] id in policy.toml, never by a number retyped here. `doorman check` refuses an id no [[people]] entry carries.",
+			"A stricter list than the ring allow-list by design: ringing the house and opening its garage are different trusts. \"*\" means everyone on the allow-list.",
+			"A text from a number not on the allow-list, or a listed person texting a word they may not, is archived and never answered — a reply tells a stranger the number is live.",
+			"Replies are boring on purpose: plain ASCII, under 160 characters, no digits, no links, no exclamation marks. One segment on the bill and past the carrier's spam filter, which dropped the first text this house ever sent. The loader refuses a reply that breaks the rule.",
+			"Nothing here waits for a reply to arrive; there are no receipts. The door's state is the truth and the text is a courtesy.",
+		},
+		Properties: map[string]*Schema{
+			"words": {
+				Type:        "array",
+				MinItems:    one,
+				Description: "Every word the house understands by text.",
+				Items: &Schema{
+					Type:     "object",
+					Required: []string{"word", "people"},
+					Properties: map[string]*Schema{
+						"word":    {Type: "string", Pattern: "^[a-z0-9]+$", Description: "What the sender types: lowercase letters and digits, matched exactly against the trimmed, lowercased text.", Rules: []string{"Unique."}},
+						"people":  {Type: "array", MinItems: one, Items: &Schema{Type: "string"}, Description: "[[people]] ids allowed to say it, or [\"*\"] for everyone on the allow-list.", CrossRefs: []string{"policy.toml [[people]] id"}},
+						"webhook": {Type: "string", Pattern: "^https?://", Description: "POSTed to when the word arrives from a listed sender — Home Assistant's webhook, typically. The body is JSON: the word, the sender's [[people]] id, and the message id; never the text."},
+						"reply":   {Type: "string", Description: "Texted back to the sender. Optional.", Rules: []string{"Plain ASCII, at most 160 characters, no digits, no links, no exclamation marks.", "A word needs a webhook, a reply, or both."}},
+					},
+					AdditionalProperties: falsy,
+				},
+			},
+		},
+		Required:             []string{"words"},
 		AdditionalProperties: falsy,
 	}
 }
@@ -867,6 +919,7 @@ func Env() *Schema {
 			"HANDSET_<NAME>_PASSWORD variables are named by password_env in handsets.toml and read by `doorman render`, not by the daemon.",
 			"CONTACTS_<ID>_TOKEN variables are named by token_env in contacts.toml and read by the daemon's contacts refresher and by `doorman check --fetch`: the bearer token a url source is fetched with, sent in an Authorization header and never in the URL.",
 			"HANDSET_<NAME>_ADMIN_PASSWORD and HANDSET_<NAME>_PROVISION_PASSWORD are generated by `doorman init` for every handset and read only by `doorman render` and `doorman provision`: the phone's own web-admin password (so no phone keeps its factory login) and the credential a provisioned phone presents to fetch its configuration after first contact. Never typed, never in handsets.toml.",
+			"INBOX_URL and INBOX_TOKEN are read only by `doorman inbox`, never by the daemon: the house's edge inbox (the URL the edge worker serves this house at) and the token scoped to pulling its texts and sending its replies. The carrier API key is never on this box; the edge holds it.",
 			"PROVISION_ADDRESS is read only by `doorman render` and `doorman provision`, never by the daemon: the address phones reach this box at — its LAN IP, optionally :port (default 8443) — required once any handset carries mac and model. Never localhost (on the phone, that is the phone), never a .local name (SIP phones resolve through unicast DNS), and not a Tailscale address unless a phone is on the tailnet.",
 			"The VOICEMAIL_*, STT_*, and SMTP_* keys in examples/.env.example are reserved for the unshipped voicemail feature. They are deliberately not read yet, so .env will not churn when it lands.",
 		},

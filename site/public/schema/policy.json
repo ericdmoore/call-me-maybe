@@ -265,6 +265,18 @@
       "items": {
         "type": "object",
         "properties": {
+          "id": {
+            "description": "Optional short handle — \"gabi\" — for other files to name this person by. messages.toml says who may text which word by these ids.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-cross-references": [
+              "messages.toml [[words]] people"
+            ],
+            "x-rules": [
+              "Unique across [[people]].",
+              "A handle, never a number retyped elsewhere and never an index that shifts when the list is edited."
+            ]
+          },
           "name": {
             "description": "Who this is. Appears on the handset display and in logs.",
             "type": "string"

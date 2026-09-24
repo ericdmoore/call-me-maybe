@@ -710,6 +710,32 @@ the provisioning window. A name added to `[[people]]` is on every phone at
 its next poll (hourly) with nothing rendered and no window opened. A handset's
 `phonebook` key narrows what it shows: `["house"]` for a child's room.
 
+### Texts to the house
+
+A text to the house number is control plane, never conversation: a known
+word from a listed person does one thing and gets one boring reply;
+everything else is archived by the carrier's email forwarding and never
+answered. The pieces, in order:
+
+1. **The archive.** On VoIP.ms, forward the DID's SMS and MMS to the house's
+   mailbox. No code; every text and photo lands there for good.
+2. **The edge.** Deploy `edge/` (its README is the whole procedure): the
+   Worker VoIP.ms calls back, that this box pulls from, and that holds the
+   carrier API key so this box never does. Give VoIP.ms the callback URL
+   with the house's callback token in the path, and admit Cloudflare's
+   egress to the API allow-list.
+3. **The words.** `cp examples/messages.example.toml messages.toml`, give
+   the people it names an `id` in `policy.toml`, point each word at a Home
+   Assistant webhook, and `doorman check`.
+4. **The consumer.** `INBOX_URL` and `INBOX_TOKEN` in `.env`, then
+   `doorman inbox` in a tab to watch it work, and
+   `sudo systemctl enable --now doorman-inbox` to keep it working.
+
+Text `ping` from an allow-listed phone: the tab prints the outcome and the
+phone gets `pong` back within a couple of seconds. Nothing on the call path
+reads a text, and a handset cannot text an outside number through the house
+at all — that is a second number and a line of its own.
+
 ### Add a second number
 
 One box, several phone numbers, each with its own rules — a curt doorman on

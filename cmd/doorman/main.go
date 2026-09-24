@@ -84,6 +84,8 @@ func runCommand() int {
 			return runBalance(os.Args[2:])
 		case "provision":
 			return runProvision(os.Args[2:])
+		case "inbox":
+			return runInbox(os.Args[2:])
 		case "pack":
 			return runPack(os.Args[2:])
 		case "version", "-v", "--version":
@@ -236,6 +238,20 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 sources — served always, read-only, one port above
                                 the window, with each phone's own credential; the
                                 doorman-directory.service unit runs this
+  doorman inbox [flags]         texts to the house number: long-poll the house's
+                                edge inbox (INBOX_URL, INBOX_TOKEN), act on the
+                                words messages.toml allows from the people it
+                                names, reply through the edge. No listener and
+                                no carrier credential on this box; the edge
+                                holds that. Runs in a tab, or under
+                                doorman-inbox.service. Exits 0 with nothing to
+                                do when INBOX_URL or messages.toml is absent
+      -messages path            words file (default $MESSAGES_PATH or ./messages.toml)
+      -policy path              policy file, for [[people]] ids (default $POLICY_PATH or ./policy.toml)
+      -env path                 secrets file (default ./.env)
+      -state dir                handled message ids (default $XDG_STATE_HOME/doorman/inbox)
+      -once                     pull once, handle what is there, exit
+      -wait d                   how long each pull waits at the edge (default 20s)
   doorman e164 <number>         show how a raw caller ID normalises
   doorman lsp                   language server (stdio) for policy.toml and
                                 handsets.toml — diagnostics from the same

@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────
+# Call Me Maybe — texts the house answers.
+#   cp messages.example.toml messages.toml
+#   ./bin/doorman check
+#
+# THIS FILE IS OPTIONAL, and not having it is the normal state: with no
+# messages.toml the house answers no texts, and `doorman inbox` says so and
+# exits. Rollback is deleting the file.
+#
+# ONE NUMBER, ONE PURPOSE. A text to the house number is control plane and
+# archive, never conversation. The carrier forwards every text and MMS photo
+# to the house's mailbox — that is the archive and needs no code. A known word
+# from a listed person does one thing and gets one boring reply. Everything
+# else — a stranger, a listed person saying a word they may not, a word nobody
+# taught the house — is archived and NEVER ANSWERED: a reply tells a stranger
+# the number is live, and silence is the right answer. Nothing typed on a
+# handset leaves through the house number; conversational texting would be a
+# second number and a line of its own.
+#
+# PEOPLE ARE NAMED BY ID. `people` lists [[people]] ids from policy.toml —
+# give an entry `id = "gabi"` — or ["*"] for everyone on the allow-list.
+# Never a number retyped here. A stricter list than the ring allow-list by
+# design: ringing the house and opening its garage are different trusts.
+#
+# REPLIES ARE BORING ON PURPOSE. Plain ASCII, at most 160 characters, no
+# digits, no links, no exclamation marks. One segment on the bill and past
+# the carrier's spam filter, which dropped the first text this house ever
+# sent. `doorman check` refuses a reply that breaks the rule.
+# ─────────────────────────────────────────────────────────────
+
+# A word that acts: the webhook is Home Assistant's, and HA decides what a
+# garage is and whether now is a good time. The body it receives is JSON —
+# the word, the sender's id, the message id — and never the text itself.
+[[words]]
+word = "garage"
+people = ["gabi", "eric"]
+webhook = "http://homeassistant.local:8123/api/webhook/cmm-garage-open"
+reply = "The garage is open"
+
+# Closing is its own word, because closing a door nobody is watching is the
+# one thing to make deliberate. Adults only.
+[[words]]
+word = "close"
+people = ["eric"]
+webhook = "http://homeassistant.local:8123/api/webhook/cmm-garage-close"
+reply = "Closing the garage"
+
+# A word that only replies — the smoke test for the whole path.
+[[words]]
+word = "ping"
+people = ["*"]
+reply = "pong"
