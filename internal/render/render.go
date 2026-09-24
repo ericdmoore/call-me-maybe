@@ -107,6 +107,7 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 	plan.WriteString("[handsets-internal]\n")
 
 	var all, pageMembers []string
+	var messageRoutes []messageRoute
 	generated := 0
 
 	for _, h := range handsets {
@@ -146,6 +147,11 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 		// The same auth object serves both directions.
 		fmt.Fprintf(&pjsip, "auth=%s-auth\noutbound_auth=%s-auth\naors=%s\n", h.ID, h.ID, h.ID)
 		pjsip.WriteString("direct_media=no\nforce_rport=yes\nrewrite_contact=yes\nrtp_symmetric=yes\ndtmf_mode=rfc4733\n")
+		// A text typed on a handset arrives as a SIP MESSAGE. Without its own
+		// context it runs the call dialplan, where Dial() rings the other
+		// phone as an anonymous call and delivers nothing (first re-provision,
+		// 2026-09-24). [cmm-messages] below hands it to the phone as a message.
+		pjsip.WriteString("message_context=cmm-messages\n")
 		if h.Number > 0 {
 			fmt.Fprintf(&pjsip, "callerid=%s <%d>\n", label, h.Number)
 		} else {
@@ -174,6 +180,7 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 		if h.Number > 0 {
 			fmt.Fprintf(&plan, "exten => %d,1,Dial(%s,30)\n", h.Number, h.Endpoint)
 			fmt.Fprintf(&plan, "exten => %d,hint,%s\n", h.Number, h.Endpoint)
+			messageRoutes = append(messageRoutes, messageRoute{number: h.Number, id: h.ID})
 		}
 		all = append(all, h.Endpoint)
 		if h.Page {
@@ -199,5 +206,27 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 			strings.Join(pageMembers, "&"))
 	}
 
+	// Texts between handsets. Every endpoint above names this context for
+	// SIP MESSAGE, so a message to a room number reaches that phone as a
+	// message, and 100 reaches every phone.
+	sort.Slice(messageRoutes, func(i, j int) bool { return messageRoutes[i].number < messageRoutes[j].number })
+	plan.WriteString("\n; Texts between handsets (SIP MESSAGE): a room number, or 100 for everyone.\n[cmm-messages]\n")
+	for _, r := range messageRoutes {
+		fmt.Fprintf(&plan, "exten => %d,1,MessageSend(pjsip:%s,${MESSAGE(from)})\n", r.number, r.id)
+	}
+	if len(messageRoutes) > 0 {
+		plan.WriteString("exten => 100,1,NoOp(text everyone)\n")
+		for _, r := range messageRoutes {
+			fmt.Fprintf(&plan, " same => n,MessageSend(pjsip:%s,${MESSAGE(from)})\n", r.id)
+		}
+	}
+	plan.WriteString("exten => _X.,1,NoOp(no handset numbered ${EXTEN} to text)\n")
+
 	return &Fragments{PJSIP: pjsip.String(), Dialplan: plan.String(), Generated: generated}, nil
+}
+
+// messageRoute is one handset's number → endpoint for [cmm-messages].
+type messageRoute struct {
+	number int
+	id     string
 }

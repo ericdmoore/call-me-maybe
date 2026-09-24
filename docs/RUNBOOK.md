@@ -544,6 +544,7 @@ valid **transfer target**.
 | *97 | Check **voicemail** (prompts for mailbox + password) |
 | *6 + digits | **The hunt** (optional, commented out by default): plays the greeting of the mailbox with that number and hangs up — a scavenger hunt whose answers are what you dial. `*6X.` is reserved for it whether or not you play. See `HUNT.md` |
 | 9196 | Echo test — your voice comes straight back; isolates RTP problems |
+| *(text)* | A message typed on a handset to a room number reaches that phone as a message, and to `100` reaches every phone (SIP MESSAGE, routed by the generated `[cmm-messages]` context) |
 | 9197 | Speaking clock — proves audio path without a second person |
 | 555 | **Home Assistant Assist** (optional, disabled by default) |
 

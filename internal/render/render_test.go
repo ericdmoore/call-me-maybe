@@ -217,3 +217,29 @@ func TestEveryHandsetEndpointCanAnswerAPhonesNotifyChallenge(t *testing.T) {
 		t.Fatalf("endpoint must carry outbound_auth beside auth:\n%s", f.PJSIP)
 	}
 }
+
+// A text typed on a handset is a SIP MESSAGE. It must reach the other
+// phone as a message, not ring it as an anonymous call.
+func TestHandsetTextsReachTheOtherPhoneAsMessages(t *testing.T) {
+	handsets := []policy.Handset{
+		{ID: "kitchen", Label: "Kitchen", Endpoint: "PJSIP/kitchen", Number: 101, PasswordEnv: "HANDSET_KITCHEN_PASSWORD"},
+		{ID: "theater", Label: "Theater", Endpoint: "PJSIP/theater", Number: 102, PasswordEnv: "HANDSET_THEATER_PASSWORD"},
+	}
+	f, err := Build(handsets, func(string) (string, bool) { return "sip-secret", true }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(f.PJSIP, "message_context=cmm-messages\n") != 2 {
+		t.Fatalf("every endpoint must route SIP MESSAGE to [cmm-messages]:\n%s", f.PJSIP)
+	}
+	for _, want := range []string{
+		"[cmm-messages]\n",
+		"exten => 101,1,MessageSend(pjsip:kitchen,${MESSAGE(from)})\n",
+		"exten => 102,1,MessageSend(pjsip:theater,${MESSAGE(from)})\n",
+		"exten => 100,1,NoOp(text everyone)\n same => n,MessageSend(pjsip:kitchen,${MESSAGE(from)})\n same => n,MessageSend(pjsip:theater,${MESSAGE(from)})\n",
+	} {
+		if !strings.Contains(f.Dialplan, want) {
+			t.Errorf("dialplan missing %q:\n%s", want, f.Dialplan)
+		}
+	}
+}
