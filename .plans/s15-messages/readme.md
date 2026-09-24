@@ -118,7 +118,11 @@ where is that readable?" Every answer was wrong on a number that also opens
 the garage: the person on the other end sees a conversation and a machine's
 replies from one sender, and the box has to guess whether "garage?" is a
 question or an instruction. The mechanism could carry both; the policy is
-that it does not. If the family ever wants conversational texting from
+that it does not. The owner's framing, which is the shortest statement of
+why: the house number is a NAT. Many handsets inside, one address outside,
+and a reply from outside has no inside address to return to. Voice resolves
+that by ringing everyone; a text has no such natural resolution, so the
+posture is not to attempt one. If the family ever wants conversational texting from
 handsets, that is a second DID and a `[line]` of its own — its texts to its
 handsets, every handset for a family line, one for a kid's own number, one
 shared thread per outside number — and a later milestone here, not a
