@@ -30,6 +30,8 @@ enough to live in its plan.
 | **s13** | [Actions](s13-actions/) — one `[[actions]]` registry (what it does, who may, what it says back, whether it confirms) that a text word, a lobby digit and a passkey all point at; HA acts and may refuse; the garage is the first door | planned | s15 (the text), s14 (the leaf), s19 (the confirm); the ratgdo in HA |
 | **s19** | [The edge inbox](s19-edge-inbox/) — the house's public front door: the carrier's SMS callback and, later, passkey-signed commands land in one queue at the edge; the hub pulls; the edge holds the carrier key; `login.callmemaybe.cc` as verifier, not authorizer | M1 shipped 2026-09-24 | s15 M2 consumes it; s13 gives the words a door |
 
+| **s20** | [The party line](s20-party-line/) — a room is a PIN with a suffix: a child makes room 107 from her handset, friends type `pin * 107` in the lobby and land in it, hosts are house handsets, guests wait for one, the room ends with the last host and forgets itself after a fortnight | planned | s14 for the card; the line's concurrent-call limit |
+
 ### Archived
 
 | | Stream | Closed |
