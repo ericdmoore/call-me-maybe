@@ -30,8 +30,6 @@ enough to live in its plan.
 | **s13** | [Actions](s13-actions/) — one `[[actions]]` registry (what it does, who may, what it says back, whether it confirms) that a text word, a lobby digit and a passkey all point at; HA acts and may refuse; the garage is the first door | planned | s15 (the text), s14 (the leaf), s19 (the confirm); the ratgdo in HA |
 | **s19** | [The edge inbox](s19-edge-inbox/) — the house's public front door: the carrier's SMS callback and, later, passkey-signed commands land in one queue at the edge; the hub pulls; the edge holds the carrier key; `login.callmemaybe.cc` as verifier, not authorizer | M1 shipped 2026-09-24 | s15 M2 consumes it; s13 gives the words a door |
 
-| **s20** | [The party line](s20-party-line/) — a room is a PIN with a suffix: a child makes room 107 from her handset, friends type `pin * 107` in the lobby and land in it, hosts are house handsets, guests wait for one, the room ends with the last host and forgets itself after a fortnight | parked 2026-09-25 — two channels on VoIP.ms, $23/channel/month for more; reopens with a per-minute second trunk | s01 for the second trunk; s14 for the card |
-
 ### Archived
 
 | | Stream | Closed |
@@ -40,6 +38,15 @@ enough to live in its plan.
 | **s15** | [Messages — the house answers texts](_archives/s15-messages/) — SMS on the house number as control plane and archive, never conversation: the edge inbox, `doorman inbox`, `messages.toml`, boring replies; handsets text each other on the LAN | 2026-09-24 — `ping` → `pong` live; the archive call waits on the mailbox; the door and the menu handed to s13 and s14 |
 | **s10** | [Zero-touch handsets](_archives/s10-zero-touch-handsets/) — `render` writes the phone's own file; `doorman provision` is the window, the instructions and the watch; `rotate --phones` re-provisions; the directory unit is the phone book | 2026-09-23 — shipped in v0.6.0 under test; the live rehearsal rides with the jepsen re-provision |
 | **s07** | [The contacts ladder](_archives/s07-contacts-ladder/) — address books as admission: vCards parsed and classified, the five-rung ladder, `url` sources fetched into a last-good cache off the call path, `via` on the call record | 2026-09-23 — shipped in v0.6.1; nothing on the box to touch |
+
+### Cancelled
+
+Planned, reasoned through, and then not built. The plan stays so the
+reasoning is not redone the next time the idea comes up.
+
+| | Stream | Cancelled |
+|---|---|---|
+| **s20** | [The party line](_archives/cancelled/s20-party-line/) — a room is a PIN with a suffix: a child makes room 107 from her handset, friends type `pin * 107` in the lobby and land in it, hosts are house handsets, guests wait for one | 2026-09-25 — VoIP.ms allows two simultaneous calls and sells more only at $23/channel/month; a twenty-friend room is $460 a month. Revivable with a per-minute second trunk (s01) |
 
 ---
 
@@ -195,6 +202,8 @@ offline on upgrade, which argues for warn-then-reject over two releases.
 - Number streams `sNN`; do not renumber when one is dropped.
 - A stream moves to `_archives/` — same folder name, same number — when every
   milestone has either landed or been explicitly dropped in its status line.
+  A stream that was planned and then not built at all goes to
+  `_archives/cancelled/` with the reason in its status line.
   Partly-shipped streams stay here: a plan with one open milestone is still
   the place that milestone is reasoned about. The table above lists archived
   streams under their own heading so the numbering stays legible.
