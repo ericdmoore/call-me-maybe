@@ -17,7 +17,6 @@ shipped in v0.9.0). All four done the same day; s13 and s19 are next. s13 and s1
 
 | | Stream | Status | Depends on |
 |---|---|---|---|
-| **s01** | [Multiple lines](s01-multiple-DIDs/) — several numbers, then several providers | **all three phases done — Phase 3 outbound failover shipped 2026-09-25 (v0.9.0); ready to archive** | — |
 | **s02** | [Home and office config examples](s02-home-and-office-config-examples/) — worked, tested, published starting points | M1–M4 shipped (four scenarios at callmemaybe.cc/examples/); M5 waits on primitives | `#`-terminated collection and voicemail metadata for M5 |
 | **s04** | [Network helpers](s04-standarddize-network-helpers/) — TTS, STT and LLM addressed by URL, wherever they run | planned | — |
 | **s05** | [System alerts](s05-system-alerts/) — the house phone tells you about the house phone | planned | composite prompts |
@@ -28,8 +27,8 @@ shipped in v0.9.0). All four done the same day; s13 and s19 are next. s13 and s1
 | **s14** | [411 — the phone explains itself](s14-411-feature-discovery/) — one registry of everything you can dial; a generated, checkable IVR at `411`; the runbook table, a wall card and the soft keys from the same source | planned | the graph-provenance primitive; composite prompts |
 | **s16** | [The family voice pack](s16-family-voice-pack/) — the bundled voice is the floor; a `family/` overlay one layer deep, recorded from any handset with `*99` (menu) or `*99*N` (straight to one); `#` inside the call drops back to the default; the studio's own lines are an optional second clip set | planned | — |
 
-s01 has an [`arch.md`](s01-multiple-DIDs/arch.md); s03's reasoning is short
-enough to live in its plan.
+s01 has an [`arch.md`](_archives/s01-multiple-DIDs/arch.md); s03's reasoning
+is short enough to live in its plan.
 
 | **s13** | [Actions](s13-actions/) — one `[[actions]]` registry (what it does, who may, what it says back, whether it confirms) that a text word, a lobby digit and a passkey all point at; HA acts and may refuse; the garage is the first door | planned | s15 (the text), s14 (the leaf), s19 (the confirm); the ratgdo in HA |
 | **s19** | [The edge inbox](s19-edge-inbox/) — the house's public front door: the carrier's SMS callback and, later, passkey-signed commands land in one queue at the edge; the hub pulls; the edge holds the carrier key; `login.callmemaybe.cc` as verifier, not authorizer | M1 shipped 2026-09-24 | s15 M2 consumes it; s13 gives the words a door |
@@ -41,6 +40,7 @@ enough to live in its plan.
 | **s08** | [Durable event journal](_archives/s08-durable-event-journal/) — SQLite history, doorbells, CEL capture, consumer-owned replay | 2026-09-23 — verified live on jepsen; replicas and the HTTP endpoint dropped with reasons |
 | **s15** | [Messages — the house answers texts](_archives/s15-messages/) — SMS on the house number as control plane and archive, never conversation: the edge inbox, `doorman inbox`, `messages.toml`, boring replies; handsets text each other on the LAN | 2026-09-24 — `ping` → `pong` live; the archive call waits on the mailbox; the door and the menu handed to s13 and s14 |
 | **s10** | [Zero-touch handsets](_archives/s10-zero-touch-handsets/) — `render` writes the phone's own file; `doorman provision` is the window, the instructions and the watch; `rotate --phones` re-provisions; the directory unit is the phone book | 2026-09-23 — shipped in v0.6.0 under test; the live rehearsal rides with the jepsen re-provision |
+| **s01** | [Multiple lines](_archives/s01-multiple-DIDs/) — several numbers, then several providers: the routing spine, line identity, outbound identity by trunk, per-line observability, `trunks.toml` and the generated inbound/emergency/failover contexts | 2026-09-25 — Phase 3 (outbound failover) shipped in v0.9.0; inbound failover stays the provider's failover DID, by design |
 | **s03** | [Provider balance checking](_archives/s03-provider-balalnce-checking/) — `doorman balance` per trunk with an exit code for cron; `--ring` has the house say the balance aloud over an internal call, once a day per trunk; `--prom` is the gauge; `doorman-balance.timer` every morning | 2026-09-25 — M2 + M3 shipped in v0.8.0; the daemon never checks a balance and never holds the key |
 | **s07** | [The contacts ladder](_archives/s07-contacts-ladder/) — address books as admission: vCards parsed and classified, the five-rung ladder, `url` sources fetched into a last-good cache off the call path, `via` on the call record | 2026-09-23 — shipped in v0.6.1; nothing on the box to touch |
 

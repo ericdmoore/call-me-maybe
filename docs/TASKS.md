@@ -250,7 +250,7 @@ independent of each other.**
 under 7b is the schedules-at-line-scope item, which is a `[[schedules]]`
 question rather than a line one.
 
-Several *providers* is Phase 2 of `.plans/s01-multiple-DIDs/readme.md`, and it
+Several *providers* is Phase 2 of `.plans/_archives/s01-multiple-DIDs/readme.md`, and it
 **has now landed in full** — M2.4, per-provider health, closed it. `trunks.toml` is a provider
 inventory rendered the way `handsets.toml` is, `[line] trunk` names which
 provider a number arrives on, and `doorman render` generates the registrations,
@@ -393,7 +393,7 @@ resolves them; `internal/lobby/console.go` is `*4`.
       forever, fights `*97` and every future feature code, and with five
       ventures nobody remembers which digit is which. A menu that says the
       numbers out loud beats a mapping you have to memorise.
-      See `.plans/s01-multiple-DIDs/readme.md`.
+      See `.plans/_archives/s01-multiple-DIDs/readme.md`.
 - [x] Outbound calls in the call log. Landed in 7d, where it belonged: it
       wanted a direction on the record, not just a line.
 
