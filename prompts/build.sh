@@ -31,17 +31,24 @@ command -v ffmpeg      >/dev/null || { echo "✗ ffmpeg not found"; exit 1; }
 
 mkdir -p "${OUT}"
 
-# Read name/text pairs out of manifest.json without needing jq.
+# Read dir/name/text triples out of manifest.json without needing jq. The
+# six lobby prompts land in build/; the house's own phrases ("system") land
+# in build/system/, beside them and outside the pack contract, so a pack that
+# replaces the lobby's voice never silences an announcement.
 python3 - "$MANIFEST" <<'PY' > /tmp/cmm-prompts.tsv
 import json, sys
-for name, text in json.load(open(sys.argv[1]))["prompts"].items():
-    print(f"{name}\t{text}")
+m = json.load(open(sys.argv[1]))
+for name, text in m["prompts"].items():
+    print(f".\t{name}\t{text}")
+for name, text in m.get("system", {}).items():
+    print(f"system\t{name}\t{text}")
 PY
 
-while IFS=$'\t' read -r name text; do
+while IFS=$'\t' read -r dir name text; do
   [ -z "${name}" ] && continue
-  echo "→ ${name}: ${text}"
-  raw="${OUT}/${name}.raw.wav"
+  mkdir -p "${OUT}/${dir}"
+  echo "→ ${dir}/${name}: ${text}"
+  raw="${OUT}/${dir}/${name}.raw.wav"
 
   printf '%s' "${text}" | "${PIPER_CMD}" --model "${PIPER_VOICE}" --output_file "${raw}"
 
@@ -55,13 +62,13 @@ while IFS=$'\t' read -r name text; do
   # "Good day" that peaks the line.
   ffmpeg -nostdin -loglevel error -y -i "${raw}" \
     -af "loudnorm=I=-18:TP=-2:LRA=7" \
-    -ar 8000 -ac 1 -acodec pcm_s16le "${OUT}/${name}.wav"
+    -ar 8000 -ac 1 -acodec pcm_s16le "${OUT}/${dir}/${name}.wav"
 
   # 16 kHz wideband for g722. ".wav16" is Asterisk's extension for the format,
   # and ffmpeg cannot infer a container from it — name the format explicitly.
   ffmpeg -nostdin -loglevel error -y -i "${raw}" \
     -af "loudnorm=I=-18:TP=-2:LRA=7" \
-    -ar 16000 -ac 1 -acodec pcm_s16le -f wav "${OUT}/${name}.wav16"
+    -ar 16000 -ac 1 -acodec pcm_s16le -f wav "${OUT}/${dir}/${name}.wav16"
 
   rm -f "${raw}"
 done < /tmp/cmm-prompts.tsv

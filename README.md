@@ -244,7 +244,7 @@ Then on the Pi:
 ```bash
 ASTDATA=$(sudo asterisk -rx 'core show settings' | awk -F': *' '/Data directory/ {print $2}')
 sudo mkdir -p "$ASTDATA/sounds/call-me-maybe"        # /var/lib/asterisk on the Pi, /usr/share/asterisk on Ubuntu
-sudo cp /tmp/cmm-prompts/* "$ASTDATA/sounds/call-me-maybe/"
+sudo cp -R /tmp/cmm-prompts/* "$ASTDATA/sounds/call-me-maybe/"   # -R: the system/ phrases ride along
 sudo chown -R asterisk:asterisk "$ASTDATA/sounds/call-me-maybe"
 ```
 

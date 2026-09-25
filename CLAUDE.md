@@ -43,7 +43,8 @@ make run                   # dev run with .env sourced (needs reachable Asterisk
 ./bin/doorman lsp          # language server for the config files (stdio)
 ./bin/doorman e164 <num>   # show how a raw caller ID normalises
 ./bin/doorman events --json # durable events, --after/--limit/--eventType
-./bin/doorman balance      # prepaid credit per trunk; exit 1 under threshold
+./bin/doorman balance      # prepaid credit per trunk; exit 1 under threshold;
+                           # --ring <handset> has the house say so; --prom <file> is the gauge
 ./bin/doorman provision    # inventory view; with ids: window + instructions + watch
 ./bin/doorman rotate --phones  # new handset SIP passwords; `provision notify` delivers
 ./bin/doorman inbox        # texts to the house: consume the edge inbox per messages.toml

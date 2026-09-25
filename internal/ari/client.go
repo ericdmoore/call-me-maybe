@@ -234,6 +234,16 @@ func (c *Client) Hangup(ctx context.Context, channelID string) error {
 	return c.do(ctx, http.MethodDelete, "/channels/"+channelID, nil, nil)
 }
 
+// Channel reads one channel's current state — GET /channels/{id}. A channel
+// that has ended answers 404 (IsNotFound). Read by `doorman balance` to watch
+// an announcement it originated ring, answer and end; never by the call path,
+// which learns what happened to a channel from the event stream.
+func (c *Client) Channel(ctx context.Context, channelID string) (Channel, error) {
+	var ch Channel
+	err := c.do(ctx, http.MethodGet, "/channels/"+channelID, nil, &ch)
+	return ch, err
+}
+
 // SetChannelVar sets a channel variable, visible to the dialplan after a
 // ContinueToDialplan — how doorman tells voicemail-drop which mailbox.
 func (c *Client) SetChannelVar(ctx context.Context, channelID, name, value string) error {

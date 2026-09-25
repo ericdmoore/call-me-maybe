@@ -462,9 +462,18 @@ process. No `trunks.toml` means there is nothing to check and exit 0.
       Flowroute is in the backend map precisely so the postpaid branch is real
       rather than theoretical: "Flowroute is postpaid — no balance to report".
       A provider with no client at all is reported too, never skipped.
-- [ ] Exposed as a gauge for §4 rather than doorman growing SMTP, webhooks and
-      threshold config. Thresholds and delivery are operator decisions.
-- [ ] **The alert rings a handset.** An earlier draft of this line said the
+- [x] Exposed as a gauge rather than doorman growing SMTP, webhooks and
+      threshold config. Thresholds and delivery are operator decisions. Not
+      on a §4 endpoint — the daemon never checks a balance — but as
+      `doorman balance --prom <file>`, the Prometheus text format for
+      node_exporter's textfile collector, written atomically on every run
+      (s03 M3, v0.8.0).
+- [x] **The alert rings a handset.** Shipped as `doorman balance --ring
+      <handset>` and `BALANCE_RING` for the timer (s03 M2, v0.8.0): the CLI
+      originates over ARI with `announce,balance,<n>` as Stasis arguments
+      and the daemon's `lobby.Announcement` says a bundled `system/` clip,
+      the number, and goodbye — the first, smallest form of s05's live
+      call. Once a day per trunk. An earlier draft of this line said the
       alert path must not be the phone, reasoning that a zero balance cannot
       pay for an outbound call to report itself. That was wrong: an *internal*
       call never touches a trunk — no provider, no credit, no registration — so

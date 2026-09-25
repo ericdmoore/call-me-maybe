@@ -1,5 +1,5 @@
 {
-  "$comment": "Prompt text for the bundled pack (CC BY-SA 4.0). Keys must match PROMPT_NAMES in internal/lobby/prompts.go. Re-run prompts/build.sh after editing. To ship this as a distributable pack, see docs/PACKS.md.",
+  "$comment": "Prompt text for the bundled pack (CC BY-SA 4.0). Keys under \"prompts\" must match PROMPT_NAMES in internal/lobby/prompts.go — the six a pack supplies. Keys under \"system\" are the house's own phrases (docs/PACKS.md: outside the pack contract, installed beside it as system/), spoken by announcements such as the low-balance call; a pack never has to supply them. Re-run prompts/build.sh after editing. To ship this as a distributable pack, see docs/PACKS.md.",
   "voice": "en_GB-alba-medium",
   "prompts": {
     "welcome-known": "Welcome. I'll connect you.",
@@ -8,5 +8,8 @@
     "good-day": "Good day.",
     "no-answer": "Sorry, nobody's available right now.",
     "connecting": "Connecting you now."
+  },
+  "system": {
+    "balance-low": "This is the house phone. The calling credit is running low. It is down to about"
   }
 }

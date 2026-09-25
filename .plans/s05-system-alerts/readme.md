@@ -3,7 +3,13 @@
 How doorman tells the household something it needs to know, using the only
 output device the household has agreed to pay attention to: the telephone.
 
-**Status:** planned. Nothing started.
+**Status:** planned. The `live-call` delivery exists in its smallest form
+since v0.8.0 (2026-09-25): `lobby.Announcement` in the daemon rings nothing
+itself but speaks a catalogue entry — a bundled `system/` clip, a number,
+goodbye — on a channel that `doorman balance --ring` originated with
+`announce,<kind>,<value>` as Stasis arguments. The catalogue has one entry
+(`balance`). M2 here is generalising that: the catalogue, more kinds, and
+an acknowledgement digit.
 Related: `.plans/s03-provider-balalnce-checking` (first real customer),
 `docs/TASKS.md` §2 (voicemail, transcription), issue #15 (outbound alert
 ladders), `.plans/README.md` (composite prompts primitive).

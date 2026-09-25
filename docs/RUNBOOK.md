@@ -291,17 +291,24 @@ $ rsync -av prompts/build/ pi@raspberrypi:/tmp/cmm-prompts/
 # On the Pi:
 $ ASTDATA=$(sudo asterisk -rx 'core show settings' | awk -F': *' '/Data directory/ {print $2}')
 $ sudo mkdir -p "$ASTDATA/sounds/call-me-maybe"        # /var/lib/asterisk on the Pi, /usr/share/asterisk on Ubuntu
-$ sudo cp /tmp/cmm-prompts/* "$ASTDATA/sounds/call-me-maybe/"
+$ sudo cp -R /tmp/cmm-prompts/* "$ASTDATA/sounds/call-me-maybe/"
 $ sudo chown -R asterisk:asterisk "$ASTDATA/sounds/call-me-maybe"
 $ rm -rf /tmp/cmm-prompts
 ```
+
+`-R` because the build has a `system/` directory beside the six lobby
+prompts: the house's own phrases, such as the low-balance call, which live
+outside the pack contract so that swapping the lobby's voice never silences
+an alert. A box provisioned before v0.8.0 has the six and not the directory;
+copy it the same way.
 
 ### Service
 
 ```bash
 $ sudo cp scripts/doorman.service scripts/doorman-directory.service /etc/systemd/system/
+$ sudo cp scripts/doorman-balance.service scripts/doorman-balance.timer /etc/systemd/system/
 $ sudo systemctl daemon-reload
-$ sudo systemctl enable --now doorman doorman-directory
+$ sudo systemctl enable --now doorman doorman-directory doorman-balance.timer
 $ sudo systemctl status doorman
 $ journalctl -u doorman -f
 ```
@@ -1395,6 +1402,80 @@ needs a daemon, an Asterisk, or a phone:
 If you do keep it on the Pi, know that you have widened the blast radius of a
 compromised Pi from "a sub-account that can make calls" to "the account that
 owns the DIDs", and scope the key as far down as the provider allows.
+
+#### Let it ring the kitchen
+
+The obvious alert is email, and the obvious objection is that at zero you
+cannot afford to be told. Both are wrong: **an internal call never touches a
+trunk.** No provider, no credit, no registration — a dead account can still
+ring the kitchen to say it is dead.
+
+```bash
+$ doorman balance --ring kitchen            # a handset id, or a group, from handsets.toml
+$ doorman balance --ring adults,kitchen     # in order: the first to answer hears it
+```
+
+When a trunk is below its threshold the kitchen rings, and whoever picks up
+hears *"This is the house phone. The calling credit is running low. It is
+down to about — twelve — goodbye."* The number is the lowest low balance,
+rounded down; the currency is whatever you pay in and is deliberately not
+spoken. Nobody answering is not an error: the house has been told as much as
+a phone can tell it. The table still prints and the exit code is still 1.
+
+Three things follow:
+
+- **It needs the daemon**, on this box, because the announcement is an
+  internal call placed over ARI, and ARI binds to loopback. So a run that
+  rings is a run on the box, and the API key comes with it — see above for
+  what that costs. `ARI_USERNAME` and `ARI_PASSWORD` come from `.env` as for
+  the daemon.
+- **It rings once a day per trunk**, not every run. `--repeat 24h` is the
+  default and `--state` is where the last alert is remembered
+  (`$XDG_STATE_HOME/doorman/balance.json`; the unit uses
+  `/var/lib/doorman/balance.json`). A trunk that recovers is forgotten, so
+  its next dip rings straight away. `--repeat 0` rings every run, for
+  testing.
+- **Nothing is synthesised.** The phrase is a pre-rendered clip in the
+  bundled pack's `system/` directory and the number is read by Asterisk.
+  A pack replacing the lobby's voice does not have to supply it and cannot
+  silence it. If the kitchen rings and says nothing but a number, the
+  `system/` directory was not copied — see "Prompts" above.
+
+Set `BALANCE_RING=kitchen` in `.env` and the timer below does the same
+every morning without the flag.
+
+#### On a timer
+
+`doorman-balance.timer` runs the check at 09:00 local, with a few minutes
+of jitter, and on the next boot if the box was off. Enable it whether or not
+there is a `trunks.toml`: without one the run says there is nothing to
+check and exits 0.
+
+```bash
+$ sudo systemctl enable --now doorman-balance.timer
+$ systemctl list-timers doorman-balance.timer
+$ sudo systemctl start doorman-balance.service && journalctl -u doorman-balance -n 20
+```
+
+A low balance leaves the service unit in a failed state — exit 1 — which is
+visible in `systemctl --failed` and is the point, not a bug to silence.
+
+#### A gauge for Prometheus
+
+```bash
+$ doorman balance --prom /var/lib/node_exporter/textfile_collector/doorman_balance.prom
+```
+
+Writes the Prometheus text format for node_exporter's textfile collector,
+atomically, on every run — including the runs where nothing is low, because
+a file that stops changing is itself a signal. `doorman_trunk_balance`,
+`doorman_trunk_balance_threshold`, `doorman_trunk_balance_known` (1 when the
+last check read a number) and `doorman_balance_last_check_timestamp_seconds`,
+labelled by trunk id and provider and never by an account name. Thresholds
+and delivery stay in your alerting stack; the daemon never serves this,
+because the daemon never checks a balance. `BALANCE_PROM` in `.env` sets it
+for the timer, with a `ReadWritePaths=` drop-in on the unit when the path is
+outside `/var/lib/doorman`.
 
 #### Setting it up on VoIP.ms
 

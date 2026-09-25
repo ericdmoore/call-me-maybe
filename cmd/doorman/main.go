@@ -172,6 +172,13 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 daemon deliberately never reads it
       -trunks path              provider inventory (default $TRUNKS_PATH or ./trunks.toml)
       -env path                 secrets file holding the API passwords (default ./.env)
+      -ring ids                 handset or group ids to ring when a trunk is
+                                low, in order — an internal call, so it works
+                                when the account is empty; needs the daemon
+                                on this box; once per trunk per -repeat (24h),
+                                remembered in -state (default $BALANCE_RING)
+      -prom file                write a Prometheus textfile-collector file on
+                                every run (default $BALANCE_PROM)
       -min n                    threshold for trunks that declare no balance_min
       -json                     machine-readable, for a cron job on another box
       -timeout d                how long to wait on one provider (default 20s)
@@ -1622,6 +1629,39 @@ func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log 
 			return
 		}
 
+		// The house talking to itself: `doorman balance` originated a handset
+		// with announce,<kind>,<value> and the handset just answered. Say it
+		// and hang up. Outside the concurrent-call ceiling for the console's
+		// reason, and never the lobby: a handset that answered an internal
+		// call must not be asked for a PIN by the phone it is holding.
+		if len(ev.Args) > 0 && ev.Args[0] == lobby.AnnounceArg {
+			kind, value := "", ""
+			if len(ev.Args) > 1 {
+				kind = ev.Args[1]
+			}
+			if len(ev.Args) > 2 {
+				value = ev.Args[2]
+			}
+			media, ok := lobby.AnnounceMedia(kind, value)
+			if !ok {
+				log.Warn("no such announcement, hanging up", "kind", kind, "channel", ev.Channel.ID)
+				go func(id string) {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					_ = client.Hangup(ctx, id)
+				}(ev.Channel.ID)
+				return
+			}
+			a := lobby.NewAnnouncement(ev.Channel.ID, media, lobby.AnnounceDeps{
+				ARI:        ariAdapter{client},
+				Log:        log,
+				OnFinished: reg.removeAnnouncement,
+			})
+			reg.addAnnouncement(a)
+			go a.Run()
+			return
+		}
+
 		deps := lines.forCall(ev.Args, log)
 		s := lobby.NewSession(ev.Channel.ID, ev.Channel.Caller.Number, deps)
 		if !reg.admit(s, deps.Cfg.MaxConcurrentCalls) {
@@ -1668,6 +1708,10 @@ func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log 
 		}
 		if c := reg.console(channelID); c != nil {
 			c.PlaybackFinished(ev.Playback.ID)
+			return
+		}
+		if a := reg.announcement(channelID); a != nil {
+			a.PlaybackFinished(ev.Playback.ID)
 		}
 
 	case "StasisEnd", "ChannelDestroyed":
@@ -1701,6 +1745,12 @@ func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log 
 			} else {
 				c.CallerGone()
 			}
+			return
+		}
+		// An announcement never detaches — leaving the app alive is not an
+		// ending it can have — so for once the two events mean one thing.
+		if a := reg.announcement(ev.Channel.ID); a != nil {
+			a.CallerGone()
 		}
 	}
 }
@@ -1717,13 +1767,17 @@ type registry struct {
 	channels map[string]*lobby.Session
 	callers  map[string]*lobby.Session
 	consoles map[string]*lobby.Console
+	// announcements are handsets the house rang to tell them something —
+	// the same separate-map reasoning as consoles, one level simpler.
+	announcements map[string]*lobby.Announcement
 }
 
 func newRegistry() *registry {
 	return &registry{
-		channels: make(map[string]*lobby.Session),
-		callers:  make(map[string]*lobby.Session),
-		consoles: make(map[string]*lobby.Console),
+		channels:      make(map[string]*lobby.Session),
+		callers:       make(map[string]*lobby.Session),
+		consoles:      make(map[string]*lobby.Console),
+		announcements: make(map[string]*lobby.Announcement),
 	}
 }
 
@@ -1790,6 +1844,24 @@ func (r *registry) console(id string) *lobby.Console {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.consoles[id]
+}
+
+func (r *registry) addAnnouncement(a *lobby.Announcement) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.announcements[a.ChannelID] = a
+}
+
+func (r *registry) announcement(id string) *lobby.Announcement {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.announcements[id]
+}
+
+func (r *registry) removeAnnouncement(a *lobby.Announcement) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.announcements, a.ChannelID)
 }
 
 func (r *registry) removeConsole(c *lobby.Console) {

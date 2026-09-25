@@ -430,8 +430,39 @@ needs a copy of
 .I trunks.toml
 and the API password, and no daemon at all.
 .PP
+.BI "\-\-ring " ids
+rings a handset when a trunk is low \(em a handset or group id from
+.IR handsets.toml ,
+several in order, the first to answer hears it \(em and the daemon says
+"the calling credit is running low, it is down to about" and the lowest low
+balance as a whole number. An internal call never touches a trunk, so a dead
+account can still ring the kitchen to say it is dead. It needs the daemon on
+this box (the call is placed over ARI, on loopback, with
+.BR ARI_USERNAME " and " ARI_PASSWORD
+from
+.IR .env ),
+and it rings once per trunk per
+.B \-\-repeat
+(default 24h), remembered in
+.B \-\-state
+(default
+.IR $XDG_STATE_HOME/doorman/balance.json ).
+.B BALANCE_RING
+in the environment is the same as the flag.
+.PP
+.BI "\-\-prom " file
+writes the Prometheus text format for node_exporter's textfile collector on
+every run, atomically: balance, threshold and whether the last check read a
+number, per trunk, labelled by trunk id and provider and never by an
+account. The daemon never serves a balance because it never checks one.
+.B BALANCE_PROM
+in the environment is the same as the flag.
+.B doorman\-balance.timer
+runs the command every morning.
+.PP
 Flags:
-.BR \-\-trunks ", " \-\-env ", " \-\-min ", " \-\-json ", " \-\-timeout .
+.BR \-\-trunks ", " \-\-env ", " \-\-min ", " \-\-json ", " \-\-timeout ", "
+.BR \-\-ring ", " \-\-handsets ", " \-\-repeat ", " \-\-ring\-timeout ", " \-\-state ", " \-\-prom .
 .PP
 .BI "doorman e164 " number
 Show how a raw caller ID normalises to E.164. Use this when a known caller
@@ -580,7 +611,18 @@ Default
 The prompt pack every line speaks from unless it names its own with
 .BR "[line] prompts" ,
 which overrides this per line and is read from the policy file, so swapping a
-pack reloads like any other policy edit.
+pack reloads like any other policy edit. The house's own phrases \(em the
+low\-balance call \(em always come from the bundled pack's
+.I system/
+directory, whatever this says: a pack supplies the six lobby prompts and
+cannot silence an alert.
+.TP
+.BR BALANCE_RING ", " BALANCE_PROM
+Read by
+.B doorman balance
+and never by the daemon: the handset or group ids to ring when a trunk is
+low, and the Prometheus textfile to write. Empty means neither. See
+.BR "doorman balance" .
 .TP
 .B FIRST_DIGIT_TIMEOUT_MS
 Default 10000. Time to dial the

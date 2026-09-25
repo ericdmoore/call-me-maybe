@@ -2,7 +2,15 @@
 
 Know the trunk is about to die before the phone stops ringing.
 
-**Status:** **M1 has landed, per trunk** — the capability, a VoIP.ms client and
+**Status:** **every milestone has landed.** M2 and M3 shipped 2026-09-25 in
+v0.8.0: `doorman balance --ring <handset>` rings the house and the daemon
+reads the balance aloud, once a day per trunk; `--prom <file>` writes the
+Prometheus textfile; `doorman-balance.timer` runs it every morning with
+`BALANCE_RING` and `BALANCE_PROM` from `.env`. The daemon still never
+checks a balance and never holds the key — it learned exactly one new
+thing, how to say a number (`lobby.Announcement`), and that is the first
+form of s05's live call. What remains below is the original reasoning.
+M1 landed first, per trunk — the capability, a VoIP.ms client and
 `doorman balance` with an exit code cron can use. M4 landed with it rather than
 after it, because `trunks.toml` already existed and retrofitting per-trunk would
 have meant building the thing twice. M2 (the phone call) and M3 (the gauge) are
@@ -156,7 +164,31 @@ credential-free probe cannot show; it is corroborated by two independent
 client libraries, and the client fails loudly rather than reporting zero if it
 ever changes.
 
-### M2 · The phone call
+### M2 · The phone call — **done** (2026-09-25, v0.8.0)
+
+**As built.** The CLI decides and originates; the daemon speaks. `doorman
+balance --ring kitchen,office` resolves the ids through handsets.toml (a
+group expands in place, a pseudo-handset is skipped with a note), and when
+a trunk is low originates over ARI to each in turn with
+`announce,balance,<n>` as the Stasis arguments, watching the channel until
+it ends; the first to answer hears it. The daemon's new
+`lobby.Announcement` plays `system/balance-low` from the bundled pack,
+`number:<n>` (Asterisk reads it — nothing is synthesised, invariant 7) and
+`vm-goodbye`, then hangs up. `<n>` is the lowest low balance rounded down,
+because "about twelve" must never be more than the account holds, and the
+currency is unspoken by design. Repeat suppression is a 0600 state file of
+when each trunk was last announced: once per `--repeat` (24h), a recovered
+trunk forgotten so its next dip rings at once, a call that could not be
+placed not recorded so the next run tries again. `--repeat 0` for testing.
+The threshold stayed where M1 put it, `balance_min` and `--min`; the ring
+target is `--ring` or `BALANCE_RING`, so the timer needs no wrapper. The
+composite prompt primitive turned out to already exist in the console
+(`say` over a media list) and was copied rather than extracted — the third
+customer can do the extraction.
+
+**What it costs, said plainly:** the ring is on the box, because ARI is on
+loopback, so the API key is on the box with it. RUNBOOK says so beside the
+"run it off the Pi" advice rather than pretending both can hold.
 
 **Build**
 
@@ -170,7 +202,16 @@ ever changes.
 **Verify:** drop a test threshold above the real balance and confirm the
 kitchen rings and says the number.
 
-### M3 · The gauge
+### M3 · The gauge — **done** (2026-09-25, v0.8.0)
+
+**As built.** Not on a metrics endpoint: the daemon never checks a balance,
+so it has no number to serve, and TASKS §4 is still unbuilt. `doorman
+balance --prom <file>` (or `BALANCE_PROM`) writes the Prometheus text
+format for node_exporter's textfile collector, atomically, on every run —
+`doorman_trunk_balance`, `_threshold`, `_known` and a last-check
+timestamp, labelled by trunk id and provider and never by an account name.
+That is the mechanism that exists for numbers a cron job produces, and it
+means the gauge needs nothing the CLI did not already have.
 
 **Build**
 
