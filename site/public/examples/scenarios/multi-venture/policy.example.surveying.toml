@@ -1,0 +1,69 @@
+# ─────────────────────────────────────────────────────────────
+# Example · The multi-venture operator — the surveying line
+#
+# The line named `surveying`, by the word between the dots. With a
+# trunks.toml, `doorman render` writes the inbound route for this number
+# into the telnyx trunk's context and names the line itself; nothing is
+# edited by hand. policy.example.toml beside this one is the home line and
+# explains the whole arrangement — read it first.
+# ─────────────────────────────────────────────────────────────
+
+# trunk: where this number lives, and the way out for a call placed as it.
+# outbound_cid must be a number that trunk owns — this line's own is the
+# safe answer, and `doorman check` refuses one declared at another trunk.
+# outbound_handsets: the office phone presents this number without being
+# asked. One phone, one line; a second claim on it is refused.
+[line]
+label = "Mertaugh Surveying"
+number = "+15125550142"
+trunk = "telnyx"
+on_no_input = "voicemail"
+outbound_cid = "+15125550142"
+outbound_handsets = ["office"]
+
+[house]
+handsets = ["office"]
+voicemail = "surveying"
+caller_id_format = "Surveying: {name} <{number}>"
+
+[[people]]
+name = "Hollis Ranch"
+numbers = ["512-555-0170"]
+notes = "current job — boundary survey"
+
+[[people]]
+name = "County permits desk"
+numbers = ["(512) 555-0171"]
+
+# A CLOSED window: evenings and overnight. One crossing of midnight per
+# window, one window per extension, so the weekend cannot be written.
+[[schedules]]
+id = "closed"
+enabled = true
+start = "17:30"
+end = "08:30"
+days = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
+
+# PINs: the CHANGEME sentinel, replaced by
+# `doorman rotate -policy policy.surveying.toml`.
+[[extensions]]
+pin = "CHANGEME"
+label = "New work"
+voicemail = "newwork"
+afterhours = "closed"
+
+  [[extensions.steps]]
+  handsets = ["office"]
+  rings = 3
+
+  [[extensions.steps]]
+  handsets = ["office", "kitchen"]
+  rings = 4
+
+[[extensions]]
+pin = "CHANGEME"
+label = "Site emergency"
+handsets = ["office"]
+voicemail = "surveying"
+afterhours = "closed"
+afterhours_ring = ["office", "kitchen"]

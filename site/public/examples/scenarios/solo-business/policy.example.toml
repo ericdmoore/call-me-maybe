@@ -33,7 +33,8 @@
 #            example: business hours here apply to the only line there is, so
 #            a household sharing this number shares its hours too. Two
 #            numbers on one box is this file plus a second policy file beside
-#            it — a worked example of that is planned, see examples/README.md.
+#            it — worked in examples/scenarios/home-and-business/, which is
+#            this business beside a family's number.
 #
 # CHECK IT   ./bin/doorman check --allow-placeholders \
 #                --handsets examples/scenarios/solo-business/handsets.example.toml \

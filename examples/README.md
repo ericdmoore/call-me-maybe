@@ -15,9 +15,11 @@ household actually needs. Start here if one of them resembles you.
 |---|---|---|
 | [`scenarios/solo-business/`](scenarios/solo-business/) | One person, one number, working from home. Business hours, clients on the allow-list, an extension per concern ending in a mailbox rather than a dismissal | today |
 | [`scenarios/family-line/`](scenarios/family-line/) | A household with one number and eight phones. Known callers ring everything; strangers get the lobby and then "good day" | today |
+| [`scenarios/home-and-business/`](scenarios/home-and-business/) | The two above on one box: two numbers, two policy files, one phone plant. The office phone dials out as the business without being asked; every other phone is the house, and so is 911 | today |
+| [`scenarios/multi-venture/`](scenarios/multi-venture/) | One home line and two businesses at two providers: three policy files and a `trunks.example.toml`. Each venture claims the phone in its workspace; `doorman render` writes the registrations, the routes and the 911 ladder | today |
 
-Home *and* business on one box, several ventures on several numbers, and an
-out-of-hours answering flow are planned — see
+An out-of-hours answering flow — "is this number good for a callback?" — is
+planned and waits on two primitives that do not exist; see
 `.plans/s02-home-and-office-config-examples/`.
 
 **Every file here is also published at <https://callmemaybe.cc/examples/>**,
@@ -38,6 +40,7 @@ examples/
 └── scenarios/
     └── <slug>/                  one directory per scenario
         ├── policy.example.toml      required — this is what makes it an example
+        ├── policy.example.<line>.toml  each extra number the box answers, if any
         ├── handsets.example.toml    required — a policy that cannot be copied is not an example
         └── trunks.example.toml      optional — most installs have one provider
 ```
@@ -55,6 +58,8 @@ The rules, which are also how the tests find them:
 - **A scenario answering several numbers** puts the extra lines in
   `policy.example.<line>.toml` beside the primary file — the same
   `policy.<line>.toml` convention `doorman check` discovers at runtime.
+  Pointing `check` at the primary file checks all of them, and the test
+  loads every sibling too.
 - **The directory slug names the situation**, not the plan item:
   `solo-business`, not `e2`.
 

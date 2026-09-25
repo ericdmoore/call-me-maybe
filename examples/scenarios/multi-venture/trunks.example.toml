@@ -1,0 +1,47 @@
+# ─────────────────────────────────────────────────────────────
+# Example · The multi-venture operator — the providers.
+#
+# Two providers, because the ventures' numbers were bought where the
+# per-minute rate was good and the home number stayed where its E911 was
+# already filed. This file is what makes that ordinary: `doorman render`
+# writes both registrations, one inbound context per trunk with a route per
+# DID, the outbound path per line, and [cmm-emergency] — and none of it is
+# hand-maintained afterwards. Rollback is deleting the file.
+#
+# SECRETS ARE NAMED HERE, NEVER WRITTEN HERE. password_env is the NAME of a
+# .env variable; the loader refuses a value that is not shaped like one.
+# ─────────────────────────────────────────────────────────────
+
+# Set, not inferred. Unset would still be defined — the primary line's trunk,
+# which is the same answer here — but a household with two providers should
+# say it out loud, because E911 is registered per DID against a street
+# address and this is the trunk whose address is the house. The ventures'
+# numbers have no address filed (e911 = false below), so 911 never leaves by
+# them unless this one is down, and then only because a connected call with
+# the wrong address on the dispatcher's screen beats a failed one.
+emergency_trunk = "voipms"
+
+# ── The home number ──────────────────────────────────────────
+[[trunks]]
+id       = "voipms"                    # names the PJSIP endpoint; [line] trunk refers to it
+provider = "voip.ms"                   # display only; nothing routes on it
+host     = "chicago.voip.ms"           # your POP — the same one everywhere
+username = "123456_home"               # the SUB ACCOUNT, never the main login
+password_env = "TRUNK_VOIPMS_PASSWORD"
+e911     = true                        # the house's address is on file here
+
+# ── The ventures ─────────────────────────────────────────────
+# Both business numbers live on one account at one provider, on one
+# registration: a trunk is a provider account, not a number, and
+# `doorman render` routes each DID that arrives on it to its own line.
+[[trunks]]
+id       = "telnyx"
+provider = "telnyx"
+host     = "sip.telnyx.com"
+username = "cmm-ventures"
+password_env = "TRUNK_TELNYX_PASSWORD"
+e911     = false                       # no address filed for these numbers —
+                                       # declared, so 911 is never routed here
+                                       # first. A provider with no E911 at all
+                                       # is a reason to reject the provider,
+                                       # not a line item to skip.

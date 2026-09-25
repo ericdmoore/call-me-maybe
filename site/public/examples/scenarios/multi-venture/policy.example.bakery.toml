@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────
+# Example · The multi-venture operator — the bakery line
+#
+# The line named `bakery`. Same provider account as the surveying number —
+# a trunk is an account, not a number, and render routes each DID arriving
+# on it to its own line. policy.example.toml beside this one is the home
+# line and explains the whole arrangement — read it first.
+# ─────────────────────────────────────────────────────────────
+
+# The counter phone presents the bakery. It is claimed here and nowhere
+# else: claim it from the surveying line too and `doorman check` refuses.
+[line]
+label = "Blue Door Bakery"
+number = "+15125550188"
+trunk = "telnyx"
+on_no_input = "voicemail"
+outbound_cid = "+15125550188"
+outbound_handsets = ["counter"]
+
+# An order is worth two phones: the counter, and the kitchen, where the
+# baker actually is at 06:00. The bedrooms are never in a bakery's ring
+# group, on any step, at any hour.
+[house]
+handsets = ["counter", "kitchen"]
+voicemail = "bakery"
+caller_id_format = "Bakery: {name} <{number}>"
+
+[[people]]
+name = "Mill Street Grocer"
+numbers = ["512-555-0180"]
+notes = "wholesale — standing Thursday order"
+
+[[people]]
+name = "Flour supplier"
+numbers = ["(512) 555-0181"]
+
+# A bakery closes early and opens early: shut from mid-afternoon until
+# before dawn. Still one crossing of midnight, still no weekend.
+[[schedules]]
+id = "closed"
+enabled = true
+start = "14:00"
+end = "05:30"
+days = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
+
+# PINs: the CHANGEME sentinel, replaced by
+# `doorman rotate -policy policy.bakery.toml`.
+[[extensions]]
+pin = "CHANGEME"
+label = "Orders"
+voicemail = "orders"
+afterhours = "closed"
+
+  [[extensions.steps]]
+  handsets = ["counter"]
+  rings = 3
+
+  [[extensions.steps]]
+  handsets = ["counter", "kitchen"]
+  rings = 4
+
+# Wholesale accounts ring the office too: the paperwork lives there.
+[[extensions]]
+pin = "CHANGEME"
+label = "Wholesale"
+handsets = ["counter", "office"]
+voicemail = "wholesale"
+afterhours = "closed"

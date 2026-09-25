@@ -1,0 +1,116 @@
+# ─────────────────────────────────────────────────────────────
+# Example · Home plus business on one box — the business line
+#
+# The second file of a pair. policy.example.toml beside this one is the
+# home line and the default; this is `biz`, named by the word between the
+# dots, which is also what the dialplan says: Stasis(${DOORMAN_APP},line,biz).
+# Everything the home line's header explains applies here — read it first.
+#
+# What this file owns, and the home line does not: this number's allow-list,
+# its disposition for a silent stranger, its extensions and their PINs, its
+# schedule, its rate-limit budget, and which phone presents this number
+# when somebody dials out. The phones themselves are shared and live in
+# handsets.toml; this file names them by the same ids.
+#
+# Same binary, opposite disposition. The home line dismisses a stranger who
+# dials nothing; this one takes a message, because a business line that
+# hangs up on a stranger hangs up on next month's work.
+# ─────────────────────────────────────────────────────────────
+
+# ── The number ───────────────────────────────────────────────
+# outbound_handsets is the claim: pick up the OFFICE phone, dial, and the
+# person called sees the business number. It is written here rather than in
+# handsets.toml because that file is shared and cannot hold something true
+# of only one line. One phone, one line: claim the office from a third line
+# too and `doorman check` refuses with "a handset is claimed by more than
+# one line", because a phone presents one number and which one would win is
+# nothing an operator can see.
+#
+# outbound_cid must be a number this line's provider owns. With one
+# provider that is every number on the box; with two, `doorman check`
+# refuses a caller ID declared at the other one, because a provider
+# rejects or silently rewrites a number it does not own.
+[line]
+label = "Mertaugh Surveying"
+number = "+15125550142"
+on_no_input = "voicemail"
+outbound_cid = "+15125550142"
+outbound_handsets = ["office"]
+
+# ── What an admitted caller reaches ──────────────────────────
+# The office, and only the office. This is also where a silent stranger
+# lands — on_no_input = "voicemail" needs a [house] voicemail to send them
+# to, and `doorman check` refuses the combination without one.
+[house]
+handsets = ["office"]
+voicemail = "surveying"
+caller_id_format = "Surveying: {name} <{number}>"
+
+# ── Clients ──────────────────────────────────────────────────
+# This line's allow-list, and nobody else's. Grandma is not on it and should
+# not be: she has the other number.
+[[people]]
+name = "Hollis Ranch"
+numbers = ["512-555-0170"]
+notes = "current job — boundary survey"
+
+[[people]]
+name = "County permits desk"
+numbers = ["(512) 555-0171"]
+notes = "they call back same-day or not at all"
+
+# ── Business hours ───────────────────────────────────────────
+# A CLOSED window. Evenings and overnight; one crossing of midnight per
+# window and one window per extension, so the weekend cannot be written —
+# Saturday rings like a weekday. Same limit as the solo-business example.
+[[schedules]]
+id = "closed"
+enabled = true
+start = "17:30"
+end = "08:30"
+days = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
+
+# ── An extension per concern ─────────────────────────────────
+# Every PIN is the CHANGEME sentinel. Replace this file's with
+# `doorman rotate -policy policy.biz.toml`; `doorman init` does the home
+# line's. They are separate credentials for separate audiences, and a
+# client who is given the surveying PIN never learns the kids' one.
+
+# New work rings the office, then follows the surveyor to the kitchen —
+# where a child may answer, which is why the display says "Surveying:".
+# Nothing on this line reaches a bedroom, in any step, at any hour.
+[[extensions]]
+pin = "CHANGEME"
+label = "New work"
+voicemail = "newwork"
+afterhours = "closed"
+
+  [[extensions.steps]]
+  handsets = ["office"]
+  rings = 3
+
+  [[extensions.steps]]
+  handsets = ["office", "kitchen"]
+  rings = 4
+
+# An invoice question is not worth chasing a phone across a house for.
+[[extensions]]
+pin = "CHANGEME"
+label = "Accounts"
+voicemail = "accounts"
+afterhours = "closed"
+
+  [[extensions.steps]]
+  handsets = ["office"]
+  rings = 2
+
+# The one that still rings after hours: the office and the kitchen, not the
+# bedroom. An unanswered redirect falls through to the mailbox; it does not
+# hang up.
+[[extensions]]
+pin = "CHANGEME"
+label = "Site emergency"
+handsets = ["office"]
+voicemail = "urgent"
+afterhours = "closed"
+afterhours_ring = ["office", "kitchen"]

@@ -10,8 +10,13 @@ shipped: `examples/scenarios/solo-business/` (E2) and
 README, the templates and every scenario are published at
 <https://callmemaybe.cc/examples/> by `make site-assets` (CI fails when the
 copies drift), and `llms-policy.txt` points at them instead of carrying a
-home line inline. E3 and E4 want s01 Phase 1, which has since landed, so M4
-is next; E5 still waits on primitives that do not exist.
+home line inline. **M4 shipped 2026-09-25:** E3
+(`examples/scenarios/home-and-business/`, two policy files, one provider,
+the hand-written route) and E4 (`examples/scenarios/multi-venture/`, three
+policy files and a `trunks.example.toml` across two providers), both
+checked in CI through the primary file and, since this milestone, every
+sibling line file by the Go test as well. E5 still waits on primitives that
+do not exist.
 Related: `llms-policy.txt`, `examples/`, `docs/writing-policies.md`,
 `.plans/s01-multiple-DIDs` (several of these examples need it).
 
@@ -103,7 +108,15 @@ ones written in the file:
   governs an empty dial window; exhausting `MAX_PIN_ATTEMPTS` ends in
   "good day", and a rate-limited caller never hears the greeting at all.
 
-### E3 · Home plus business on one box
+### E3 · Home plus business on one box — **shipped**
+
+`examples/scenarios/home-and-business/`. E1 and E2 together, two policy
+files, two numbers, one provider. The header carries the one dialplan
+route doorman cannot write without a trunks.toml, and the primary-line
+rule stated as the reason the home line is the bare file: the default is
+both what an unclaimed phone presents and the trunk 911 leaves by. The
+office is the only claimed phone; `*4` appears once, as the parent in the
+kitchen returning a client's call, and the kids never meet it.
 
 E1 and E2 together, two policy files, two numbers. **Needs s01 Phase 1**, which
 has landed — so this is now buildable. The layout already carries it: a second
@@ -113,7 +126,16 @@ sibling pattern `DiscoverLines` looks for at runtime.
 Also the first example where `*4` and the primary-line rule appear, and the
 right place to show that a kid never meets either.
 
-### E4 · The multi-venture operator
+### E4 · The multi-venture operator — **shipped**
+
+`examples/scenarios/multi-venture/`. One home line at VoIP.ms with E911,
+two ventures on one Telnyx account, three policy files, and the first
+scenario with a `trunks.example.toml` — `emergency_trunk` set out loud,
+`e911` declared per trunk, and `doorman check --trunks` printing the
+outbound table, the trunk table and the emergency ladder. The two refusals
+the header promises were verified while writing it: a phone claimed by two
+lines, and a caller ID declared at the other trunk. Stated limits: no
+outbound failover for an ordinary call (s01 Phase 3), and the weekend.
 
 One home line plus several business lines, per-handset default identities.
 **Needs s01 Phase 1 including M1.3**, which has landed —
@@ -198,10 +220,13 @@ doing its job.
   the E3 shape, and becomes a pointer the day E3 ships (M4).
 - `llms.txt` and `examples/README.md` say where the set is published.
 
-### M4 · E3 and E4 — unblocked
+### M4 · E3 and E4 — **done** (2026-09-25)
 
-s01 Phase 1 and most of Phase 2 have landed since this was written, so both are
-buildable now rather than waiting.
+Both shipped, see E3 and E4 above. With them the discovery test in
+`internal/policy` also loads every `policy.example.<line>.toml` sibling
+with strict unknown keys, and the guide's inline second-line example
+became pointers, so `llms-policy.txt` now carries no configuration that
+is not also a checked file.
 
 ### M5 · E5, when the primitives land
 

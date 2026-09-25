@@ -43,7 +43,8 @@
 #            Answer a second number, or present a different caller ID on one.
 #            The binary does both; one line is the scope of this example. Two
 #            numbers on one box is this file plus a second policy file beside
-#            it — a worked example of that is planned, see examples/README.md.
+#            it — worked in examples/scenarios/home-and-business/, and with
+#            two providers in examples/scenarios/multi-venture/.
 #
 # CHECK IT   ./bin/doorman check --allow-placeholders \
 #                --handsets examples/scenarios/family-line/handsets.example.toml \

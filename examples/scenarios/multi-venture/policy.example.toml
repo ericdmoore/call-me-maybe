@@ -1,0 +1,139 @@
+# ─────────────────────────────────────────────────────────────
+# Example · The multi-venture operator — the home line
+#
+# FOR        One house, one person with two businesses, three numbers, two
+#            providers. The surveying number rings the office; the bakery
+#            number rings the counter in the converted garage, then the
+#            kitchen. Pick up the office phone and dial and the client sees
+#            the surveying number; pick up the counter phone and a supplier
+#            sees the bakery's. Pick up ANY other phone — or either of
+#            those from the `*4` console — and the house number goes out.
+#            A kid dialling 911 from the bunk room leaves by the home
+#            number, whose address is the one on file, and no arrangement
+#            of keypresses changes that.
+#
+#            This file is the HOME line and the bare policy.toml on purpose:
+#            the bare file is the default, and the default is two jobs in
+#            one rule — what an unclaimed phone presents, and the trunk 911
+#            leaves by. The ventures are the two sibling files, named by
+#            the word between the dots: policy.example.surveying.toml and
+#            policy.example.bakery.toml. Read those after this one.
+#
+# NEEDS      trunks.example.toml, the fifth file here, and `doorman render`.
+#            With the inventory present render writes the registrations for
+#            both providers, one inbound context per trunk with a route per
+#            DID — so no dialplan edit names a line by hand — the outbound
+#            trunk and caller ID on the phones each venture claims, and the
+#            [cmm-emergency] ladder. Two provider accounts, each with a
+#            password named in .env: TRUNK_VOIPMS_PASSWORD and
+#            TRUNK_TELNYX_PASSWORD. Then the generated files are installed
+#            and #included exactly as docs/RUNBOOK.md, "The provider
+#            inventory", describes.
+#
+#            Seven mailboxes in voicemail.conf: family, kids, surveying,
+#            newwork, bakery, orders, wholesale. Voicemail is Asterisk's;
+#            doorman only names the box.
+#
+# DOES NOT   Fail over between providers for an ordinary call. A venture
+#            whose provider is down is a venture whose calls fail, in both
+#            directions; only 911 has a fallback ladder, and inbound
+#            forwarding on a dead trunk is the provider's feature, not this
+#            box's. Outbound failover per line is planned (s01 Phase 3)
+#            and deliberately not built.
+#
+#            Let one phone belong to two ventures. A phone presents one
+#            number. Claim the counter from the surveying line as well and
+#            `doorman check` refuses — "a handset is claimed by more than
+#            one line" — and `doorman render` will not generate until it is
+#            resolved, because which venture's customers see the wrong
+#            number would otherwise depend on nothing an operator can see.
+#
+#            Present a number a trunk does not own. Each venture's
+#            outbound_cid is its own number, at its own trunk; write the
+#            bakery's number as the surveying line's caller ID and
+#            `doorman check` refuses it, because Telnyx would carry it but
+#            the home provider would not, and a provider that does not own
+#            a number rejects the call or silently rewrites it.
+#
+#            Give the kids a menu. `*4` exists on every phone and nobody in
+#            this house under sixteen will ever learn it: the phones they
+#            reach are unclaimed and present the house, and the console's
+#            only use here is a parent in the kitchen returning a supplier's
+#            call as the bakery.
+#
+#            Close a venture at weekends, or schedule the house — the same
+#            limits every example states.
+#
+# CHECK IT   ./bin/doorman check --allow-placeholders \
+#                --handsets examples/scenarios/multi-venture/handsets.example.toml \
+#                --trunks   examples/scenarios/multi-venture/trunks.example.toml \
+#                examples/scenarios/multi-venture/policy.example.toml
+#
+#            "Lines: 3", then the outbound caller ID table with the trunk
+#            each line leaves by, the trunk table with which lines arrive
+#            on each, and the emergency section: 911 leaves by voipms,
+#            chosen, address declared, falls over to telnyx. That output is
+#            the whole design of this example, and it is the thing to read
+#            before installing.
+#
+# THE .ENV   EXTENSION_LENGTH (6), FIRST_DIGIT_TIMEOUT_MS (10000),
+#            MAX_PIN_ATTEMPTS (2) — one install, one value each, all three
+#            lines. Plus the two trunk passwords named above.
+#
+# A starting point, not a supported configuration. Copy it and make it yours.
+# ─────────────────────────────────────────────────────────────
+
+# ── The number ───────────────────────────────────────────────
+# trunk names the provider this number lives at, from trunks.toml. It is
+# also the way out of the building for every unclaimed phone and for 911.
+# No outbound_handsets: the default line never claims, it is what a phone
+# presents when nobody did.
+[line]
+label = "The house"
+number = "+15125550100"
+trunk = "voipms"
+on_no_input = "dismiss"
+outbound_cid = "+15125550100"
+
+[house]
+handsets = ["everyone"]
+voicemail = "family"
+caller_id_format = "Home: {name} <{number}>"
+
+[[people]]
+name = "Grandma"
+numbers = ["512-555-0110"]
+
+[[people]]
+name = "School front office"
+numbers = ["(512) 555-0150"]
+notes = "attendance line — do not remove"
+
+[[schedules]]
+id = "school-night"
+enabled = true
+start = "20:30"
+end = "07:00"
+days = ["SU", "MO", "TU", "WE", "TH"]
+
+# Every PIN is the CHANGEME sentinel. `doorman init` replaces this file's;
+# each venture's file is its own `doorman rotate -policy <file>`.
+[[extensions]]
+pin = "CHANGEME"
+label = "Kids"
+voicemail = "kids"
+afterhours = "school-night"
+
+  [[extensions.steps]]
+  handsets = ["bunk-room"]
+  rings = 3
+
+  [[extensions.steps]]
+  handsets = ["adults"]
+  rings = 4
+
+[[extensions]]
+pin = "CHANGEME"
+label = "Whole house"
+handsets = ["everyone"]
+voicemail = "family"

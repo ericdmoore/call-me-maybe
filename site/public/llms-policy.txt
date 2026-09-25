@@ -228,7 +228,8 @@ the one that resembles the person you are helping; copy both files.
   https://callmemaybe.cc/examples/scenarios/solo-business/policy.example.toml
   https://callmemaybe.cc/examples/scenarios/solo-business/handsets.example.toml
 
-The index, with what each one cannot do:
+Two more, for a box answering several numbers, are under "A second line
+beside the first" below. The index, with what each one cannot do:
 https://callmemaybe.cc/examples/README.md. The templates — one of every
 section, which is what `doorman init` copies from — are beside them:
 https://callmemaybe.cc/examples/policy.example.toml and siblings.
@@ -239,73 +240,61 @@ a defect to repair by hand. Every number is `555-01xx`.
 
 ## A second line beside the first
 
-The one shape not yet among the published examples: a business number
-answered by the same box as the home line. This goes in `policy.biz.toml`
-beside the home line's `policy.toml`, with the dialplan sending the
-business DID to `Stasis(${DOORMAN_APP},line,biz)`. Same binary, opposite
-disposition: the home line dismisses a stranger who dials nothing, this one
-takes a message.
+A box answering two or more numbers keeps one policy file per number:
+`policy.toml` is the default line, and each extra one is
+`policy.<line>.toml` beside it, named by the word between the dots — the
+same word the dialplan passes as `Stasis(${DOORMAN_APP},line,<name>)`.
+Both shapes are published, complete, with the dialplan or inventory they
+need stated in the header:
 
-    [line]
-    label       = "Mertaugh Enterprises"
-    number      = "+15125550142"
-    prompts     = "concierge"
-    on_no_input = "voicemail"
+- **Home plus business on one box** — the family line and the solo
+  business above, together. Two files, one provider, one hand-written
+  dialplan route.
+  https://callmemaybe.cc/examples/scenarios/home-and-business/policy.example.toml
+  https://callmemaybe.cc/examples/scenarios/home-and-business/policy.example.biz.toml
+  https://callmemaybe.cc/examples/scenarios/home-and-business/handsets.example.toml
+- **The multi-venture operator** — one home line and two businesses at
+  two providers. Three policy files and a `trunks.example.toml`, so
+  `doorman render` writes every route and nothing is hand-edited.
+  https://callmemaybe.cc/examples/scenarios/multi-venture/policy.example.toml
+  https://callmemaybe.cc/examples/scenarios/multi-venture/policy.example.surveying.toml
+  https://callmemaybe.cc/examples/scenarios/multi-venture/policy.example.bakery.toml
+  https://callmemaybe.cc/examples/scenarios/multi-venture/handsets.example.toml
+  https://callmemaybe.cc/examples/scenarios/multi-venture/trunks.example.toml
 
-    [house]
-    handsets = ["office"]
-    voicemail = "main"
+The rules that shape them, which you must not reverse:
 
-    [[people]]
-    name = "Acme (client)"
-    numbers = ["512-555-0177"]
-
-    [[extensions]]
-    label = "Sales"
-    pin = "614297"
-    voicemail = "sales"
-    [[extensions.steps]]
-    handsets = ["office"]
-    seconds = 25
-
-    [[extensions]]
-    label = "Support"
-    pin = "830516"
-    voicemail = "support"
-    [[extensions.steps]]
-    handsets = ["office"]
-    seconds = 25
-
-    [[schedules]]
-    id = "office-hours"
-    start = "09:00"
-    end = "17:00"
-    days = ["MO","TU","WE","TH","FR"]
-
-Acme rings the office directly. Anyone else hears the concierge pack's
-greeting, and either dials Sales or Support or says nothing and lands in the
-`main` mailbox — no lead is dropped.
-
-`prompts = "concierge"` needs the pack to actually be installed at
-`/var/lib/asterisk/sounds/concierge/`, with the same six clip names the
-bundled pack uses. Omit the key and the line speaks with the house voice,
-which is a perfectly good business line. See `docs/PACKS.md`.
-
-`outbound_cid` and `outbound_handsets` are what make the office phone ring
-customers back *as* the business. Everything not claimed here keeps presenting
-`policy.toml`'s `outbound_cid`, so adding a business line cannot change what
-the kitchen phone shows. Two things to say out loud when writing this:
-
-- The caller ID reaches the plain dial path through `doorman render`, so tell
-  them to re-render and reload PJSIP. Editing the file alone changes what `*4`
-  offers and nothing else. The same is true of `[line] trunk`, which rides on
-  the same endpoint as a second `set_var`.
-- With a trunks.toml, a call as this line also *leaves* by this line's trunk.
-  Present a number the trunk owns: the provider rejects or silently rewrites
-  one it does not, and `doorman check` refuses the case it can prove.
-- Emergency calls are not affected and must not be made to be. 911 leaves with
-  the trunk's own caller ID whatever any line says, by the designated
-  emergency trunk rather than by this one.
+- **The bare `policy.toml` is the home line, always.** Being the default is
+  two jobs in one rule: it is what an unclaimed handset presents when
+  somebody dials, and it is the trunk 911 leaves by. Put a business in the
+  bare file and a child dialling 911 leaves by a number whose registered
+  address is somebody else's.
+- **`[line] outbound_cid` and `outbound_handsets` make a phone present a
+  line without anyone pressing anything.** The claim lives in the line's
+  file, not `handsets.toml`, which is shared. One phone, one line:
+  `doorman check` refuses a handset claimed twice, and `doorman render`
+  will not generate until it is resolved. Everything unclaimed presents
+  `policy.toml`'s `outbound_cid`. `*4` is the console for the rare call as
+  another line; it refuses 911, and nobody who only has one line ever
+  meets it.
+- **The caller ID reaches the phone through `doorman render`.** Tell them
+  to re-render and reload PJSIP after editing a claim. Editing the file
+  alone changes what `*4` offers and nothing else. The same is true of
+  `[line] trunk`, which rides on the same endpoint as a second `set_var`.
+- **With a trunks.toml, a call as a line leaves by that line's trunk.**
+  Present a number the trunk owns: a provider rejects or silently rewrites
+  one it does not, and `doorman check` refuses the case it can prove — a
+  caller ID this config declares as another line's number at another
+  trunk.
+- **Emergency calls are not affected and must not be made to be.** 911
+  leaves with the trunk's own caller ID whatever any line says, by the
+  designated emergency trunk (`emergency_trunk` in trunks.toml, else the
+  default line's) rather than by the line the handset happens to present.
+- `on_no_input = "voicemail"` needs a `[house] voicemail` to land in;
+  `check` refuses the pair without one. `prompts = "<pack>"` needs that
+  pack installed under `/var/lib/asterisk/sounds/<pack>/` with the same
+  six clip names as the bundled one; omit it and the line speaks with the
+  house voice, which is a perfectly good business line. See `docs/PACKS.md`.
 
 ## The provider inventory — trunks.toml
 

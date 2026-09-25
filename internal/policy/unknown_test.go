@@ -275,6 +275,25 @@ func TestShippedExamplesHaveNoUnknownKeys(t *testing.T) {
 			}); err != nil {
 				t.Errorf("%s fails a strict check: %v", dir, err)
 			}
+			// A scenario answering several numbers keeps the extra lines
+			// in policy.example.<line>.toml beside the primary — the same
+			// sibling rule the daemon and `doorman check` discover by. A
+			// stray key in one of those ships just as surely.
+			lines, ignored := DiscoverLines(filepath.Join(dir, "policy.example.toml"))
+			for _, ig := range ignored {
+				t.Errorf("%s: %s is ignored (%s) — an example file nothing loads is a trap", dir, ig.Path, ig.Reason)
+			}
+			for _, lf := range lines[1:] {
+				data, err := os.ReadFile(lf.Path)
+				if err != nil {
+					t.Fatalf("%s: %v", dir, err)
+				}
+				if _, err := fromSplitTOML(data, hs, Options{
+					AllowPlaceholders: true, StrictUnknownKeys: true,
+				}); err != nil {
+					t.Errorf("%s (line %s) fails a strict check: %v", lf.Path, lf.Name, err)
+				}
+			}
 		})
 	}
 	// A discovery loop that finds nothing passes silently, which is the same
