@@ -91,9 +91,17 @@ hears "the room is full" instead of silence.
 1. ~~VoIP.ms's simultaneous inbound call limit on this line~~ — answered
    2026-09-25: the API does not expose it, and VoIP.ms's published default
    is **two simultaneous calls per DID** on every plan. So today the party
-   line holds two friends, not twenty. More channels are a Virtual PRI
-   (flat, per channel per month) or a support request; either is a cost
-   line in this plan before M1 is worth a Saturday. The `600` bridge's
+   line holds two friends, not twenty. VoIP.ms sells more only as a
+   Virtual PRI — $23 per channel per month, ordered through sales, channels
+   shared across the account's DIDs, with a "burstable" option from about
+   a dollar per channel per day — which prices a twenty-kid room at $460 a
+   month standing, or roughly a dollar per friend per party-day if the
+   burst option works the way it reads. The better answer is the one s01
+   already built for: **a second DID at a provider that does not meter
+   channels** (Telnyx or Flowroute, per-minute, concurrency limits in the
+   dozens by default), on its own trunk in `trunks.toml`, as the party
+   line's own number — a dollar a month for the number and about a dollar
+   for a ten-friend half hour. The house number stays what it is. The `600` bridge's
    `max_members` is set from whatever the line actually allows, so the
    third caller hears "the room is full" rather than a busy signal.
 2. Which prompt says "enter the room"? The pack contract is six names;
