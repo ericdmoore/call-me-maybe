@@ -1,6 +1,14 @@
 # s20 · The party line — a room is a PIN with a suffix
 
-**Status:** planned (2026-09-25). Drafted from a conversation that started at
+**Status:** parked (2026-09-25) — not economically viable on the current
+provider. VoIP.ms allows two simultaneous calls on the house line and sells
+more only as a $23-per-channel-per-month Virtual PRI through sales, so a
+room for twenty is $460 a month standing; see open question 1. The design
+below stands and reopens the day a second, per-minute trunk (Flowroute or
+Telnyx, on the s01 inventory) carries the party line's own number — or the
+day the room only ever needs two friends. Nothing here is built until then.
+
+Drafted from a conversation that started at
 "there used to be 1-800 conference lines" and ended somewhere better: a
 child telling her friends the house phone can hold twenty of them at once,
 call at 4:30, we will plan the sleepover.
@@ -106,6 +114,10 @@ hears "the room is full" instead of silence.
    for a ten-friend half hour. The house number stays what it is. The `600` bridge's
    `max_members` is set from whatever the line actually allows, so the
    third caller hears "the room is full" rather than a busy signal.
+   **Verdict (2026-09-25): not viable on the current provider.** The
+   stream is parked, not dropped: the first milestone becomes "a second
+   trunk that does not meter channels answers the party line's number",
+   and that is a purchase decision, not a Saturday.
 2. Which prompt says "enter the room"? The pack contract is six names;
    the room prompts are the lobby's existing ones plus SayDigits until a
    deliberate pack bump adds "say your name" and "the room is full".
