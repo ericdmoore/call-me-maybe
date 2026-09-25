@@ -12,14 +12,13 @@ otherwise have to be reconstructed from a commit log.
 
 **Order, set 2026-09-25:** s11 (M3, the rehearsal — the box readied from
 here, the Saturday is the family's) → s02 (M3 and M4 shipped the same day;
-M5 waits) → s03 (M2 and M3 shipped in v0.8.0) → s01 (Phase 3, outbound
-failover). s13 and s19 follow; s20 is cancelled.
+M5 waits) → s03 (M2 and M3 shipped in v0.8.0; archived) → s01 (Phase 3,
+outbound failover). s13 and s19 follow; s20 is cancelled.
 
 | | Stream | Status | Depends on |
 |---|---|---|---|
 | **s01** | [Multiple lines](s01-multiple-DIDs/) — several numbers, then several providers | **Phase 1 and 2 done; Phase 3 (outbound failover, M3.1–M3.3) not started** | — |
 | **s02** | [Home and office config examples](s02-home-and-office-config-examples/) — worked, tested, published starting points | M1–M4 shipped (four scenarios at callmemaybe.cc/examples/); M5 waits on primitives | `#`-terminated collection and voicemail metadata for M5 |
-| **s03** | [Provider balance checking](s03-provider-balalnce-checking/) — know the trunk is dying before the phone stops | all shipped — M2 the phone call and M3 the gauge landed 2026-09-25 (v0.8.0); ready to archive | — |
 | **s04** | [Network helpers](s04-standarddize-network-helpers/) — TTS, STT and LLM addressed by URL, wherever they run | planned | — |
 | **s05** | [System alerts](s05-system-alerts/) — the house phone tells you about the house phone | planned | composite prompts |
 | **s06** | [Speakers as page targets](s06-speaker-page-targets/) — Sonos and Cast carry a page; they are not handsets | planned | TASKS §6 (HA webhook) |
@@ -42,6 +41,7 @@ enough to live in its plan.
 | **s08** | [Durable event journal](_archives/s08-durable-event-journal/) — SQLite history, doorbells, CEL capture, consumer-owned replay | 2026-09-23 — verified live on jepsen; replicas and the HTTP endpoint dropped with reasons |
 | **s15** | [Messages — the house answers texts](_archives/s15-messages/) — SMS on the house number as control plane and archive, never conversation: the edge inbox, `doorman inbox`, `messages.toml`, boring replies; handsets text each other on the LAN | 2026-09-24 — `ping` → `pong` live; the archive call waits on the mailbox; the door and the menu handed to s13 and s14 |
 | **s10** | [Zero-touch handsets](_archives/s10-zero-touch-handsets/) — `render` writes the phone's own file; `doorman provision` is the window, the instructions and the watch; `rotate --phones` re-provisions; the directory unit is the phone book | 2026-09-23 — shipped in v0.6.0 under test; the live rehearsal rides with the jepsen re-provision |
+| **s03** | [Provider balance checking](_archives/s03-provider-balalnce-checking/) — `doorman balance` per trunk with an exit code for cron; `--ring` has the house say the balance aloud over an internal call, once a day per trunk; `--prom` is the gauge; `doorman-balance.timer` every morning | 2026-09-25 — M2 + M3 shipped in v0.8.0; the daemon never checks a balance and never holds the key |
 | **s07** | [The contacts ladder](_archives/s07-contacts-ladder/) — address books as admission: vCards parsed and classified, the five-rung ladder, `url` sources fetched into a last-good cache off the call path, `via` on the call record | 2026-09-23 — shipped in v0.6.1; nothing on the box to touch |
 
 ### Cancelled
