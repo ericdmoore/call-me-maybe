@@ -10,11 +10,16 @@ otherwise have to be reconstructed from a commit log.
 
 ## Streams
 
+**Order, set 2026-09-25:** s11 (M3, the rehearsal — the box readied from
+here, the Saturday is the family's) → s02 (M3 publish for models, then M4
+the two mixed scenarios) → s03 (M2 the phone call, M3 the gauge) → s01
+(Phase 3, outbound failover). s13 and s19 follow; s20 is cancelled.
+
 | | Stream | Status | Depends on |
 |---|---|---|---|
-| **s01** | [Multiple lines](s01-multiple-DIDs/) — several numbers, then several providers | **Phase 1 done; Phase 2 all but M2.4** | — |
+| **s01** | [Multiple lines](s01-multiple-DIDs/) — several numbers, then several providers | **Phase 1 and 2 done; Phase 3 (outbound failover, M3.1–M3.3) not started** | — |
 | **s02** | [Home and office config examples](s02-home-and-office-config-examples/) — worked, tested, published starting points | M1 + M2 shipped (`examples/scenarios/`) | s01 for two of five |
-| **s03** | [Provider balance checking](s03-provider-balalnce-checking/) — know the trunk is dying before the phone stops | planned | s01 Phase 2 for per-trunk |
+| **s03** | [Provider balance checking](s03-provider-balalnce-checking/) — know the trunk is dying before the phone stops | M1 + M4 shipped (`doorman balance`, per trunk); M2 the phone call and M3 the gauge open | composite prompts for M2; TASKS §4 for M3 |
 | **s04** | [Network helpers](s04-standarddize-network-helpers/) — TTS, STT and LLM addressed by URL, wherever they run | planned | — |
 | **s05** | [System alerts](s05-system-alerts/) — the house phone tells you about the house phone | planned | composite prompts |
 | **s06** | [Speakers as page targets](s06-speaker-page-targets/) — Sonos and Cast carry a page; they are not handsets | planned | TASKS §6 (HA webhook) |
