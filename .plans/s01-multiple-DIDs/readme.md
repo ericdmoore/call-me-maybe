@@ -12,8 +12,12 @@ belong to trunks), M2.3 (outbound by trunk) and now M2.4 (per-provider health)
 have all landed, so adding a provider is editing TOML and re-rendering, a call
 leaves by its line's provider, 911 leaves by a designated trunk with a
 fallback rather than by whatever the dialplan hard-codes, and `doorman
-balance` says which account is about to stop answering. Phase 3 (failover)
-remains a sketch and is deliberately not started.
+balance` says which account is about to stop answering. **Phase 3 shipped
+2026-09-25 (v0.9.0):** `[line] failover`, the ladder in `[cmm-outbound]`
+driven by `OUTBOUND_FAILOVER`, one generated `[cmm-failover-<id>]` per trunk
+presenting that trunk's own number, the call ending there so CEL records
+which trunk carried it, all-down audible, and the runbook's word on the
+provider-side failover DID. Every milestone of this stream has landed.
 
 ---
 
@@ -633,7 +637,23 @@ One consequence: an exhausted balance often answers `CONGESTION` rather than
 
 ## Milestones
 
-### M3.1 · Outbound failover
+### M3.1 · Outbound failover — **done** (2026-09-25, v0.9.0)
+
+**As built.** The ladder is generic and lives in the hand-written
+`[cmm-outbound]`: after the first Dial, `CHANUNAVAIL` or `CONGESTION` reads
+`OUTBOUND_FAILOVER` (trunk ids, comma-joined; a set_var from `doorman render`
+on every handset the line claims, and set per call by the `*4` console) and
+climbs it with `CUT`, one `Goto` per rung into a generated
+`[cmm-failover-<id>]` — guarded by `DIALPLAN_EXISTS`, so a box without the
+generated file skips the rung with a NoOp rather than dying in a Goto. Each
+rung presents its trunk's own number, `render.FailoverCallerID`: the number
+of the first line (primary first) that lives at that trunk, or a cleared
+caller ID when none does. `doorman check` prints the rungs and what each
+presents under the outbound identity block; the same function decides both,
+so the terminal and the file cannot disagree. Validation: needs `trunk`, may
+not name it, no duplicates, every id declared. Ten-digit dialling now joins
+the eleven-digit extension rather than copying its Dial, so there is one
+ladder and not two.
 
 - `[line] failover`, an ordered list of trunk ids, validated as a cross-file
   reference like `trunk` already is.
@@ -644,7 +664,19 @@ One consequence: an exhausted balance often answers `CONGESTION` rather than
 - A line may not list its own trunk, and may not list a trunk that does not
   exist.
 
-### M3.2 · Bounded and visible
+### M3.2 · Bounded and visible — **done** (2026-09-25, v0.9.0)
+
+**As built.** Bounded by the list; all-down plays `all-circuits-busy-now`
+and a congestion tone — and so does a single dead trunk with no ladder,
+which used to fail with a click. Recorded without doorman touching the
+call: a rung's Dial *ends* in its own context (the far end hanging up
+reaches `Hangup()` there; the caller hanging up dies in the Dial there), so
+CEL's context-at-hangup is `cmm-failover-<id>` and the journal — which
+already ingests CEL and now classifies that prefix as outbound — answers
+"which trunk carried it" with `doorman events --eventType channel.ended`.
+No new column, no UserEvent plumbing, no subscription to endpoints; the
+call log's outbound record is unchanged because doorman leaves the console
+call before any trunk is dialled and cannot honestly claim to know.
 
 - The ladder is bounded by the list length; all-down fails audibly rather than
   silently.
@@ -652,7 +684,13 @@ One consequence: an exhausted balance often answers `CONGESTION` rather than
   `line` and `direction`; add which trunk actually carried it, because "why did
   the customer see the wrong number" needs an answer that is not a guess.
 
-### M3.3 · Runbook
+### M3.3 · Runbook — **done** (2026-09-25)
+
+RUNBOOK "Outbound failover": why the default is off (the customer sees a
+different number), what climbs the ladder and what never does, what a
+customer sees, the journal query, 911 unaffected, the provider's failover
+DID as the inbound answer beside E911, and the pre-v0.9.0 upgrade note (the
+ladder is in the hand-written template).
 
 - The provider-side failover DID, beside E911.
 - What a customer sees when a call falls back, stated plainly.

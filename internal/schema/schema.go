@@ -589,6 +589,18 @@ func line() *Schema {
 					"Reaches the plain dial path as set_var=OUTBOUND_TRUNK on the endpoint at the next `doorman render`; the *4 console picks it up at the next policy reload.",
 				},
 			},
+			"failover": {
+				Type:        "array",
+				Items:       &Schema{Type: "string"},
+				Description: "The trunks a call placed as this line falls over to, in order, when its own trunk cannot carry it — ids from trunks.toml. Off unless written. A fallback presents that trunk's own number (the number of the first line that lives there), never this line's, because a provider will not carry a number its account does not own; `doorman check` prints which number each step presents. Only CHANUNAVAIL and CONGESTION climb the ladder — a lost registration, a provider outage, an exhausted balance and a dead network all look like those — while busy, no answer and a caller hanging up are answers from the far end and are never retried down another provider. When nothing can carry the call the caller hears \"all circuits are busy now\". A call that fell over ends in the fallback trunk's own generated context, so the CEL journal records which trunk carried it.",
+				CrossRefs:   []string{"trunks.toml [[trunks]].id", "asterisk/extensions.conf [cmm-outbound] OUTBOUND_FAILOVER", "extensions_trunks.conf [cmm-failover-<id>]"},
+				Rules: []string{
+					"Needs trunk on the same line: the ladder starts from the trunk this line's calls leave by, and the dialplan's DEFAULT_TRUNK is not a name doorman knows.",
+					"May not list the line's own trunk, an id twice, or an id trunks.toml does not declare; `doorman check` refuses each.",
+					"Reaches the plain dial path as set_var=OUTBOUND_FAILOVER on every handset that calls as this line at the next `doorman render`; the *4 console sets it per call for the line chosen at the keypad. The per-trunk [cmm-failover-<id>] contexts are generated into extensions_trunks.conf, so a box without a trunks.toml has no ladder to climb.",
+					"Emergency calls are not affected: 911 has its own ladder in [cmm-emergency], ordered by which trunk has a street address on file, and never reads this key.",
+				},
+			},
 			"outbound_cid": {
 				Type: "string",
 				Description: "What a call placed as this line presents to the person being called. Any format; normalised to E.164 at load. " +

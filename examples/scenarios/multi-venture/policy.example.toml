@@ -34,12 +34,17 @@
 #            newwork, bakery, orders, wholesale. Voicemail is Asterisk's;
 #            doorman only names the box.
 #
-# DOES NOT   Fail over between providers for an ordinary call. A venture
-#            whose provider is down is a venture whose calls fail, in both
-#            directions; only 911 has a fallback ladder, and inbound
-#            forwarding on a dead trunk is the provider's feature, not this
-#            box's. Outbound failover per line is planned (s01 Phase 3)
-#            and deliberately not built.
+# DOES NOT   Fall over for the HOME line, deliberately. The ventures do —
+#            `failover = ["voipms"]` in each of their files — so a call from
+#            the counter still goes out when Telnyx is having an afternoon,
+#            presenting the house number rather than the bakery's, because
+#            VoIP.ms will not carry a number it does not own. The home line
+#            writes no ladder: a call from the kitchen that fell over to
+#            Telnyx would reach Grandma from the bakery's number, and that
+#            is the kind of surprise a house does not want. Only
+#            CHANUNAVAIL and CONGESTION climb a ladder; busy and no answer
+#            are answers. Inbound has no ladder here at all — that is the
+#            provider's failover DID, set beside the E911 address.
 #
 #            Let one phone belong to two ventures. A phone presents one
 #            number. Claim the counter from the surveying line as well and

@@ -68,6 +68,11 @@ const (
 	// outboundContext is where the console releases the handset. It is
 	// deliberately not [internal]: see emergencyNumbers.
 	outboundContext = "outbound-console"
+	// outboundFailoverVar is the ladder [cmm-outbound] climbs when the chosen
+	// line's trunk cannot carry the call: trunk ids, comma-joined. Set beside
+	// the other two, to the chosen line's own, so a claimed handset's ladder
+	// never rides a call placed as a different line.
+	outboundFailoverVar = "OUTBOUND_FAILOVER"
 )
 
 // The console speaks with Asterisk's own voice rather than the prompt pack.
@@ -153,6 +158,10 @@ type ConsoleLine struct {
 	// is choosing an identity, and which company carries it is the part that
 	// has to follow from that choice rather than be made separately.
 	Trunk string
+	// Failover is the ladder of trunk ids, comma-joined, a call as this line
+	// falls over to when Trunk cannot carry it, or "" for none. Never spoken
+	// either, for the same reason.
+	Failover string
 }
 
 // ConsoleDeps wires a Console to the world.
@@ -456,6 +465,7 @@ func (c *Console) place(line ConsoleLine, dialledDigits string) {
 	for _, v := range []struct{ name, value, reason string }{
 		{outboundTrunkVar, line.Trunk, "trunk-failed"},
 		{outboundCIDVar, line.CallerID, "cid-failed"},
+		{outboundFailoverVar, line.Failover, "failover-failed"},
 	} {
 		if err := c.deps.ARI.SetChannelVar(c.ctx, c.ChannelID, v.name, v.value); err != nil {
 			c.log.Error("could not set the outbound channel variables, refusing to place the call",

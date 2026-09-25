@@ -12,12 +12,12 @@ otherwise have to be reconstructed from a commit log.
 
 **Order, set 2026-09-25:** s11 (M3, the rehearsal — the box readied from
 here, the Saturday is the family's) → s02 (M3 and M4 shipped the same day;
-M5 waits) → s03 (M2 and M3 shipped in v0.8.0; archived) → s01 (Phase 3,
-outbound failover). s13 and s19 follow; s20 is cancelled.
+M5 waits) → s03 (M2 and M3 shipped in v0.8.0; archived) → s01 (Phase 3
+shipped in v0.9.0). All four done the same day; s13 and s19 are next. s13 and s19 follow; s20 is cancelled.
 
 | | Stream | Status | Depends on |
 |---|---|---|---|
-| **s01** | [Multiple lines](s01-multiple-DIDs/) — several numbers, then several providers | **Phase 1 and 2 done; Phase 3 (outbound failover, M3.1–M3.3) not started** | — |
+| **s01** | [Multiple lines](s01-multiple-DIDs/) — several numbers, then several providers | **all three phases done — Phase 3 outbound failover shipped 2026-09-25 (v0.9.0); ready to archive** | — |
 | **s02** | [Home and office config examples](s02-home-and-office-config-examples/) — worked, tested, published starting points | M1–M4 shipped (four scenarios at callmemaybe.cc/examples/); M5 waits on primitives | `#`-terminated collection and voicemail metadata for M5 |
 | **s04** | [Network helpers](s04-standarddize-network-helpers/) — TTS, STT and LLM addressed by URL, wherever they run | planned | — |
 | **s05** | [System alerts](s05-system-alerts/) — the house phone tells you about the house phone | planned | composite prompts |

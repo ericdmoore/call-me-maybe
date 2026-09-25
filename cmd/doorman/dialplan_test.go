@@ -128,10 +128,45 @@ func TestBothOutboundPathsShareOneContext(t *testing.T) {
 		"ExecIf($[\"${OUTBOUND_TRUNK}\" != \"\"]?Set(CMM_TRUNK=${OUTBOUND_TRUNK}))",
 		"ExecIf($[\"${OUTBOUND_CID}\" != \"\"]?Set(CALLERID(num)=${OUTBOUND_CID}))",
 		"Dial(PJSIP/${EXTEN}@${CMM_TRUNK},60)",
-		"Dial(PJSIP/1${EXTEN}@${CMM_TRUNK},60)",
+		// Ten digits join the eleven-digit path rather than copying its
+		// Dial, so there is one ladder and not two that can drift.
+		"exten => _NXXNXXXXXX,1,Goto(cmm-outbound,1${EXTEN},1)",
 	} {
 		if !strings.Contains(ctx, want) {
 			t.Errorf("[cmm-outbound] is missing %q:\n%s", want, ctx)
+		}
+	}
+	if strings.Contains(ctx, "Dial(PJSIP/1${EXTEN}@${CMM_TRUNK},60)") {
+		t.Error("[cmm-outbound] carries a second Dial for ten digits — one ladder, not two")
+	}
+}
+
+// The failover ladder: only a trunk failure climbs it, every step is a
+// generated per-trunk context reached by name, and nothing at the bottom is
+// silent. The far end being busy, not answering, or the caller hanging up are
+// answers and never retried down another provider — a customer who declined
+// the call once must not get it again from a different number.
+func TestOutboundLadderClimbsOnlyOnTrunkFailure(t *testing.T) {
+	ctx := dialplanContext(t, shippedDialplan(t), "cmm-outbound")
+	for _, want := range []string{
+		`GotoIf($["${DIALSTATUS}"="CHANUNAVAIL" | "${DIALSTATUS}"="CONGESTION"]?ladder:done)`,
+		"same => n(ladder),Set(CMM_LADDER=${OUTBOUND_FAILOVER})",
+		`same => n(more),GotoIf($["${CMM_LADDER}"=""]?failed)`,
+		`Set(CMM_TRUNK=${CUT(CMM_LADDER,\,,1)})`,
+		`Set(CMM_LADDER=${CUT(CMM_LADDER,\,,2-)})`,
+		"GotoIf(${DIALPLAN_EXISTS(cmm-failover-${CMM_TRUNK},${EXTEN},1)}?cmm-failover-${CMM_TRUNK},${EXTEN},1)",
+		"same => n(failed),NoOp(NO TRUNK COULD CARRY THIS CALL)",
+		"same => n,Playback(all-circuits-busy-now)",
+		"same => n,Congestion(5)",
+		"same => n(done),Hangup()",
+	} {
+		if !strings.Contains(ctx, want) {
+			t.Errorf("[cmm-outbound] is missing %q:\n%s", want, ctx)
+		}
+	}
+	for _, never := range []string{`"BUSY"`, `"NOANSWER"`, `"CANCEL"`} {
+		if strings.Contains(ctx, never) {
+			t.Errorf("[cmm-outbound] retries on %s — that is an answer from the far end, not a trunk failure", never)
 		}
 	}
 }

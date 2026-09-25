@@ -60,6 +60,11 @@ func header(from string, secrets bool) string {
 const (
 	outboundCIDVar   = "OUTBOUND_CID"
 	outboundTrunkVar = "OUTBOUND_TRUNK"
+	// outboundFailoverVar is the ladder: trunk ids, comma-separated, in the
+	// order [cmm-outbound] tries them after OUTBOUND_TRUNK fails. Each step
+	// is a generated [cmm-failover-<id>] context (trunks.go), so the dialplan
+	// holds the dial strings and this variable holds only names.
+	outboundFailoverVar = "OUTBOUND_FAILOVER"
 )
 
 // OutboundIdentity is what one handset presents and where its calls leave by.
@@ -77,10 +82,14 @@ type OutboundIdentity struct {
 	// means the dialplan's DEFAULT_TRUNK decides, which is every install with
 	// one provider and no trunks.toml at all.
 	Trunk string
+	// Failover is the ladder of trunk ids, comma-joined, a call from this
+	// handset falls over to when Trunk cannot carry it. Empty is no ladder,
+	// which is every line that did not write [line] failover.
+	Failover string
 }
 
 // set reports whether this handset has any outbound identity to write.
-func (o OutboundIdentity) set() bool { return o.CID != "" || o.Trunk != "" }
+func (o OutboundIdentity) set() bool { return o.CID != "" || o.Trunk != "" || o.Failover != "" }
 
 // Build renders both fragments. Secrets come exclusively through env — the
 // generated PJSIP file contains real passwords and must be treated like
@@ -171,6 +180,9 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 			}
 			if out.Trunk != "" {
 				fmt.Fprintf(&pjsip, "set_var=%s=%s\n", outboundTrunkVar, out.Trunk)
+			}
+			if out.Failover != "" {
+				fmt.Fprintf(&pjsip, "set_var=%s=%s\n", outboundFailoverVar, out.Failover)
 			}
 		}
 		fmt.Fprintf(&pjsip, "\n[%s-auth]\ntype=auth\nauth_type=userpass\nusername=%s\npassword=%s\n\n", h.ID, h.ID, secret)

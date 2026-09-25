@@ -17,6 +17,7 @@
 label = "Mertaugh Surveying"
 number = "+15125550142"
 trunk = "telnyx"
+failover = ["voipms"]         # presents the house number when Telnyx cannot carry the call
 on_no_input = "voicemail"
 outbound_cid = "+15125550142"
 outbound_handsets = ["office"]

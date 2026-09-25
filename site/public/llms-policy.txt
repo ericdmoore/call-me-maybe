@@ -80,6 +80,7 @@ If someone has one number, write one `policy.toml` and do not mention lines.
     trunk       = "voipms"                 # id from trunks.toml; ONLY with one
     outbound_cid      = "+15125550142"     # what a call placed as this line shows
     outbound_handsets = ["office"]         # phones that call as it without asking
+    failover          = ["telnyx"]         # trunks to try when this line's cannot; off unless written
 
     [house]
     handsets = ["kitchen", "office"]   # ids from handsets.toml, or a group id
@@ -164,6 +165,14 @@ If someone has one number, write one `policy.toml` and do not mention lines.
     in trunks.toml or `[line] trunk` in plain policy.toml. Neither is an error,
     not a note — `doorman check` exits non-zero and `doorman render` refuses to
     generate. Never write a multi-provider config without settling it.
+18. `[line] failover` is an ordered list of *other* declared trunks a call as
+    this line tries when its own trunk answers CHANUNAVAIL or CONGESTION. It
+    needs `trunk` on the same line, may not name that trunk or any id twice,
+    and is **off unless written** — a fallback presents that trunk's own
+    number (the first line living there), never this line's, so a customer
+    sees a different number; `doorman check` prints which. Busy, no answer
+    and a caller hanging up never climb the ladder. 911 has its own ladder
+    and ignores this key.
 
 ## `on_no_input` — the difference between a doorman and a concierge
 

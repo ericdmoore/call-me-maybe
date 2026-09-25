@@ -403,3 +403,58 @@ func TestRouteHandsStarFourToTheConsole(t *testing.T) {
 		}
 	}
 }
+
+// ── failover ─────────────────────────────────────────────────────────────
+
+func routedWithFailover(name, number, trunk, cid string, failover []string, handsets ...string) lineIdentity {
+	l := routed(name, number, trunk, cid, handsets...)
+	l.Failover = failover
+	return l
+}
+
+// The ladder reaches the phones a line claims and the console alike, as one
+// comma-joined string of trunk ids, and `check` says what each rung presents
+// — the number of the first line living at that trunk, never this line's.
+func TestTheFailoverLadderTravelsWithTheIdentityAndIsExplained(t *testing.T) {
+	plan := newOutboundPlan([]lineIdentity{
+		routedWithFailover(policy.DefaultLine, "+15125550100", "voipms", "+15125550100", []string{"telnyx"}),
+		routedWithFailover("biz", "+15125550142", "telnyx", "+15125550142", []string{"voipms", "flowroute"}, "office"),
+	})
+	ids := plan.identities([]string{"kitchen", "office"})
+	if ids["office"].Failover != "voipms,flowroute" {
+		t.Errorf("office ladder = %q, want voipms,flowroute", ids["office"].Failover)
+	}
+	if ids["kitchen"].Failover != "telnyx" {
+		t.Errorf("kitchen (unclaimed, so the primary line) ladder = %q, want telnyx", ids["kitchen"].Failover)
+	}
+	for _, l := range plan.consoleLines() {
+		if l.Name == "biz" && l.Failover != "voipms,flowroute" {
+			t.Errorf("console line biz ladder = %q", l.Failover)
+		}
+	}
+	out := plan.describe([]string{"kitchen", "office"})
+	for _, want := range []string{
+		"When telnyx cannot carry a call as biz, it falls over",
+		"1. voipms     presents +15125550100",
+		"2. flowroute  presents (the trunk's default — no line declares a number there)",
+		"When voipms cannot carry a call as default, it falls over",
+		"1. telnyx     presents +15125550142",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("describe() is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// No ladder, no mention: a box with one provider must never read the word.
+func TestNoFailoverIsNotDescribed(t *testing.T) {
+	plan := newOutboundPlan([]lineIdentity{
+		routed(policy.DefaultLine, "+15125550100", "voipms", "+15125550100"),
+	})
+	if out := plan.describe([]string{"kitchen"}); strings.Contains(out, "falls over") {
+		t.Errorf("describe() mentions failover nobody configured:\n%s", out)
+	}
+	if ids := plan.identities([]string{"kitchen"}); ids["kitchen"].Failover != "" {
+		t.Errorf("kitchen has a ladder: %q", ids["kitchen"].Failover)
+	}
+}

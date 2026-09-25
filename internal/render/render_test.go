@@ -249,3 +249,25 @@ func TestHandsetTextsReachTheOtherPhoneAsMessages(t *testing.T) {
 		}
 	}
 }
+
+// The ladder rides the endpoint beside the caller ID and trunk, as a list of
+// names: the dial strings stay in the dialplan, and a handset with no ladder
+// gets no variable, so an endpoint on a box that never wrote [line] failover
+// is byte-identical to what it was.
+func TestRenderWritesTheFailoverLadderBesideTheTrunk(t *testing.T) {
+	f, err := Build(fixture(), env(secrets), map[string]OutboundIdentity{
+		"kitchen":   {CID: "+15125550100", Trunk: "voipms", Failover: "telnyx,flowroute"},
+		"kids-room": {CID: "+15125550100", Trunk: "voipms"},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	kitchen, _ := section(f.PJSIP, "[kitchen]")
+	if !strings.Contains(kitchen, "set_var=OUTBOUND_FAILOVER=telnyx,flowroute") {
+		t.Errorf("[kitchen] missing the ladder:\n%s", kitchen)
+	}
+	kids, _ := section(f.PJSIP, "[kids-room]")
+	if strings.Contains(kids, "OUTBOUND_FAILOVER") {
+		t.Errorf("[kids-room] has a ladder nobody wrote:\n%s", kids)
+	}
+}

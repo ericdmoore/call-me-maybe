@@ -54,6 +54,9 @@ type outboundLine struct {
 	// the dialplan's DEFAULT_TRUNK. It travels beside CID everywhere the two
 	// go, because a provider will not carry a number its account does not own.
 	Trunk string
+	// Failover is the ladder of trunk ids a call as this line tries after
+	// Trunk fails, in order, or nil.
+	Failover []string
 	// Number is the line's own DID. Not an outbound value at all — it is here
 	// because it is the only evidence this box has about which numbers a trunk
 	// owns, and that is what makes a caller ID checkable at all.
@@ -99,6 +102,7 @@ func newOutboundPlan(ids []lineIdentity) outboundPlan {
 			Label:    id.Label,
 			CID:      id.OutboundCID,
 			Trunk:    id.Trunk,
+			Failover: id.Failover,
 			Number:   id.Number,
 			Handsets: id.OutboundHandsets,
 		}
@@ -116,6 +120,27 @@ func newOutboundPlan(ids []lineIdentity) outboundPlan {
 		}
 	}
 	return plan
+}
+
+// ladder is the failover list as the dialplan reads it: trunk ids,
+// comma-joined, in order. One string because it rides a set_var and a
+// channel variable, and the dialplan takes it apart with CUT.
+func (l outboundLine) ladder() string { return strings.Join(l.Failover, ",") }
+
+// failoverCallerIDs is what each fallback step presents, per line — the same
+// answer render writes into [cmm-failover-<id>], computed the same way, so the
+// terminal and the file cannot disagree about the one thing a customer will
+// notice: the number that reached their phone.
+func (p outboundPlan) failoverCallerIDs(l outboundLine) []string {
+	lines := make([]render.TrunkLine, 0, len(p.Lines))
+	for _, x := range p.Lines {
+		lines = append(lines, render.TrunkLine{Name: x.Name, Number: x.Number, Trunk: x.Trunk})
+	}
+	out := make([]string, 0, len(l.Failover))
+	for _, id := range l.Failover {
+		out = append(out, render.FailoverCallerID(id, lines))
+	}
+	return out
 }
 
 // lineFor returns the line a handset calls as, and whether it was claimed
@@ -136,7 +161,7 @@ func (p outboundPlan) identities(handsetIDs []string) map[string]render.Outbound
 	out := make(map[string]render.OutboundIdentity, len(handsetIDs))
 	for _, id := range handsetIDs {
 		line, _ := p.lineFor(id)
-		if v := (render.OutboundIdentity{CID: line.CID, Trunk: line.Trunk}); v != (render.OutboundIdentity{}) {
+		if v := (render.OutboundIdentity{CID: line.CID, Trunk: line.Trunk, Failover: line.ladder()}); v != (render.OutboundIdentity{}) {
 			out[id] = v
 		}
 	}
@@ -148,7 +173,7 @@ func (p outboundPlan) consoleLines() []lobby.ConsoleLine {
 	out := make([]lobby.ConsoleLine, 0, len(p.Lines))
 	for _, l := range p.Lines {
 		out = append(out, lobby.ConsoleLine{
-			Name: l.Name, Label: l.Label, CallerID: l.CID, Trunk: l.Trunk,
+			Name: l.Name, Label: l.Label, CallerID: l.CID, Trunk: l.Trunk, Failover: l.ladder(),
 		})
 	}
 	return out
@@ -334,6 +359,22 @@ func (p outboundPlan) describe(handsetIDs []string) string {
 	if routed {
 		add("  A call as a line leaves by that line's trunk, on both paths: the phones\n")
 		add("  below carry it as a set_var, and `*4` sets it per call.\n")
+	}
+
+	// Failover, only where somebody wrote it. The number a fallback presents
+	// is the thing to say out loud: it is not the line's own, and a customer
+	// who rings it back reaches whichever line lives at the other trunk.
+	for _, l := range p.Lines {
+		if len(l.Failover) == 0 {
+			continue
+		}
+		add("\n  When %s cannot carry a call as %s, it falls over — in order, presenting\n", orDefault(l.Trunk, noOutboundTrunk), l.Name)
+		add("  that trunk's own number rather than this line's:\n")
+		for i, cid := range p.failoverCallerIDs(l) {
+			add("    %d. %-10s presents %s\n", i+1, l.Failover[i], orDefault(cid, "(the trunk's default — no line declares a number there)"))
+		}
+		add("  A line's own trunk failing is CHANUNAVAIL or CONGESTION; busy, no answer\n")
+		add("  and a caller hanging up are answers, not failures, and do not fall over.\n")
 	}
 
 	claimed := map[string][]string{}

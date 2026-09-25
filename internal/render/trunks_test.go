@@ -491,3 +491,60 @@ func section(text, header string) (string, bool) {
 	}
 	return text[start:], true
 }
+
+// ── Outbound failover ────────────────────────────────────────────────────
+
+// One generated context per trunk, each presenting THAT trunk's own number.
+// The failing line's caller ID must not survive the fall: the second trunk
+// does not own it, and a provider rejects or silently rewrites a number its
+// account does not own — which is the very call this ladder routes around.
+func TestEveryTrunkGetsAFailoverContextPresentingItsOwnNumber(t *testing.T) {
+	f := buildTrunks(t, trunkFixture(), trunkLines())
+	telnyx, ok := section(f.Dialplan, "[cmm-failover-telnyx]")
+	if !ok {
+		t.Fatalf("no [cmm-failover-telnyx] in:\n%s", f.Dialplan)
+	}
+	for _, want := range []string{
+		"same => n,Set(CALLERID(num)=+15125550142)", // the biz line lives at telnyx
+		"same => n,Dial(PJSIP/${EXTEN}@telnyx,60)",
+		`same => n,GotoIf($["${DIALSTATUS}"="CHANUNAVAIL" | "${DIALSTATUS}"="CONGESTION"]?cmm-outbound,${EXTEN},more)`,
+		"same => n,Hangup()",
+	} {
+		if !strings.Contains(telnyx, want) {
+			t.Errorf("[cmm-failover-telnyx] is missing %q:\n%s", want, telnyx)
+		}
+	}
+	if strings.Contains(telnyx, "+15125550100") {
+		t.Error("the home line's number leaked into telnyx's fallback — telnyx does not own it")
+	}
+	voipms, _ := section(f.Dialplan, "[cmm-failover-voipms]")
+	if !strings.Contains(voipms, "same => n,Set(CALLERID(num)=+15125550100)") {
+		t.Errorf("[cmm-failover-voipms] does not present the home number:\n%s", voipms)
+	}
+	// And the call ends in this context, whichever way it ends: that is how
+	// the CEL journal records which trunk carried it.
+	if strings.Contains(telnyx, "Return()") || strings.Contains(telnyx, "Goto(cmm-outbound,${EXTEN},done)") {
+		t.Error("a connected fallback must end in its own context, not return to the ladder")
+	}
+}
+
+// A trunk no line declares a number at cannot be given one to present. The
+// caller ID is cleared rather than left as the failing line's, and the file
+// says why at the point somebody will read it.
+func TestAFallbackTrunkWithNoLineClearsTheCallerID(t *testing.T) {
+	lines := []TrunkLine{{Name: "default", Number: "+15125550100", Trunk: "voipms"}}
+	f := buildTrunks(t, trunkFixture(), lines)
+	telnyx, _ := section(f.Dialplan, "[cmm-failover-telnyx]")
+	if !strings.Contains(telnyx, "same => n,Set(CALLERID(num)=)") {
+		t.Errorf("[cmm-failover-telnyx] should clear the caller ID:\n%s", telnyx)
+	}
+	if !strings.Contains(telnyx, "no line declares a number at this trunk") {
+		t.Errorf("[cmm-failover-telnyx] should say why:\n%s", telnyx)
+	}
+	if got := FailoverCallerID("telnyx", lines); got != "" {
+		t.Errorf("FailoverCallerID = %q, want empty", got)
+	}
+	if got := FailoverCallerID("voipms", lines); got != "+15125550100" {
+		t.Errorf("FailoverCallerID = %q, want the home number", got)
+	}
+}

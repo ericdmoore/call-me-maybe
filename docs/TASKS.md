@@ -431,6 +431,16 @@ Phase 2 (several *providers*) is a separate problem and starts at `trunks.toml`.
 - [ ] If §4 metrics land, a `line` label — and still **no caller identifiers
       in labels**.
 
+### 7e. Outbound failover — DONE (s01 Phase 3, v0.9.0)
+
+`[line] failover`, an ordered list of other declared trunks; the ladder in the
+hand-written `[cmm-outbound]` climbs it on `CHANUNAVAIL`/`CONGESTION` only,
+each rung a generated `[cmm-failover-<id>]` presenting that trunk's own
+number, the call ending there so CEL records which trunk carried it; all-down
+is audible. Off unless written, because a fallback changes the number a
+customer sees. Inbound failover stays the provider's failover DID, documented
+beside E911.
+
 ---
 
 ## 8. Provider account health — CLI DONE (the alert and the gauge are open)

@@ -94,6 +94,12 @@ func LineContext(name string) string { return "cmm-line-" + name }
 // the interface between the two files and not an internal detail.
 const EmergencyContext = "cmm-emergency"
 
+// FailoverContext is the dialplan context that carries a call on one trunk
+// after the trunk before it could not. One per trunk, generated, reached by
+// name from the hand-written [cmm-outbound] ladder; the channel ends in it,
+// so the CEL journal records which trunk actually carried the call.
+func FailoverContext(trunkID string) string { return "cmm-failover-" + trunkID }
+
 // registrationBinding emits the two settings that make a registration-based
 // trunk work, with the reason attached.
 //
@@ -233,6 +239,7 @@ func BuildTrunks(trunks []policy.Trunk, lines []TrunkLine, handsetIDs []string, 
 	}
 
 	writeLineContexts(&plan, lines)
+	writeFailoverContexts(&plan, trunks, lines)
 	order := EmergencyOrder(trunks, em.Trunk)
 	writeEmergencyContext(&plan, order, em)
 
@@ -385,6 +392,65 @@ func writeLineContexts(b *strings.Builder, lines []TrunkLine) {
 		// the greeting starts.
 		b.WriteString(" same => n,Answer()\n")
 		fmt.Fprintf(b, " same => n,Stasis(${DOORMAN_APP}%s)\n", stasisArgs(l.Name))
+		b.WriteString(" same => n,Hangup()\n\n")
+	}
+}
+
+// ── Outbound failover ────────────────────────────────────────────────────
+
+// FailoverCallerID is what a call presents when it falls over to trunkID:
+// the number of the first line, primary first, that lives at that trunk. A
+// DID a line answers there is a number the account certainly owns, and a
+// provider will not carry one it does not — it rejects the call or silently
+// rewrites it. Empty when no line declares a number there, in which case the
+// caller ID is cleared and the trunk sends whatever it sends.
+//
+// Never the failing line's own number: that is the number the *first* trunk
+// owns, and presenting it down the second is exactly the rejected call this
+// ladder exists to route around. The customer sees a different number and
+// `doorman check` says which one, per line, because "why did they see the
+// wrong number" needs an answer that is not a guess.
+func FailoverCallerID(trunkID string, lines []TrunkLine) string {
+	for _, l := range lines {
+		if l.Trunk == trunkID && l.Number != "" {
+			return l.Number
+		}
+	}
+	return ""
+}
+
+// writeFailoverContexts emits [cmm-failover-<id>] for every trunk. The
+// hand-written [cmm-outbound] ladder reaches them by name from
+// OUTBOUND_FAILOVER; a trunk nobody lists costs a few lines nobody reads.
+//
+// The call ENDS here, whichever way it ends — the Dial connecting and the far
+// end hanging up, or the caller hanging up mid-call — and only a further
+// failure leaves, back to the ladder. That is deliberate: CEL records the
+// channel's context at hangup, so a call that fell over to telnyx is one whose
+// channel ended in cmm-failover-telnyx, and the journal answers "which trunk
+// carried it" without doorman having been anywhere near the call.
+func writeFailoverContexts(b *strings.Builder, trunks []policy.Trunk, lines []TrunkLine) {
+	b.WriteString("; ── Outbound failover ────────────────────────────────────────\n")
+	b.WriteString("; One context per trunk, reached from the ladder in [cmm-outbound] when the\n")
+	b.WriteString("; trunk before it answered CHANUNAVAIL or CONGESTION — which is what a lost\n")
+	b.WriteString("; registration, a provider outage, an exhausted balance and a dead network\n")
+	b.WriteString("; all look like from here, and they are not distinguished because they need\n")
+	b.WriteString("; not be. Each presents ITS OWN trunk's number: a provider will not carry a\n")
+	b.WriteString("; number its account does not own, so the line's caller ID stays behind and\n")
+	b.WriteString("; the person called sees this trunk's. A call that connects here ends here,\n")
+	b.WriteString("; so the CEL journal records which trunk carried it.\n\n")
+	for _, tr := range trunks {
+		cid := FailoverCallerID(tr.ID, lines)
+		fmt.Fprintf(b, "[%s]\n", FailoverContext(tr.ID))
+		fmt.Fprintf(b, "exten => _X.,1,NoOp(FALLING OVER to %s: the trunk before it could not carry this call)\n", tr.ID)
+		if cid != "" {
+			fmt.Fprintf(b, " same => n,Set(CALLERID(num)=%s)\n", cid)
+		} else {
+			b.WriteString(" same => n,Set(CALLERID(num)=)\n")
+			b.WriteString(" same => n,NoOp(no line declares a number at this trunk, so it presents its own default)\n")
+		}
+		fmt.Fprintf(b, " same => n,Dial(PJSIP/${EXTEN}@%s,60)\n", tr.ID)
+		b.WriteString(" same => n,GotoIf($[\"${DIALSTATUS}\"=\"CHANUNAVAIL\" | \"${DIALSTATUS}\"=\"CONGESTION\"]?cmm-outbound,${EXTEN},more)\n")
 		b.WriteString(" same => n,Hangup()\n\n")
 	}
 }

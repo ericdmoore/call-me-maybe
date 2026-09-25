@@ -456,3 +456,24 @@ func TestConsoleOffersAtMostNineLines(t *testing.T) {
 	h.console.CallerGone()
 	h.waitFinished(t)
 }
+
+// The ladder is set beside the other two, to the chosen line's own — and to
+// empty when the line has none, so a claimed handset's ladder never rides a
+// call the operator placed as a different line.
+func TestConsoleSetsTheChosenLinesFailoverLadder(t *testing.T) {
+	lines := []ConsoleLine{
+		{Name: "default", Label: "Home", CallerID: "+15125550100", Trunk: "voipms", Failover: "telnyx"},
+		{Name: "biz", Label: "Mertaugh Enterprises", CallerID: "+15125550142", Trunk: "telnyx"},
+	}
+	h := startConsole(t, lines)
+	h.playUntil(t, "digits:15125550142")
+	h.console.Dtmf("2")
+	h.playUntil(t, sayBeep)
+	h.dial("5125550199#")
+	if got := h.waitForVar(t, "OUTBOUND_FAILOVER"); got != "" {
+		t.Fatalf("OUTBOUND_FAILOVER=%q for a line with no ladder, want it cleared", got)
+	}
+	h.waitFor(t, "Continue")
+	h.console.CallerLeft()
+	h.waitFinished(t)
+}

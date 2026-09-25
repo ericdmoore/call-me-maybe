@@ -226,6 +226,49 @@ func TestLineTrunkIsCheckedAgainstTheInventory(t *testing.T) {
 	}
 }
 
+const twoTrunksForFailover = oneTrunk + `
+[[trunks]]
+id = "telnyx"
+provider = "telnyx"
+host = "sip.telnyx.com"
+username = "cmm-home"
+password_env = "TRUNK_TELNYX_PASSWORD"
+`
+
+// [line] failover is a cross-file reference like trunk, plus three rules of
+// its own: it needs a trunk to fall over FROM, it may not name that trunk —
+// a call that failed there does not succeed there — and it may not name one
+// twice. Each is refused by name, because a ladder that silently skips a
+// rung is one the operator believes is longer than it is.
+func TestLineFailoverIsALadderOfOtherDeclaredTrunks(t *testing.T) {
+	trunks := mustTrunks(t, twoTrunksForFailover)
+
+	if err := loadLineWithTrunks(t, "[line]\ntrunk = \"voipms\"\nfailover = [\"telnyx\"]\n", trunks); err != nil {
+		t.Fatalf("a ladder of another declared trunk should load: %v", err)
+	}
+	for _, c := range []struct{ line, want string }{
+		{"[line]\nfailover = [\"telnyx\"]\n", "needs trunk"},
+		{"[line]\ntrunk = \"voipms\"\nfailover = [\"voipms\"]\n", "own trunk"},
+		{"[line]\ntrunk = \"voipms\"\nfailover = [\"telnyx\", \"telnyx\"]\n", "twice"},
+		{"[line]\ntrunk = \"voipms\"\nfailover = [\"flowroute\"]\n", "not declared"},
+		{"[line]\ntrunk = \"voipms\"\nfailover = [\"\"]\n", "empty trunk id"},
+	} {
+		err := loadLineWithTrunks(t, c.line, trunks)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.line, err, c.want)
+		}
+	}
+
+	p, err := fromSplitTOML([]byte("[line]\ntrunk = \"voipms\"\nfailover = [\"telnyx\"]\n[house]\nhandsets = [\"kitchen\"]\n"),
+		[]byte(trunkLineHandsets), Options{Trunks: trunks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Line().Failover; len(got) != 1 || got[0] != "telnyx" {
+		t.Errorf("Failover = %v, want [telnyx]", got)
+	}
+}
+
 // Naming a trunk with no trunks.toml at all is a different mistake with a
 // different fix, and saying "not declared in trunks.toml" would send someone
 // looking for a file that is not there.

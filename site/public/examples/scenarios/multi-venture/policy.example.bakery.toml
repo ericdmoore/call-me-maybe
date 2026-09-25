@@ -13,6 +13,7 @@
 label = "Blue Door Bakery"
 number = "+15125550188"
 trunk = "telnyx"
+failover = ["voipms"]         # presents the house number when Telnyx cannot carry the call
 on_no_input = "voicemail"
 outbound_cid = "+15125550188"
 outbound_handsets = ["counter"]

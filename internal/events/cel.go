@@ -170,7 +170,10 @@ func inboundLine(ctx string) (string, bool) {
 	return "", false
 }
 func outboundContext(ctx string) bool {
-	return ctx == "internal" || ctx == "cmm-outbound" || ctx == "outbound-console" || ctx == "cmm-emergency"
+	return ctx == "internal" || ctx == "cmm-outbound" || ctx == "outbound-console" || ctx == "cmm-emergency" ||
+		// A call that fell over ends in the fallback trunk's own context, which
+		// is how the journal knows which trunk carried it (render.FailoverContext).
+		strings.HasPrefix(ctx, "cmm-failover-")
 }
 func celEventID(source string, seq int64, suffix string) string {
 	return digest(fmt.Sprintf("cel:%s:%d:%s", source, seq, suffix))

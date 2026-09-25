@@ -45,6 +45,13 @@ the call also leaves by that line's
 .BR "[line] trunk" ,
 because a provider will not present a number its account does not own; the
 caller ID and the trunk are one decision and travel together on both paths.
+.B [line] failover
+is the ordered list of other trunks a call as that line tries when its own
+answers CHANUNAVAIL or CONGESTION \(em off unless written, because each rung
+presents that trunk's own number rather than the line's, and the call ends
+in that trunk's generated context so the journal records which one carried
+it. Busy, no answer and a hangup are answers, not failures, and never climb
+it.
 .PP
 That console refuses emergency numbers outright: E911 is registered per DID
 against a street address, so
@@ -236,10 +243,12 @@ or a
 .I contacts.toml
 source id \(em and defaults to house and people.
 .IP
-Each endpoint also carries the outbound caller ID that phone presents and the
-trunk its calls leave by, read from every line's
+Each endpoint also carries the outbound caller ID that phone presents, the
+trunk its calls leave by and the failover ladder it climbs, read from every
+line's
 .BR "[line] outbound_cid" ,
-.B [line] trunk
+.BR "[line] trunk" ,
+.B [line] failover
 and
 .BR "outbound_handsets" .
 It is generated rather than configured because a handset that picks up and

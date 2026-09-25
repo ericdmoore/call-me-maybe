@@ -1283,6 +1283,76 @@ perfectly normal call from this end.
 `outbound_cid` anywhere, nothing is generated and every outbound call presents
 the trunk default again, exactly as before.
 
+### Outbound failover
+
+**Off unless you write it, and here is why.** When a line's trunk cannot carry
+a call, the next trunk can — but it cannot present the line's number, because
+a provider will not carry a number its account does not own. So a call that
+falls over reaches the customer **from a different number**: the number of
+whichever line lives at the fallback trunk. That is a choice about what your
+customers see, not a resilience setting to switch on by reflex.
+
+```toml
+# policy.bakery.toml
+[line]
+trunk    = "telnyx"
+failover = ["voipms"]        # other declared trunks, in order; never its own
+```
+
+```bash
+$ doorman check          # prints, per line, what each rung presents:
+#   When telnyx cannot carry a call as bakery, it falls over — in order, presenting
+#   that trunk's own number rather than this line's:
+#     1. voipms     presents +15125550100
+$ doorman render         # OUTBOUND_FAILOVER on the phones this line claims,
+                         # and one [cmm-failover-<id>] context per trunk in
+                         # extensions_trunks.conf; copy and reload as usual
+```
+
+**What climbs the ladder, and what never does.** Only `CHANUNAVAIL` and
+`CONGESTION` — which, from the dialplan's side, is what a lost registration, a
+provider outage, an exhausted balance and a dead network all look like, and
+they are deliberately not told apart. Busy, no answer and the caller hanging
+up are answers from the far end and are never retried down another provider:
+somebody who declined the call once must not get it again from a new number.
+Nothing is asked whether it is registered; the trunk is tried, and a dead one
+fails in milliseconds.
+
+**What a customer sees.** A different caller ID, and a call that took a few
+seconds longer to ring. If they save it, they ring the other line back next
+time. Say so to whoever answers that line.
+
+**What you see.** A call that fell over ends in the fallback trunk's own
+context, so with the journal on:
+
+```bash
+$ doorman events --json --eventType channel.ended | grep cmm-failover-
+```
+
+names the trunk that actually carried it — the answer to "why did they see the
+wrong number" that is not a guess. Nothing in doorman placed or watched the
+call: the dialplan did it and CEL recorded it.
+
+**When nothing can carry it**, with or without a ladder, the caller now hears
+"all circuits are busy now" and a congestion tone rather than a click. A
+silent failure is how a dead trunk goes unnoticed for a week.
+
+**911 is not affected.** Emergency calls have their own ladder in
+`[cmm-emergency]`, ordered by which trunk has a street address on file, and
+read neither `failover` nor a line's caller ID. See "Which trunk carries 911".
+
+**Inbound has no equivalent here, and that is a real answer.** If a
+registration is down, calls never reach the box at all — there is no code path
+to write. What exists is the provider's **failover DID** (VoIP.ms: DID
+settings → Failover, route to a mobile when the trunk is unreachable), and it
+is the single most valuable thing you can configure that this project will
+never implement. Set it beside the E911 address, once.
+
+**Upgrading a box provisioned before v0.9.0:** the ladder lives in the
+hand-written `[cmm-outbound]` in `asterisk/extensions.conf`. Copy the new
+template over `/etc/asterisk/extensions.conf` (keeping your own edits) and
+`dialplan reload`; without it the key is accepted, rendered, and never read.
+
 ### Rotate a PIN
 
 SSH in, one command, no restart:
