@@ -18,7 +18,8 @@ ends for everyone. Two weeks without a call and the room forgets itself;
 `676767 * 107` stops working until Grace makes it again. A parent sees who
 called and when in `doorman calls`, and nobody can listen in. Twenty
 callers is nothing for the box; the line's simultaneous-call limit is the
-real ceiling, and the plan says what it is.
+real ceiling, and it is two until somebody pays for more (see the open
+questions).
 
 ## Starting point
 
@@ -87,8 +88,14 @@ hears "the room is full" instead of silence.
 
 ## Open questions
 
-1. VoIP.ms's simultaneous inbound call limit on this line, and whether it
-   is per DID or per sub-account. Decides whether "up to 20" is true.
+1. ~~VoIP.ms's simultaneous inbound call limit on this line~~ — answered
+   2026-09-25: the API does not expose it, and VoIP.ms's published default
+   is **two simultaneous calls per DID** on every plan. So today the party
+   line holds two friends, not twenty. More channels are a Virtual PRI
+   (flat, per channel per month) or a support request; either is a cost
+   line in this plan before M1 is worth a Saturday. The `600` bridge's
+   `max_members` is set from whatever the line actually allows, so the
+   third caller hears "the room is full" rather than a busy signal.
 2. Which prompt says "enter the room"? The pack contract is six names;
    the room prompts are the lobby's existing ones plus SayDigits until a
    deliberate pack bump adds "say your name" and "the room is full".
