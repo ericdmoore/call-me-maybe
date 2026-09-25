@@ -18,7 +18,7 @@ the two mixed scenarios) → s03 (M2 the phone call, M3 the gauge) → s01
 | | Stream | Status | Depends on |
 |---|---|---|---|
 | **s01** | [Multiple lines](s01-multiple-DIDs/) — several numbers, then several providers | **Phase 1 and 2 done; Phase 3 (outbound failover, M3.1–M3.3) not started** | — |
-| **s02** | [Home and office config examples](s02-home-and-office-config-examples/) — worked, tested, published starting points | M1 + M2 shipped (`examples/scenarios/`) | s01 for two of five |
+| **s02** | [Home and office config examples](s02-home-and-office-config-examples/) — worked, tested, published starting points | M1–M3 shipped (`examples/scenarios/`, published at callmemaybe.cc/examples/); M4 next | s01 for two of five |
 | **s03** | [Provider balance checking](s03-provider-balalnce-checking/) — know the trunk is dying before the phone stops | M1 + M4 shipped (`doorman balance`, per trunk); M2 the phone call and M3 the gauge open | composite prompts for M2; TASKS §4 for M3 |
 | **s04** | [Network helpers](s04-standarddize-network-helpers/) — TTS, STT and LLM addressed by URL, wherever they run | planned | — |
 | **s05** | [System alerts](s05-system-alerts/) — the house phone tells you about the house phone | planned | composite prompts |

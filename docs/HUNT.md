@@ -29,8 +29,10 @@ skipped ahead, and that is a feature.
    under `[features-internal]` and uncomment the four `exten`/`same` lines.
    Then `sudo asterisk -rx 'dialplan reload'`.
 2. **Add a mailbox per recorded clue**, named for its answer, in
-   `/etc/asterisk/voicemail.conf` under `[household]`. The example file has a
-   commented block to copy:
+   `/etc/asterisk/voicemail.conf` under `[household]`. The example file
+   (`asterisk/voicemail.conf.example` in the repository;
+   `/opt/call-me-maybe/asterisk/voicemail.conf.example` on an installed
+   box) has a commented block to copy:
 
    ```
    6  => 7391,Hunt: chairs

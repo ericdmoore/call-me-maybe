@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────────────────────
+# Example · A one-person business line — the hardware.
+#
+# Companion to policy.example.toml in this directory. Copy both:
+#
+#   cp examples/scenarios/solo-business/handsets.example.toml handsets.toml
+#   cp examples/scenarios/solo-business/policy.example.toml    policy.toml
+#   ./bin/doorman init          # replaces the placeholder PINs
+#
+# Two phones, because that is how many one person can be near: a desk phone
+# and a cordless. The group is what policy.toml rings when it means "wherever
+# she is right now" — writing the two ids out in five places instead would
+# mean five edits the day a third phone arrives.
+#
+# Every handset needs dtmf_mode=rfc4733, which `doorman render` writes for
+# you. Without it the lobby is deaf and every stranger is dismissed.
+# ─────────────────────────────────────────────────────────────
+
+[[handsets]]
+id = "desk"
+label = "Office desk"
+endpoint = "PJSIP/desk"          # must be PJSIP/<id>; render enforces it
+number = 101                     # internal extension + BLF hint (100-199)
+page = false                     # nothing to page: there is one person here
+mailbox = "surveying"            # MWI lamp follows this voicemail.conf box
+password_env = "HANDSET_DESK_PASSWORD"
+
+[[handsets]]
+id = "cordless"
+label = "Cordless handset"
+endpoint = "PJSIP/cordless"
+number = 102
+page = false
+mailbox = "surveying"
+password_env = "HANDSET_CORDLESS_PASSWORD"
+
+# ── Groups ───────────────────────────────────────────────────
+# A group id works anywhere a handset id does in policy.toml.
+
+[[groups]]
+id = "working"
+label = "Both phones"
+handsets = ["desk", "cordless"]

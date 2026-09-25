@@ -96,7 +96,7 @@ Outbound, the same section carries `outbound_cid` — what a call placed as this
 
 Observability follows the same shape: **one** call log for every line, with `line` on the record, so a whole day reads in order and `doorman calls --line biz` narrows it afterwards. A `*4` call is recorded as `direction: outbound` with the number in `dialled` and an outcome of `placed` — doorman hands the channel to the dialplan and never learns whether anybody answered. Both fields are absent for the default line and for inbound, so an install with one number writes byte-identical records and never sees a line column. The event webhook carries `line` too, which is what a Home Assistant automation routes an announcement on; it stays inbound-only, because an outbound call rings nothing in this house.
 
-**Helping someone write a `policy.toml`? Read <https://callmemaybe.cc/llms-policy.txt> first.** It is the complete current key surface, two worked examples, the rules a JSON Schema cannot express, and — the part that matters — an explicit list of keys that appear in the planning docs but do not load. Machine-readable schema at <https://callmemaybe.cc/schema/policy.json>.
+**Helping someone write a `policy.toml`? Read <https://callmemaybe.cc/llms-policy.txt> first.** It is the complete current key surface, pointers to the worked examples published at <https://callmemaybe.cc/examples/> (one directory per situation, each stating what it cannot do), the rules a JSON Schema cannot express, and — the part that matters — an explicit list of keys that appear in the planning docs but do not load. Machine-readable schema at <https://callmemaybe.cc/schema/policy.json>.
 
 ## Durable event consumers
 

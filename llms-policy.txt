@@ -208,49 +208,43 @@ and that is the population it was given to on purpose.
 **Never put a real PIN in an example, a commit message, or a test fixture.**
 Use `555-01xx` numbers, which are reserved for fiction.
 
-## A worked home line
+## Worked examples — fetch these rather than inventing one
 
-    [house]
-    handsets = ["kitchen", "living-room", "primary-bed"]
-    voicemail = "family"
+Complete, checked configurations are published beside the schema, one
+directory per situation, each file opening with who it is for, what it
+needs that does not exist, and what it deliberately does not do. Start from
+the one that resembles the person you are helping; copy both files.
 
-    [[people]]
-    name = "Grandma"
-    numbers = ["512-555-0100"]
+- **The family line** — one number, eight phones. Known callers ring
+  everything; a stranger gets the lobby, then "good day". Groups
+  (`adults`, `kids`, `everyone`), a school-night schedule on the kids'
+  extension, ladders by `rings`.
+  https://callmemaybe.cc/examples/scenarios/family-line/policy.example.toml
+  https://callmemaybe.cc/examples/scenarios/family-line/handsets.example.toml
+- **A one-person business line** — one number, working from home.
+  `on_no_input = "voicemail"` so no lead is dropped, business hours from
+  `[[schedules]]`, clients on the allow-list, an extension per concern each
+  ending in its own mailbox.
+  https://callmemaybe.cc/examples/scenarios/solo-business/policy.example.toml
+  https://callmemaybe.cc/examples/scenarios/solo-business/handsets.example.toml
 
-    [[people]]
-    name = "School"
-    numbers = ["+15125550142"]
+The index, with what each one cannot do:
+https://callmemaybe.cc/examples/README.md. The templates — one of every
+section, which is what `doorman init` copies from — are beside them:
+https://callmemaybe.cc/examples/policy.example.toml and siblings.
 
-    [[extensions]]
-    label = "Kids"
-    pin = "739104"
-    voicemail = "kids"
-    afterhours = "school-nights"
-    [[extensions.steps]]
-    handsets = ["kids-room"]
-    seconds = 20
-    [[extensions.steps]]
-    handsets = ["kitchen", "primary-bed"]
-    seconds = 25
+Every PIN in every example is the `CHANGEME` sentinel and `doorman check`
+refuses the file until `doorman init` replaces them; that is the point, not
+a defect to repair by hand. Every number is `555-01xx`.
 
-    [[schedules]]
-    id = "school-nights"
-    start = "20:30"
-    end = "07:00"
-    days = ["SU","MO","TU","WE","TH"]
+## A second line beside the first
 
-Grandma and the school ring the house directly. A stranger hears the lobby and
-needs `739104`, which rings the kids' room for 20 seconds, then escalates to
-the kitchen and main bedroom, then goes to the kids' mailbox. On school nights
-it skips straight to voicemail.
-
-## A worked business line
-
-This goes in `policy.biz.toml` beside the home line's `policy.toml`, with the
-dialplan sending the business DID to `Stasis(${DOORMAN_APP},line,biz)`. Same
-binary, opposite disposition: the home line dismisses a stranger who dials
-nothing, this one takes a message.
+The one shape not yet among the published examples: a business number
+answered by the same box as the home line. This goes in `policy.biz.toml`
+beside the home line's `policy.toml`, with the dialplan sending the
+business DID to `Stasis(${DOORMAN_APP},line,biz)`. Same binary, opposite
+disposition: the home line dismisses a stranger who dials nothing, this one
+takes a message.
 
     [line]
     label       = "Mertaugh Enterprises"
@@ -547,6 +541,8 @@ that appears to deliver it. `docs/TASKS.md` has the current state.
 - `https://callmemaybe.cc/schema/policy.json` — the machine-readable surface
 - `https://callmemaybe.cc/schema/trunks.json` — the provider inventory
 - `https://callmemaybe.cc/schema/contacts.json` — the address-book inventory
+- `https://callmemaybe.cc/examples/README.md` — the worked examples and the
+  templates, with what each cannot do
 - `doorman schema policy` — the same, from the binary in hand
 - `doorman check` — the authority on whether a file is valid
 - `doorman init` — generate a starting config whose placeholders cannot

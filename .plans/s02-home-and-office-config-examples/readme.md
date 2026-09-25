@@ -6,9 +6,12 @@ start from instead of assembling one from a schema.
 **Status:** **M1 and M2 are complete.** The framework is in
 `examples/README.md`, and both examples that need nothing unbuilt have
 shipped: `examples/scenarios/solo-business/` (E2) and
-`examples/scenarios/family-line/` (E1). M3 (publishing to the site) is next
-and untouched. E3 and E4 want s01 Phase 1, which has since landed, so M4 is
-now unblocked; E5 still waits on primitives that do not exist.
+`examples/scenarios/family-line/` (E1). **M3 shipped 2026-09-25:** the
+README, the templates and every scenario are published at
+<https://callmemaybe.cc/examples/> by `make site-assets` (CI fails when the
+copies drift), and `llms-policy.txt` points at them instead of carrying a
+home line inline. E3 and E4 want s01 Phase 1, which has since landed, so M4
+is next; E5 still waits on primitives that do not exist.
 Related: `llms-policy.txt`, `examples/`, `docs/writing-policies.md`,
 `.plans/s01-multiple-DIDs` (several of these examples need it).
 
@@ -180,15 +183,20 @@ blocked. E2 is `examples/scenarios/solo-business/`, E1 is
 --allow-placeholders` and both refuse a strict check, which is the sentinel
 doing its job.
 
-### M3 · Publish for models — next
+### M3 · Publish for models — **done** (2026-09-25)
 
-Untouched. `make site-assets` and `site/public` are deliberately unchanged by
-M1/M2, so this is still a clean piece of work.
-
-- `make site-assets` copies examples beside the schema.
-- `llms-policy.txt` links them and says which is which — it already carries two
-  worked examples inline, which should become pointers now these exist so
-  there is one copy rather than two.
+- `make site-assets` copies `examples/README.md`, the five templates and
+  `scenarios/` to `site/public/examples/` under their own names; the one
+  rename is `.env.example` → `env.example`, because a dotfile is hidden to
+  a static host. The existing CI step (`make site-assets` then
+  `git diff --exit-code`) covers the copies, so an example that changes
+  without a republish fails the build.
+- `llms-policy.txt` now opens its examples section with the two published
+  scenarios and the index URL, and says which is which and what each
+  cannot do. The inline home line is gone — one copy, not two. The inline
+  *business* line stays, retitled "A second line beside the first": it is
+  the E3 shape, and becomes a pointer the day E3 ships (M4).
+- `llms.txt` and `examples/README.md` say where the set is published.
 
 ### M4 · E3 and E4 — unblocked
 

@@ -73,7 +73,17 @@ site-assets: build
 	@for n in policy handsets trunks contacts env; do \
 		./bin/doorman schema $$n > site/public/schema/$$n.json; \
 	done
-	@echo "✓ site/public: llms.txt, llms-policy.txt, install.sh, schema/{policy,handsets,trunks,contacts,env}.json"
+	@# The examples, beside the schema, so a model can fetch a worked
+	@# configuration from the same host as the surface it was written to.
+	@# .env.example is published without its dot: static hosts and browsers
+	@# treat a dotfile as hidden, and a hidden template helps nobody.
+	@rm -rf site/public/examples && mkdir -p site/public/examples
+	@cp examples/README.md site/public/examples/README.md
+	@cp examples/policy.example.toml examples/handsets.example.toml examples/trunks.example.toml \
+		examples/contacts.example.toml examples/messages.example.toml site/public/examples/
+	@cp examples/.env.example site/public/examples/env.example
+	@cp -R examples/scenarios site/public/examples/scenarios
+	@echo "✓ site/public: llms.txt, llms-policy.txt, install.sh, schema/{policy,handsets,trunks,contacts,env}.json, examples/"
 
 ## check: everything that must be green before a commit
 check: fmt-check vet lint test build

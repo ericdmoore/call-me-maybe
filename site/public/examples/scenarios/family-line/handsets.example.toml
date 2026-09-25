@@ -1,0 +1,124 @@
+# ─────────────────────────────────────────────────────────────
+# Example · The family line — the hardware.
+#
+# Companion to policy.example.toml in this directory. Copy both:
+#
+#   cp examples/scenarios/family-line/handsets.example.toml handsets.toml
+#   cp examples/scenarios/family-line/policy.example.toml    policy.toml
+#   ./bin/doorman init          # replaces the placeholder PINs
+#
+# Eight phones: the kitchen, five bedrooms, the office and the playroom. That
+# is a lot of ringing, which is the point — a known caller rings all of it,
+# and everything else is about ringing less than all of it.
+#
+# `page` is the one setting here that is a house rule rather than an
+# inventory fact: a bedroom that answers the dial-500 page is a bedroom
+# somebody gets woken up in.
+#
+# Every handset needs dtmf_mode=rfc4733, which `doorman render` writes for
+# you. Without it the lobby is deaf and every stranger is dismissed.
+# ─────────────────────────────────────────────────────────────
+
+[[handsets]]
+id = "kitchen"
+label = "Kitchen"
+endpoint = "PJSIP/kitchen"       # must be PJSIP/<id>; render enforces it
+number = 101                     # internal extension + BLF hint (100-199)
+page = true
+mailbox = "family"               # MWI lamp follows this voicemail.conf box
+password_env = "HANDSET_KITCHEN_PASSWORD"
+
+[[handsets]]
+id = "office"
+label = "Office"
+endpoint = "PJSIP/office"
+number = 102
+page = true
+mailbox = "family"
+password_env = "HANDSET_OFFICE_PASSWORD"
+
+[[handsets]]
+id = "playroom"
+label = "Playroom"
+endpoint = "PJSIP/playroom"
+number = 103
+page = true
+mailbox = "kids"
+password_env = "HANDSET_PLAYROOM_PASSWORD"
+
+# ── The five bedrooms ────────────────────────────────────────
+# None of them page. A page is for "dinner is ready", and a bedroom is where
+# somebody is asleep, revising, or on a call they would rather you did not
+# join.
+
+[[handsets]]
+id = "primary-bed"
+label = "Primary bedroom"
+endpoint = "PJSIP/primary-bed"
+number = 104
+page = false
+mailbox = "family"
+password_env = "HANDSET_PRIMARY_BED_PASSWORD"
+
+[[handsets]]
+id = "bunk-room"
+label = "Bunk room"
+endpoint = "PJSIP/bunk-room"
+number = 105
+page = false
+mailbox = "kids"
+password_env = "HANDSET_BUNK_ROOM_PASSWORD"
+
+[[handsets]]
+id = "blue-room"
+label = "Blue room"
+endpoint = "PJSIP/blue-room"
+number = 106
+page = false
+mailbox = "kids"
+password_env = "HANDSET_BLUE_ROOM_PASSWORD"
+
+[[handsets]]
+id = "green-room"
+label = "Green room"
+endpoint = "PJSIP/green-room"
+number = 107
+page = false
+mailbox = "kids"
+password_env = "HANDSET_GREEN_ROOM_PASSWORD"
+
+[[handsets]]
+id = "attic-bed"
+label = "Attic bedroom"
+endpoint = "PJSIP/attic-bed"
+number = 108
+page = false
+mailbox = "kids"
+password_env = "HANDSET_ATTIC_BED_PASSWORD"
+
+# ── Groups ───────────────────────────────────────────────────
+# A group id works anywhere a handset id does in policy.toml — [house],
+# extensions, ladder steps. Groups contain handsets only: no nesting, which
+# is why "everyone" lists all eight rather than "adults" plus "kids".
+#
+# The whole point of `everyone` is [house]. Writing eight ids there and then
+# again in the "Whole house" extension is two lists that disagree the week
+# after a phone is added, and the disagreement is silent.
+
+[[groups]]
+id = "adults"
+label = "Adult handsets"
+handsets = ["kitchen", "office", "primary-bed"]
+
+[[groups]]
+id = "kids"
+label = "Kids' rooms and the playroom"
+handsets = ["bunk-room", "blue-room", "green-room", "attic-bed", "playroom"]
+
+[[groups]]
+id = "everyone"
+label = "Every phone in the house"
+handsets = [
+  "kitchen", "office", "playroom",
+  "primary-bed", "bunk-room", "blue-room", "green-room", "attic-bed",
+]
