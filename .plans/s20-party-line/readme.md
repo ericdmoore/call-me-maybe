@@ -98,8 +98,10 @@ hears "the room is full" instead of silence.
    month standing, or roughly a dollar per friend per party-day if the
    burst option works the way it reads. The better answer is the one s01
    already built for: **a second DID at a provider that does not meter
-   channels** (Telnyx or Flowroute, per-minute, concurrency limits in the
-   dozens by default), on its own trunk in `trunks.toml`, as the party
+   channels** — Flowroute meters inbound by the minute with no cap on
+   simultaneous calls; Telnyx sets no inbound limit per SIP connection by
+   default and only caps outbound (2, then 10 after verification) — on its
+   own trunk in `trunks.toml`, as the party
    line's own number — a dollar a month for the number and about a dollar
    for a ten-friend half hour. The house number stays what it is. The `600` bridge's
    `max_members` is set from whatever the line actually allows, so the
