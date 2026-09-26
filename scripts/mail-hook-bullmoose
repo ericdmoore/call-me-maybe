@@ -7,8 +7,9 @@
 # names the house mailbox and comes from the environment — the caller's .env,
 # or /etc/asterisk/cmm-mail.env for Asterisk's own voicemail hook. Whoever
 # runs this needs a bullmoose login of their own: `bullmoose init` as that
-# user, with a token scoped to `send` and nothing else (RUNBOOK, "The house
-# mailbox"). doorman never learns to send mail; it prints, and this sends.
+# user, with a token scoped to `draft,send` and nothing else — draft creates
+# the message, send submits it, and neither reads anything (RUNBOOK, "The
+# house mailbox"). doorman never learns to send mail; it prints, and this sends.
 #
 # Any other mail system is a script with this same contract: subject as the
 # one argument, Markdown body on stdin, non-zero exit when it did not send.

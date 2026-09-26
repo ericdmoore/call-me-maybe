@@ -622,8 +622,13 @@ as the house and do nothing else, and losing the box means revoking one
 token:
 
 ```bash
-$ bullmoose admin token create midbury@example.com --name jepsen-voicemail --scopes send
+$ bullmoose admin token create midbury@example.com --name jepsen-voicemail --scopes draft,send
 ```
+
+Both scopes, and only those: `send` submits, but the message has to be
+created first and that is `draft` — a token with `send` alone fails at
+`Email/set` with "token lacks the draft scope" (found on the first box,
+2026-09-25). Neither reads anything.
 
 It is shown once. Put it in a bootstrap bundle rather than on a command
 line, so it never lands in a shell history:

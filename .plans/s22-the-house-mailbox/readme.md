@@ -77,7 +77,9 @@ the copy. If the hook fails the message is still in the box and the lamp is
 still lit — email is a feed, never the record.
 
 **A send-only token, minted for the box, revocable alone.** On the
-workstation: `bullmoose token create --name jepsen --scopes send`. On the
+workstation: `bullmoose admin token create <house> --name jepsen --scopes
+draft,send` — `send` alone cannot create the message it would submit
+(found live: `Email/set` refuses without `draft`); neither scope reads. On the
 box, as the service account: `bullmoose init --base <jmap> --token bm_…`,
 with the CLI's config directed under `/var/lib/doorman/bullmoose` (0700).
 That token can send mail as the house and do nothing else; losing the box
@@ -121,8 +123,9 @@ call, and the narrower answer is two tokens.
 **Done so far.** The account `midbury@bullmoose.cc` exists (created with
 the operator CLI, tenant `t_bullmoose`), with read grants for the user's own
 account and for alpaca's CLI login so the feed can be verified from here.
-Two send-only tokens were minted for the box — one for Asterisk's user, one
-for doorman's — and stored only in 0600 files on alpaca until they are
+Two `draft,send` tokens were minted for the box — one for Asterisk's user,
+one for doorman's — after the first, `send`-only pair was found unable to
+create a message and revoked; stored only in 0600 files on alpaca until
 placed. `scripts/voicemail-notify` (externnotify: newest message in the
 box, Markdown note, recording linked so the CLI attaches it, `timeout 60`,
 outcome to journald under `cmm-voicemail`) and `scripts/mail-hook-bullmoose`
