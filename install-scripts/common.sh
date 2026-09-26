@@ -209,6 +209,44 @@ prepare() {
  run install -o root -g root -m 0755 "$repo/scripts/voicemail-notify" /opt/call-me-maybe/scripts/voicemail-notify
  run install -o root -g root -m 0755 "$repo/scripts/mail-hook-bullmoose" /opt/call-me-maybe/scripts/mail-hook-bullmoose
  run install -m 0644 "$repo/scripts/cel-spool.sql" /opt/call-me-maybe/scripts/cel-spool.sql
+ # Asterisk-wide call capture (CEL) is what lets the journal record calls
+ # doorman never touched — a handset dialling out, a call that fell over to
+ # another trunk. Three pieces, all host preparation and all idempotent:
+ # the distro's disabled sample cel.conf and cel_sqlite3_custom.conf are set
+ # aside (kept as .distro, like every original) and ours installed, unless
+ # the file in place is already ours or somebody else's edit; the SQLite
+ # spool is initialised ONCE as the asterisk user with scripts/cel-spool.sql,
+ # which is what gives it its identity, AUTOINCREMENT cursor and retention
+ # trigger (the backend would otherwise create a table the journal cannot
+ # trust); and the service account is allowed to read it. The spool holds
+ # full caller IDs; nothing here widens it beyond asterisk and doorman.
+ # `doorman init` then points .env at both. First customer, 2026-09-25: the
+ # rebuilt box ran two days with the distro sample in place and no spool.
+ astlog=/var/log/asterisk
+ for name in cel.conf cel_sqlite3_custom.conf; do
+  if [ -e "/etc/asterisk/$name" ] && ! grep -q 'call-me-maybe' "/etc/asterisk/$name" && [ ! -e "/etc/asterisk/$name.distro" ] && ! grep -q '^enable=yes\|^table' "/etc/asterisk/$name"; then
+   run mv "/etc/asterisk/$name" "/etc/asterisk/$name.distro"
+  fi
+  if [ ! -e "/etc/asterisk/$name" ]; then
+   run install -o root -g asterisk -m 0640 "$repo/asterisk/$name" "/etc/asterisk/$name"
+  elif ! grep -q 'call-me-maybe' "/etc/asterisk/$name" && [ "$dry_run" = 0 ]; then
+   printf 'note: /etc/asterisk/%s is not the shipped file and not the distro sample; left alone (docs/events.md)\n' "$name"
+  fi
+ done
+ if [ "$dry_run" = 1 ] || [ ! -e "$astlog/master.db" ]; then
+  run sh -c "umask 077; cd / && su -s /bin/sh asterisk -c 'sqlite3 $astlog/master.db' < $repo/scripts/cel-spool.sql"
+ elif ! su -s /bin/sh asterisk -c "sqlite3 '$astlog/master.db' 'SELECT source_id FROM doorman_cel_meta WHERE singleton=1'" >/dev/null 2>&1; then
+  printf 'note: %s/master.db exists but was not initialised by scripts/cel-spool.sql; see docs/events.md before enabling CEL_SPOOL_PATH\n' "$astlog"
+ fi
+ run setfacl -m u:doorman:rx,d:u:doorman:rX "$astlog"
+ run setfacl -m u:doorman:r "$astlog/master.db"
+ for side in "$astlog/master.db-wal" "$astlog/master.db-shm"; do
+  [ "$dry_run" = 0 ] && [ -e "$side" ] && run setfacl -m u:doorman:r "$side"
+ done
+ if [ "$dry_run" = 0 ] && systemctl is-active --quiet asterisk 2>/dev/null; then
+  # Already loaded is fine; a freshly configured backend needs asking once.
+  run asterisk -rx 'module load cel_sqlite3_custom.so' >/dev/null 2>&1 || true
+ fi
  install_once "$binary" /opt/call-me-maybe/bin/doorman 0755
  # The same binary on the system PATH — which is also sudo's secure_path — so
  # the operator can say `sudo -u doorman doorman init` instead of spelling out

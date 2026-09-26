@@ -232,6 +232,15 @@ writes `master.db` under Asterisk's `astlogdir` (usually
 sudo asterisk -rx 'module show like cel_sqlite3_custom'
 ```
 
+**On a host prepared by `install-scripts/`, all of this is done:** the two
+configuration files are installed (the distro samples kept as `.distro`), the
+spool is initialised once as the asterisk user, the service account is granted
+read access, and `doorman init` writes `CEL_SPOOL_PATH` and
+`EVENT_JOURNAL_PATH` into `.env` because the places exist. A rerun is
+idempotent and repairs a host prepared before 2026-09-25. `scripts/smoke.sh`
+reports the capture state as its own rung. What follows is the same procedure
+by hand, for a host prepared some other way.
+
 During a maintenance window, stop Asterisk, initialise the spool, then install
 the configuration files. Substitute the actual `astlogdir` and service user.
 The `sqlite3` executable is an operator setup tool; Doorman remains a static,

@@ -84,6 +84,16 @@ func runInit(args []string) int {
 		fmt.Fprintf(os.Stderr, "  Run init from the repository root, or pass --examples.\n")
 		return 1
 	}
+	// A prepared Linux host has a private journal directory and an
+	// initialised CEL spool (install-scripts/); point .env at whichever
+	// exists, so the journal is on from the first boot and a workstation
+	// init writes exactly what it always did.
+	if info, err := os.Stat("/var/lib/doorman/journal"); err == nil && info.IsDir() {
+		plan.JournalPath = "/var/lib/doorman/journal/events.db"
+		if _, err := os.Stat("/var/log/asterisk/master.db"); err == nil {
+			plan.CELSpoolPath = "/var/log/asterisk/master.db"
+		}
+	}
 	envOut := plan.EnvFile(string(envBase))
 
 	if *dryRun {

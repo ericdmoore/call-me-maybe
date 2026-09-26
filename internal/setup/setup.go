@@ -57,6 +57,14 @@ type Plan struct {
 	EnvPath      string
 	PolicyPath   string
 	HandsetsPath string
+
+	// JournalPath and CELSpoolPath, when set, turn the journal and the
+	// Asterisk-wide capture on in the rendered .env. cmd/doorman fills them
+	// in only where the installer left the places for them — the private
+	// journal directory, the initialised spool — so a workstation init
+	// writes the same commented-out lines it always did.
+	JournalPath  string
+	CELSpoolPath string
 }
 
 // Paths locates the files init manages.
@@ -364,6 +372,23 @@ func (p *Plan) EnvFile(base string) string {
 	// Any handset variables the example shipped that this install has no
 	// handset for would otherwise sit empty and confuse `render`.
 	out = regexp.MustCompile(`(?m)^HANDSET_[A-Z0-9_]+_(ADMIN_|PROVISION_)?PASSWORD=$\n?`).ReplaceAllString(out, "")
+	// The journal and the CEL spool ship commented out in the example; on a
+	// prepared host they are uncommented in place, so the comment above each
+	// stays beside the value it explains.
+	uncomment := func(key, value string) {
+		re := regexp.MustCompile(`(?m)^#\s*` + regexp.QuoteMeta(key) + `=.*$`)
+		if re.MatchString(out) {
+			out = re.ReplaceAllLiteralString(out, key+"="+value)
+			return
+		}
+		set(key, value)
+	}
+	if p.JournalPath != "" {
+		uncomment("EVENT_JOURNAL_PATH", p.JournalPath)
+	}
+	if p.CELSpoolPath != "" {
+		uncomment("CEL_SPOOL_PATH", p.CELSpoolPath)
+	}
 	return out
 }
 

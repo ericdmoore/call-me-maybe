@@ -251,6 +251,32 @@ printf '    this script does not dial 911 and never will. Test it deliberately,\
 printf '    and keep a mobile in the house: a hobbyist phone on a consumer\n'
 printf '    connection is a supplementary phone, never the only way to call for help.\n'
 
+# ── Rung 5c: call capture ────────────────────────────────────
+# Optional, and reported as such: without it the journal holds only what
+# doorman itself saw, and a handset dialling out leaves no record.
+rung "5c. Call capture (CEL)"
+
+if ast 'cel show status' | grep -q 'CEL Logging: Enabled'; then
+  pass "CEL logging enabled"
+  if ast 'module show like cel_sqlite3_custom' | grep -q 'Running'; then
+    pass "cel_sqlite3_custom is running"
+  else
+    fail "cel_sqlite3_custom is not running" "sudo asterisk -rx 'module load cel_sqlite3_custom.so'; check /etc/asterisk/cel_sqlite3_custom.conf"
+  fi
+  if [ -n "$(envval CEL_SPOOL_PATH)" ]; then
+    SPOOL=$(envval CEL_SPOOL_PATH)
+    if $SUDO -u doorman test -r "$SPOOL" 2>/dev/null; then
+      pass "doorman can read $SPOOL"
+    else
+      fail "doorman cannot read $SPOOL" "sudo setfacl -m u:doorman:rx,d:u:doorman:rX $(dirname "$SPOOL") && sudo setfacl -m u:doorman:r $SPOOL"
+    fi
+  else
+    warn "CEL_SPOOL_PATH is not set — Asterisk records, doorman does not read it" "CEL_SPOOL_PATH=/var/log/asterisk/master.db in .env, then restart doorman"
+  fi
+else
+  warn "CEL logging is off — the journal sees only doorman's own calls" "install asterisk/cel.conf (the installer does on Linux); see docs/events.md"
+fi
+
 # ── Rung 6: prompts ──────────────────────────────────────────
 rung "6. Prompts"
 

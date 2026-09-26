@@ -211,6 +211,7 @@ run. Only a strictly newer semantic version is advertised.
 
 ```bash
 $ cd /opt/call-me-maybe
+$ sudo cp asterisk/cel.conf asterisk/cel_sqlite3_custom.conf /etc/asterisk/   # the installer already did, on Linux
 $ sudo cp asterisk/extensions.conf asterisk/http.conf asterisk/rtp.conf \
           asterisk/musiconhold.conf asterisk/res_parking.conf asterisk/pjsip_notify.conf /etc/asterisk/
 $ sudo cp asterisk/pjsip.conf.example     /etc/asterisk/pjsip.conf

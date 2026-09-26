@@ -223,3 +223,38 @@ func TestAdminSecretSatisfiesPhonePasswordRules(t *testing.T) {
 		t.Error("env var naming")
 	}
 }
+
+func TestEnvFileTurnsTheJournalOnOnlyWhereThePlacesExist(t *testing.T) {
+	p, err := BuildPlan([]string{"Kitchen"}, DefaultPaths())
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	base := "# journal\n# EVENT_JOURNAL_PATH=/var/lib/doorman/journal/events.db\n# capture\n# CEL_SPOOL_PATH=/var/log/asterisk/master.db\n"
+
+	// A workstation: nothing to point at, the two lines stay as shipped
+	// (the secrets are appended below them, as always).
+	if out := p.EnvFile(base); !strings.HasPrefix(out, base) {
+		t.Errorf("without paths the example's lines should be untouched:\n%s", out)
+	}
+	// A prepared host: uncommented in place, comment kept beside the value.
+	p.JournalPath = "/var/lib/doorman/journal/events.db"
+	p.CELSpoolPath = "/var/log/asterisk/master.db"
+	out := p.EnvFile(base)
+	for _, want := range []string{
+		"# journal\nEVENT_JOURNAL_PATH=/var/lib/doorman/journal/events.db\n",
+		"# capture\nCEL_SPOOL_PATH=/var/log/asterisk/master.db\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "# EVENT_JOURNAL_PATH") || strings.Contains(out, "# CEL_SPOOL_PATH") {
+		t.Errorf("the commented lines should have been replaced, not duplicated:\n%s", out)
+	}
+	// Journal only: the spool line stays commented rather than pointing at
+	// a file that does not exist.
+	p.CELSpoolPath = ""
+	if out := p.EnvFile(base); !strings.Contains(out, "# CEL_SPOOL_PATH=") {
+		t.Errorf("CEL_SPOOL_PATH should stay commented without a spool:\n%s", out)
+	}
+}
