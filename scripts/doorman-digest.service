@@ -1,0 +1,43 @@
+# Yesterday, every morning: `doorman digest --mail --full` renders the day's
+# calls (from the journal) and texts (from the inbox's outcome log) as one
+# Markdown mail and hands it to MAIL_HOOK for MAIL_TO — the house mailbox,
+# which is the audit log, hence --full: it already holds whole numbers from
+# the voicemail and carrier feeds. doorman never sends mail itself.
+#
+# Run by doorman-digest.timer. Exits 2 and stays quiet when MAIL_HOOK and
+# MAIL_TO are not set: a house with no mailbox has nowhere to send the day.
+#
+# The service account needs its own bullmoose login (RUNBOOK, "The house
+# mailbox"): HOME is /var/lib/doorman so the CLI keeps it under
+# /var/lib/doorman/.bullmoose, inside the sandbox this unit allows writes to.
+#
+# Install:
+#   sudo cp scripts/doorman-digest.service scripts/doorman-digest.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now doorman-digest.timer
+[Unit]
+Description=Call Me Maybe — yesterday, to the house mailbox
+Documentation=https://callmemaybe.cc
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=doorman
+Group=doorman
+WorkingDirectory=/opt/call-me-maybe
+EnvironmentFile=/opt/call-me-maybe/.env
+Environment=HOME=/var/lib/doorman
+ExecStart=/opt/call-me-maybe/bin/doorman digest --mail --full --inbox-state /var/lib/doorman/inbox
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/opt/call-me-maybe
+StateDirectory=doorman
+StateDirectoryMode=0700
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=128M
+
+StandardOutput=journal
+StandardError=journal

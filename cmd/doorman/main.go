@@ -86,6 +86,8 @@ func runCommand() int {
 			return runProvision(os.Args[2:])
 		case "inbox":
 			return runInbox(os.Args[2:])
+		case "digest":
+			return runDigest(os.Args[2:])
 		case "pack":
 			return runPack(os.Args[2:])
 		case "version", "-v", "--version":
@@ -253,7 +255,14 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 no carrier credential on this box; the edge
                                 holds that. Runs in a tab, or under
                                 doorman-inbox.service. Exits 0 with nothing to
-                                do when INBOX_URL or messages.toml is absent
+                                do when INBOX_URL or messages.toml is absent.
+                                With MAIL_HOOK and MAIL_TO set, every reply the
+                                house sends is copied to the house mailbox
+  doorman digest [flags]        yesterday as one mail: calls from the journal,
+                                texts from the inbox's outcome log, as Markdown
+                                on stdout (redacted) or --mail through MAIL_HOOK
+                                to MAIL_TO (--full for whole numbers);
+                                doorman-digest.timer runs it every morning
       -messages path            words file (default $MESSAGES_PATH or ./messages.toml)
       -policy path              policy file, for [[people]] ids (default $POLICY_PATH or ./policy.toml)
       -env path                 secrets file (default ./.env)

@@ -13,6 +13,7 @@ import (
 
 	"callmemaybe/internal/inbox"
 	"callmemaybe/internal/policy"
+	"callmemaybe/internal/textlog"
 	"callmemaybe/internal/xdg"
 )
 
@@ -82,6 +83,19 @@ func runInbox(args []string) int {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return 2
 	}
+	// The inbox's own record of what it did, for the morning digest, and
+	// the house mailbox's copy of every reply — both optional, neither on
+	// the decision path: a text is handled before either is told.
+	outcomes, err := textlog.Open(stateDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 2
+	}
+	mail, err := newMailer(env)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 2
+	}
 
 	// Not journaled from here: the daemon owns the journal's single writer,
 	// and a second writer on the same file is a fight nobody wins. The
@@ -112,6 +126,20 @@ func runInbox(args []string) int {
 			line += "  (" + o.Detail + ")"
 		}
 		fmt.Println(line)
+		if err := outcomes.Append(textlog.Record{
+			At: time.Now(), ID: o.ID, To: o.To, Person: o.Person, Word: o.Word,
+			Action: o.Action, Result: o.Result, Reply: o.Reply, Detail: o.Detail,
+		}); err != nil {
+			fmt.Printf("  %s  outcome log: %v\n", time.Now().Format("15:04:05"), err)
+		}
+		if mail != nil && o.Reply != "" {
+			// Best-effort and off the loop: the house has already spoken.
+			go func(o inbox.Outcome) {
+				if err := mail(replySubject(o), replyBody(o, time.Now())); err != nil {
+					fmt.Printf("  %s  house mailbox: %v\n", time.Now().Format("15:04:05"), err)
+				}
+			}(o)
+		}
 	}
 	onError := func(err error) { fmt.Printf("  %s  edge: %v — retrying\n", time.Now().Format("15:04:05"), err) }
 
@@ -152,4 +180,41 @@ func messagesPathArg(explicit string) string {
 		return p
 	}
 	return "./messages.toml"
+}
+
+// replySubject and replyBody are the house mailbox's copy of a reply. Full
+// number, because that mailbox is the audit log and the carrier's own
+// forwarding of the inbound text already carries it; never the text of an
+// unknown word, which the outcome does not hold either.
+func replySubject(o inbox.Outcome) string {
+	who := o.Person
+	if who == "" {
+		who = o.To
+	}
+	if o.Word != "" {
+		return fmt.Sprintf("The house replied to %s (%s): %s", who, o.Word, o.Reply)
+	}
+	return fmt.Sprintf("The house replied to %s: %s", who, o.Reply)
+}
+
+func replyBody(o inbox.Outcome, at time.Time) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "The house replied **%s**\n\n", o.Reply)
+	fmt.Fprintf(&b, "- to: `%s`", o.To)
+	if o.Person != "" {
+		fmt.Fprintf(&b, " (%s)", o.Person)
+	}
+	b.WriteString("\n")
+	if o.Word != "" {
+		fmt.Fprintf(&b, "- word: %s\n", o.Word)
+	}
+	if o.Action != "" {
+		fmt.Fprintf(&b, "- action: %s\n", o.Action)
+	}
+	fmt.Fprintf(&b, "- result: %s\n", o.Result)
+	if o.Detail != "" {
+		fmt.Fprintf(&b, "- detail: %s\n", o.Detail)
+	}
+	fmt.Fprintf(&b, "- when: %s\n", at.Format("2006-01-02 15:04 MST"))
+	return b.String()
 }

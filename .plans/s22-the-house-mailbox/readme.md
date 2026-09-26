@@ -186,14 +186,38 @@ mint the token, `init` as the service account, test with one message. Done
 when a voicemail left on jepsen arrives in the mailbox with the recording
 attached, and a hook that fails leaves the message and the lamp untouched.
 
-### M2 · The carrier feed and the replies
+### M2 · The carrier feed and the replies — replies shipped (v0.10.0, 2026-09-25); the carrier half is a portal switch
+
+**As built.** `doorman inbox` reads `MAIL_HOOK`/`MAIL_TO` and, after each
+text is handled, copies any reply the house sent to the mailbox — subject
+"The house replied to gabi (garage): The garage is open", body with the
+number, word, action, result — in a goroutine, best-effort, never on the
+decision path. It also keeps its own outcome log
+(`<state>/outcomes.jsonl`, 0600, rotated at 8 MiB), because the journal
+has one writer and this process is not it: the morning digest reads it.
+The service account gets its own `draft,send` token and CLI login under
+`/var/lib/doorman/.bullmoose`, which is why the inbox unit now sets
+`HOME=/var/lib/doorman`. The carrier feed is the one piece with no code:
+VoIP.ms email forwarding for the DID, a portal switch (or `setSMS
+email_enabled=1`), which the user flips because the API password lives
+only in the portal and the edge.
 
 `setSMS` email forwarding on (one API call, recorded in RUNBOOK beside the
 callback); `doorman inbox` runs the hook per reply, best-effort, never on
 the decision path. Done when a `ping` produces two mails: the carrier's copy
 of "ping" and the house's copy of "pong".
 
-### M3 · The digest
+### M3 · The digest — **done** (v0.10.0, 2026-09-25)
+
+**As built.** `doorman digest [--since 24h] [--full] [--mail]` renders the
+day as Markdown: calls from the journal (or the legacy log; a box with
+neither is told to set `EVENT_JOURNAL_PATH` rather than failing the
+morning), texts from the inbox's outcome log. Redacted on stdout as
+`doorman calls` is; `--full` for whole numbers. `doorman-digest.timer`
+runs it at 07:30 with `--mail --full`, because the house mailbox is the
+audit log and the other feeds already carry whole numbers there. Pure
+renderer, tested without a journal; the mail hook runner is shared with
+the inbox and tested against a shell script.
 
 `doorman digest [--since] [--full]` over the journal; `doorman-digest.timer`;
 the hook. Done when the morning mail lists yesterday's calls and texts,

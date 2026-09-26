@@ -25,6 +25,7 @@ doorman calls --json      # the call log as JSON Lines: one record per call,
                           # --direction narrow it on a box with several numbers
 doorman events --json     # durable event page; --after, --limit, --eventType
                           # reads internal public_events_v1; no public DB access
+doorman digest --mail     # yesterday's calls and texts as one mail to the house mailbox
 doorman balance --json    # what is left on each prepaid trunk; exit 1 when any
                           # is low; --ring kitchen has the house say so aloud
                           # is under its threshold, so cron needs no wrapper

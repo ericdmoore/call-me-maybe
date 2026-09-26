@@ -22,6 +22,10 @@ User=doorman
 Group=doorman
 WorkingDirectory=/opt/call-me-maybe
 EnvironmentFile=/opt/call-me-maybe/.env
+# The reply feed runs MAIL_HOOK, whose shipped form is the bullmoose CLI,
+# which keeps its login under $HOME/.bullmoose — so HOME is the state
+# directory this sandbox lets the service account write to.
+Environment=HOME=/var/lib/doorman
 ExecStart=/opt/call-me-maybe/bin/doorman inbox -state /var/lib/doorman/inbox
 Restart=on-failure
 RestartSec=5

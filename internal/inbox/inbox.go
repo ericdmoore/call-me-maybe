@@ -190,6 +190,11 @@ type Outcome struct {
 	Action string // the [[actions]] id the word performed, when it named one
 	Person string // [[people]] id or name, when the sender is on the list
 	Detail string
+	// To is the sender in E.164 once it parsed as a number, and Reply is
+	// what the house sent back — the fact the house mailbox wants a copy
+	// of. Empty when nothing was sent: a stranger is never answered.
+	To    string
+	Reply string
 }
 
 // Deps is what the reader needs from the house.
@@ -257,6 +262,7 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 		out.Detail = "sender is not a phone number"
 		return out
 	}
+	out.To = n.Value
 	caller, ok := r.d.Policy.LookupCaller(n.Value)
 	if !ok {
 		// Archived by the carrier's email path; never answered, because a
@@ -278,6 +284,8 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 		reply := "I know these words: " + strings.Join(r.allowedWords(caller), ", ")
 		if err := r.d.Edge.Send(ctx, n.Value, reply); err != nil {
 			out.Detail = "reply failed: " + err.Error()
+		} else {
+			out.Reply = reply
 		}
 		return out
 	}
@@ -311,7 +319,10 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 		// Intent, not authority (s19): nothing moves on a text alone. Until
 		// the passkey door exists, say so and do nothing.
 		out.Result = "needs-confirmation"
-		_ = r.d.Edge.Send(ctx, n.Value, "That one needs your passkey, which is not set up yet")
+		const notYet = "That one needs your passkey, which is not set up yet"
+		if r.d.Edge.Send(ctx, n.Value, notYet) == nil {
+			out.Reply = notYet
+		}
 		return out
 	}
 	if webhook != "" {
@@ -328,6 +339,8 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 	if reply != "" {
 		if err := r.d.Edge.Send(ctx, n.Value, reply); err != nil {
 			out.Detail = "reply failed: " + err.Error()
+		} else {
+			out.Reply = reply
 		}
 	}
 	return out

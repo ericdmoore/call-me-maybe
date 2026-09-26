@@ -270,3 +270,18 @@ func TestARudeReplyIsRefusedBeforeItLeaves(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// The house mailbox wants a copy of what the house said. The outcome
+// carries the reply and who it went to; a stranger's outcome carries
+// neither, because a stranger is never answered.
+func TestTheOutcomeCarriesTheReplyForTheHouseMailbox(t *testing.T) {
+	h := newHarness(t)
+	out := h.reader.Handle(context.Background(), Message{ID: "m1", From: "15125550101", Body: "garage"})
+	if out.To != "+15125550101" || out.Reply != "The garage is open" {
+		t.Fatalf("outcome = %+v, want the reply and its recipient", out)
+	}
+	stranger := h.reader.Handle(context.Background(), Message{ID: "m2", From: "15125550199", Body: "garage"})
+	if stranger.Reply != "" {
+		t.Fatalf("a stranger was answered: %+v", stranger)
+	}
+}

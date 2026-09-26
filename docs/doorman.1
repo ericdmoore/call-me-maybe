@@ -402,7 +402,29 @@ or
 .I messages.toml
 is absent;
 .B doorman\-inbox.service
-runs it for good.
+runs it for good. With
+.BR MAIL_HOOK " and " MAIL_TO
+set, every reply the house sends is copied to the house mailbox, and its own
+outcome log (in the state directory) records what each text did.
+.TP
+.BI "doorman digest [\-since " d "] [\-full] [\-mail] [\-subject " s "] [\-env " path "] [\-inbox\-state " dir ]
+Yesterday as one mail: the day's calls from the journal (or the legacy log)
+and its texts from the inbox's outcome log, rendered as Markdown. Printed to
+stdout redacted, as
+.B doorman calls
+is;
+.B \-\-full
+shows whole numbers;
+.B \-\-mail
+hands it to
+.B MAIL_HOOK
+for
+.BR MAIL_TO .
+A query over the journal, never an input to anything, never on a call.
+.B doorman\-digest.timer
+runs it every morning with
+.BR "\-\-mail \-\-full" ,
+because the house mailbox is the audit log and already holds whole numbers.
 .TP
 .B doorman balance
 What is left on each prepaid trunk, per trunk, with a non\-zero exit when any
@@ -625,6 +647,19 @@ low\-balance call \(em always come from the bundled pack's
 .I system/
 directory, whatever this says: a pack supplies the six lobby prompts and
 cannot silence an alert.
+.TP
+.BR MAIL_HOOK ", " MAIL_TO
+Read by
+.BR "doorman inbox" " and " "doorman digest"
+and never by the daemon: the executable that sends one mail \(em subject as
+its argument, Markdown body on stdin,
+.B MAIL_TO
+in its environment, non\-zero exit when it did not send \(em and the house
+mailbox address. The shipped
+.I scripts/mail\-hook\-bullmoose
+runs the bullmoose CLI with a token scoped to draft and send. Both or
+neither. Asterisk's own voicemail hook reads the same two names from
+.IR /etc/asterisk/cmm\-mail.env .
 .TP
 .BR BALANCE_RING ", " BALANCE_PROM
 Read by

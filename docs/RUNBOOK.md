@@ -701,6 +701,43 @@ mail password, no login, and no way to read the mailbox from here. The
 mailbox itself becomes the most sensitive thing in the house — recordings
 and full caller numbers — so keep it to people who would answer the phone.
 
+#### The other three feeds
+
+**Texts to the house** arrive by the carrier's own forwarding, which needs
+nothing on the box: on VoIP.ms, *DID Numbers → Manage DIDs → SMS/MMS
+settings*, enable email forwarding to the house address (the same thing the
+API's `setSMS … email_enabled=1` does). The box never sees the carrier's
+key and cannot lose the text.
+
+**The house's replies and the morning digest** come from doorman's own
+commands, which run as the service account and so need their own login —
+a second token, minted the same way (`--scopes draft,send`), handed over
+the same way, with the CLI's state under the service account's state
+directory:
+
+```bash
+$ sudo install -o doorman -g doorman -m 0400 /tmp/midbury.json /tmp/midbury-doorman.json && rm /tmp/midbury.json
+$ sudo -u doorman HOME=/var/lib/doorman bullmoose init --base file:///tmp/midbury-doorman.json
+$ sudo rm /tmp/midbury-doorman.json
+```
+
+Then two lines in `.env`, and the units:
+
+```bash
+# .env
+MAIL_HOOK=/opt/call-me-maybe/scripts/mail-hook-bullmoose
+MAIL_TO=midbury@example.com
+
+$ sudo systemctl restart doorman-inbox                  # every reply, copied as it is sent
+$ sudo systemctl enable --now doorman-digest.timer      # yesterday, at 07:30
+$ cd /opt/call-me-maybe && sudo -u doorman HOME=/var/lib/doorman doorman digest --mail --full   # one now
+```
+
+`doorman digest` on its own prints the same Markdown, redacted, for a look
+before it goes anywhere. The inbox keeps its own outcome log
+(`/var/lib/doorman/inbox/outcomes.jsonl`, 0600, rotated at 8 MiB) because
+the journal has one writer and the inbox is not it; the digest reads both.
+
 ### Ringer ladders and afterhours
 
 Both are pure `policy.toml`; see the `Kids` extension in
