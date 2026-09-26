@@ -118,7 +118,43 @@ call, and the narrower answer is two tokens.
 
 ## Milestones and acceptance criteria
 
-### M1 · The hook and the voicemail feed — in progress (2026-09-25 night)
+### M1 · The hook and the voicemail feed — **done, live** (2026-09-25 night)
+
+**Verified end to end on jepsen:** a message dropped into the family box
+from the console (a Local channel into `[voicemail-drop]` with a global
+`MAILBOX`) reached `midbury@bullmoose.cc` within seconds as "Voicemail for
+family from Unknown", 94 s, recording linked and attached; the kitchen and
+theater lamps lit; the user heard the voicemail key answer. Read back from
+alpaca with a throwaway read-only token, revoked after.
+
+**Four findings on the way, all shipped (v0.9.1, v0.9.2):**
+
+1. **Voicemail had never worked on the rebuilt box.** Asterisk 22 builds
+   `app_voicemail` three ways; with all three autoloaded, the ODBC one
+   fails and, on declining, *unregisters* `VoiceMail()` while the file one
+   shows Running. Every caller sent to voicemail since 2026-09-23 was hung
+   up on with one warning in `messages.log`. The installer now `noload`s
+   the ODBC and IMAP variants and `smoke.sh` checks the application is
+   registered.
+2. **The installer's `noload` lines were in the wrong section.** The
+   distro's `modules.conf` ends with `[global]`; appending put them where
+   Asterisk ignores them, so the AEL/Lua set-aside only ever worked because
+   the sample files had been moved. They go after `autoload=yes` now, and
+   a rerun repairs an earlier install.
+3. **The token scope is `draft,send`.** `send` alone cannot create the
+   message it would submit (`Email/set` refuses without `draft`). Neither
+   reads.
+4. **The CLI's repository is private**, so the binary is fetched on the
+   workstation with `gh` and copied; and the bootstrap bundle must be
+   handed to the asterisk user with `install -o asterisk`, not copied.
+
+Two more, not fixed tonight: the CEL spool that feeds the journal was
+never set up on the rebuilt box (`cel_sqlite3_custom` declines to load; no
+`master.db`; `CEL_SPOOL_PATH` unset), which M3's digest and s01's
+"which trunk carried it" both lean on — a documented operator step in
+`docs/events.md`. And `*97` asks "mailbox?" on a keypad that cannot type
+`family`: mailbox names in the example are words, which s21 M2 resolves by
+sending the phone straight into its own box.
 
 **Done so far.** The account `midbury@bullmoose.cc` exists (created with
 the operator CLI, tenant `t_bullmoose`), with read grants for the user's own
