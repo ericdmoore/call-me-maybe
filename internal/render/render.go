@@ -355,9 +355,12 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 				plan.WriteString(" same => n,Hangup()\n")
 			}
 			fmt.Fprintf(&plan, " same => n(quiet),Playback(%s/quiet-room)\n", systemMedia)
-			// MATH with int: $[…] divides in floating point and SayNumber
-			// would read "15.000000" (first box, 2026-09-25).
-			fmt.Fprintf(&plan, " same => n,SayNumber(${MATH((%s - ${EPOCH} + 59)/60,int)})\n", dndExpiry(h.ID))
+			// Two steps, because $[…] divides in floating point (SayNumber
+			// read "15.000000") and MATH takes exactly one operation, so the
+			// sum is $[…]'s and the rounding division is MATH's (first box,
+			// 2026-09-25, both ways).
+			fmt.Fprintf(&plan, " same => n,Set(LEFT=$[%s - ${EPOCH} + 59])\n", dndExpiry(h.ID))
+			plan.WriteString(" same => n,SayNumber(${MATH(${LEFT}/60,int)})\n")
 			fmt.Fprintf(&plan, " same => n,Playback(%s/quiet-minutes)\n", systemMedia)
 			if h.Mailbox != "" {
 				fmt.Fprintf(&plan, " same => n,VoiceMail(%s@household,u)\n", h.Mailbox)
