@@ -14,8 +14,20 @@ and `500` member lists at call time skipping quiet phones, and lets a
 `page_override` phone's page through — `doorman check` warns when no
 phone has it; doorman's ring steps ask Asterisk over ARI before each leg
 and a step that is all quiet is recorded as "quiet" and the ladder moves
-on to the mailbox. A friend outside hears nothing of it. Originally
-planned 2026-09-21, late. The idea: a handset sets itself "do
+on to the mailbox. A friend outside hears nothing of it. **Verified on
+jepsen the same night, ringing no phone:** with the theater's global set
+from the console, a room call to 102 driven through ARI took the quiet
+branch and said "…not taking calls for another" — "fifteen" — "minutes"
+before offering the box (v0.12.2; v0.12.0 spoke "15.000000" and v0.12.1
+nothing, MATH taking one operation); with both phones quiet, a known
+caller's call was welcomed, skipped both handsets ("handset is quiet, not
+ringing it" twice, "every handset in this stage is quiet"), exhausted the
+ladder and went to the family box; CEL shows no Dial to either phone. Two
+first-customer facts on the way: ARI's global endpoint answers "" for any
+function with arguments, and its channel endpoint refuses DB() as a
+dangerous function — hence the global. `check` warns that jepsen has no
+`page_override` phone yet, which is the user's inventory decision.
+Originally planned 2026-09-21, late. The idea: a handset sets itself "do
 not disturb" for 15, 30 or 45 minutes — no rings, no pages — except that a
 page from the kitchen or the master bedroom still gets through. Drafted with
 two Wi-Fi handhelds registered and the first PSTN calls a few hours old.
