@@ -31,6 +31,7 @@ s01 has an [`arch.md`](_archives/s01-multiple-DIDs/arch.md); s03's reasoning
 is short enough to live in its plan.
 
 | **s13** | [Actions](s13-actions/) — one `[[actions]]` registry (what it does, who may, what it says back, whether it confirms) that a text word, a lobby digit and a passkey all point at; HA acts and may refuse; the garage is the first door | planned | s15 (the text), s14 (the leaf), s19 (the confirm); the ratgdo in HA |
+| **s21** | [A phone's own voicemail](s21-a-phones-own-voicemail/) — `mailbox` on a handset becomes a real box render makes: a room call rings out into it, the phone's voicemail key opens it without a PIN, `init` gives every room one; adding a phone is a name, a number, an address book and a voicemail | planned | s12 waits on it; a WP826 on the desk for the template value |
 | **s19** | [The edge inbox](s19-edge-inbox/) — the house's public front door: the carrier's SMS callback and, later, passkey-signed commands land in one queue at the edge; the hub pulls; the edge holds the carrier key; `login.callmemaybe.cc` as verifier, not authorizer | M1 shipped 2026-09-24 | s15 M2 consumes it; s13 gives the words a door |
 
 ### Archived
