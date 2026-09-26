@@ -155,9 +155,13 @@ prepare() {
    run mv "/etc/asterisk/$sample" "/etc/asterisk/$sample.distro"
   fi
  done
- if [ -e /etc/asterisk/modules.conf ] && ! grep -qE '^noload => pbx_ael\.so' /etc/asterisk/modules.conf; then
-  run sh -c 'printf "\n; call-me-maybe: extensions.conf is the only dialplan\nnoload => pbx_ael.so\nnoload => pbx_lua.so\n" >> /etc/asterisk/modules.conf'
- fi
+ # noload lines are honoured only inside [modules]. The distro's modules.conf
+ # ENDS with a [global] section, so appending — which is what this did until
+ # 2026-09-25 — put them where Asterisk ignores them, and the AEL/Lua set-aside
+ # only ever worked because the sample files had been moved. Insert them right
+ # after autoload= instead, once per line, and pull any stragglers out of the
+ # tail so a rerun repairs an earlier install.
+ #
  # app_voicemail is one module built three ways — file, ODBC, IMAP — and only
  # one may load. Autoloading all three, the ODBC one fails (no database) and
  # on declining it UNREGISTERS the VoiceMail applications the file one had
@@ -165,8 +169,13 @@ prepare() {
  # and every caller sent to voicemail is hung up on with one warning in
  # messages.log (Asterisk 22 on Ubuntu, first customer, 2026-09-25). Load only
  # the file-storage one.
- if [ -e /etc/asterisk/modules.conf ] && ! grep -qE '^noload => app_voicemail_odbc\.so' /etc/asterisk/modules.conf; then
-  run sh -c 'printf "\n; call-me-maybe: only the file-storage voicemail may load\nnoload => app_voicemail_odbc.so\nnoload => app_voicemail_imap.so\n" >> /etc/asterisk/modules.conf'
+ if [ -e /etc/asterisk/modules.conf ]; then
+  for mod in pbx_ael.so pbx_lua.so app_voicemail_odbc.so app_voicemail_imap.so; do
+   run sh -c "sed -i '/^noload => $mod\$/d' /etc/asterisk/modules.conf"
+  done
+  run sh -c "sed -i '/^; call-me-maybe: /d' /etc/asterisk/modules.conf"
+  run sh -c "sed -i '0,/^autoload[[:space:]]*=[[:space:]]*yes[[:space:]]*\$/s//&\n; call-me-maybe: extensions.conf is the only dialplan; only the file-storage voicemail may load\nnoload => pbx_ael.so\nnoload => pbx_lua.so\nnoload => app_voicemail_odbc.so\nnoload => app_voicemail_imap.so/' /etc/asterisk/modules.conf"
+  grep -qE '^noload => app_voicemail_odbc\.so' /etc/asterisk/modules.conf || fail 'modules.conf has no autoload=yes line inside [modules]; add the four noload lines there by hand (RUNBOOK, "Asterisk config fixes").'
  fi
  # 0755, not 0750: the directory holds nothing secret (the secrets are 0600
  # files owned by doorman, and asterisk/generated is 0700), and 0750 locked the

@@ -240,10 +240,13 @@ On Debian and Ubuntu the installer also sets the distro's sample AEL and Lua
 dialplans aside (`extensions.ael.distro`, `extensions.lua.distro`) and adds
 `noload => pbx_ael.so` and `noload => pbx_lua.so` to `modules.conf`, so
 `extensions.conf` is the only dialplan loaded. On a hand-prepared host, do
-the same.
+the same — **inside the `[modules]` section**, right after `autoload=yes`.
+The distro's file ends with a `[global]` section, and a `noload` appended
+there is silently ignored (the installer did exactly that until
+2026-09-25; a rerun moves the lines).
 
 It also adds `noload => app_voicemail_odbc.so` and `noload =>
-app_voicemail_imap.so`. Asterisk 22 builds voicemail three ways and only one
+app_voicemail_imap.so` in the same place. Asterisk 22 builds voicemail three ways and only one
 may load; with all three autoloaded the ODBC one fails for want of a
 database and, on declining, **unregisters the `VoiceMail()` applications
 the file-storage one had registered**. The module still shows Running,
