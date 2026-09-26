@@ -67,7 +67,8 @@ fi
 # The voicemail applications can vanish while the module shows Running: the
 # ODBC-built variant fails to load and unregisters them on its way out. Every
 # caller sent to voicemail is then hung up on, and nothing on a handset says so.
-if sudo asterisk -rx 'core show application VoiceMail' 2>/dev/null | grep -q -- '-= Info about application'; then
+# Case-insensitive: Asterisk prints "Info about Application", in colour.
+if sudo asterisk -rx 'core show application VoiceMail' 2>/dev/null | grep -qi 'info about application'; then
   pass "VoiceMail() is registered"
 else
   fail "VoiceMail() is not registered — the ODBC variant unloaded it" \
