@@ -49,6 +49,14 @@
       "items": {
         "type": "object",
         "properties": {
+          "email": {
+            "description": "Where this phone's mailbox mails its messages, with the recording attached (voicemail.conf's attach=yes). Optional; the address on the generated mailbox line. Needs mailbox.",
+            "type": "string",
+            "x-rules": [
+              "Needs mailbox on the same handset.",
+              "When several phones share a box, the first address given is the box's."
+            ]
+          },
           "endpoint": {
             "description": "Asterisk endpoint. Must be PJSIP/\u003cid\u003e — `doorman render` enforces the match so the generated config cannot disagree with the inventory.",
             "type": "string",
@@ -76,11 +84,17 @@
             ]
           },
           "mailbox": {
-            "description": "Mailbox whose message-waiting lamp this phone follows.",
+            "description": "This phone's own voicemail box. `doorman render` writes it into voicemail_handsets.conf when VOICEMAIL_\u003cBOX\u003e_PIN is in .env (a box without one is assumed hand-written in voicemail.conf, which is every box from before render made them); a call to this phone's number that rings out — or finds it busy — lands in it; the phone's voicemail key (*97) opens it without asking which or for a PIN; and its message-waiting lamp follows it. Two phones may name one box and share it. A policy file's `voicemail = \"…\"` may name it too, so a stranger with this room's PIN who rings out leaves the message on this room's phone.",
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9_-]*$",
             "x-cross-references": [
-              "asterisk/voicemail.conf [household] context"
+              "asterisk/voicemail.conf [household] context",
+              "VOICEMAIL_\u003cBOX\u003e_PIN in .env",
+              "policy.toml [house].voicemail and [[extensions]].voicemail"
+            ],
+            "x-rules": [
+              "`doorman rotate --voicemail [box …]` sets or rotates the PINs; `doorman init` gives every room its own box.",
+              "`doorman check` lists every box handsets name and every box policy sends callers to, and says which the tool writes."
             ]
           },
           "model": {

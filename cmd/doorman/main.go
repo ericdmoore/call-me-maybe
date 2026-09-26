@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -197,6 +198,9 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
   doorman rotate [flags] [label ...]
                                 rotate extension PINs; all extensions when no labels given
       -policy path              policy file (default $POLICY_PATH or ./policy.toml)
+      -voicemail [box ...]      set or rotate the PINs of the mailboxes handsets
+                                name, in .env (VOICEMAIL_<BOX>_PIN); render then
+                                writes them into voicemail_handsets.conf
       -phones [id ...]          rotate handset SIP passwords in .env instead — never
                                 printed; render, install, then "doorman provision
                                 notify" hands each phone its new one
@@ -462,6 +466,7 @@ func runCheck(args []string) (code int) {
 	if !printOutbound(results, trunks) {
 		rc = 1
 	}
+	printMailboxes(results, secretLookup(*envFlag))
 	// Both silent without a trunks.toml: a box with one provider has nothing
 	// to choose between and should never have to read the word "trunk".
 	printTrunks(trunks, results)
@@ -941,10 +946,14 @@ func runRotate(args []string) int {
 	pathFlag := fs.String("policy", "", "policy file (default $POLICY_PATH or ./policy.toml)")
 	handsetsFlag := fs.String("handsets", "", "handsets file (default $HANDSETS_PATH or ./handsets.toml)")
 	phones := fs.Bool("phones", false, "rotate handset SIP passwords in .env instead of PINs; ids narrow it")
-	envFlag := fs.String("env", "./.env", "secrets file, for --phones")
+	voicemail := fs.Bool("voicemail", false, "rotate (or first set) the PINs of the mailboxes handsets name, in .env; box ids narrow it")
+	envFlag := fs.String("env", "./.env", "secrets file, for --phones and --voicemail")
 	_ = fs.Parse(args)
 	if *phones {
 		return runRotatePhones(handsetsPathArg(*handsetsFlag), *envFlag, fs.Args())
+	}
+	if *voicemail {
+		return runRotateVoicemail(handsetsPathArg(*handsetsFlag), *envFlag, fs.Args())
 	}
 	path := policyPathArg(*pathFlag)
 	labels := fs.Args()
@@ -1127,7 +1136,8 @@ func runRender(args []string) int {
 		written = append(written, path)
 		return true
 	}
-	if !write("pjsip_handsets.conf", frags.PJSIP) || !write("extensions_handsets.conf", frags.Dialplan) {
+	if !write("pjsip_handsets.conf", frags.PJSIP) || !write("extensions_handsets.conf", frags.Dialplan) ||
+		!write("voicemail_handsets.conf", frags.Voicemail) {
 		return 1
 	}
 
@@ -1186,6 +1196,7 @@ func runRender(args []string) int {
 	}
 
 	fmt.Printf("✓ rendered %d handset(s) from %s\n", frags.Generated, handsetsPath)
+	printRenderedMailboxes(frags.Mailboxes)
 	if len(prov.Phones) > 0 {
 		fmt.Printf("✓ rendered %d phone configuration(s) into %s\n", len(prov.Phones), provDir)
 		for _, ph := range prov.Phones {
@@ -1220,7 +1231,10 @@ func runRender(args []string) int {
 		fmt.Println("  sudo chown asterisk:asterisk /etc/asterisk/*_trunks.conf")
 		fmt.Println("  sudo chmod 640 /etc/asterisk/*_trunks.conf")
 	}
-	fmt.Println("  sudo asterisk -rx 'pjsip reload' && sudo asterisk -rx 'dialplan reload'")
+	fmt.Println("  sudo asterisk -rx 'pjsip reload' && sudo asterisk -rx 'dialplan reload' && sudo asterisk -rx 'voicemail reload'")
+	fmt.Println("\nvoicemail_handsets.conf is read once voicemail.conf ends with")
+	fmt.Println("  #tryinclude \"voicemail_handsets.conf\"")
+	fmt.Println("(the shipped example does). It appends to [household]; hand-written boxes there stay.")
 	if trunkFrags != nil {
 		fmt.Println("\nThe trunk files are only read once pjsip.conf and extensions.conf")
 		fmt.Println("#include them — see RUNBOOK \"Add a second provider\". Delete the")
@@ -2020,4 +2034,172 @@ func hostTimezone() string {
 		}
 	}
 	return ""
+}
+
+// printRenderedMailboxes says which boxes render wrote and which it left to
+// the hand-written file — the difference between "this phone's voicemail
+// works" and "somebody has to add a line to voicemail.conf".
+func printRenderedMailboxes(boxes []render.Mailbox) {
+	if len(boxes) == 0 {
+		return
+	}
+	made, assumed := 0, 0
+	for _, m := range boxes {
+		if m.Generated {
+			made++
+		} else {
+			assumed++
+		}
+	}
+	fmt.Printf("✓ %d mailbox(es): %d written to voicemail_handsets.conf", len(boxes), made)
+	if assumed > 0 {
+		fmt.Printf(", %d assumed hand-written in voicemail.conf", assumed)
+	}
+	fmt.Println()
+	for _, m := range boxes {
+		state := "written"
+		if !m.Generated {
+			state = "not written — " + m.EnvVar + " is not in .env (`doorman rotate --voicemail " + m.ID + "` sets one)"
+		}
+		fmt.Printf("    %-14s %-24s %s\n", m.ID, strings.Join(m.Handsets, ", "), state)
+	}
+}
+
+// printMailboxes is `doorman check`'s view: every box a handset names and
+// every box a policy file sends a caller to, and whether each one exists
+// as far as the tool can see. A mailbox named nowhere the tool writes is a
+// caller who hears "the person at extension … is unavailable" and is hung
+// up on, with nothing on a handset to say why — this is where that becomes
+// visible before a call.
+func printMailboxes(results []checkedLine, env func(string) (string, bool)) {
+	if len(results) == 0 || results[0].pol == nil {
+		return
+	}
+	handsets := results[0].pol.HandsetList()
+	boxes := render.Mailboxes(handsets, env)
+	byID := map[string]render.Mailbox{}
+	for _, m := range boxes {
+		byID[m.ID] = m
+	}
+	// Where policy sends callers.
+	type use struct{ line, where string }
+	uses := map[string][]use{}
+	var order []string
+	note := func(box, line, where string) {
+		if box == "" {
+			return
+		}
+		if _, seen := uses[box]; !seen {
+			order = append(order, box)
+		}
+		uses[box] = append(uses[box], use{line, where})
+	}
+	for _, r := range results {
+		if r.err != nil {
+			continue
+		}
+		note(r.pol.HousePlan().Mailbox, r.Name, "[house]")
+		for _, e := range r.pol.Extensions() {
+			note(e.Plan.Mailbox, r.Name, "extension "+e.Label)
+		}
+	}
+	for _, m := range boxes {
+		if _, seen := uses[m.ID]; !seen {
+			order = append(order, m.ID)
+		}
+	}
+	if len(order) == 0 {
+		return
+	}
+	sort.Strings(order)
+	multi := len(results) > 1
+	fmt.Printf("\nMailboxes: %d\n\n", len(order))
+	for _, id := range order {
+		m, named := byID[id]
+		var owner string
+		switch {
+		case named && len(m.Handsets) == 1:
+			owner = m.Handsets[0] + "'s own"
+		case named:
+			owner = "shared by " + strings.Join(m.Handsets, ", ")
+		default:
+			owner = "no handset names it"
+		}
+		var state string
+		switch {
+		case named && m.Generated:
+			state = "written by render"
+		case named:
+			state = "hand-written in voicemail.conf, or missing — " + m.EnvVar + " is not in .env"
+		default:
+			state = "must exist in voicemail.conf (the tool cannot see it)"
+		}
+		var where []string
+		for _, u := range uses[id] {
+			if multi {
+				where = append(where, u.line+": "+u.where)
+			} else {
+				where = append(where, u.where)
+			}
+		}
+		fmt.Printf("  %-14s %-32s %s\n", id, owner, state)
+		if len(where) > 0 {
+			fmt.Printf("  %-14s callers land here from %s\n", "", strings.Join(where, ", "))
+		}
+	}
+	fmt.Println("\n  A phone's voicemail key opens its own box; *98 reaches any box with its PIN.")
+}
+
+// runRotateVoicemail sets a new PIN for each mailbox the handsets name —
+// or for the first time, which is how a box provisioned before render made
+// mailboxes gets them: set the PIN, render, install, reload. The phone that
+// owns a box never types its PIN; *98 from another phone does.
+func runRotateVoicemail(handsetsPath, envPath string, ids []string) int {
+	handsets, _, err := policy.LoadHandsets(handsetsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 1
+	}
+	want := map[string]bool{}
+	for _, id := range ids {
+		want[id] = true
+	}
+	narrowed := len(want) > 0
+	var keys, chosen []string
+	for _, m := range render.Mailboxes(handsets, func(string) (string, bool) { return "", false }) {
+		if narrowed && !want[m.ID] {
+			continue
+		}
+		keys = append(keys, m.EnvVar)
+		chosen = append(chosen, m.ID)
+		delete(want, m.ID)
+	}
+	for id := range want {
+		fmt.Fprintf(os.Stderr, "✗ no handset in %s names mailbox %q\n", handsetsPath, id)
+		return 1
+	}
+	if len(keys) == 0 {
+		fmt.Fprintf(os.Stderr, "✗ no handset in %s names a mailbox\n", handsetsPath)
+		return 1
+	}
+	pins := map[string]string{}
+	if err := setup.RotateSecrets(envPath, keys, func() (string, error) { return setup.PIN(6, map[string]bool{}) }); err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 1
+	}
+	// Read back what was written, so the PINs shown are the ones in force.
+	env := secretLookup(envPath)
+	for i, k := range keys {
+		pins[chosen[i]], _ = env(k)
+	}
+	fmt.Printf("✓ set %d mailbox PIN(s) in %s — shown once:\n\n", len(keys), envPath)
+	for _, id := range chosen {
+		fmt.Printf("  %-14s  →  %s\n", id, pins[id])
+	}
+	fmt.Println("\nThe phone that owns a box opens it without the PIN; *98 from any other")
+	fmt.Println("phone asks for it. They take effect at the next render:")
+	fmt.Println()
+	fmt.Println("  doorman render                      # voicemail_handsets.conf")
+	fmt.Println("  (install as render prints, then `voicemail reload`)")
+	return 0
 }

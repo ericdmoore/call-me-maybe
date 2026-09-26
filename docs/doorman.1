@@ -199,6 +199,16 @@ given, or only the named ones. A running daemon picks the change up within a
 second. New PINs are printed to stdout \(em the one place they are ever
 shown \(em and are never written to the logs.
 .IP
+.BI "doorman rotate \-voicemail [\-env " path "] [" box ...]
+Set, or rotate, the PIN of each mailbox the handsets name \(em
+.BI VOICEMAIL_ <BOX> _PIN
+in
+.IR .env ,
+shown once. The phone that owns a box never types it;
+.B *98
+from another phone does. Takes effect at the next
+.BR "doorman render" .
+.TP
 .BI "doorman rotate \-phones [\-env " path "] [" id ...]
 rotates handset SIP passwords instead, rewriting
 .I .env
@@ -647,6 +657,20 @@ low\-balance call \(em always come from the bundled pack's
 .I system/
 directory, whatever this says: a pack supplies the six lobby prompts and
 cannot silence an alert.
+.TP
+.BI VOICEMAIL_ <BOX> _PIN
+The PIN of each mailbox a handset names, read by
+.B doorman render
+into
+.I voicemail_handsets.conf
+exactly as
+.BI HANDSET_ <ID> _PASSWORD
+is read into the PJSIP file.
+.B doorman init
+writes one per room;
+.B doorman rotate \-\-voicemail
+sets or rotates them. A box with no variable is left to the hand\-written
+.IR voicemail.conf .
 .TP
 .BR MAIL_HOOK ", " MAIL_TO
 Read by

@@ -97,9 +97,14 @@ type Handset struct {
 	Number int `toml:"number"`
 	// Page marks the handset a member of the page-all group (dial 500).
 	Page bool `toml:"page"`
-	// Mailbox lights this phone's MWI lamp from voicemail.conf's
-	// [household] section.
+	// Mailbox is this phone's own voicemail box: `doorman render` makes it
+	// (voicemail_handsets.conf, when VOICEMAIL_<BOX>_PIN is in .env), a room
+	// call that rings out lands in it, the phone's voicemail key opens it,
+	// and its MWI lamp follows it. Two phones may name one box.
 	Mailbox string `toml:"mailbox"`
+	// Email, optional, is where that box's messages are mailed — the
+	// mailbox line's address in the generated voicemail config.
+	Email string `toml:"email"`
 	// PasswordEnv names the .env variable holding this handset's SIP
 	// password. The secret itself never appears in this file.
 	PasswordEnv string `toml:"password_env"`
@@ -620,6 +625,17 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		numbers[h.Number] = h.ID
 		if h.Mailbox != "" && !mailboxPattern.MatchString(h.Mailbox) {
 			fail("handset %q mailbox %q must be lowercase alphanumeric/dash/underscore", h.ID, h.Mailbox)
+		}
+	}
+	for _, h := range f.Handsets {
+		if h.Email == "" {
+			continue
+		}
+		if h.Mailbox == "" {
+			fail("handset %q has an email but no mailbox — the address belongs to a voicemail box", h.ID)
+		}
+		if at := strings.IndexByte(h.Email, '@'); at < 1 || at == len(h.Email)-1 || strings.ContainsAny(h.Email, " \t,") {
+			fail("handset %q email %q is not an address", h.ID, h.Email)
 		}
 	}
 

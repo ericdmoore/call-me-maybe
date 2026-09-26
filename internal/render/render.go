@@ -31,6 +31,123 @@ type Fragments struct {
 	// Generated counts the PJSIP handsets rendered; pseudo-handsets
 	// (Local/... endpoints) are listed in the map but not generated.
 	Generated int
+	// Voicemail is the [household](+) mailbox lines — voicemail_handsets.conf
+	// — one per box a handset names whose PIN is in .env, and a comment for
+	// each box that is not, which is assumed to be written by hand.
+	Voicemail string
+	// Mailboxes is what Voicemail was built from, for `doorman check` and
+	// `doorman render` to report.
+	Mailboxes []Mailbox
+}
+
+// A phone's own voicemail (s21): `mailbox` on a handset is a box the tool
+// makes. render writes the mailbox line, with the PIN from
+// VOICEMAIL_<BOX>_PIN in .env exactly as handset passwords come from
+// HANDSET_<ID>_PASSWORD; gives the endpoint CMM_MAILBOX so `*97` opens that
+// box without asking; and lets a room call that rings out fall into it. A
+// box whose PIN is not in .env is left alone and named in a comment — that
+// is every install from before this existed, where `family` lives in the
+// hand-written voicemail.conf and must go on working untouched.
+
+// Mailbox is one voicemail box as the inventory describes it.
+type Mailbox struct {
+	ID string
+	// Handsets name it, in inventory order. One handset makes it that
+	// phone's own box; several make it a shared one.
+	Handsets []string
+	// Label is the display name written to Asterisk: the one handset's
+	// label, or the id made readable when the box is shared.
+	Label string
+	// Email is the first address any of its handsets gives, or "".
+	Email string
+	// EnvVar names the .env variable holding its PIN, and Generated says
+	// whether that variable was set — that is, whether render wrote it.
+	EnvVar    string
+	Generated bool
+	pin       string
+}
+
+// VoicemailPINEnv is the .env variable holding a mailbox's PIN.
+func VoicemailPINEnv(box string) string {
+	return "VOICEMAIL_" + strings.ToUpper(strings.ReplaceAll(box, "-", "_")) + "_PIN"
+}
+
+// Mailboxes lists every box the handsets name, in id order, with what
+// render knows about each.
+func Mailboxes(handsets []policy.Handset, env Env) []Mailbox {
+	byID := map[string]*Mailbox{}
+	var order []string
+	for _, h := range handsets {
+		if h.Mailbox == "" {
+			continue
+		}
+		m, ok := byID[h.Mailbox]
+		if !ok {
+			m = &Mailbox{ID: h.Mailbox, EnvVar: VoicemailPINEnv(h.Mailbox)}
+			byID[h.Mailbox] = m
+			order = append(order, h.Mailbox)
+		}
+		m.Handsets = append(m.Handsets, h.ID)
+		if m.Email == "" {
+			m.Email = h.Email
+		}
+	}
+	sort.Strings(order)
+	out := make([]Mailbox, 0, len(order))
+	for _, id := range order {
+		m := byID[id]
+		if len(m.Handsets) == 1 {
+			for _, h := range handsets {
+				if h.ID == m.Handsets[0] {
+					m.Label = h.Label
+				}
+			}
+		}
+		if m.Label == "" {
+			m.Label = humanise(id)
+		}
+		if v, ok := env(m.EnvVar); ok && v != "" {
+			m.Generated, m.pin = true, v
+		}
+		out = append(out, *m)
+	}
+	return out
+}
+
+// humanise turns "whole-house" into "Whole house" for a display name.
+func humanise(id string) string {
+	s := strings.NewReplacer("-", " ", "_", " ").Replace(id)
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// buildVoicemail renders voicemail_handsets.conf from the boxes.
+func buildVoicemail(boxes []Mailbox) string {
+	var b strings.Builder
+	b.WriteString(header("handsets.toml", false))
+	b.WriteString("; THIS FILE CONTAINS VOICEMAIL PINS. Install it root-owned and mode 0640,\n")
+	b.WriteString("; and never commit it. voicemail.conf reaches it with\n")
+	b.WriteString(";   #tryinclude \"voicemail_handsets.conf\"\n")
+	b.WriteString("; and [household](+) below appends to the hand-written context there, so\n")
+	b.WriteString("; a box written by hand (family, the hunt's) keeps working beside these.\n")
+	b.WriteString("; A box named here without VOICEMAIL_<BOX>_PIN in .env is not written: it\n")
+	b.WriteString("; is assumed to be one of the hand-written ones.\n\n")
+	b.WriteString("[household](+)\n")
+	for _, m := range boxes {
+		if !m.Generated {
+			fmt.Fprintf(&b, "; %s: %s is not set in .env — assumed hand-written in voicemail.conf (%s)\n",
+				m.ID, m.EnvVar, strings.Join(m.Handsets, ", "))
+			continue
+		}
+		line := fmt.Sprintf("%s => %s,%s", m.ID, m.pin, strings.ReplaceAll(m.Label, ",", " "))
+		if m.Email != "" {
+			line += "," + m.Email
+		}
+		fmt.Fprintf(&b, "%s\n", line)
+	}
+	return b.String()
 }
 
 // header is the banner every generated file carries. from names the source of
@@ -168,6 +285,10 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 		}
 		if h.Mailbox != "" {
 			fmt.Fprintf(&pjsip, "mailboxes=%s@household\n", h.Mailbox)
+			// The phone's own box, for *97: VoiceMailMain(${CMM_MAILBOX}@household,s)
+			// opens it without asking which, or for a PIN — a handset on the
+			// LAN is already trusted to call as the house and page every room.
+			fmt.Fprintf(&pjsip, "set_var=CMM_MAILBOX=%s\n", h.Mailbox)
 		}
 		if out := outbound[h.ID]; out.set() {
 			// Read by [cmm-outbound], the one context both outbound paths go
@@ -191,6 +312,18 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 
 		if h.Number > 0 {
 			fmt.Fprintf(&plan, "exten => %d,1,Dial(%s,30)\n", h.Number, h.Endpoint)
+			if h.Mailbox != "" {
+				// A room call that rings out lands in the room's own box —
+				// busy gets the busy greeting — and a call that was answered
+				// ends when the far end hangs up, without a detour through
+				// voicemail on its way out.
+				plan.WriteString(" same => n,GotoIf($[\"${DIALSTATUS}\"=\"ANSWER\"]?done)\n")
+				plan.WriteString(" same => n,GotoIf($[\"${DIALSTATUS}\"=\"BUSY\"]?busy)\n")
+				fmt.Fprintf(&plan, " same => n,VoiceMail(%s@household,u)\n", h.Mailbox)
+				plan.WriteString(" same => n(done),Hangup()\n")
+				fmt.Fprintf(&plan, " same => n(busy),VoiceMail(%s@household,b)\n", h.Mailbox)
+				plan.WriteString(" same => n,Hangup()\n")
+			}
 			fmt.Fprintf(&plan, "exten => %d,hint,%s\n", h.Number, h.Endpoint)
 			messageRoutes = append(messageRoutes, messageRoute{number: h.Number, id: h.ID, label: label})
 		}
@@ -209,6 +342,7 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 
 	sort.Strings(all)
 	sort.Strings(pageMembers)
+	boxes := Mailboxes(handsets, env)
 
 	plan.WriteString("\n; Ring every handset.\n")
 	fmt.Fprintf(&plan, "exten => 100,1,Dial(%s,30)\n", strings.Join(all, "&"))
@@ -254,7 +388,8 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 	}
 	plan.WriteString(" same => n,Return()\n")
 
-	return &Fragments{PJSIP: pjsip.String(), Dialplan: plan.String(), Generated: generated}, nil
+	return &Fragments{PJSIP: pjsip.String(), Dialplan: plan.String(), Generated: generated,
+		Voicemail: buildVoicemail(boxes), Mailboxes: boxes}, nil
 }
 
 // messageRoute is one handset's number → endpoint for [cmm-messages].

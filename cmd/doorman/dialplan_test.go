@@ -170,3 +170,21 @@ func TestOutboundLadderClimbsOnlyOnTrunkFailure(t *testing.T) {
 		}
 	}
 }
+
+// *97 is the phone's own box, no questions; *98 is the old menu, for any
+// box with its PIN. A handset with no box gets the menu on *97 too.
+func TestVoicemailKeyOpensThePhonesOwnBox(t *testing.T) {
+	body := shippedDialplan(t)
+	ctx := dialplanContext(t, body, "features-internal")
+	for _, want := range []string{
+		`exten => *97,1,Answer()`,
+		` same => n,GotoIf($["${CMM_MAILBOX}" != ""]?own)`,
+		` same => n,VoiceMailMain(@household)`,
+		` same => n(own),VoiceMailMain(${CMM_MAILBOX}@household,s)`,
+		`exten => *98,1,Answer()`,
+	} {
+		if !strings.Contains(ctx, want) {
+			t.Errorf("[features-internal] is missing %q", want)
+		}
+	}
+}

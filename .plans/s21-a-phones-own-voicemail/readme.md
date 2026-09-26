@@ -1,6 +1,10 @@
 # s21 · A phone's own voicemail — the mailbox is a fact about the handset
 
-**Status:** planned (2026-09-25, evening). From the user: "Do you think we
+**Status:** M1 + M2 shipped in v0.11.0 (2026-09-25, late night); M3 docs
+shipped with them. One correction to the sketch below: the provisioning
+template already set the phone's voicemail access number (P33 = `*97`),
+so the key worked all along — what it opened was the "mailbox?" menu, and
+`family` cannot be typed on a keypad. Originally planned the same evening. From the user: "Do you think we
 could configure each handset to have its own voicemail? The WP826 has a VM
 icon — it would be nice if that was *for that handset*." And the shape of
 adding a handset, as they see it: a name, a number, an address book, a
@@ -128,7 +132,23 @@ they do now; the boxes are simply real.
 
 ## Milestones and acceptance criteria
 
-### M1 · The box exists and the room call lands in it
+### M1 · The box exists and the room call lands in it — **done** (v0.11.0)
+
+**As built.** `render.Mailboxes` lists every box the handsets name; a box
+whose `VOICEMAIL_<BOX>_PIN` is in `.env` is written to
+`voicemail_handsets.conf` under `[household](+)` (one handset → its label
+and `email`; shared → the id made readable), a box without one is named
+in a comment and left to the hand-written file — which is how `family` on
+every older install keeps working untouched, and why render never fails
+over a box it did not make. The endpoint gains `set_var=CMM_MAILBOX`; the
+room's Dial gains `ANSWER→done`, `BUSY→busy`, `VoiceMail(box,u)`,
+`VoiceMail(box,b)`. `doorman check` prints a Mailboxes block: each box,
+whose it is, whether render writes it, and where policy sends callers.
+`doorman init` gives every room its own box with a PIN in `.env` and its
+extension pointing there; `doorman rotate --voicemail [box …]` sets or
+rotates PINs. `voicemail.conf.example` ends with the `#tryinclude` and sets
+`passwordlocation = spooldir` so a PIN changed from a phone is not undone
+by the next render.
 
 `voicemail_handsets.conf` generated under `[household](+)`; PINs from
 `.env` by convention; `voicemail.conf.example` gains the `#tryinclude` and
@@ -139,7 +159,14 @@ generated set; `init` writes one box per room and the PINs into `.env`;
 into the master bedroom's greeting and the lamp lights there; a `voicemail =
 "typo"` is named by `check`; and the installed `family` box is untouched.
 
-### M2 · The key is the phone's
+### M2 · The key is the phone's — **done** (v0.11.0)
+
+**As built.** `*97` checks `CMM_MAILBOX` and goes straight into that box
+with the `s` option (no PIN — the LAN handset is the credential, as for
+`*4`); a handset with no box gets the old menu. `*98` is the old menu from
+any phone. The template already dialled `*97` from the key. The hunt's
+greeting-recording step moves to `*98`, since a phone with a box no longer
+sees the menu on `*97`.
 
 `CMM_MAILBOX` on the endpoint; `*97` opens it without a PIN, `*98` is the
 old menu; the template sets the phone's voicemail access number. Done when
@@ -147,7 +174,7 @@ pressing the voicemail key on a zero-touch-provisioned WP826 plays that
 phone's messages, and `*98` from the same phone reaches another box with its
 PIN.
 
-### M3 · Docs and the rehearsal
+### M3 · Docs and the rehearsal — docs done (v0.11.0); the rehearsal is the next voicemail anyone leaves
 
 RUNBOOK "Voicemail" rewritten around the four facts; FIRST-BOOT's phones
 step; `examples/handsets.example.toml` and the scenarios give every room a

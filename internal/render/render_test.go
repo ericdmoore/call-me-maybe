@@ -271,3 +271,75 @@ func TestRenderWritesTheFailoverLadderBesideTheTrunk(t *testing.T) {
 		t.Errorf("[kids-room] has a ladder nobody wrote:\n%s", kids)
 	}
 }
+
+// ── A phone's own voicemail (s21) ────────────────────────────────────────
+
+func TestRenderWritesTheMailboxesWhosePINsAreInEnv(t *testing.T) {
+	hs := []policy.Handset{
+		{ID: "kitchen", Label: "Kitchen", Endpoint: "PJSIP/kitchen", Number: 101, Mailbox: "whole-house", PasswordEnv: "HANDSET_KITCHEN_PASSWORD"},
+		{ID: "theater", Label: "Theater", Endpoint: "PJSIP/theater", Number: 102, Mailbox: "whole-house", PasswordEnv: "HANDSET_THEATER_PASSWORD"},
+		{ID: "master-bed", Label: "Master bedroom", Endpoint: "PJSIP/master-bed", Number: 103, Mailbox: "master-bed", Email: "caroline@example.invalid", PasswordEnv: "HANDSET_MASTER_BED_PASSWORD"},
+		{ID: "office", Label: "Office", Endpoint: "PJSIP/office", Number: 104, Mailbox: "family", PasswordEnv: "HANDSET_OFFICE_PASSWORD"},
+	}
+	e := env(map[string]string{
+		"HANDSET_KITCHEN_PASSWORD": "a", "HANDSET_THEATER_PASSWORD": "b", "HANDSET_MASTER_BED_PASSWORD": "c", "HANDSET_OFFICE_PASSWORD": "d",
+		"VOICEMAIL_WHOLE_HOUSE_PIN": "482913", "VOICEMAIL_MASTER_BED_PIN": "917364",
+		// family: no PIN — the hand-written box every older install has.
+	})
+	f, err := Build(hs, e, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	for _, want := range []string{
+		"[household](+)",
+		"whole-house => 482913,Whole house", // shared: the id made readable, no email
+		"master-bed => 917364,Master bedroom,caroline@example.invalid", // own: the phone's label and address
+		"; family: VOICEMAIL_FAMILY_PIN is not set in .env — assumed hand-written in voicemail.conf (office)",
+	} {
+		if !strings.Contains(f.Voicemail, want) {
+			t.Errorf("voicemail_handsets.conf missing %q:\n%s", want, f.Voicemail)
+		}
+	}
+	if strings.Contains(f.Voicemail, "family =>") {
+		t.Error("a box with no PIN in .env must not be written — it would duplicate the hand-written one")
+	}
+	if len(f.Mailboxes) != 3 || f.Mailboxes[0].ID != "family" || f.Mailboxes[0].Generated || !f.Mailboxes[2].Generated {
+		t.Errorf("Mailboxes = %+v", f.Mailboxes)
+	}
+	// The endpoint carries its box for *97, and the room call lands in it.
+	kitchen, _ := section(f.PJSIP, "[kitchen]")
+	if !strings.Contains(kitchen, "mailboxes=whole-house@household") || !strings.Contains(kitchen, "set_var=CMM_MAILBOX=whole-house") {
+		t.Errorf("[kitchen] lacks its box:\n%s", kitchen)
+	}
+	for _, want := range []string{
+		"exten => 103,1,Dial(PJSIP/master-bed,30)",
+		` same => n,GotoIf($["${DIALSTATUS}"="ANSWER"]?done)`,
+		` same => n,GotoIf($["${DIALSTATUS}"="BUSY"]?busy)`,
+		" same => n,VoiceMail(master-bed@household,u)",
+		" same => n(done),Hangup()",
+		" same => n(busy),VoiceMail(master-bed@household,b)",
+	} {
+		if !strings.Contains(f.Dialplan, want) {
+			t.Errorf("dialplan missing %q:\n%s", want, f.Dialplan)
+		}
+	}
+	if got := VoicemailPINEnv("master-bed"); got != "VOICEMAIL_MASTER_BED_PIN" {
+		t.Errorf("VoicemailPINEnv = %q", got)
+	}
+}
+
+// A handset with no mailbox is exactly what it was: no set_var, a Dial and
+// nothing after it, and no line in the voicemail file.
+func TestRenderWithoutAMailboxIsUnchanged(t *testing.T) {
+	f, err := Build(fixture(), env(secrets), nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	kids, _ := section(f.PJSIP, "[kids-room]")
+	if strings.Contains(kids, "CMM_MAILBOX") {
+		t.Errorf("[kids-room] has a box nobody gave it:\n%s", kids)
+	}
+	if strings.Contains(f.Dialplan, "VoiceMail(kids-room") || !strings.Contains(f.Dialplan, "exten => 105,1,Dial(PJSIP/kids-room,30)\nexten => 105,hint") {
+		t.Errorf("105 should be a bare Dial:\n%s", f.Dialplan)
+	}
+}

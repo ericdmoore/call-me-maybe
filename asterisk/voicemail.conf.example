@@ -21,6 +21,10 @@ attach = yes
 maxmsg = 100
 maxsecs = 180
 minsecs = 2
+; A PIN changed from a phone's own menu is written here rather than back
+; into the file that declared it — which for a generated box would be undone
+; by the next `doorman render`.
+passwordlocation = spooldir
 serveremail = lobby@example.com
 emailsubject = [Home phone] Voicemail for ${VM_NAME} from ${VM_CALLERID}
 ; mailcmd = /usr/bin/msmtp -t
@@ -37,7 +41,7 @@ family => 4242,Family,family@example.com
 
 ; ── The hunt (optional) ──────────────────────────────────────
 ; One mailbox per clue, NAMED FOR ITS ANSWER: a child who counts six chairs
-; dials *66 and hears this greeting. Record each greeting through *97 (the
+; dials *66 and hears this greeting. Record each greeting through *98 (the
 ; mailbox, its PIN, then 0 and 1). The PINs are for recording and are the
 ; parents' alone — children never hold a credential, and a hunt never uses a
 ; lobby PIN, a mailbox PIN or an admin password as an answer or a reward.
@@ -45,3 +49,11 @@ family => 4242,Family,family@example.com
 ; greeting, and nobody leaves messages here. See docs/HUNT.md.
 ;6  => 7391,Hunt: chairs
 ;14 => 2685,Hunt: stairs
+
+; ── The phones' own boxes ────────────────────────────────────
+; `doorman render` writes voicemail_handsets.conf: one box per `mailbox` a
+; handset names, PIN from VOICEMAIL_<BOX>_PIN in .env, appended to [household]
+; with (+) so everything above stays. A box named there without a PIN in .env
+; is left to this file. tryinclude, not include: absent before the first
+; render, and a missing #include rejects the whole file.
+#tryinclude "voicemail_handsets.conf"

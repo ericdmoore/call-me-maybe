@@ -18,7 +18,11 @@ label = "Kitchen"
 endpoint = "PJSIP/kitchen"       # must be PJSIP/<id>; render enforces it
 number = 101                     # internal extension + BLF hint (100-199)
 page = true                      # rings on dial-500 page-all
-mailbox = "adults"               # MWI lamp follows this voicemail.conf box
+mailbox = "adults"               # this phone's voicemail: render writes the box
+                                 # (PIN from VOICEMAIL_ADULTS_PIN in .env, or it is
+                                 # yours in voicemail.conf), room calls that ring
+                                 # out land in it, *97 opens it, the lamp follows it
+# email = "you@example.com"      # optional: the box mails its messages here
 password_env = "HANDSET_KITCHEN_PASSWORD"
 # The two lines that let the phone configure itself (`doorman provision`):
 # the MAC from the sticker, in any written form, and which template it gets.

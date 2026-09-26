@@ -47,6 +47,7 @@ make run                   # dev run with .env sourced (needs reachable Asterisk
                            # --ring <handset> has the house say so; --prom <file> is the gauge
 ./bin/doorman provision    # inventory view; with ids: window + instructions + watch
 ./bin/doorman rotate --phones  # new handset SIP passwords; `provision notify` delivers
+./bin/doorman rotate --voicemail  # set/rotate the PINs of the boxes handsets name (.env); render writes them
 ./bin/doorman inbox        # texts to the house: consume the edge inbox per messages.toml
 ./bin/doorman digest       # yesterday as Markdown from the journal + inbox outcomes; --mail sends it
 ./scripts/smoke.sh         # full deployment verification, run ON the Pi

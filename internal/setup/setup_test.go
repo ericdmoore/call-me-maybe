@@ -258,3 +258,37 @@ func TestEnvFileTurnsTheJournalOnOnlyWhereThePlacesExist(t *testing.T) {
 		t.Errorf("CEL_SPOOL_PATH should stay commented without a spool:\n%s", out)
 	}
 }
+
+// Every room its own box (s21): the handset names it, the room's extension
+// sends a stranger who rings out to it, and its PIN lives in .env beside the
+// phone's passwords — while the house box stays hand-written and printed.
+func TestInitGivesEveryRoomItsOwnMailbox(t *testing.T) {
+	p, err := BuildPlan([]string{"Kitchen", "Master Bed"}, DefaultPaths())
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	hs := p.HandsetsTOML()
+	for _, want := range []string{`id = "kitchen"`, `mailbox = "kitchen"`, `id = "master-bed"`, `mailbox = "master-bed"`} {
+		if !strings.Contains(hs, want) {
+			t.Errorf("handsets.toml missing %q:\n%s", want, hs)
+		}
+	}
+	pol := p.PolicyTOML()
+	if !strings.Contains(pol, "label = \"Master Bed\"\nhandsets = [\"master-bed\"]\nvoicemail = \"master-bed\"") {
+		t.Errorf("the room's extension should land in the room's box:\n%s", pol)
+	}
+	if !strings.Contains(pol, "[house]\nhandsets = [\"kitchen\", \"master-bed\"]\nvoicemail = \"family\"") {
+		t.Errorf("the house box should stay family:\n%s", pol)
+	}
+	env := p.EnvFile("")
+	for _, box := range []string{"kitchen", "master-bed"} {
+		key := VoicemailPINEnvVarFor(box)
+		pin := p.VoicemailPINs[box]
+		if len(pin) != 6 || !strings.Contains(env, key+"="+pin) {
+			t.Errorf(".env missing %s=<6 digits> (pin %q):\n%s", key, pin, env)
+		}
+	}
+	if strings.Contains(env, "VOICEMAIL_FAMILY_PIN") {
+		t.Error("the house box's PIN is printed once, not written to .env")
+	}
+}

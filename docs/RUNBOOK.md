@@ -280,7 +280,7 @@ $ sudo -u doorman doorman check
 # Generate the per-handset Asterisk config and install it. Name the files:
 # asterisk/generated is 0700 doorman, so a shell glob under sudo finds nothing.
 $ sudo -u doorman doorman render
-$ sudo cp asterisk/generated/pjsip_handsets.conf asterisk/generated/extensions_handsets.conf /etc/asterisk/
+$ sudo cp asterisk/generated/pjsip_handsets.conf asterisk/generated/extensions_handsets.conf asterisk/generated/voicemail_handsets.conf /etc/asterisk/
 $ sudo chown asterisk:asterisk /etc/asterisk/*_handsets.conf
 $ sudo chmod 640 /etc/asterisk/*_handsets.conf
 $ sudo asterisk -rx 'pjsip reload' && sudo asterisk -rx 'dialplan reload'
@@ -563,7 +563,8 @@ valid **transfer target**.
 | 700 | (as a transfer target) **park** the call; Asterisk announces a slot |
 | 701–720 | Pick up a parked call from any handset |
 | *4 | **Outbound console**: call as another one of your numbers. Only interesting with more than one line, and it refuses 911 — see "Outbound caller ID" below. This is the one that goes through doorman |
-| *97 | Check **voicemail** (prompts for mailbox + password) |
+| *97 | **Voicemail** — the phone's own box, straight in, no PIN (a handset with no `mailbox` gets the old menu). What the voicemail key dials |
+| *98 | Any mailbox, with its PIN — the old `*97` menu, for checking another room's box |
 | *6 + digits | **The hunt** (optional, commented out by default): plays the greeting of the mailbox with that number and hangs up — a scavenger hunt whose answers are what you dial. `*6X.` is reserved for it whether or not you play. See `HUNT.md` |
 | 9196 | Echo test — your voice comes straight back; isolates RTP problems |
 | *(text)* | A message typed on a handset to a room number reaches that phone as a message, and to `100` reaches every phone (SIP MESSAGE, routed by the generated `[cmm-messages]` context) |
@@ -583,10 +584,49 @@ One-time phone-side setup:
 
 ### Voicemail
 
-`asterisk/voicemail.conf.example` → `/etc/asterisk/voicemail.conf`. The
-mailboxes there (`kids`, `adults`, `family` in the `[household]` section) are
-what `voicemail = "..."` in `policy.toml` refers to. **Change the placeholder
-passwords** — they are dialable from any handset via *97.
+Every phone has its own box, and the tool makes it. Adding a phone is four
+facts in `handsets.toml` — a name, a number, the address books it shows,
+and its voicemail:
+
+```toml
+[[handsets]]
+id = "master-bed"
+label = "Master bedroom"       # the name
+number = 103                   # the number
+phonebook = ["house", "caroline"]   # the address books
+mailbox = "master-bed"         # its own voicemail
+email = "caroline@example.com" # optional: messages mailed here, recording attached
+```
+
+Then `doorman render`, copy, reload — and a call to 103 that rings out (or
+finds the phone busy) leaves a message in the master bedroom's box; that
+phone's lamp lights; its voicemail key (`*97`) opens the box with no
+"mailbox?" and no PIN, because a phone on the LAN is already trusted to
+call as the house and page every room; a stranger with the master
+bedroom's lobby PIN who rings out lands in the same box when the extension
+says `voicemail = "master-bed"`. Two phones may name one box (`kitchen` and
+`theater` → `"whole-house"`), one line and two lamps.
+
+**The PIN lives in `.env`**, as the phone's passwords do —
+`VOICEMAIL_MASTER_BED_PIN` — and `doorman render` writes the box into
+`voicemail_handsets.conf`, which `voicemail.conf` reaches through the
+`#tryinclude` at its end (the example has it; an older `voicemail.conf`
+needs the line added). `doorman init` gives every room a box and a PIN;
+`doorman rotate --voicemail [box …]` sets or rotates them — run it once on
+a box that predates all this. The PIN is for `*98`, another phone
+reaching this box; the phone that owns it never types it.
+
+**A box with no PIN in `.env` is left to `voicemail.conf`.** That is
+`family`, and every box from before render made them: `doorman check`
+lists each mailbox handsets name or policy sends callers to, and says
+whether render writes it or the hand-written file must. `mailbox =
+"family"` on every phone with `family` hand-written keeps working exactly
+as it did, plus room calls landing there and `*97` opening it.
+
+`asterisk/voicemail.conf.example` → `/etc/asterisk/voicemail.conf` still
+holds the house box (`family`) and whatever else you write by hand.
+**Change its placeholder password** — a hand-written box is dialable from
+any handset via `*98`.
 
 `attach = yes` emails every message with the recording attached. For delivery,
 install msmtp configured to relay through your provider (SES works fine) and
@@ -2001,8 +2041,9 @@ Mitigations, in the order they are worth doing:
    environment variable per phone precisely so they can differ. Generate them:
    `openssl rand -base64 18`.
 2. **Change the voicemail PINs.** `asterisk/voicemail.conf.example` ships `4242`
-   for every mailbox as an obvious placeholder. It is still `4242` until you
-   change it, and voicemail is reachable from any handset with `*97`.
+   for every hand-written mailbox as an obvious placeholder. It is still
+   `4242` until you change it, and any box is reachable from any handset with
+   `*98`. The boxes render writes get their PINs from `.env`.
 3. **Keep SIP off the WAN.** Nothing in this design needs an inbound port. If
    your router forwards 5060 anywhere, undo it.
 4. **Put handsets on a network guests do not share.** A guest Wi-Fi password

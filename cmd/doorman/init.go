@@ -193,6 +193,8 @@ func printSecrets(plan *setup.Plan) {
 	for _, h := range plan.Handsets {
 		fmt.Printf("  %-22s %s\n", h.Label, plan.ExtensionPINs[h.ID])
 	}
+	fmt.Println("  (each room's own voicemail PIN is in .env as VOICEMAIL_<ROOM>_PIN; the")
+	fmt.Println("   room's phone opens its box without one, *98 from another phone asks)")
 	if pin, ok := plan.VoicemailPINs[plan.Mailbox]; ok {
 		fmt.Println()
 		fmt.Printf("  %-22s %s   (set this in voicemail.conf)\n", "Voicemail "+plan.Mailbox, pin)

@@ -43,7 +43,7 @@ skipped ahead, and that is a feature.
    (see "The one rule" below). No email address: the clue is the greeting and
    nobody leaves messages here. `sudo asterisk -rx 'voicemail reload'`.
 3. **Record each clue as that mailbox's greeting.** From any handset: dial
-   `*97`, enter the mailbox number, enter its PIN, press `0` for mailbox
+   `*98`, enter the mailbox number, enter its PIN, press `0` for mailbox
    options, then `1` to record the unavailable greeting. Say the clue, press
    `#`, then `1` to accept. Hang up. Dial `*6` and the number to hear it back.
 4. **Hide the envelopes.** Print or copy the cards in `docs/hunt/cards.md`,
@@ -117,7 +117,8 @@ feature must not land on one.
 | `700`–`720` | call parking |
 | `*4` | the outbound console |
 | `*6` + digits | **the hunt** |
-| `*97` | voicemail |
+| `*97` | this phone's voicemail |
+| `*98` | any mailbox, with its PIN |
 | `9196`, `9197` | echo test; the time |
 | `911` | emergency, always, never through anything else |
 
