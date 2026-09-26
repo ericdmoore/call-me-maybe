@@ -638,10 +638,14 @@ $ scp /tmp/midbury.json jepsen:/tmp/midbury.json && rm /tmp/midbury.json
 The CLI keeps its state under `$HOME/.bullmoose`:
 
 ```bash
-$ sudo -u asterisk HOME=/var/lib/asterisk bullmoose init --base file:///tmp/midbury.json
-$ sudo rm /tmp/midbury.json
+$ sudo install -o asterisk -g asterisk -m 0400 /tmp/midbury.json /tmp/midbury-bundle.json && rm /tmp/midbury.json
+$ sudo -u asterisk HOME=/var/lib/asterisk bullmoose init --base file:///tmp/midbury-bundle.json
+$ sudo rm /tmp/midbury-bundle.json
 $ sudo -u asterisk HOME=/var/lib/asterisk bullmoose accounts     # the house account, listed
 ```
+
+The `install` matters: a file copied in as the operator is unreadable to
+the asterisk user, and `init` says so rather than guessing.
 
 **4. Name the address, and turn the hook on.**
 
