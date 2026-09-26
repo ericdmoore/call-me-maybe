@@ -158,6 +158,16 @@ prepare() {
  if [ -e /etc/asterisk/modules.conf ] && ! grep -qE '^noload => pbx_ael\.so' /etc/asterisk/modules.conf; then
   run sh -c 'printf "\n; call-me-maybe: extensions.conf is the only dialplan\nnoload => pbx_ael.so\nnoload => pbx_lua.so\n" >> /etc/asterisk/modules.conf'
  fi
+ # app_voicemail is one module built three ways — file, ODBC, IMAP — and only
+ # one may load. Autoloading all three, the ODBC one fails (no database) and
+ # on declining it UNREGISTERS the VoiceMail applications the file one had
+ # already registered: the module shows Running, `VoiceMail()` does not exist,
+ # and every caller sent to voicemail is hung up on with one warning in
+ # messages.log (Asterisk 22 on Ubuntu, first customer, 2026-09-25). Load only
+ # the file-storage one.
+ if [ -e /etc/asterisk/modules.conf ] && ! grep -qE '^noload => app_voicemail_odbc\.so' /etc/asterisk/modules.conf; then
+  run sh -c 'printf "\n; call-me-maybe: only the file-storage voicemail may load\nnoload => app_voicemail_odbc.so\nnoload => app_voicemail_imap.so\n" >> /etc/asterisk/modules.conf'
+ fi
  # 0755, not 0750: the directory holds nothing secret (the secrets are 0600
  # files owned by doorman, and asterisk/generated is 0700), and 0750 locked the
  # operator out of `cd /opt/call-me-maybe` — the first step of every next step.

@@ -242,6 +242,17 @@ dialplans aside (`extensions.ael.distro`, `extensions.lua.distro`) and adds
 `extensions.conf` is the only dialplan loaded. On a hand-prepared host, do
 the same.
 
+It also adds `noload => app_voicemail_odbc.so` and `noload =>
+app_voicemail_imap.so`. Asterisk 22 builds voicemail three ways and only one
+may load; with all three autoloaded the ODBC one fails for want of a
+database and, on declining, **unregisters the `VoiceMail()` applications
+the file-storage one had registered**. The module still shows Running,
+`core show application VoiceMail` says it is not registered, and every
+caller handed to voicemail is hung up on with a single warning in
+`messages.log`. Found on the first customer's box two days after a
+rebuild, during which no message had been left. `scripts/smoke.sh` now
+checks it; on a hand-prepared host add the two lines and restart Asterisk.
+
 ### doorman config
 
 If `install-scripts/` prepared the host, `/opt/call-me-maybe` already belongs
@@ -594,7 +605,7 @@ voicemail feed; texts arrive by the carrier's own forwarding, and the
 house's replies and a morning digest are planned (`.plans/s22`). The shape
 is always the same: **doorman never learns to send mail.** Asterisk or the
 CLI prints, and a hook sends. The shipped hook uses the bullmoose CLI,
-because it is one static binary with tokens scoped to `send` and nothing
+because it is one static binary with tokens scoped to `draft,send` and nothing
 else; any other mail system is a ten-line script with the same contract
 (subject as the one argument, Markdown body on stdin, non-zero exit if it
 did not send).

@@ -64,6 +64,16 @@ else
   fail "asterisk not running" "sudo systemctl start asterisk"
 fi
 
+# The voicemail applications can vanish while the module shows Running: the
+# ODBC-built variant fails to load and unregisters them on its way out. Every
+# caller sent to voicemail is then hung up on, and nothing on a handset says so.
+if sudo asterisk -rx 'core show application VoiceMail' 2>/dev/null | grep -q -- '-= Info about application'; then
+  pass "VoiceMail() is registered"
+else
+  fail "VoiceMail() is not registered — the ODBC variant unloaded it" \
+    "add 'noload => app_voicemail_odbc.so' and 'noload => app_voicemail_imap.so' to modules.conf, then restart asterisk"
+fi
+
 # ── Rung 2: trunk registration ───────────────────────────────
 rung "2. VoIP.ms trunk"
 
