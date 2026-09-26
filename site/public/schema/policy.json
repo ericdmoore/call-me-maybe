@@ -50,7 +50,7 @@
             "description": "What the house says back, where the transport can carry one.",
             "type": "string",
             "x-rules": [
-              "Plain ASCII, at most 160 characters, no phone numbers, no links, no exclamation marks.",
+              "Plain ASCII, at most 160 characters — one segment, and no emoji, which would halve it. `doorman check` warns about a phone number, the one shape a carrier has dropped from this number, and refuses nothing else.",
               "An action needs a webhook, a reply, or both."
             ]
           },

@@ -34,16 +34,15 @@ reply = "pong"
 
 func TestMessagesRefuseWhatWouldMisfire(t *testing.T) {
 	for name, body := range map[string]string{
-		"a word with a space":         "[[words]]\nword = \"open sesame\"\npeople = [\"*\"]\nreply = \"ok\"\n",
-		"nobody may say it":           "[[words]]\nword = \"garage\"\nreply = \"ok\"\n",
-		"it does nothing":             "[[words]]\nword = \"garage\"\npeople = [\"*\"]\n",
-		"a bad webhook":               "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nwebhook = \"ftp://x\"\n",
-		"a reply with a phone number": "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"Call 512-555-0142\"\n",
-		"a reply with a link":         "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"see https://x\"\n",
-		"a shouting reply":            "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"Open!\"\n",
-		"a duplicate word":            "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"ok\"\n[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"ok\"\n",
-		"an unknown key":              "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"ok\"\nrepply = \"x\"\n",
-		"a bad person id":             "[[words]]\nword = \"garage\"\npeople = [\"Gabi Moore\"]\nreply = \"ok\"\n",
+		"a word with a space":    "[[words]]\nword = \"open sesame\"\npeople = [\"*\"]\nreply = \"ok\"\n",
+		"nobody may say it":      "[[words]]\nword = \"garage\"\nreply = \"ok\"\n",
+		"it does nothing":        "[[words]]\nword = \"garage\"\npeople = [\"*\"]\n",
+		"a bad webhook":          "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nwebhook = \"ftp://x\"\n",
+		"a reply with an emoji":  "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"Door open \U0001F44D\"\n",
+		"a reply over a segment": "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\n",
+		"a duplicate word":       "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"ok\"\n[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"ok\"\n",
+		"an unknown key":         "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"ok\"\nrepply = \"x\"\n",
+		"a bad person id":        "[[words]]\nword = \"garage\"\npeople = [\"Gabi Moore\"]\nreply = \"ok\"\n",
 	} {
 		if _, err := MessagesFromTOML([]byte(body)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -97,7 +96,7 @@ func TestActionsAreARegistryWithOwnersAndRules(t *testing.T) {
 	for name, body := range map[string]string{
 		"an unknown person": "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"eric\"]\n",
 		"nobody":            "[[actions]]\nid = \"garage\"\nreply = \"ok\"\n",
-		"a rude reply":      "[[actions]]\nid = \"garage\"\nreply = \"Open!\"\npeople = [\"*\"]\n",
+		"a rude reply":      "[[actions]]\nid = \"garage\"\nreply = \"Open \U0001F44D\"\npeople = [\"*\"]\n",
 		"a bad confirm":     "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\nconfirm = \"sms\"\n",
 		"a duplicate id":    "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\n[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\n",
 		"nothing to do":     "[[actions]]\nid = \"garage\"\npeople = [\"*\"]\n",
@@ -118,30 +117,27 @@ func TestAWordNamesAnActionOrCarriesItsOwnReply(t *testing.T) {
 	}
 }
 
-// The digits clause was narrowed on 2026-09-26: what the carrier dropped
-// was a text with a phone number in it, not a text with a digit in it. A PIN,
-// a time and a count pass; a number somebody could dial does not, however
-// it is punctuated.
-func TestReplyRuleRefusesPhoneNumbersNotDigits(t *testing.T) {
+// The rule is plain ASCII and one segment, and nothing else: links, marks
+// and numbers all pass, because the one thing a carrier was seen to drop is
+// advice from `doorman check`, not a refusal at the door.
+func TestReplyRuleIsASCIIAndOneSegmentOnly(t *testing.T) {
 	for _, ok := range []string{
 		"Family voicemail PIN: 482913",
-		"Back in 20 minutes",
-		"The garage closed at 9:15",
-		"Order 5 more, not 500",
+		"Back in 20 minutes!",
+		"Confirm at https://login.callmemaybe.cc/x/abc",
+		"Call 512-555-0142",
 	} {
 		if p := ReplyProblem(ok); p != "" {
 			t.Errorf("%q refused: %s", ok, p)
 		}
 	}
-	for _, bad := range []string{
-		"Call 5125550142",
-		"Call 512-555-0142",
-		"Call (512) 555 0142",
-		"Call +1 512.555.0142",
-		"ref 12345678",
-	} {
-		if p := ReplyProblem(bad); !strings.Contains(p, "phone number") {
-			t.Errorf("%q should be refused as a phone number, got %q", bad, p)
-		}
+	if p := ReplyProblem("Door open \U0001F44D"); !strings.Contains(p, "non-ASCII") {
+		t.Errorf("an emoji should be refused, got %q", p)
+	}
+	if w := ReplyWarning("Call 512-555-0142"); !strings.Contains(w, "phone number") {
+		t.Errorf("a phone number should be warned about, got %q", w)
+	}
+	if w := ReplyWarning("PIN 482913, back in 20 minutes"); w != "" {
+		t.Errorf("a PIN and a time should not be warned about, got %q", w)
 	}
 }

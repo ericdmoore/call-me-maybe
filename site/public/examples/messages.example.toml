@@ -23,10 +23,10 @@
 # for everyone on the allow-list, and may only narrow the action's own list.
 # Never a number retyped here.
 #
-# REPLIES ARE BORING ON PURPOSE. Plain ASCII, at most 160 characters, no
-# phone numbers, no links, no exclamation marks. One segment on the bill and past
-# the carrier's spam filter, which dropped the first text this house ever
-# sent. `doorman check` refuses a reply that breaks the rule.
+# REPLIES ARE BORING ON PURPOSE. Plain ASCII, at most 160 characters: one
+# segment on the bill, and no emoji, which halves it. `doorman check` refuses
+# a reply the transport cannot carry, and warns — only warns — about a phone
+# number, the one shape a carrier has dropped from this house's number.
 # ─────────────────────────────────────────────────────────────
 
 # Each word names an action from policy.toml's [[actions]]: what it does,

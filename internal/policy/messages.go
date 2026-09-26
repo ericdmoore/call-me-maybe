@@ -204,31 +204,36 @@ func MessagesFromTOML(data []byte) (*Messages, error) {
 }
 
 // ReplyProblem says why a reply may not be sent, or "" when it may. Plain
-// ASCII, one segment, no phone numbers, no links, no exclamation marks: one
-// rule with two reasons — one segment on the bill, and past the carrier's
-// spam filter, which ate the first text this house ever sent. That text
-// carried a phone number; the rule said "no digits at all" from 2026-09-24
-// until the first customer pointed out that this was an escalation the one
-// observation did not support (2026-09-26). A six-digit PIN or "back in 20
-// minutes" is fine; a run of seven or more digits, separators allowed, is
-// the shape that was actually dropped and is what is refused.
+// Plain ASCII and one segment. Those two are transport facts: a single
+// non-ASCII character (an emoji, a curly quote) switches the carrier's
+// encoding and halves the segment, and a second segment is a second charge
+// and a second chance to arrive out of order. Everything else this rule once
+// refused — exclamation marks, links, any digit, then phone numbers — was
+// carrier folklore generalised from one dropped text (2026-09-22) and was
+// taken out on 2026-09-26 at the first customer's word: links are what s19
+// will send, and "emojis are the issue". ReplyWarning keeps the one shape
+// that text had as advice `doorman check` prints, never a refusal.
 func ReplyProblem(reply string) string {
 	switch {
 	case strings.TrimSpace(reply) == "":
 		return "is empty"
 	case len(reply) > 160:
 		return fmt.Sprintf("is %d characters; one segment is 160", len(reply))
-	case strings.ContainsAny(reply, "!"):
-		return "has an exclamation mark — carriers read that as spam"
-	case strings.Contains(strings.ToLower(reply), "http"):
-		return "has a link — carriers drop those from a VoIP number"
-	case looksLikePhoneNumber(reply):
-		return "has a phone number — the carrier filter drops those from a VoIP number first"
 	}
 	for _, r := range reply {
 		if r > 126 || (r < 32 && r != '\n') {
 			return fmt.Sprintf("has a non-ASCII character %q — that alone halves the segment to seventy characters", r)
 		}
+	}
+	return ""
+}
+
+// ReplyWarning is advice, not a rule: the one shape of text this house has
+// seen a carrier drop. Printed by `doorman check` beside the reply; never
+// refused, because a human who typed it knows what they are sending.
+func ReplyWarning(reply string) string {
+	if looksLikePhoneNumber(reply) {
+		return "carries a phone number — the one shape a carrier has dropped from this number (2026-09-22)"
 	}
 	return ""
 }

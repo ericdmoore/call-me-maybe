@@ -266,7 +266,7 @@ func TestTheEdgeIsSpokenToWithTheTokenInAHeaderNeverTheURL(t *testing.T) {
 
 func TestARudeReplyIsRefusedBeforeItLeaves(t *testing.T) {
 	e := &Edge{URL: "http://edge.example.invalid/h/test", Token: testToken}
-	if err := e.Send(context.Background(), "+15125550101", "Door 1 open!"); err == nil || !strings.Contains(err.Error(), "refusing") {
+	if err := e.Send(context.Background(), "+15125550101", "Door open \U0001F44D"); err == nil || !strings.Contains(err.Error(), "refusing") {
 		t.Fatalf("err = %v", err)
 	}
 }

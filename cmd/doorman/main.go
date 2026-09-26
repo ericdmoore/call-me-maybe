@@ -541,6 +541,9 @@ func printMessages(path string, lists []allowList) bool {
 			does = append(does, "replies")
 		}
 		fmt.Printf("  %-12s from %-24s → %s\n", w.Word, strings.Join(w.People, ", "), strings.Join(does, " + "))
+		if warn := policy.ReplyWarning(w.Reply); warn != "" {
+			fmt.Printf("    ! reply %s\n", warn)
+		}
 		for _, id := range w.People {
 			if id != "*" && !have[id] {
 				fmt.Printf("    ✗ %q is not a [[people]] id in any policy file — add `id = %q` to that person\n", id, id)
