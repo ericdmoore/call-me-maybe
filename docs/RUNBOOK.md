@@ -563,6 +563,8 @@ valid **transfer target**.
 | 700 | (as a transfer target) **park** the call; Asterisk announces a slot |
 | 701–720 | Pick up a parked call from any handset |
 | *4 | **Outbound console**: call as another one of your numbers. Only interesting with more than one line, and it refuses 911 — see "Outbound caller ID" below. This is the one that goes through doorman |
+| *78NN | **Do not disturb** for this phone, NN = 15, 30 or 45 minutes; anything else is refused out loud. Room calls to it say how long and offer its box; the house ring group and the page skip it, except a page from a `page_override` phone. Clears itself when the time is up |
+| *79 | Do not disturb off |
 | *97 | **Voicemail** — the phone's own box, straight in, no PIN (a handset with no `mailbox` gets the old menu). What the voicemail key dials |
 | *98 | Any mailbox, with its PIN — the old `*97` menu, for checking another room's box |
 | *6 + digits | **The hunt** (optional, commented out by default): plays the greeting of the mailbox with that number and hangs up — a scavenger hunt whose answers are what you dial. `*6X.` is reserved for it whether or not you play. See `HUNT.md` |
@@ -581,6 +583,43 @@ One-time phone-side setup:
   `musiconhold.conf` at your own directory of 8 kHz mono WAVs.
 - **MWI lamps**: add `mailboxes=kids@household` (etc.) to an endpoint in
   `pjsip.conf` and that phone's message light follows the mailbox.
+
+### Do not disturb
+
+A child in the theater dials `*7830`, hears "do not disturb for thirty
+minutes", and for half an hour:
+
+- someone in the kitchen dialling `102` hears "that phone isn't taking
+  calls for another twenty minutes" and lands in the theater's mailbox if
+  it has one;
+- a known caller from outside rings every phone but the theater; the
+  theater's own lobby extension plays the ordinary unavailable greeting
+  and its mailbox, with no mention of quiet — a child's DND is not a
+  stranger's information;
+- `100` (ring all) and `500` (page) skip it, and whoever paged hears "one
+  phone is quiet; the others heard you" — **unless the page comes from a
+  phone with `page_override = true` in `handsets.toml`**, which reaches
+  every room regardless. Mark the kitchen and the parents' room. This is
+  what makes DND safe to hand to a child, and `doorman check` warns when
+  no phone has it.
+
+At the thirty-first minute everything is normal with nobody having done
+anything; `*79` ends it early. Only 15, 30 and 45 are accepted, because
+"quiet for 480 minutes" is a phone that stopped ringing and nobody
+remembers why. A phone can only quiet itself: the code reads the endpoint
+off the channel, not the keypad.
+
+The state is Asterisk's — `DB(DND/<handset>)` holds the expiry, written by
+`*78` and read by the generated dialplan and by doorman (over ARI, before
+each leg it rings). doorman never writes it, so a page works with the
+daemon down and the two can never disagree; `sudo asterisk -rx 'database
+show DND'` is the whole truth. The phrases are the bundled pack's own
+(`system/quiet-*`), so a swapped lobby voice never silences them.
+
+Not a schedule: quiet hours for a room are `afterhours` on its extension,
+and the two compose. Not the phone's own DND button either — that one is
+indefinite, invisible to the house, and blocks a parent's page, which is
+the problem this replaces. Turn it off in the phone's menu.
 
 ### Voicemail
 

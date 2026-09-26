@@ -45,6 +45,15 @@ the call also leaves by that line's
 .BR "[line] trunk" ,
 because a provider will not present a number its account does not own; the
 caller ID and the trunk are one decision and travel together on both paths.
+.B *78NN
+quiets the phone that dialled it for 15, 30 or 45 minutes and
+.B *79
+ends it: room calls say how long and offer its box, the ring\-all and the
+page skip it, except a page from a handset with
+.B page_override
+in
+.IR handsets.toml .
+The state is Asterisk's own, time\-boxed, read by doorman and never written.
 .B [line] failover
 is the ordered list of other trunks a call as that line tries when its own
 answers CHANUNAVAIL or CONGESTION \(em off unless written, because each rung

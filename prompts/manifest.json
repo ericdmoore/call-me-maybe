@@ -10,6 +10,12 @@
     "connecting": "Connecting you now."
   },
   "system": {
-    "balance-low": "This is the house phone. The calling credit is running low. It is down to about"
+    "balance-low": "This is the house phone. The calling credit is running low. It is down to about",
+    "quiet-for": "Do not disturb for",
+    "quiet-minutes": "minutes.",
+    "quiet-refused": "Fifteen, thirty, or forty-five minutes. Try again.",
+    "quiet-off": "Do not disturb is off.",
+    "quiet-room": "That phone isn't taking calls for another",
+    "quiet-page": "One phone is quiet. The others heard you."
   }
 }

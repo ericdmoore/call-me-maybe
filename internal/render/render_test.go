@@ -44,10 +44,10 @@ func TestRenderGeneratesAllThreePlacesFromOneFile(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"exten => 101,1,Dial(PJSIP/kitchen,30)",
+		" same => n,Dial(PJSIP/kitchen,30)",
 		"exten => 101,hint,PJSIP/kitchen",
-		"exten => 100,1,Dial(PJSIP/kids-room&PJSIP/kitchen,30)",
-		"exten => 500,1,Page(PJSIP/kitchen,ib(page-autoanswer^s^1),60)",
+		"exten => 100,1,Set(MEMBERS=)", " same => n,Dial(${MEMBERS:1},30)",
+		" same => n,Page(${MEMBERS:1},ib(page-autoanswer^s^1),60)",
 	} {
 		if !strings.Contains(f.Dialplan, want) {
 			t.Errorf("dialplan missing %q", want)
@@ -312,7 +312,7 @@ func TestRenderWritesTheMailboxesWhosePINsAreInEnv(t *testing.T) {
 		t.Errorf("[kitchen] lacks its box:\n%s", kitchen)
 	}
 	for _, want := range []string{
-		"exten => 103,1,Dial(PJSIP/master-bed,30)",
+		" same => n,Dial(PJSIP/master-bed,30)",
 		` same => n,GotoIf($["${DIALSTATUS}"="ANSWER"]?done)`,
 		` same => n,GotoIf($["${DIALSTATUS}"="BUSY"]?busy)`,
 		" same => n,VoiceMail(master-bed@household,u)",
@@ -339,7 +339,55 @@ func TestRenderWithoutAMailboxIsUnchanged(t *testing.T) {
 	if strings.Contains(kids, "CMM_MAILBOX") {
 		t.Errorf("[kids-room] has a box nobody gave it:\n%s", kids)
 	}
-	if strings.Contains(f.Dialplan, "VoiceMail(kids-room") || !strings.Contains(f.Dialplan, "exten => 105,1,Dial(PJSIP/kids-room,30)\nexten => 105,hint") {
-		t.Errorf("105 should be a bare Dial:\n%s", f.Dialplan)
+	if strings.Contains(f.Dialplan, "VoiceMail(kids-room") || !strings.Contains(f.Dialplan, " same => n,Dial(PJSIP/kids-room,30)\n same => n,Hangup()\n same => n(quiet)") {
+		t.Errorf("105 should be a Dial with no voicemail after it:\n%s", f.Dialplan)
+	}
+}
+
+// ── Do not disturb (s12) ─────────────────────────────────────────────────
+
+func TestRenderHonoursDoNotDisturbInRoomsRingAllAndPage(t *testing.T) {
+	hs := []policy.Handset{
+		{ID: "kitchen", Label: "Kitchen", Endpoint: "PJSIP/kitchen", Number: 101, Page: true, PageOverride: true, Mailbox: "kitchen", PasswordEnv: "HANDSET_KITCHEN_PASSWORD"},
+		{ID: "theater", Label: "Theater", Endpoint: "PJSIP/theater", Number: 102, Page: true, PasswordEnv: "HANDSET_THEATER_PASSWORD"},
+	}
+	f, err := Build(hs, env(map[string]string{"HANDSET_KITCHEN_PASSWORD": "a", "HANDSET_THEATER_PASSWORD": "b", "VOICEMAIL_KITCHEN_PIN": "123456"}), nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	dnd := func(id string) string { return "${IF($[${DB_EXISTS(DND/" + id + ")}]?${DB(DND/" + id + ")}:0)}" }
+	for _, want := range []string{
+		// A room: the check first, then the minutes and the box (kitchen) or a hangup (theater).
+		"exten => 101,1,GotoIf($[" + dnd("kitchen") + " > ${EPOCH}]?quiet)",
+		" same => n,Dial(PJSIP/kitchen,30)",
+		" same => n(quiet),Playback(call-me-maybe/system/quiet-room)",
+		" same => n,SayNumber($[(" + dnd("kitchen") + " - ${EPOCH} + 59) / 60])",
+		" same => n,Playback(call-me-maybe/system/quiet-minutes)",
+		" same => n,VoiceMail(kitchen@household,u)",
+		"exten => 102,1,GotoIf($[" + dnd("theater") + " > ${EPOCH}]?quiet)",
+		// Ring-all skips a quiet phone and says so when nobody is left.
+		"exten => 100,1,Set(MEMBERS=)",
+		" same => n,ExecIf($[" + dnd("theater") + " <= ${EPOCH}]?Set(MEMBERS=${MEMBERS}&PJSIP/theater))",
+		" same => n,Dial(${MEMBERS:1},30)",
+		" same => n(none),Playback(call-me-maybe/system/quiet-page)",
+		// The page: the kitchen's override cuts through; anyone else is told.
+		`exten => 500,1,Set(MEMBERS=)`,
+		` same => n,Set(OVERRIDE=$["${CHANNEL(endpoint)}"="kitchen"])`,
+		" same => n,ExecIf($[${OVERRIDE} | " + dnd("theater") + " <= ${EPOCH}]?Set(MEMBERS=${MEMBERS}&PJSIP/theater):Set(QUIET=1))",
+		" same => n,ExecIf($[${QUIET}]?Playback(call-me-maybe/system/quiet-page))",
+		" same => n,Page(${MEMBERS:1},ib(page-autoanswer^s^1),60)",
+	} {
+		if !strings.Contains(f.Dialplan, want) {
+			t.Errorf("dialplan missing %q:\n%s", want, f.Dialplan)
+		}
+	}
+	if len(f.PageOverrides) != 1 || f.PageOverrides[0] != "kitchen" {
+		t.Errorf("PageOverrides = %v", f.PageOverrides)
+	}
+	// Nobody overrides: the page still works, and QUIET still tells the pager.
+	hs[0].PageOverride = false
+	f, _ = Build(hs, env(map[string]string{"HANDSET_KITCHEN_PASSWORD": "a", "HANDSET_THEATER_PASSWORD": "b"}), nil)
+	if !strings.Contains(f.Dialplan, " same => n,Set(OVERRIDE=0)\n") || len(f.PageOverrides) != 0 {
+		t.Errorf("without overrides the page should set OVERRIDE=0:\n%s", f.Dialplan)
 	}
 }

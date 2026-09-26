@@ -97,6 +97,11 @@ type Handset struct {
 	Number int `toml:"number"`
 	// Page marks the handset a member of the page-all group (dial 500).
 	Page bool `toml:"page"`
+	// PageOverride marks a phone whose pages are not subject to a room's
+	// do-not-disturb (s12): the kitchen, the parents' room. Inventory, not
+	// policy — which phones override is a fact about where they sit — and
+	// the thing that makes DND safe to hand to a child.
+	PageOverride bool `toml:"page_override"`
 	// Mailbox is this phone's own voicemail box: `doorman render` makes it
 	// (voicemail_handsets.conf, when VOICEMAIL_<BOX>_PIN is in .env), a room
 	// call that rings out lands in it, the phone's voicemail key opens it,

@@ -26,6 +26,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -467,6 +468,7 @@ func runCheck(args []string) (code int) {
 		rc = 1
 	}
 	printMailboxes(results, secretLookup(*envFlag))
+	printPageOverrides(results)
 	// Both silent without a trunks.toml: a box with one provider has nothing
 	// to choose between and should never have to read the word "trunk".
 	printTrunks(trunks, results)
@@ -1530,6 +1532,7 @@ func serve() error {
 				RedactCallerID:     cfg.RedactCallerID,
 				MaxConcurrentCalls: cfg.MaxConcurrentCalls,
 			},
+			Quiet:        quietThroughARI(client, o.log),
 			OnLegCreated: reg.addLeg,
 			OnFinished:   reg.remove,
 		}
@@ -2202,4 +2205,59 @@ func runRotateVoicemail(handsetsPath, envPath string, ids []string) int {
 	fmt.Println("  doorman render                      # voicemail_handsets.conf")
 	fmt.Println("  (install as render prints, then `voicemail reload`)")
 	return 0
+}
+
+// quietThroughARI asks Asterisk whether a handset has set do-not-disturb:
+// DB(DND/<id>) holds an expiry the phone wrote with *78NN. A read that
+// fails, or a value that is not a time, is "not quiet" — a phone must ring
+// rather than be silenced by a hiccup, which is the safe direction for a
+// house phone to fail in. Bounded tightly: this runs on the ring path.
+func quietThroughARI(client *ari.Client, log *slog.Logger) func(string) bool {
+	return func(id string) bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		v, err := client.Variable(ctx, "DB(DND/"+id+")")
+		if err != nil {
+			log.Warn("could not read do-not-disturb, ringing anyway", "handset", id, "err", err)
+			return false
+		}
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return false
+		}
+		until, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return false
+		}
+		return time.Now().Unix() < until
+	}
+}
+
+// printPageOverrides says which phones' pages reach a quiet room, and warns
+// when none do: do-not-disturb is one keypress on every phone, and a house
+// where no page can cut through it is a house where a child's thirty
+// minutes can outlast a parent's need to reach them.
+func printPageOverrides(results []checkedLine) {
+	if len(results) == 0 || results[0].pol == nil {
+		return
+	}
+	var over, paged []string
+	for _, h := range results[0].pol.HandsetList() {
+		if h.PageOverride {
+			over = append(over, h.ID)
+		}
+		if h.Page {
+			paged = append(paged, h.ID)
+		}
+	}
+	if len(paged) == 0 && len(over) == 0 {
+		return
+	}
+	fmt.Println()
+	if len(over) > 0 {
+		fmt.Printf("Do not disturb: a page from %s reaches a quiet room (page_override)\n", strings.Join(over, ", "))
+		return
+	}
+	fmt.Println("! Do not disturb: no handset has page_override, so no page can reach a room")
+	fmt.Println("  that dialled *78. Mark the kitchen or a parent's room in handsets.toml.")
 }

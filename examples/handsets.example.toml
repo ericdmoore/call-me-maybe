@@ -18,6 +18,8 @@ label = "Kitchen"
 endpoint = "PJSIP/kitchen"       # must be PJSIP/<id>; render enforces it
 number = 101                     # internal extension + BLF hint (100-199)
 page = true                      # rings on dial-500 page-all
+page_override = true             # its pages reach a room on do-not-disturb (*78NN):
+                                 # mark the kitchen and the parents' room
 mailbox = "adults"               # this phone's voicemail: render writes the box
                                  # (PIN from VOICEMAIL_ADULTS_PIN in .env, or it is
                                  # yours in voicemail.conf), room calls that ring
@@ -54,6 +56,7 @@ label = "Primary bedroom"
 endpoint = "PJSIP/primary-bed"
 number = 104
 page = false                     # nobody pages the bedroom
+page_override = true             # but a page from it reaches a quiet room
 mailbox = "adults"
 password_env = "HANDSET_PRIMARY_BED_PASSWORD"
 

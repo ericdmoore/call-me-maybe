@@ -121,6 +121,15 @@
             "type": "boolean",
             "default": false
           },
+          "page_override": {
+            "description": "A page from this phone reaches a room that has set do-not-disturb (*78NN). Mark the kitchen and the parents' room: it is what makes DND safe to hand to a child, and `doorman check` warns when no phone has it. Inventory rather than policy, because which phones override is a fact about where they sit.",
+            "type": "boolean",
+            "default": false,
+            "x-cross-references": [
+              "asterisk/extensions.conf *78NN / *79",
+              "the generated 500 group in extensions_handsets.conf"
+            ]
+          },
           "password_env": {
             "description": "Name of the .env variable holding this handset's SIP password. The secret itself never appears in this file. `doorman render` substitutes it and fails if unset.",
             "type": "string",

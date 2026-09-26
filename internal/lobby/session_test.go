@@ -648,3 +648,44 @@ func TestAfterhoursRingFallsBackToVoicemail(t *testing.T) {
 	h.sess.CallerLeft()
 	h.waitFinished(t)
 }
+
+// Do not disturb (s12): a quiet handset is not rung. Asterisk owns the
+// state; the session only asks. A stage whose every handset is quiet is a
+// stage that rang nobody, and a ladder of those ends at the mailbox — the
+// friend with the kids' PIN leaves a message rather than hearing a phone
+// that will not ring.
+func TestAQuietHandsetIsNotRungAndAQuietLadderEndsInVoicemail(t *testing.T) {
+	quiet := map[string]bool{"kids-room": true}
+	h := startTuned(t, kidsLadderPolicy, "9995550199", nil, func(d *Deps) {
+		d.Quiet = func(id string) bool { return quiet[id] }
+	})
+	h.finishPlayback(t)
+	dialPin(h, "555001")
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+
+	// Stage 1 is the kids' room alone, and it is quiet: nothing originates,
+	// and the ladder moves straight to the adults.
+	o1 := h.fake.expect(t, "Originate")
+	o2 := h.fake.expect(t, "Originate")
+	got := map[string]bool{o1.Args[0]: true, o2.Args[0]: true}
+	if got["PJSIP/kids-room"] || !got["PJSIP/kitchen"] || !got["PJSIP/primary-bed"] {
+		t.Fatalf("originated %v, want the adults only", got)
+	}
+	<-h.legs
+	<-h.legs
+	// Nobody answers the adults either → voicemail, as ever.
+	h.fake.expectAny(t, "Hangup", "Hangup", "RingStop", "DestroyBridge")
+	if c := h.fake.expect(t, "SetChannelVar"); c.Args[1] != "MAILBOX" || c.Args[2] != "kids" {
+		t.Fatalf("SetChannelVar = %v, want MAILBOX=kids", c.Args)
+	}
+	h.fake.expect(t, "Continue")
+	h.sess.CallerLeft()
+	h.waitFinished(t)
+	// The record says the first stage rang nobody because it was quiet.
+	rec := h.rec.only(t)
+	if len(rec.Stages) < 1 || rec.Stages[0].Result != "quiet" {
+		t.Errorf("stages = %+v, want the first marked quiet", rec.Stages)
+	}
+}

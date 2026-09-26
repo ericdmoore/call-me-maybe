@@ -234,6 +234,18 @@ func (c *Client) Hangup(ctx context.Context, channelID string) error {
 	return c.do(ctx, http.MethodDelete, "/channels/"+channelID, nil, nil)
 }
 
+// Variable evaluates a global variable or a dialplan function — GET
+// /asterisk/variable — and returns its value. Read by the daemon to ask
+// whether a handset is quiet (DB(DND/<id>)), which is Asterisk's own,
+// time-boxed state that doorman reads and never writes.
+func (c *Client) Variable(ctx context.Context, name string) (string, error) {
+	var out struct {
+		Value string `json:"value"`
+	}
+	err := c.do(ctx, http.MethodGet, "/asterisk/variable", url.Values{"variable": {name}}, &out)
+	return out.Value, err
+}
+
 // Channel reads one channel's current state — GET /channels/{id}. A channel
 // that has ended answers 404 (IsNotFound). Read by `doorman balance` to watch
 // an announcement it originated ring, answer and end; never by the call path,

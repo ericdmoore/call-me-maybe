@@ -38,6 +38,9 @@ type Fragments struct {
 	// Mailboxes is what Voicemail was built from, for `doorman check` and
 	// `doorman render` to report.
 	Mailboxes []Mailbox
+	// PageOverrides are the handsets whose pages reach a quiet room, in id
+	// order — empty is a house where nobody can, which `check` warns about.
+	PageOverrides []string
 }
 
 // A phone's own voicemail (s21): `mailbox` on a handset is a box the tool
@@ -122,6 +125,20 @@ func humanise(id string) string {
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
 }
+
+// Do not disturb (s12) is a time-boxed key Asterisk owns: DB(DND/<handset>)
+// holds an expiry, set by *78NN on the phone itself and cleared by *79 or
+// by time. Everything below only reads it. dndExpiry is the expression that
+// reads it safely — a missing key is 0, never an empty operand that makes
+// the expression parser warn and answer false by accident.
+func dndExpiry(id string) string {
+	return "${IF($[${DB_EXISTS(DND/" + id + ")}]?${DB(DND/" + id + ")}:0)}"
+}
+
+// systemMedia is where the house's own phrases live (the bundled pack's
+// system/ directory), the same prefix internal/lobby plays announcements
+// from; a test in cmd/doorman keeps the two agreeing.
+const systemMedia = "call-me-maybe/system"
 
 // buildVoicemail renders voicemail_handsets.conf from the boxes.
 func buildVoicemail(boxes []Mailbox) string {
@@ -232,7 +249,7 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 	plan.WriteString(header("handsets.toml", false))
 	plan.WriteString("[handsets-internal]\n")
 
-	var all, pageMembers []string
+	var all, pageMembers, overrides []string
 	var messageRoutes []messageRoute
 	generated := 0
 
@@ -311,7 +328,12 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 		generated++
 
 		if h.Number > 0 {
-			fmt.Fprintf(&plan, "exten => %d,1,Dial(%s,30)\n", h.Number, h.Endpoint)
+			// A quiet room is told about, inside the house: how many minutes
+			// remain, exactly, then its mailbox if it has one. Outside
+			// callers never reach this — the lobby's ladders are doorman's,
+			// and a child's DND is not a stranger's information.
+			fmt.Fprintf(&plan, "exten => %d,1,GotoIf($[%s > ${EPOCH}]?quiet)\n", h.Number, dndExpiry(h.ID))
+			fmt.Fprintf(&plan, " same => n,Dial(%s,30)\n", h.Endpoint)
 			if h.Mailbox != "" {
 				// A room call that rings out lands in the room's own box —
 				// busy gets the busy greeting — and a call that was answered
@@ -323,13 +345,25 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 				plan.WriteString(" same => n(done),Hangup()\n")
 				fmt.Fprintf(&plan, " same => n(busy),VoiceMail(%s@household,b)\n", h.Mailbox)
 				plan.WriteString(" same => n,Hangup()\n")
+			} else {
+				plan.WriteString(" same => n,Hangup()\n")
 			}
+			fmt.Fprintf(&plan, " same => n(quiet),Playback(%s/quiet-room)\n", systemMedia)
+			fmt.Fprintf(&plan, " same => n,SayNumber($[(%s - ${EPOCH} + 59) / 60])\n", dndExpiry(h.ID))
+			fmt.Fprintf(&plan, " same => n,Playback(%s/quiet-minutes)\n", systemMedia)
+			if h.Mailbox != "" {
+				fmt.Fprintf(&plan, " same => n,VoiceMail(%s@household,u)\n", h.Mailbox)
+			}
+			plan.WriteString(" same => n,Hangup()\n")
 			fmt.Fprintf(&plan, "exten => %d,hint,%s\n", h.Number, h.Endpoint)
 			messageRoutes = append(messageRoutes, messageRoute{number: h.Number, id: h.ID, label: label})
 		}
 		all = append(all, h.Endpoint)
 		if h.Page {
 			pageMembers = append(pageMembers, h.Endpoint)
+		}
+		if h.PageOverride {
+			overrides = append(overrides, h.ID)
 		}
 	}
 
@@ -344,12 +378,43 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 	sort.Strings(pageMembers)
 	boxes := Mailboxes(handsets, env)
 
-	plan.WriteString("\n; Ring every handset.\n")
-	fmt.Fprintf(&plan, "exten => 100,1,Dial(%s,30)\n", strings.Join(all, "&"))
+	sort.Strings(overrides)
+	plan.WriteString("\n; Ring every handset — every handset that is not quiet (*78NN).\n")
+	plan.WriteString("exten => 100,1,Set(MEMBERS=)\n")
+	for _, ep := range all {
+		id := strings.TrimPrefix(ep, "PJSIP/")
+		fmt.Fprintf(&plan, " same => n,ExecIf($[%s <= ${EPOCH}]?Set(MEMBERS=${MEMBERS}&%s))\n", dndExpiry(id), ep)
+	}
+	plan.WriteString(" same => n,GotoIf($[\"${MEMBERS}\"=\"\"]?none)\n")
+	plan.WriteString(" same => n,Dial(${MEMBERS:1},30)\n")
+	plan.WriteString(" same => n,Hangup()\n")
+	fmt.Fprintf(&plan, " same => n(none),Playback(%s/quiet-page)\n", systemMedia)
+	plan.WriteString(" same => n,Hangup()\n")
 	if len(pageMembers) > 0 {
 		plan.WriteString("\n; Page: members auto-answer on speaker (page = true in handsets.toml).\n")
-		fmt.Fprintf(&plan, "exten => 500,1,Page(%s,ib(page-autoanswer^s^1),60)\n",
-			strings.Join(pageMembers, "&"))
+		plan.WriteString("; A quiet room is skipped, and the pager is told — unless the pager is a\n")
+		plan.WriteString("; page_override phone, whose page reaches every room regardless: a\n")
+		plan.WriteString("; parent's page is what makes do-not-disturb safe to hand to a child.\n")
+		plan.WriteString("exten => 500,1,Set(MEMBERS=)\n")
+		plan.WriteString(" same => n,Set(QUIET=0)\n")
+		if len(overrides) > 0 {
+			var conds []string
+			for _, id := range overrides {
+				conds = append(conds, "\"${CHANNEL(endpoint)}\"=\""+id+"\"")
+			}
+			fmt.Fprintf(&plan, " same => n,Set(OVERRIDE=$[%s])\n", strings.Join(conds, " | "))
+		} else {
+			plan.WriteString(" same => n,Set(OVERRIDE=0)\n")
+		}
+		for _, ep := range pageMembers {
+			id := strings.TrimPrefix(ep, "PJSIP/")
+			fmt.Fprintf(&plan, " same => n,ExecIf($[${OVERRIDE} | %s <= ${EPOCH}]?Set(MEMBERS=${MEMBERS}&%s):Set(QUIET=1))\n", dndExpiry(id), ep)
+		}
+		fmt.Fprintf(&plan, " same => n,ExecIf($[${QUIET}]?Playback(%s/quiet-page))\n", systemMedia)
+		plan.WriteString(" same => n,GotoIf($[\"${MEMBERS}\"=\"\"]?none)\n")
+		plan.WriteString(" same => n,Page(${MEMBERS:1},ib(page-autoanswer^s^1),60)\n")
+		plan.WriteString(" same => n,Hangup()\n")
+		plan.WriteString(" same => n(none),Hangup()\n")
 	}
 
 	// Texts between handsets. Every endpoint above names this context for
@@ -389,7 +454,7 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 	plan.WriteString(" same => n,Return()\n")
 
 	return &Fragments{PJSIP: pjsip.String(), Dialplan: plan.String(), Generated: generated,
-		Voicemail: buildVoicemail(boxes), Mailboxes: boxes}, nil
+		Voicemail: buildVoicemail(boxes), Mailboxes: boxes, PageOverrides: overrides}, nil
 }
 
 // messageRoute is one handset's number → endpoint for [cmm-messages].

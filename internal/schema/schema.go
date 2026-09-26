@@ -198,6 +198,12 @@ func handsetItem() *Schema {
 				Description: "Include in the page-all group reached by dialling 500.",
 				Default:     false,
 			},
+			"page_override": {
+				Type:        "boolean",
+				Description: "A page from this phone reaches a room that has set do-not-disturb (*78NN). Mark the kitchen and the parents' room: it is what makes DND safe to hand to a child, and `doorman check` warns when no phone has it. Inventory rather than policy, because which phones override is a fact about where they sit.",
+				Default:     false,
+				CrossRefs:   []string{"asterisk/extensions.conf *78NN / *79", "the generated 500 group in extensions_handsets.conf"},
+			},
 			"mailbox": {
 				Type:        "string",
 				Description: "This phone's own voicemail box. `doorman render` writes it into voicemail_handsets.conf when VOICEMAIL_<BOX>_PIN is in .env (a box without one is assumed hand-written in voicemail.conf, which is every box from before render made them); a call to this phone's number that rings out — or finds it busy — lands in it; the phone's voicemail key (*97) opens it without asking which or for a PIN; and its message-waiting lamp follows it. Two phones may name one box and share it. A policy file's `voicemail = \"…\"` may name it too, so a stranger with this room's PIN who rings out leaves the message on this room's phone.",
