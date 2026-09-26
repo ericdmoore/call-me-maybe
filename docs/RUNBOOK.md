@@ -587,6 +587,90 @@ Doorman hands callers to voicemail by releasing the channel into the
 `[voicemail-drop]` dialplan context with `MAILBOX` set — after that handoff
 the call belongs to Asterisk, and doorman deliberately never touches it again.
 
+### The house mailbox
+
+One address that hears everything the house hears. This section is the
+voicemail feed; texts arrive by the carrier's own forwarding, and the
+house's replies and a morning digest are planned (`.plans/s22`). The shape
+is always the same: **doorman never learns to send mail.** Asterisk or the
+CLI prints, and a hook sends. The shipped hook uses the bullmoose CLI,
+because it is one static binary with tokens scoped to `send` and nothing
+else; any other mail system is a ten-line script with the same contract
+(subject as the one argument, Markdown body on stdin, non-zero exit if it
+did not send).
+
+**1. Install the CLI on the box.** One binary, from the bullmoose releases
+page (`cli-go/v*` tags); check the version there first:
+
+```bash
+$ V=v0.5.1
+$ curl -fsSLo /tmp/bullmoose "https://github.com/ericdmoore/bullmoose.cc/releases/download/cli-go/$V/bullmoose_${V}_linux_amd64"
+$ curl -fsSL "https://github.com/ericdmoore/bullmoose.cc/releases/download/cli-go/$V/checksums.txt" | grep linux_amd64
+$ sha256sum /tmp/bullmoose                 # must match the line above
+$ sudo install -m 0755 /tmp/bullmoose /usr/local/bin/bullmoose && rm /tmp/bullmoose
+```
+
+**2. Mint a send-only token, on the workstation, never on the box.** The
+operator's admin login mints tokens for any account; the token can send mail
+as the house and do nothing else, and losing the box means revoking one
+token:
+
+```bash
+$ bullmoose admin token create midbury@example.com --name jepsen-voicemail --scopes send
+```
+
+It is shown once. Put it in a bootstrap bundle rather than on a command
+line, so it never lands in a shell history:
+
+```bash
+$ umask 077 && printf '{"base":"https://app.bullmoose.cc","token":"bm_…","accountId":"t_…"}' > /tmp/midbury.json
+$ scp /tmp/midbury.json jepsen:/tmp/midbury.json && rm /tmp/midbury.json
+```
+
+**3. Log the asterisk user in.** The hook runs as whoever calls it, and
+`externnotify` runs as Asterisk's own user, whose home is `/var/lib/asterisk`.
+The CLI keeps its state under `$HOME/.bullmoose`:
+
+```bash
+$ sudo -u asterisk HOME=/var/lib/asterisk bullmoose init --base file:///tmp/midbury.json
+$ sudo rm /tmp/midbury.json
+$ sudo -u asterisk HOME=/var/lib/asterisk bullmoose accounts     # the house account, listed
+```
+
+**4. Name the address, and turn the hook on.**
+
+```bash
+$ printf 'MAIL_TO=midbury@example.com\n' | sudo tee /etc/asterisk/cmm-mail.env >/dev/null
+$ sudo chown root:asterisk /etc/asterisk/cmm-mail.env && sudo chmod 0640 /etc/asterisk/cmm-mail.env
+$ sudo nano /etc/asterisk/voicemail.conf     # under [general]:
+#   externnotify = /opt/call-me-maybe/scripts/voicemail-notify
+$ sudo asterisk -rx 'voicemail reload'
+```
+
+**5. Leave yourself a message** — from a mobile through the lobby, or from
+the console without ringing anyone: a global `MAILBOX` stands in for the
+channel variable doorman would have set, and a Local channel plays a clip
+into the box as if somebody were talking:
+
+```bash
+$ sudo asterisk -rx 'dialplan set global MAILBOX family'
+$ sudo asterisk -rx 'channel originate Local/s@voicemail-drop application Playback demo-congrats'
+$ sudo asterisk -rx 'dialplan set global MAILBOX ""'
+$ journalctl -t cmm-voicemail -n 3        # "sent family's new message to …"
+```
+
+The mail arrives with the recording attached. **If it does not,** the
+message is still in the box and the lamp is still lit: mail is a feed, never
+the record. `journalctl -t cmm-voicemail` says why — no `MAIL_TO`, the CLI
+not on `PATH`, a token revoked. Nothing about a failed send reaches a
+caller, and nothing here runs on a call.
+
+**What this puts on the box:** a token that can send as the house, in
+`/var/lib/asterisk/.bullmoose/`, and the address in a root-owned file. No
+mail password, no login, and no way to read the mailbox from here. The
+mailbox itself becomes the most sensitive thing in the house — recordings
+and full caller numbers — so keep it to people who would answer the phone.
+
 ### Ringer ladders and afterhours
 
 Both are pure `policy.toml`; see the `Kids` extension in

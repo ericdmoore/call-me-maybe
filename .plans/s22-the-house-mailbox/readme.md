@@ -116,7 +116,25 @@ call, and the narrower answer is two tokens.
 
 ## Milestones and acceptance criteria
 
-### M1 · The hook and the voicemail feed
+### M1 · The hook and the voicemail feed — in progress (2026-09-25 night)
+
+**Done so far.** The account `midbury@bullmoose.cc` exists (created with
+the operator CLI, tenant `t_bullmoose`), with read grants for the user's own
+account and for alpaca's CLI login so the feed can be verified from here.
+Two send-only tokens were minted for the box — one for Asterisk's user, one
+for doorman's — and stored only in 0600 files on alpaca until they are
+placed. `scripts/voicemail-notify` (externnotify: newest message in the
+box, Markdown note, recording linked so the CLI attaches it, `timeout 60`,
+outcome to journald under `cmm-voicemail`) and `scripts/mail-hook-bullmoose`
+(subject as the argument, Markdown on stdin, `MAIL_TO` from the
+environment) ship with the installer; `voicemail.conf.example` carries the
+commented `externnotify` line; RUNBOOK "The house mailbox" is the
+procedure. One change from the sketch: Asterisk's hook runs as the
+`asterisk` user, which cannot read `.env`, so its address lives in
+`/etc/asterisk/cmm-mail.env` (0640 root:asterisk) and its CLI login under
+`/var/lib/asterisk/.bullmoose`; `MAIL_HOOK`/`MAIL_TO` in `.env` arrive with
+M2, when doorman's own feeds start reading them. Verified on the
+workstation: a Markdown link to a local WAV attaches ("1 attached").
 
 `MAIL_HOOK` in `.env` (schema, template, man page); `scripts/mail-hook-
 bullmoose` (the shipped hook) and `scripts/voicemail-notify` (the

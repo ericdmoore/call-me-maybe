@@ -185,6 +185,10 @@ prepare() {
  run install -m 0644 "$repo/install-scripts/README.md" /opt/call-me-maybe/docs/INSTALL-LINUX.md
  run install -m 0755 "$repo/scripts/smoke.sh" /opt/call-me-maybe/scripts/smoke.sh
  run install -o root -g root -m 0755 "$repo/scripts/notify-check-sync" /opt/call-me-maybe/scripts/notify-check-sync
+ # The house mailbox: Asterisk's externnotify script and the mail hook it
+ # runs. Inert until /etc/asterisk/cmm-mail.env names an address.
+ run install -o root -g root -m 0755 "$repo/scripts/voicemail-notify" /opt/call-me-maybe/scripts/voicemail-notify
+ run install -o root -g root -m 0755 "$repo/scripts/mail-hook-bullmoose" /opt/call-me-maybe/scripts/mail-hook-bullmoose
  run install -m 0644 "$repo/scripts/cel-spool.sql" /opt/call-me-maybe/scripts/cel-spool.sql
  install_once "$binary" /opt/call-me-maybe/bin/doorman 0755
  # The same binary on the system PATH — which is also sudo's secure_path — so

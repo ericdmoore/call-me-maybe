@@ -1,0 +1,32 @@
+#!/bin/sh
+# Call Me Maybe — the shipped mail hook: hand one message to the bullmoose CLI.
+#
+#   mail-hook-bullmoose "<subject>" < body.md
+#
+# The body is Markdown on stdin; a link to a local file attaches it. MAIL_TO
+# names the house mailbox and comes from the environment — the caller's .env,
+# or /etc/asterisk/cmm-mail.env for Asterisk's own voicemail hook. Whoever
+# runs this needs a bullmoose login of their own: `bullmoose init` as that
+# user, with a token scoped to `send` and nothing else (RUNBOOK, "The house
+# mailbox"). doorman never learns to send mail; it prints, and this sends.
+#
+# Any other mail system is a script with this same contract: subject as the
+# one argument, Markdown body on stdin, non-zero exit when it did not send.
+set -eu
+subject="${1:-}"
+if [ -z "$subject" ]; then
+  echo "mail-hook-bullmoose: usage: mail-hook-bullmoose <subject> < body.md" >&2
+  exit 2
+fi
+if [ -z "${MAIL_TO:-}" ]; then
+  echo "mail-hook-bullmoose: MAIL_TO is not set — the house mailbox address" >&2
+  exit 2
+fi
+BULLMOOSE="${BULLMOOSE:-bullmoose}"
+if ! command -v "$BULLMOOSE" >/dev/null 2>&1; then
+  echo "mail-hook-bullmoose: $BULLMOOSE is not on PATH — install the CLI (RUNBOOK, \"The house mailbox\")" >&2
+  exit 3
+fi
+# --yes: no terminal here. --expandMD html: Markdown becomes the HTML body,
+# the raw Markdown rides along as plain text, and linked local files attach.
+exec "$BULLMOOSE" send --to "$MAIL_TO" --subject "$subject" --expandMD html --yes

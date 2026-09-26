@@ -3,8 +3,13 @@
 ;
 ; attach=yes is the load-bearing line: every message is emailed with the
 ; recording attached, which is most of the project's voicemail roadmap
-; implemented by Asterisk itself. Point mailcmd at msmtp/sendmail relaying
-; through your provider (e.g. SES) — see RUNBOOK.
+; implemented by Asterisk itself. Two ways out of the box, pick one:
+;   mailcmd       — an SMTP relay (msmtp/sendmail) that takes Asterisk's own
+;                   email as-is.
+;   externnotify  — the house mailbox: a script that runs after each message
+;                   is saved and hands it to a mail hook (the shipped one
+;                   uses the bullmoose CLI with a send-only token). See
+;                   RUNBOOK, "The house mailbox".
 ;
 ; CHANGE THE PASSWORDS. 4242 below is a placeholder, and voicemail
 ; passwords are dialable from any handset via *97.
@@ -19,6 +24,10 @@ minsecs = 2
 serveremail = lobby@example.com
 emailsubject = [Home phone] Voicemail for ${VM_NAME} from ${VM_CALLERID}
 ; mailcmd = /usr/bin/msmtp -t
+; The house mailbox route. Runs as the asterisk user, off the call, after the
+; message is saved; reads MAIL_TO from /etc/asterisk/cmm-mail.env. A failed
+; send leaves the message in the box and the lamp lit.
+; externnotify = /opt/call-me-maybe/scripts/voicemail-notify
 
 [household]
 ; mailbox => password,Display Name,email
