@@ -176,6 +176,19 @@ PIN.
 
 ### M3 · Docs and the rehearsal — docs done (v0.11.0); the rehearsal is the next voicemail anyone leaves
 
+**On jepsen, 2026-09-25 22:10:** v0.11.0 installed by the documented
+path, the new `extensions.conf` template copied (no local edits), the two
+voicemail.conf lines added, rendered and reloaded. Both phones still name
+`family` (hand-written, no PIN variable), so render wrote no box and
+`check` says so; `102` now carries the VoiceMail steps and the theater's
+endpoint carries `CMM_MAILBOX=family`. The ring-out path was driven
+through ARI (the console's own 30-second originate timeout killed three
+console attempts at exactly the moment the ring gave way to voicemail —
+a real caller stays on the line) and CEL shows `Dial` → `VoiceMail`
+`APP_START` → `ANSWER`; the announcement used as the "caller" was shorter
+than the greeting plus the two-second minimum, so no message was kept.
+A person leaving one is the rehearsal.
+
 RUNBOOK "Voicemail" rewritten around the four facts; FIRST-BOOT's phones
 step; `examples/handsets.example.toml` and the scenarios give every room a
 box; `llms.txt` and the man page; s12 unblocked. Done when a reader adds a
