@@ -1,6 +1,12 @@
 # s22 · The house mailbox — one address hears everything the house hears
 
-**Status:** planned (2026-09-25, late). From the user: "can we treat
+**Status:** M1–M3 live on jepsen (2026-09-25 night, v0.9.1–v0.10.0):
+voicemail, the house's replies and the morning digest all reach
+`midbury@bullmoose.cc`, verified by reading the mailbox back. Open: the
+carrier's own forwarding of inbound texts is a portal switch the user
+flips (the API password lives only there and at the edge); M4, the phone
+book from `bullmoose contacts export`, waits on the user's decision.
+Originally planned the same evening. From the user: "can we treat
 midbury@bullmoose.cc as a complete audit log? All voicemails? All SMS?
 Etc?" — and, on how the box would send: "JMAP has all HTTP endpoints, and
 we are well acquainted with the developer. Could install the Bullmoose CLI
