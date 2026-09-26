@@ -600,14 +600,20 @@ else; any other mail system is a ten-line script with the same contract
 did not send).
 
 **1. Install the CLI on the box.** One binary, from the bullmoose releases
-page (`cli-go/v*` tags); check the version there first:
+(`cli-go/v*` tags). The repository is private, so fetch it on the
+workstation with an authenticated `gh` and copy it over — an anonymous
+`curl` on the box answers 404:
 
 ```bash
-$ V=v0.5.1
-$ curl -fsSLo /tmp/bullmoose "https://github.com/ericdmoore/bullmoose.cc/releases/download/cli-go/$V/bullmoose_${V}_linux_amd64"
-$ curl -fsSL "https://github.com/ericdmoore/bullmoose.cc/releases/download/cli-go/$V/checksums.txt" | grep linux_amd64
-$ sha256sum /tmp/bullmoose                 # must match the line above
+# On the workstation:
+$ V=v0.5.1   # check the releases page
+$ gh release download "cli-go/$V" -R ericdmoore/bullmoose.cc -p "bullmoose_${V}_linux_amd64" -p checksums.txt -D /tmp/bmcli
+$ (cd /tmp/bmcli && grep linux_amd64 checksums.txt && shasum -a 256 "bullmoose_${V}_linux_amd64")   # must match
+$ scp "/tmp/bmcli/bullmoose_${V}_linux_amd64" jepsen:/tmp/bullmoose
+
+# On the box:
 $ sudo install -m 0755 /tmp/bullmoose /usr/local/bin/bullmoose && rm /tmp/bullmoose
+$ bullmoose version
 ```
 
 **2. Mint a send-only token, on the workstation, never on the box.** The
