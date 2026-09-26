@@ -355,13 +355,13 @@ func TestRenderHonoursDoNotDisturbInRoomsRingAllAndPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	dnd := func(id string) string { return "${IF($[${DB_EXISTS(DND/" + id + ")}]?${DB(DND/" + id + ")}:0)}" }
+	dnd := func(id string) string { return `${IF($["${DND_` + id + `}"!=""]?${DND_` + id + `}:0)}` }
 	for _, want := range []string{
 		// A room: the check first, then the minutes and the box (kitchen) or a hangup (theater).
 		"exten => 101,1,GotoIf($[" + dnd("kitchen") + " > ${EPOCH}]?quiet)",
 		" same => n,Dial(PJSIP/kitchen,30)",
 		" same => n(quiet),Playback(call-me-maybe/system/quiet-room)",
-		" same => n,SayNumber($[(" + dnd("kitchen") + " - ${EPOCH} + 59) / 60])",
+		" same => n,SayNumber(${MATH((" + dnd("kitchen") + " - ${EPOCH} + 59)/60,int)})",
 		" same => n,Playback(call-me-maybe/system/quiet-minutes)",
 		" same => n,VoiceMail(kitchen@household,u)",
 		"exten => 102,1,GotoIf($[" + dnd("theater") + " > ${EPOCH}]?quiet)",

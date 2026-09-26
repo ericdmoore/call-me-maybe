@@ -609,11 +609,15 @@ anything; `*79` ends it early. Only 15, 30 and 45 are accepted, because
 remembers why. A phone can only quiet itself: the code reads the endpoint
 off the channel, not the keypad.
 
-The state is Asterisk's — `DB(DND/<handset>)` holds the expiry, written by
-`*78` and read by the generated dialplan and by doorman (over ARI, before
-each leg it rings). doorman never writes it, so a page works with the
-daemon down and the two can never disagree; `sudo asterisk -rx 'database
-show DND'` is the whole truth. The phrases are the bundled pack's own
+The state is Asterisk's — the global variable `DND_<handset>` holds the
+expiry, written by `*78` and read by the generated dialplan and by doorman
+(over ARI, before each leg it rings). doorman never writes it, so a page
+works with the daemon down and the two can never disagree; `sudo asterisk
+-rx 'dialplan show globals' | grep DND_` is the whole truth. A global rather
+than the AstDB because ARI refuses to read `DB()` unless `asterisk.conf`
+opens every "dangerous" function to every ARI user; the cost is that an
+Asterisk restart clears a quiet phone early, which is the one failure this
+feature can afford. The phrases are the bundled pack's own
 (`system/quiet-*`), so a swapped lobby voice never silences them.
 
 Not a schedule: quiet hours for a room are `afterhours` on its extension,

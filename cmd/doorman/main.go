@@ -2208,7 +2208,7 @@ func runRotateVoicemail(handsetsPath, envPath string, ids []string) int {
 }
 
 // quietThroughARI asks Asterisk whether a handset has set do-not-disturb:
-// DB(DND/<id>) holds an expiry the phone wrote with *78NN. A read that
+// the global DND_<id> holds an expiry the phone wrote with *78NN. A read that
 // fails, or a value that is not a time, is "not quiet" — a phone must ring
 // rather than be silenced by a hiccup, which is the safe direction for a
 // house phone to fail in. Bounded tightly: this runs on the ring path.
@@ -2216,7 +2216,7 @@ func quietThroughARI(client *ari.Client, log *slog.Logger) func(string) bool {
 	return func(id string) bool {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		v, err := client.Variable(ctx, "DB(DND/"+id+")")
+		v, err := client.Variable(ctx, render.DNDVar(id))
 		if err != nil {
 			log.Warn("could not read do-not-disturb, ringing anyway", "handset", id, "err", err)
 			return false

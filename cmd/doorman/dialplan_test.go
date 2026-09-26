@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"callmemaybe/internal/lobby"
+	"callmemaybe/internal/render"
 )
 
 // The shipped dialplan is the one interface in this system that is not Go, and
@@ -193,18 +194,19 @@ func TestVoicemailKeyOpensThePhonesOwnBox(t *testing.T) {
 
 // *78NN quiets the phone that dialled it — the endpoint comes from the
 // channel, never the keypad — for 15, 30 or 45 minutes and nothing else;
-// *79 clears it. The state is Asterisk's DB, which the generated dialplan
-// and doorman both read and only this code writes.
+// *79 clears it. The state is an Asterisk global, which the generated
+// dialplan and doorman both read and only this code writes.
 func TestDoNotDisturbCodesWriteAsteriskOwnedState(t *testing.T) {
 	ctx := dialplanContext(t, shippedDialplan(t), "features-internal")
 	for _, want := range []string{
 		`exten => _*78XX,1,Answer()`,
 		` same => n,GotoIf($["${MINS}"="15" | "${MINS}"="30" | "${MINS}"="45"]?ok)`,
 		` same => n,Playback(call-me-maybe/system/quiet-refused)`,
-		` same => n(ok),Set(DB(DND/${CHANNEL(endpoint)})=$[${EPOCH} + ${MINS} * 60])`,
+		` same => n(ok),Set(EP=${CHANNEL(endpoint)})`,
+		` same => n,Set(GLOBAL(DND_${REPLACE(EP,-,_)})=$[${EPOCH} + ${MINS} * 60])`,
 		` same => n,SayNumber(${MINS})`,
 		`exten => *79,1,Answer()`,
-		`${DB_DELETE(DND/${CHANNEL(endpoint)})}`,
+		` same => n,Set(GLOBAL(DND_${REPLACE(EP,-,_)})=)`,
 	} {
 		if !strings.Contains(ctx, want) {
 			t.Errorf("[features-internal] is missing %q", want)
@@ -223,5 +225,13 @@ func TestSystemPhrasesShareOnePrefix(t *testing.T) {
 	media, _ := lobby.AnnounceMedia(lobby.AnnounceKindBalance, "1")
 	if len(media) == 0 || !strings.HasPrefix(media[0], "sound:call-me-maybe/system/") {
 		t.Fatalf("the daemon plays from %v, want sound:call-me-maybe/system/…", media)
+	}
+}
+
+// A dashed handset id becomes an underscored variable on both sides, or the
+// phone that set it and the dialplan that reads it name different things.
+func TestDNDVariableNameMatchesTheDialplansReplace(t *testing.T) {
+	if got := render.DNDVar("master-bed"); got != "DND_master_bed" {
+		t.Errorf("DNDVar = %q", got)
 	}
 }

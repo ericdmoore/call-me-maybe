@@ -2,8 +2,12 @@
 
 **Status:** M1 + M2 shipped in v0.12.0 (2026-09-25, late night); M3 (the
 red line key) open, waiting on line keys in the s10 template. As built:
-`*78XX` and `*79` in `[features-internal]` writing `DB(DND/<endpoint>)`
-from the channel's own endpoint, refusing anything but 15/30/45 aloud
+`*78XX` and `*79` in `[features-internal]` writing the global
+`DND_<endpoint>` from the channel's own endpoint (not the AstDB: ARI's
+variable endpoints refuse `DB()` as a "dangerous function" unless
+asterisk.conf's `live_dangerous` opens every such function to every ARI
+user — found live, and the sketch below still says DB; a restart clearing
+a quiet phone early is the worst case the sketch already accepted), refusing anything but 15/30/45 aloud
 (`system/quiet-*` phrases, bundled); render checks the key first on every
 room number (minutes left, exact, then the room's box), builds the `100`
 and `500` member lists at call time skipping quiet phones, and lets a

@@ -163,10 +163,11 @@ type Deps struct {
 
 	// Quiet says whether a handset has set do-not-disturb (s12): asked
 	// before each leg is originated, by handset id, and answered by Asterisk
-	// — DB(DND/<id>) through ARI — never by anything doorman keeps. Nil is
-	// nobody quiet, which is every install that has not dialled *78. A step
-	// whose every handset is quiet is a step that rang nobody, and a ladder
-	// of those ends where an unanswered one does: the mailbox.
+	// — the global DND_<id> read through ARI — never by anything doorman
+	// keeps. Nil is nobody quiet, which is every install
+	// that has not dialled *78. A step whose every handset is quiet is a
+	// step that rang nobody, and a ladder of those ends where an unanswered
+	// one does: the mailbox.
 	Quiet func(handsetID string) bool
 
 	// OnLegCreated lets the event router map an originated leg's channel ID

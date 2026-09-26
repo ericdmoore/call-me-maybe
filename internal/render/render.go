@@ -126,13 +126,19 @@ func humanise(id string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-// Do not disturb (s12) is a time-boxed key Asterisk owns: DB(DND/<handset>)
-// holds an expiry, set by *78NN on the phone itself and cleared by *79 or
-// by time. Everything below only reads it. dndExpiry is the expression that
-// reads it safely — a missing key is 0, never an empty operand that makes
-// the expression parser warn and answer false by accident.
+// Do not disturb (s12) is a time-boxed value Asterisk owns: the global
+// variable DND_<handset> holds an expiry, set by *78NN on the phone itself
+// and cleared by *79, by time, or by an Asterisk restart. Everything below
+// only reads it. A global rather than the AstDB because ARI cannot read
+// DB() without asterisk.conf opening every "dangerous" function to every
+// ARI user. dndExpiry is the expression that reads it safely — unset is 0,
+// never an empty operand that makes the expression parser warn and answer
+// false by accident.
+func DNDVar(id string) string { return "DND_" + strings.ReplaceAll(id, "-", "_") }
+
 func dndExpiry(id string) string {
-	return "${IF($[${DB_EXISTS(DND/" + id + ")}]?${DB(DND/" + id + ")}:0)}"
+	v := DNDVar(id)
+	return "${IF($[\"${" + v + "}\"!=\"\"]?${" + v + "}:0)}"
 }
 
 // systemMedia is where the house's own phrases live (the bundled pack's
@@ -349,7 +355,9 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 				plan.WriteString(" same => n,Hangup()\n")
 			}
 			fmt.Fprintf(&plan, " same => n(quiet),Playback(%s/quiet-room)\n", systemMedia)
-			fmt.Fprintf(&plan, " same => n,SayNumber($[(%s - ${EPOCH} + 59) / 60])\n", dndExpiry(h.ID))
+			// MATH with int: $[…] divides in floating point and SayNumber
+			// would read "15.000000" (first box, 2026-09-25).
+			fmt.Fprintf(&plan, " same => n,SayNumber(${MATH((%s - ${EPOCH} + 59)/60,int)})\n", dndExpiry(h.ID))
 			fmt.Fprintf(&plan, " same => n,Playback(%s/quiet-minutes)\n", systemMedia)
 			if h.Mailbox != "" {
 				fmt.Fprintf(&plan, " same => n,VoiceMail(%s@household,u)\n", h.Mailbox)

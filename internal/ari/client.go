@@ -234,15 +234,27 @@ func (c *Client) Hangup(ctx context.Context, channelID string) error {
 	return c.do(ctx, http.MethodDelete, "/channels/"+channelID, nil, nil)
 }
 
-// Variable evaluates a global variable or a dialplan function — GET
-// /asterisk/variable — and returns its value. Read by the daemon to ask
-// whether a handset is quiet (DB(DND/<id>)), which is Asterisk's own,
-// time-boxed state that doorman reads and never writes.
+// Variable evaluates a global variable — GET /asterisk/variable — and
+// returns its value. A dialplan function with arguments comes back empty
+// from this endpoint (found live: DB(), DB_EXISTS(), MATH() all answered
+// "" while EPOCH did), so anything that needs one goes through a channel.
 func (c *Client) Variable(ctx context.Context, name string) (string, error) {
 	var out struct {
 		Value string `json:"value"`
 	}
 	err := c.do(ctx, http.MethodGet, "/asterisk/variable", url.Values{"variable": {name}}, &out)
+	return out.Value, err
+}
+
+// ChannelVar evaluates a variable or a dialplan function on a channel — GET
+// /channels/{id}/variable. Read by the daemon to ask whether a handset is
+// quiet (DB(DND/<id>)) on the caller's own channel: Asterisk's own,
+// time-boxed state that doorman reads and never writes.
+func (c *Client) ChannelVar(ctx context.Context, channelID, name string) (string, error) {
+	var out struct {
+		Value string `json:"value"`
+	}
+	err := c.do(ctx, http.MethodGet, "/channels/"+channelID+"/variable", url.Values{"variable": {name}}, &out)
 	return out.Value, err
 }
 
