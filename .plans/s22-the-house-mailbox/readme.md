@@ -148,11 +148,14 @@ alpaca with a throwaway read-only token, revoked after.
    workstation with `gh` and copied; and the bootstrap bundle must be
    handed to the asterisk user with `install -o asterisk`, not copied.
 
-Two more, not fixed tonight: the CEL spool that feeds the journal was
-never set up on the rebuilt box (`cel_sqlite3_custom` declines to load; no
-`master.db`; `CEL_SPOOL_PATH` unset), which M3's digest and s01's
-"which trunk carried it" both lean on — a documented operator step in
-`docs/events.md`. And `*97` asks "mailbox?" on a keypad that cannot type
+One more, fixed the same night in v0.9.4: the CEL spool that feeds the
+journal had never been set up on the rebuilt box (the distro's disabled
+`cel.conf` in place, no `master.db`, `CEL_SPOOL_PATH` unset), which M3's
+digest and s01's "which trunk carried it" both lean on. It is host
+preparation now — the installer stages the two files, initialises the
+spool, grants the read ACL and reloads; `doorman init` points `.env` at
+it; `smoke.sh` has a capture rung — and jepsen records every channel since
+2026-09-25 21:24. And `*97` asks "mailbox?" on a keypad that cannot type
 `family`: mailbox names in the example are words, which s21 M2 resolves by
 sending the phone straight into its own box.
 

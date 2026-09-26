@@ -245,7 +245,11 @@ prepare() {
  done
  if [ "$dry_run" = 0 ] && systemctl is-active --quiet asterisk 2>/dev/null; then
   # Already loaded is fine; a freshly configured backend needs asking once.
+  # cel.conf itself is read by Asterisk's core, which has no reload of its
+  # own: a running Asterisk keeps "CEL Logging: Disabled" from the distro
+  # sample until a core reload (or the restart the runbook asks for anyway).
   run asterisk -rx 'module load cel_sqlite3_custom.so' >/dev/null 2>&1 || true
+  run asterisk -rx 'core reload' >/dev/null 2>&1 || true
  fi
  install_once "$binary" /opt/call-me-maybe/bin/doorman 0755
  # The same binary on the system PATH — which is also sudo's secure_path — so

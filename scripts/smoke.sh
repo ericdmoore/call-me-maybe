@@ -35,6 +35,13 @@ rung() { printf '\n%s%s%s\n' "$B" "$1" "$N"; }
 if [ "$(id -u)" = 0 ]; then SUDO=""; elif command -v sudo >/dev/null; then SUDO=sudo; else SUDO=""; fi
 ast() { $SUDO asterisk -rx "$1" 2>/dev/null; }
 svc_active() { systemctl is-active --quiet "$1" 2>/dev/null; }
+# Run one shell command as the service account, whether we are root already
+# (the documented `sudo bash scripts/smoke.sh`) or an operator with sudo.
+as_doorman() {
+  if [ "$(id -u)" = 0 ]; then su -s /bin/sh doorman -c "$1" 2>/dev/null
+  elif [ -n "$SUDO" ]; then $SUDO -u doorman sh -c "$1" 2>/dev/null
+  else return 1; fi
+}
 
 # Pull ARI settings out of .env without sourcing it (it may contain anything).
 envval() {
@@ -265,7 +272,7 @@ if ast 'cel show status' | grep -q 'CEL Logging: Enabled'; then
   fi
   if [ -n "$(envval CEL_SPOOL_PATH)" ]; then
     SPOOL=$(envval CEL_SPOOL_PATH)
-    if $SUDO -u doorman test -r "$SPOOL" 2>/dev/null; then
+    if as_doorman "test -r '$SPOOL'"; then
       pass "doorman can read $SPOOL"
     else
       fail "doorman cannot read $SPOOL" "sudo setfacl -m u:doorman:rx,d:u:doorman:rX $(dirname "$SPOOL") && sudo setfacl -m u:doorman:r $SPOOL"

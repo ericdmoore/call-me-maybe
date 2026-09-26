@@ -235,7 +235,8 @@ sudo asterisk -rx 'module show like cel_sqlite3_custom'
 **On a host prepared by `install-scripts/`, all of this is done:** the two
 configuration files are installed (the distro samples kept as `.distro`), the
 spool is initialised once as the asterisk user, the service account is granted
-read access, and `doorman init` writes `CEL_SPOOL_PATH` and
+read access, a running Asterisk is asked to `core reload` so `cel show status`
+turns to Enabled, and `doorman init` writes `CEL_SPOOL_PATH` and
 `EVENT_JOURNAL_PATH` into `.env` because the places exist. A rerun is
 idempotent and repairs a host prepared before 2026-09-25. `scripts/smoke.sh`
 reports the capture state as its own rung. What follows is the same procedure
