@@ -1,0 +1,166 @@
+# s22 · The house mailbox — one address hears everything the house hears
+
+**Status:** planned (2026-09-25, late). From the user: "can we treat
+midbury@bullmoose.cc as a complete audit log? All voicemails? All SMS?
+Etc?" — and, on how the box would send: "JMAP has all HTTP endpoints, and
+we are well acquainted with the developer. Could install the Bullmoose CLI
+on the jepsen box too." Backoff on the PIN limiter was raised in the same
+conversation and settled as not needed; that decision is recorded in s08's
+neighbourhood, not here.
+
+## What done looks like
+
+Everything the house hears lands in one mailbox, as mail, from four feeds:
+
+- **A voicemail** arrives minutes after it is left: "Voicemail for Master
+  bedroom from +1 512 555 0142", the recording attached, the room's own box
+  named (s21). Sent by the box through the bullmoose CLI, not SMTP.
+- **A text to the house number** arrives as the carrier forwards it, with
+  the sender's number. That is VoIP.ms's own forwarding; the box is not
+  involved and cannot lose it.
+- **A reply the house sent** — "pong", "the garage is closing" — arrives as
+  its own mail, so the thread of what the house said is as complete as what
+  it was told.
+- **Yesterday, every morning:** who rang, who was let in, who was dismissed
+  and why, which texts acted, which failed. Rendered from the journal, sent
+  as one mail. The durable record stays the journal; the mail is the copy a
+  human reads.
+
+Nothing else. Never a PIN, a password, a token, or a handset's SIP secret.
+The mailbox becomes the most sensitive thing in the house — recordings and
+full caller numbers — and it is treated as such: a scoped, revocable device
+token, and no other credential of the house's in the same place.
+
+## Starting point
+
+- Asterisk's `app_voicemail` emails every message with the WAV attached
+  when `mailcmd` points at something sendmail-shaped. jepsen has no relay:
+  `mailcmd` is commented out and there is no msmtp. `externnotify` fires a
+  command per new message with the context, mailbox and counts; TASKS §2
+  already earmarks it for transcription.
+- The carrier forwards received texts by email once `setSMS` names an
+  address; the callback half is live and the email half waits on the
+  mailbox existing. The edge keeps inbound only ("the carrier's email
+  forwarding is the archive, not this table"); replies are kept nowhere.
+- The journal (`EVENT_JOURNAL_PATH`, on at jepsen) records every call's
+  admission, ring, outcome and reason, and `doorman inbox` decides texts
+  but journals nothing (single-writer rule; `message.*` events reserved).
+- The bullmoose CLI is one static binary with a `linux_amd64` release,
+  `send` (body on stdin or a Markdown file; a linked local file attaches),
+  `token create --scopes send` for a send-only device credential, and
+  `init --base … --token …` to configure a box from a token with no
+  password. It also has `contacts export`: vCard 3.0 on stdout.
+- The `doorman` service account has no HOME of its own (`/opt/call-me-maybe`)
+  and a private `/var/lib/doorman`.
+
+## Decisions and invariants
+
+**doorman does not learn to send mail.** Not SMTP, not JMAP, not a
+bullmoose dependency in the binary. Every feed is either the carrier's,
+Asterisk's, or "doorman prints, a hook sends" — the shape `balance --prom`
+already has. The hook is one executable path in `.env`, `MAIL_HOOK`, which
+receives a subject and a Markdown body on stdin and exits non-zero if it
+could not send. The shipped hook script calls `bullmoose send`; somebody
+without bullmoose writes a ten-line wrapper around anything else. Nothing on
+the call path invokes it (invariants 3 and 7 territory: a mail hook that
+hangs must not hold a call, so it is only ever run by the CLI and by
+Asterisk's own after-the-fact hook).
+
+**Voicemail goes by `externnotify`, not `mailcmd`.** `mailcmd` expects a
+sendmail that reads a finished MIME message, which the CLI is not, and
+parsing Asterisk's email to re-send it is the wrong direction. `externnotify`
+runs after the message is saved, off the call, with the mailbox in hand:
+the script finds the newest recording in that box's spool, writes a short
+Markdown note (room, caller, duration, time) with the WAV linked so the CLI
+attaches it, and runs the hook. The attachment stays in the spool; email is
+the copy. If the hook fails the message is still in the box and the lamp is
+still lit — email is a feed, never the record.
+
+**A send-only token, minted for the box, revocable alone.** On the
+workstation: `bullmoose token create --name jepsen --scopes send`. On the
+box, as the service account: `bullmoose init --base <jmap> --token bm_…`,
+with the CLI's config directed under `/var/lib/doorman/bullmoose` (0700).
+That token can send mail as the house and do nothing else; losing the box
+means revoking one token. It is the only bullmoose credential the box holds.
+
+**Replies and the digest come from doorman as text.** `doorman inbox`
+gains a per-outcome hook call — subject "The house replied to +1 512…",
+body the reply — off the decision path, best-effort, and it still does not
+journal (that stays s13 M5). `doorman digest` is new: yesterday's calls and
+texts from the journal as Markdown on stdout, redacted by the same default
+`doorman calls` uses unless `--full`, run by `doorman-digest.timer` each
+morning and piped into the hook. The journal stays the source; the digest
+is a query over it and never an input to anything (invariant 10).
+
+**The carrier feed is configuration.** `setSMS … email_enabled=1
+email=<house mailbox>` the day the mailbox exists. Recorded here because it
+is the one feed with no code and no box.
+
+**Bonus, and worth a line: the whole-home phone book.** `bullmoose
+contacts export` is a vCard on stdout, which is exactly what a `contacts.toml`
+`path` source reads. A timer on the box that writes it to
+`/var/lib/doorman/contacts/house.vcf` is the whole-home book the user asked
+for on 2026-09-24, with no new source kind in doorman and the house's
+address book living where the rest of the house's data does. Read scope
+only; a second token, or the same one widened to `read,send` — the user's
+call, and the narrower answer is two tokens.
+
+## What is deliberately out of scope
+
+- Transcription (TASKS §2): the same `externnotify` script is where it
+  would go, later; this stream ships the hook without it.
+- Two-way: reading the mailbox from the box, or acting on mail. The house
+  hears; it does not read its own audit log.
+- Any mail path inside the daemon.
+- Retention of the mailbox: bullmoose's business.
+
+## Milestones and acceptance criteria
+
+### M1 · The hook and the voicemail feed
+
+`MAIL_HOOK` in `.env` (schema, template, man page); `scripts/mail-hook-
+bullmoose` (the shipped hook) and `scripts/voicemail-notify` (the
+`externnotify` script); `voicemail.conf.example` gains the `externnotify`
+line commented; RUNBOOK "The house mailbox": install the CLI on the box,
+mint the token, `init` as the service account, test with one message. Done
+when a voicemail left on jepsen arrives in the mailbox with the recording
+attached, and a hook that fails leaves the message and the lamp untouched.
+
+### M2 · The carrier feed and the replies
+
+`setSMS` email forwarding on (one API call, recorded in RUNBOOK beside the
+callback); `doorman inbox` runs the hook per reply, best-effort, never on
+the decision path. Done when a `ping` produces two mails: the carrier's copy
+of "ping" and the house's copy of "pong".
+
+### M3 · The digest
+
+`doorman digest [--since] [--full]` over the journal; `doorman-digest.timer`;
+the hook. Done when the morning mail lists yesterday's calls and texts,
+redacted, and matches `doorman calls` for the same day.
+
+### M4 · The phone book, if the user wants it
+
+`bullmoose contacts export` on a timer into a `path` source; `doorman check`
+shows its age like any source. Done when a contact added in bullmoose is on
+both handsets after the next refresh and notify.
+
+## Alternatives rejected
+
+- **msmtp → the SMTP shim on alpaca.** Works, is generic, and is a second
+  credential in a second format for a mail system that already has a CLI
+  with scoped tokens. The port also did not answer from jepsen when probed.
+- **doorman speaking JMAP.** A mail client in the phone daemon, keyed to
+  one mail system. The hook keeps doorman ignorant of where mail goes.
+- **The edge sending the reply copy.** The Worker holds the carrier key
+  and should hold nothing else; the box already knows what it replied.
+- **Treating the mailbox as the record.** Email can be dropped or
+  delayed; the journal cannot be delayed by anything on the call path and
+  keeps its own retention. Both, with the roles named.
+
+## Rollout order
+
+M1 needs the mailbox to exist and the CLI on the box — both the user's, then
+mine. M2's carrier half is one call the moment the mailbox exists. M3 is
+repo-only. M4 waits on the phone-book decision. s21 makes M1's subject
+lines say which room.
