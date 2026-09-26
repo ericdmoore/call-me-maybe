@@ -50,7 +50,7 @@
             "description": "What the house says back, where the transport can carry one.",
             "type": "string",
             "x-rules": [
-              "Plain ASCII, at most 160 characters, no digits, no links, no exclamation marks.",
+              "Plain ASCII, at most 160 characters, no phone numbers, no links, no exclamation marks.",
               "An action needs a webhook, a reply, or both."
             ]
           },

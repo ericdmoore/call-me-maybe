@@ -41,13 +41,31 @@ function bearer(req: Request): string {
 }
 
 // The reply rule, enforced here as well as on the box: plain ASCII, one
-// segment, no digits, no links, no exclamation marks.
+// segment, no phone numbers, no links, no exclamation marks. "No digits at
+// all" until 2026-09-26; what the carrier actually dropped was a text with
+// a phone number in it, so that — seven or more digits in a run, separators
+// allowed — is what is refused. A PIN or a time is fine.
+function looksLikePhoneNumber(s: string): boolean {
+  let digits = 0;
+  for (const ch of s) {
+    if (ch >= "0" && ch <= "9") {
+      digits++;
+      if (digits >= 7) return true;
+    } else if (" .-()+".includes(ch)) {
+      if (digits === 0) continue;
+    } else {
+      digits = 0;
+    }
+  }
+  return false;
+}
+
 function replyProblem(s: string): string | null {
   if (s.trim() === "") return "is empty";
   if (s.length > 160) return `is ${s.length} characters; one segment is 160`;
   if (s.includes("!")) return "has an exclamation mark";
   if (/http/i.test(s)) return "has a link";
-  if (/[0-9]/.test(s)) return "has digits";
+  if (looksLikePhoneNumber(s)) return "has a phone number";
   for (const ch of s) {
     const c = ch.charCodeAt(0);
     if (c > 126 || (c < 32 && ch !== "\n")) return "has a non-ASCII character";

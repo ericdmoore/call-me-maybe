@@ -194,8 +194,10 @@ attached, and the sender's number is the subject.
 `internal/inbox` + `doorman inbox`: the edge client (pull, ack, send — token
 in a header, never the URL), the seen-id set, word dispatch over
 `messages.toml` (`[[words]]`: word, `people` = `[[people]]` ids or `"*"`,
-webhook, reply), the reply guard (ASCII, 160, no digits, no links, no
-exclamation marks — the loader refuses, the edge refuses again), the HA
+webhook, reply), the reply guard (ASCII, 160, no phone numbers, no links, no
+exclamation marks — the loader refuses, the edge refuses again; "no digits
+at all" until 2026-09-26, when the first customer pointed out that one
+dropped text carrying a phone number did not justify refusing every digit), the HA
 webhook POST (word, person id, message id — never the text), journal
 events `message.received` / `message.acted`, `doorman-inbox.service`.
 Tests with `httptest` against a fake edge: a listed person's word acts and

@@ -204,9 +204,14 @@ func MessagesFromTOML(data []byte) (*Messages, error) {
 }
 
 // ReplyProblem says why a reply may not be sent, or "" when it may. Plain
-// ASCII, one segment, no digits, no links, no exclamation marks: one rule
-// with two reasons — one segment on the bill, and past the carrier's spam
-// filter, which ate the first text this house ever sent.
+// ASCII, one segment, no phone numbers, no links, no exclamation marks: one
+// rule with two reasons — one segment on the bill, and past the carrier's
+// spam filter, which ate the first text this house ever sent. That text
+// carried a phone number; the rule said "no digits at all" from 2026-09-24
+// until the first customer pointed out that this was an escalation the one
+// observation did not support (2026-09-26). A six-digit PIN or "back in 20
+// minutes" is fine; a run of seven or more digits, separators allowed, is
+// the shape that was actually dropped and is what is refused.
 func ReplyProblem(reply string) string {
 	switch {
 	case strings.TrimSpace(reply) == "":
@@ -217,8 +222,8 @@ func ReplyProblem(reply string) string {
 		return "has an exclamation mark — carriers read that as spam"
 	case strings.Contains(strings.ToLower(reply), "http"):
 		return "has a link — carriers drop those from a VoIP number"
-	case strings.ContainsAny(reply, "0123456789"):
-		return "has digits — a number in a text is what the carrier filter drops first"
+	case looksLikePhoneNumber(reply):
+		return "has a phone number — the carrier filter drops those from a VoIP number first"
 	}
 	for _, r := range reply {
 		if r > 126 || (r < 32 && r != '\n') {
@@ -226,4 +231,29 @@ func ReplyProblem(reply string) string {
 		}
 	}
 	return ""
+}
+
+// looksLikePhoneNumber reports a run of seven or more digits, allowing the
+// separators people put in numbers — spaces, dots, dashes, brackets, a
+// leading plus. Six digits in a row is a PIN, a year and a zip code, and is
+// not this.
+func looksLikePhoneNumber(s string) bool {
+	digits := 0
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+			digits++
+			if digits >= 7 {
+				return true
+			}
+		case r == ' ' || r == '.' || r == '-' || r == '(' || r == ')' || r == '+':
+			// a separator keeps the run alive only if digits already began
+			if digits == 0 {
+				continue
+			}
+		default:
+			digits = 0
+		}
+	}
+	return false
 }

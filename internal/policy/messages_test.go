@@ -34,16 +34,16 @@ reply = "pong"
 
 func TestMessagesRefuseWhatWouldMisfire(t *testing.T) {
 	for name, body := range map[string]string{
-		"a word with a space":  "[[words]]\nword = \"open sesame\"\npeople = [\"*\"]\nreply = \"ok\"\n",
-		"nobody may say it":    "[[words]]\nword = \"garage\"\nreply = \"ok\"\n",
-		"it does nothing":      "[[words]]\nword = \"garage\"\npeople = [\"*\"]\n",
-		"a bad webhook":        "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nwebhook = \"ftp://x\"\n",
-		"a reply with a digit": "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"Door 1 is open\"\n",
-		"a reply with a link":  "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"see https://x\"\n",
-		"a shouting reply":     "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"Open!\"\n",
-		"a duplicate word":     "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"ok\"\n[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"ok\"\n",
-		"an unknown key":       "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"ok\"\nrepply = \"x\"\n",
-		"a bad person id":      "[[words]]\nword = \"garage\"\npeople = [\"Gabi Moore\"]\nreply = \"ok\"\n",
+		"a word with a space":         "[[words]]\nword = \"open sesame\"\npeople = [\"*\"]\nreply = \"ok\"\n",
+		"nobody may say it":           "[[words]]\nword = \"garage\"\nreply = \"ok\"\n",
+		"it does nothing":             "[[words]]\nword = \"garage\"\npeople = [\"*\"]\n",
+		"a bad webhook":               "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nwebhook = \"ftp://x\"\n",
+		"a reply with a phone number": "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"Call 512-555-0142\"\n",
+		"a reply with a link":         "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"see https://x\"\n",
+		"a shouting reply":            "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"Open!\"\n",
+		"a duplicate word":            "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"ok\"\n[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"ok\"\n",
+		"an unknown key":              "[[words]]\nword = \"garage\"\npeople = [\"*\"]\nreply = \"ok\"\nrepply = \"x\"\n",
+		"a bad person id":             "[[words]]\nword = \"garage\"\npeople = [\"Gabi Moore\"]\nreply = \"ok\"\n",
 	} {
 		if _, err := MessagesFromTOML([]byte(body)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -115,5 +115,33 @@ func TestAWordNamesAnActionOrCarriesItsOwnReply(t *testing.T) {
 	}
 	if _, err := MessagesFromTOML([]byte("[[words]]\nword = \"garage\"\npeople = [\"*\"]\naction = \"garage\"\nwebhook = \"http://x/y\"\n")); err == nil {
 		t.Fatal("a word may not name an action and carry its own webhook")
+	}
+}
+
+// The digits clause was narrowed on 2026-09-26: what the carrier dropped
+// was a text with a phone number in it, not a text with a digit in it. A PIN,
+// a time and a count pass; a number somebody could dial does not, however
+// it is punctuated.
+func TestReplyRuleRefusesPhoneNumbersNotDigits(t *testing.T) {
+	for _, ok := range []string{
+		"Family voicemail PIN: 482913",
+		"Back in 20 minutes",
+		"The garage closed at 9:15",
+		"Order 5 more, not 500",
+	} {
+		if p := ReplyProblem(ok); p != "" {
+			t.Errorf("%q refused: %s", ok, p)
+		}
+	}
+	for _, bad := range []string{
+		"Call 5125550142",
+		"Call 512-555-0142",
+		"Call (512) 555 0142",
+		"Call +1 512.555.0142",
+		"ref 12345678",
+	} {
+		if p := ReplyProblem(bad); !strings.Contains(p, "phone number") {
+			t.Errorf("%q should be refused as a phone number, got %q", bad, p)
+		}
 	}
 }
