@@ -83,7 +83,23 @@ over ARI's own channel. Nothing on the call path waits on any of it.
 - Toggles. `garage` opens, `close` closes, and closing is its own action.
 - Speakers and announcements — s06.
 
-## Open questions (to settle before M2)
+## Open questions — **settled by the user, 2026-09-26**
+
+1. The ratgdo is in Home Assistant already, twice, as ESPHome devices —
+   two doors, two `cover` entities. Which one `garage` means is the entity
+   id the user fills into the automation; a second door is a second action.
+2. The automations reach Home Assistant by copy and paste for now, mailed
+   from the house mailbox with the YAML attached ("it's begging for an MCP
+   or SSH or API connection", later). Sent 2026-09-26.
+3. State readback by a long-lived token on the box: `HA_URL` and `HA_TOKEN`
+   in `.env`, read by `garage?` (M3) and never by the daemon. Directions
+   given; the user mints it in HA under their profile's Security tab.
+4. `garage` fires on a text alone until s19 M2 (`confirm = "none"`).
+5. The journal takes a second writer ("I think a second writer is fine").
+6. Day one is the garage, open only, for Eric and Gabi. Named for later:
+   lights, the thermostat, HA security settings.
+
+The original questions, for the record:
 
 1. **Is the ratgdo in HA already**, and as which entity — a `cover` with
    open/close, or a `button`? If not, that is a Saturday of hardware first.
@@ -116,12 +132,23 @@ reported as the stopgap it is); `messages.toml` words name actions;
 the word's, `confirm = "passkey"` moves nothing on a text and says so. The
 webhook payload carries action, person, via and id. Tests cover all of it.
 
-### M2 · The garage
+### M2 · The garage — in progress (2026-09-26)
 
 The ratgdo in HA, two webhook automations, `garage` and `close` in
 `policy.toml`, Gabi and Eric on them. Done when a text moves the door and
 the reply arrives, and a text from Grandma, who is on the allow-list but
 not on the action, gets nothing.
+
+**Where it stands.** On jepsen: `[[actions]] garage` (label "Open the
+garage", webhook `http://homeassistant:8123/api/webhook/cmm-garage-open-…`
+over the tailnet — `homeassistant.local` does not resolve from the box —
+reply "Asked the garage to open", people eric and gabi, confirm none) and
+`[[words]] garage`; `check` clean; inbox restarted. The automation YAML
+(webhook trigger, `local_only: false` because a tailnet address is not
+"local" to HA, `cover.open_cover` on a placeholder entity) was mailed from
+the house mailbox to the user with the file attached. Open only, as the
+user asked; `close` is one more entry each side when wanted. Done the day
+the YAML is pasted with the real entity id and a text moves the door.
 
 ### M3 · `garage?`
 
