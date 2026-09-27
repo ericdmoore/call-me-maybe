@@ -1,9 +1,33 @@
 # s19 · The edge inbox — the house's public front door, and who may knock
 
 **Status:** M1 shipped 2026-09-24 (`edge/`, deployed as `callmemaybe-edge`
-at `edge.callmemaybe.cc`); M2 planned. Drafted the afternoon Tailscale
-Funnel turned out not to be available and the question "where does a reply
-to the house go" was answered with "the house number is a NAT".
+at `edge.callmemaybe.cc`); M2 planned. Drafted the afternoon the question
+"where does a reply to the house go" was answered with "the house number
+is a NAT".
+
+**Why the Worker exists — in the user's words, settled 2026-09-26.** The
+earlier text of this plan said Tailscale Funnel "turned out not to be
+available" and that the house therefore *pulls*; that was the assistant's
+reading of "I cant turn on the tailscale funnel for collecting outside
+messages" (2026-09-24), a constraint of the moment, not a decision, and it
+was later cited back to the user as theirs. The user's actual reason for
+approving a Worker: "it was due to the fact that the edge worker was
+something that seemed more stable than the funnel URL since I can
+[rename] my magic dns name in Tailscale." That is the reason on record: the
+carrier's callback needs one URL that never moves, and a Funnel URL is tied
+to a tailnet name the user may rename, while `edge.callmemaybe.cc` is
+theirs for good. The Worker stays for that reason.
+
+**What is still the user's to choose:** how texts get from the Worker to
+the box. As built, the box long-polls (`doorman inbox`), which was the
+assistant's choice. The user's own sketch (2026-09-23 and 2026-09-24) was
+"a cloudflare worker to be public which wraps the tailscale funnel URL" —
+the Worker *pushing* each text to a token-checked endpoint the box serves
+over a Funnel. Both keep the Worker, the carrier key at the edge, and the
+CLI as the one piece of software on the box; push is instant and needs a
+small listener in doorman, pull needs nothing inbound at all. Neither is
+decided until the user says; nothing further is built on the pull shape in
+the meantime.
 
 ## What done looks like
 
