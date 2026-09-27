@@ -29,7 +29,8 @@ semantic rules (those appear as `x-cross-references` and `x-rules`).
 
 ```bash
 make check                 # gofmt + vet + lint + test + build; green before any commit
-make cover                 # -race plus per-package coverage floors
+make cover                 # -race plus per-package coverage floors (scripts/coverage.floors)
+make cover-ratchet         # raise the floors to what you just measured; floors only go up
 make lint                  # nilness + the no-secrets-in-logs analyzer
 make hooks                 # install the pre-push gate (once per clone)
 make build                 # → bin/doorman for the host

@@ -1,7 +1,8 @@
 # s11 · The hunt — the verification ladder, played by children
 
-**Status:** M1 and M2 shipped 2026-09-23 (v0.6.2); M3, the rehearsal, waits
-for a Saturday, two handsets and rice. As built, `*6` plays the mailbox's
+**Status:** archived 2026-09-26 — M1 and M2 shipped 2026-09-23 (v0.6.2);
+M3, the rehearsal, is the family's Saturday and needs nothing more from
+the software. Originally: M3 waits for a Saturday, two handsets and rice. As built, `*6` plays the mailbox's
 greeting *file* directly (`Playback` of `unavail`) rather than running
 `VoiceMail()`, so the clue is never followed by a beep and nothing is ever
 recorded, and a wrong answer hears the stock "that is not a valid extension"
@@ -162,7 +163,13 @@ feature list.
 Done when a reader who has never seen the repository can run the hunt from
 `HUNT.md` alone, and `LICENSES.md` names the cards.
 
-### M3 · The rehearsal
+### M3 · The rehearsal — **handed to the family** (2026-09-26)
+
+The kit is complete and the box is ready (verified 2026-09-25: the
+commented block is in the installed dialplan, `*97`, `500` and `600` are
+live, the trunk registered, both handsets available). The Saturday is not
+the software's milestone to close; when it happens, every stumble goes in
+`HUNT.md` or the ledger, as written below.
 
 The first customer's family plays it. Every stumble is a finding: a card
 that was unclear, a rung that failed, a feature that needed a parent to

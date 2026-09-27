@@ -92,6 +92,11 @@ check: fmt-check vet lint test build
 cover:
 	bash scripts/coverage.sh
 
+## cover-ratchet: the same, then raise every floor in scripts/coverage.floors
+## to what was just measured. Floors only go up; commit them with the tests.
+cover-ratchet:
+	bash scripts/coverage.sh --ratchet
+
 ## hooks: install the versioned pre-push gate (fmt, vet, tests, secret scan)
 hooks:
 	@chmod +x .githooks/*

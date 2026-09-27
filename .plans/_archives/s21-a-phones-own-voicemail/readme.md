@@ -1,7 +1,7 @@
 # s21 · A phone's own voicemail — the mailbox is a fact about the handset
 
-**Status:** M1 + M2 shipped in v0.11.0 (2026-09-25, late night); M3 docs
-shipped with them. One correction to the sketch below: the provisioning
+**Status:** archived 2026-09-26 — every milestone landed in v0.11.0; the
+rehearsal is the first message a person leaves. One correction to the sketch below: the provisioning
 template already set the phone's voicemail access number (P33 = `*97`),
 so the key worked all along — what it opened was the "mailbox?" menu, and
 `family` cannot be typed on a keypad. Originally planned the same evening. From the user: "Do you think we
@@ -174,7 +174,14 @@ pressing the voicemail key on a zero-touch-provisioned WP826 plays that
 phone's messages, and `*98` from the same phone reaches another box with its
 PIN.
 
-### M3 · Docs and the rehearsal — docs done (v0.11.0); the rehearsal is the next voicemail anyone leaves
+### M3 · Docs and the rehearsal — **done** (v0.11.0); the rehearsal is daily use
+
+Closed 2026-09-26: the docs shipped, the mechanism is verified in CEL
+(`Dial` → `VoiceMail` `APP_START` → `ANSWER` on a ring-out), and the
+first message a person leaves is not a milestone gate but the feature in
+use. Anything it turns up goes in the ledger like any other first-customer
+finding. The one thing still to do on jepsen is inventory, not code: give
+each room its own `mailbox` when the user wants rooms separate.
 
 **On jepsen, 2026-09-25 22:10:** v0.11.0 installed by the documented
 path, the new `extensions.conf` template copied (no local edits), the two

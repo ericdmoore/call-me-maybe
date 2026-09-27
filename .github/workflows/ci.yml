@@ -19,6 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The coverage-floors check reads scripts/coverage.floors at the
+          # base commit; a shallow clone cannot.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v7
         with:
@@ -52,6 +56,10 @@ jobs:
       # machine is driven entirely by channel sends from the ARI event router.
       - name: test + coverage floors
         run: bash scripts/coverage.sh
+
+      # The ratchet's pawl: a push may raise a floor, never lower one.
+      - name: coverage floors never go down
+        run: bash scripts/coverage-floors-check.sh "${{ github.event.pull_request.base.sha || github.event.before }}"
 
       - uses: actions/upload-artifact@v7
         if: always()

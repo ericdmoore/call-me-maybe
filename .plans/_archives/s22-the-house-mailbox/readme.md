@@ -1,6 +1,9 @@
 # s22 · The house mailbox — one address hears everything the house hears
 
-**Status:** M1–M3 live on jepsen (2026-09-25 night, v0.9.1–v0.10.0):
+**Status:** archived 2026-09-26 — M1–M3 live on jepsen; the carrier's
+forwarding of inbound texts is a portal switch the user flips (the API
+password lives only there and at the edge); M4 deferred to the phone-book
+decision. Originally: M1–M3 live on jepsen (2026-09-25 night, v0.9.1–v0.10.0):
 voicemail, the house's replies and the morning digest all reach
 `midbury@bullmoose.cc`, verified by reading the mailbox back. Open: the
 carrier's own forwarding of inbound texts is a portal switch the user
@@ -229,7 +232,13 @@ the inbox and tested against a shell script.
 the hook. Done when the morning mail lists yesterday's calls and texts,
 redacted, and matches `doorman calls` for the same day.
 
-### M4 · The phone book, if the user wants it
+### M4 · The phone book, if the user wants it — **deferred** (2026-09-26)
+
+Not built here. It is the whole-home phone book decision (open since
+2026-09-24: a vCard export source, of which `bullmoose contacts export` is
+one), and it belongs with that decision rather than in this stream. The
+command and the shape are recorded above; the day the user chooses, it is
+a timer and a `path` source, no code.
 
 `bullmoose contacts export` on a timer into a `path` source; `doorman check`
 shows its age like any source. Done when a contact added in bullmoose is on

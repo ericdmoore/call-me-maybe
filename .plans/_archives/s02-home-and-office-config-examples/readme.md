@@ -3,7 +3,9 @@
 Worked, shipped, tested example configurations that a person or a model can
 start from instead of assembling one from a schema.
 
-**Status:** **M1 and M2 are complete.** The framework is in
+**Status:** archived 2026-09-26 — M1–M4 shipped (four scenarios published
+at callmemaybe.cc/examples/); M5 dropped until its primitives exist.
+Originally: **M1 and M2 are complete.** The framework is in
 `examples/README.md`, and both examples that need nothing unbuilt have
 shipped: `examples/scenarios/solo-business/` (E2) and
 `examples/scenarios/family-line/` (E1). **M3 shipped 2026-09-25:** the
@@ -228,7 +230,12 @@ with strict unknown keys, and the guide's inline second-line example
 became pointers, so `llms-policy.txt` now carries no configuration that
 is not also a checked file.
 
-### M5 · E5, when the primitives land
+### M5 · E5, when the primitives land — **dropped from this stream** (2026-09-26)
+
+The answering-service scenario needs variable-length `#`-terminated
+collection and voicemail metadata, neither of which exists, and neither is
+this stream's to build. It reopens as its own stream the day they do; the
+description of E5 above is the brief.
 
 Still blocked: variable-length `#`-terminated collection and voicemail metadata
 do not exist.
