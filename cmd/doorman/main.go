@@ -262,7 +262,13 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 doorman-inbox.service. Exits 0 with nothing to
                                 do when INBOX_URL or messages.toml is absent.
                                 With MAIL_HOOK and MAIL_TO set, every reply the
-                                house sends is copied to the house mailbox
+                                house sends is copied to the house mailbox.
+                                With HA_URL and HA_TOKEN set, "garage?" reads
+                                the entity an action names from Home Assistant,
+                                and a door already open is left alone. With
+                                EVENT_JOURNAL_PATH set, every text and action
+                                is written to the journal beside the daemon's
+                                events (message.*, action.*)
   doorman digest [flags]        yesterday as one mail: calls from the journal,
                                 texts from the inbox's outcome log, as Markdown
                                 on stdout (redacted) or --mail through MAIL_HOOK
@@ -498,15 +504,17 @@ func runCheck(args []string) (code int) {
 	// The words, when there are any. Absent is the state every install is in
 	// and prints nothing; present, every id a word names must be a [[people]]
 	// id on some line, or the word could never be said.
-	if !printMessages(messagesPathArg(*messagesFlag), lists) {
+	if !printMessages(messagesPathArg(*messagesFlag), lists, secretLookup(*envFlag)) {
 		rc = 1
 	}
 	return rc
 }
 
 // printMessages reports messages.toml: each word, who may say it, and what
-// it does — and fails the check for an id no [[people]] entry carries.
-func printMessages(path string, lists []allowList) bool {
+// it does — and fails the check for an id no [[people]] entry carries, or
+// for an action that names a state entity with no HA_URL and HA_TOKEN to
+// read it by.
+func printMessages(path string, lists []allowList, env func(string) (string, bool)) bool {
 	msgs, err := policy.LoadMessages(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %s is not valid\n\n%v\n", path, err)
@@ -521,18 +529,24 @@ func printMessages(path string, lists []allowList) bool {
 			have[id] = true
 		}
 	}
-	actions := map[string]bool{}
+	actions := map[string]policy.Action{}
 	for _, l := range lists {
 		for _, a := range l.pol.Actions() {
-			actions[a.ID] = true
+			actions[a.ID] = a
 		}
 	}
+	haURL, _ := env("HA_URL")
+	haToken, _ := env("HA_TOKEN")
+	haReady := strings.TrimSpace(haURL) != "" && strings.TrimSpace(haToken) != ""
 	fmt.Printf("\nTexts: %d %s   (%s)\n", len(msgs.Words()), plural(len(msgs.Words()), "word"), msgs.Where())
 	ok := true
 	for _, w := range msgs.Words() {
 		does := []string{}
 		if w.Action != "" {
 			does = append(does, "action "+w.Action)
+			if a, found := actions[w.Action]; found && a.State != "" {
+				does = append(does, w.Word+"? asks "+a.State)
+			}
 		}
 		if w.Webhook != "" {
 			does = append(does, "webhook (move it to an [[actions]] entry)")
@@ -550,9 +564,15 @@ func printMessages(path string, lists []allowList) bool {
 				ok = false
 			}
 		}
-		if w.Action != "" && !actions[w.Action] {
-			fmt.Printf("    ✗ action %q is not an [[actions]] entry in any policy file\n", w.Action)
-			ok = false
+		if w.Action != "" {
+			a, found := actions[w.Action]
+			if !found {
+				fmt.Printf("    ✗ action %q is not an [[actions]] entry in any policy file\n", w.Action)
+				ok = false
+			} else if a.State != "" && !haReady {
+				fmt.Printf("    ✗ action %q names state %s but HA_URL and HA_TOKEN are not set in .env — `doorman inbox` will refuse to start (RUNBOOK, \"Actions\")\n", a.ID, a.State)
+				ok = false
+			}
 		}
 	}
 	if len(lists) > 0 && len(have) == 0 && len(msgs.PeopleReferenced()) > 0 {
@@ -1980,6 +2000,9 @@ func actionsSummary(actions []policy.Action) string {
 		who := strings.Join(a.People, ",")
 		if a.Confirm == policy.ConfirmPasskey {
 			who += " +passkey"
+		}
+		if a.State != "" {
+			who += " +state"
 		}
 		parts = append(parts, fmt.Sprintf("%s (%s)", a.ID, who))
 	}

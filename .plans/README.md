@@ -28,7 +28,7 @@ shipped in v0.9.0). All four done the same day; s13 and s19 are next. s13 and s1
 s01 has an [`arch.md`](_archives/s01-multiple-DIDs/arch.md); s03's reasoning
 is short enough to live in its plan.
 
-| **s13** | [Actions](s13-actions/) — one `[[actions]]` registry (what it does, who may, what it says back, whether it confirms) that a text word, a lobby digit and a passkey all point at; HA acts and may refuse; the garage is the first door | M1 shipped (v0.7.2); M2 wired on jepsen 2026-09-26, waiting on the HA paste | s15 (the text), s14 (the leaf), s19 (the confirm); the ratgdo in HA |
+| **s13** | [Actions](s13-actions/) — one `[[actions]]` registry (what it does, who may, what it says back, whether it confirms) that a text word, a lobby digit and a passkey all point at; HA acts and may refuse; the garage is the first door | M1 (v0.7.2), M3 `garage?`, M5 the journal's second writer, M6 RUNBOOK "Actions" shipped (v0.13.0, 2026-09-27); M2 wired on jepsen, waiting on the HA paste and token; M4 waits on s14 | s15 (the text), s14 (the leaf), s19 (the confirm); the ratgdo in HA |
 | **s19** | [The edge inbox](s19-edge-inbox/) — the house's public front door: the carrier's SMS callback and, later, passkey-signed commands land in one queue at the edge; the hub pulls; the edge holds the carrier key; `login.callmemaybe.cc` as verifier, not authorizer | M1 shipped 2026-09-24 | s15 M2 consumes it; s13 gives the words a door |
 
 ### Archived

@@ -89,6 +89,8 @@ label = "Garage door"
 webhook = "http://ha.example.invalid/api/webhook/garage"
 reply = "The garage is open"
 people = ["gabi"]
+state = "cover.large_door_door"
+done_when = "open"
 [[actions]]
 id = "close"
 webhook = "http://ha.example.invalid/api/webhook/close"
@@ -117,6 +119,56 @@ type harness struct {
 	reader  *Reader
 	hooks   []map[string]string
 	hookErr error
+	ha      *fakeHA
+}
+
+// fakeHA is Home Assistant's state endpoint: one entity, one state, and a
+// record of how it was asked.
+type fakeHA struct {
+	mu     sync.Mutex
+	state  string
+	down   bool
+	auths  []string
+	paths  []string
+	server *httptest.Server
+}
+
+const haToken = "not-a-real-ha-token-0123456789"
+
+func newFakeHA(t *testing.T) *fakeHA {
+	t.Helper()
+	f := &fakeHA{state: "closed"}
+	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.auths = append(f.auths, r.Header.Get("Authorization"))
+		f.paths = append(f.paths, r.URL.RequestURI())
+		if f.down {
+			http.Error(w, "gone fishing", 503)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer "+haToken {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		if r.URL.Path != "/api/states/cover.large_door_door" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"entity_id":  "cover.large_door_door",
+			"state":      f.state,
+			"attributes": map[string]any{"friendly_name": "Large Door Door"},
+		})
+	}))
+	t.Cleanup(f.server.Close)
+	return f
+}
+
+func (f *fakeHA) set(state string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.state = state
 }
 
 func newHarness(t *testing.T) *harness {
@@ -129,11 +181,12 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{edge: newFakeEdge(t)}
+	h := &harness{edge: newFakeEdge(t), ha: newFakeHA(t)}
 	seen, err := OpenSeen(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
+	ha := &HomeAssistant{URL: h.ha.server.URL, Token: haToken}
 	h.reader = New(Deps{
 		Policy: pol, Messages: msgs, Seen: seen,
 		Edge: &Edge{URL: h.edge.server.URL + "/h/test", Token: testToken},
@@ -141,6 +194,7 @@ func newHarness(t *testing.T) *harness {
 			h.hooks = append(h.hooks, payload)
 			return h.hookErr
 		},
+		State: ha.State,
 	})
 	return h
 }
@@ -283,5 +337,90 @@ func TestTheOutcomeCarriesTheReplyForTheHouseMailbox(t *testing.T) {
 	stranger := h.reader.Handle(context.Background(), Message{ID: "m2", From: "15125550199", Body: "garage"})
 	if stranger.Reply != "" {
 		t.Fatalf("a stranger was answered: %+v", stranger)
+	}
+}
+
+// "garage?" asks Home Assistant and moves nothing; the answer is true when
+// the door is open and true when it is closed, because it is read, never
+// remembered.
+func TestAQuestionMarkAsksHomeAssistantAndMovesNothing(t *testing.T) {
+	h := newHarness(t)
+	out := h.reader.Handle(context.Background(), Message{ID: "q1", From: "15125550101", Body: "Garage?"})
+	if out.Result != "asked" || out.State != "closed" || out.Reply != "Large Door Door is closed" || len(h.hooks) != 0 {
+		t.Fatalf("closed: %+v hooks=%d", out, len(h.hooks))
+	}
+	h.ha.set("open")
+	out = h.reader.Handle(context.Background(), Message{ID: "q2", From: "15125550101", Body: "garage ?"})
+	if out.Result != "asked" || out.State != "open" || out.Reply != "Large Door Door is open" || len(h.hooks) != 0 {
+		t.Fatalf("open: %+v hooks=%d", out, len(h.hooks))
+	}
+	for _, a := range h.ha.auths {
+		if a != "Bearer "+haToken {
+			t.Fatalf("the HA token rides in a header, got %q", a)
+		}
+	}
+	for _, p := range h.ha.paths {
+		if strings.Contains(p, haToken) {
+			t.Fatalf("the HA token must never be in the URL: %s", p)
+		}
+	}
+}
+
+// A text of "garage" to a door that is already open answers so and never
+// calls the webhook: "asked the garage to open" would be a lie about a door.
+func TestAnActionAlreadyDoneMovesNothingAndSaysSo(t *testing.T) {
+	h := newHarness(t)
+	h.ha.set("open")
+	out := h.reader.Handle(context.Background(), Message{ID: "a1", From: "15125550101", Body: "garage"})
+	if out.Result != "unchanged" || out.State != "open" || out.Reply != "It was already open" || len(h.hooks) != 0 {
+		t.Fatalf("outcome = %+v hooks=%d", out, len(h.hooks))
+	}
+	h.ha.set("closed")
+	out = h.reader.Handle(context.Background(), Message{ID: "a2", From: "15125550101", Body: "garage"})
+	if out.Result != "acted" || len(h.hooks) != 1 {
+		t.Fatalf("a closed door opens: %+v hooks=%d", out, len(h.hooks))
+	}
+}
+
+// Home Assistant unreachable: a question says so rather than guessing, and
+// a request goes to the webhook as it would without done_when — the
+// actuator decides, and the reason is kept.
+func TestHomeAssistantDownIsAnHonestAnswerNotAGuess(t *testing.T) {
+	h := newHarness(t)
+	h.ha.down = true
+	out := h.reader.Handle(context.Background(), Message{ID: "d1", From: "15125550101", Body: "garage?"})
+	if out.Result != "failed" || out.State != "" || !strings.Contains(out.Reply, "could not check") || len(h.hooks) != 0 {
+		t.Fatalf("question: %+v hooks=%d", out, len(h.hooks))
+	}
+	out = h.reader.Handle(context.Background(), Message{ID: "d2", From: "15125550101", Body: "garage"})
+	if out.Result != "acted" || len(h.hooks) != 1 || !strings.Contains(out.Detail, "state:") {
+		t.Fatalf("request: %+v hooks=%d", out, len(h.hooks))
+	}
+}
+
+// Without HA_URL and HA_TOKEN there is nothing to ask: a trailing "?" is
+// punctuation, exactly as it was before actions could be asked.
+func TestWithoutHomeAssistantAQuestionMarkIsPunctuation(t *testing.T) {
+	h := newHarness(t)
+	h.reader.d.State = nil
+	out := h.reader.Handle(context.Background(), Message{ID: "p1", From: "15125550101", Body: "garage?"})
+	if out.Result != "acted" || len(h.hooks) != 1 {
+		t.Fatalf("outcome = %+v hooks=%d", out, len(h.hooks))
+	}
+}
+
+func TestHomeAssistantErrorsNameTheCauseNeverTheToken(t *testing.T) {
+	h := newHarness(t)
+	ha := &HomeAssistant{URL: h.ha.server.URL, Token: "wrong"}
+	if _, err := ha.State(context.Background(), "cover.large_door_door"); err == nil || !strings.Contains(err.Error(), "HA_TOKEN") || strings.Contains(err.Error(), "wrong") {
+		t.Fatalf("err = %v", err)
+	}
+	ha.Token = haToken
+	if _, err := ha.State(context.Background(), "cover.no_such_door"); err == nil || !strings.Contains(err.Error(), "no entity cover.no_such_door") {
+		t.Fatalf("err = %v", err)
+	}
+	st, err := ha.State(context.Background(), "cover.large_door_door")
+	if err != nil || st.Value != "closed" || st.Name != "Large Door Door" {
+		t.Fatalf("state = %+v err = %v", st, err)
 	}
 }

@@ -420,7 +420,7 @@ func TestResetReopensFirstContactForTheNamedPhoneOnly(t *testing.T) {
 
 // A text is never read on the call path: internal/inbox is reachable from
 // `doorman inbox` and nothing else, the same guard the provider and the
-// LAN listener have.
+// LAN listener have. Its own test file is the one other allowed name.
 func TestOnlyTheInboxCommandNamesTheInboxPackage(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -428,7 +428,7 @@ func TestOnlyTheInboxCommandNamesTheInboxPackage(t *testing.T) {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasSuffix(name, ".go") || name == "inbox.go" || name == "provision_test.go" {
+		if !strings.HasSuffix(name, ".go") || name == "inbox.go" || name == "inbox_test.go" || name == "provision_test.go" {
 			continue
 		}
 		src, err := os.ReadFile(name)

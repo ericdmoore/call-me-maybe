@@ -183,8 +183,8 @@ func (s *Seen) Mark(id string) bool {
 // journal. Never the body, never the full number.
 type Outcome struct {
 	ID string
-	// Result: acted, replied, unlisted, unknown-word, not-allowed,
-	// duplicate, refused, failed.
+	// Result: acted, replied, asked, unchanged, unlisted, unknown-word,
+	// not-allowed, needs-confirmation, duplicate, failed.
 	Result string
 	Word   string
 	Action string // the [[actions]] id the word performed, when it named one
@@ -195,6 +195,72 @@ type Outcome struct {
 	// of. Empty when nothing was sent: a stranger is never answered.
 	To    string
 	Reply string
+	// State is what Home Assistant reported when it was asked — the answer
+	// to "garage?" (asked), or the reason nothing moved (unchanged).
+	State string
+	// Via is the transport, for the journal: always "sms" from here.
+	Via string
+}
+
+// State is one reading of a Home Assistant entity.
+type State struct {
+	// Value is HA's state string: open, closed, on, off, unavailable…
+	Value string
+	// Name is HA's friendly_name, or the entity id when it has none —
+	// what the house calls the thing when it answers.
+	Name string
+}
+
+// HomeAssistant reads entity state with a long-lived token — LAN
+// infrastructure like the ARI password, not a provider key. The token
+// rides in a header, never in the URL, so an error is safe to log.
+type HomeAssistant struct {
+	URL    string
+	Token  string
+	Client *http.Client
+}
+
+func (h *HomeAssistant) State(ctx context.Context, entity string) (State, error) {
+	client := h.Client
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(h.URL, "/")+"/api/states/"+url.PathEscape(entity), nil)
+	if err != nil {
+		return State{}, safeErr(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+h.Token)
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return State{}, safeErr(err)
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return State{}, fmt.Errorf("home assistant has no entity %s", entity)
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return State{}, errors.New("home assistant refused the token (HA_TOKEN)")
+	case resp.StatusCode < 200 || resp.StatusCode > 299:
+		return State{}, fmt.Errorf("home assistant answered HTTP %s", resp.Status)
+	}
+	var body struct {
+		State      string `json:"state"`
+		Attributes struct {
+			FriendlyName string `json:"friendly_name"`
+		} `json:"attributes"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+		return State{}, fmt.Errorf("home assistant: %w", err)
+	}
+	st := State{Value: strings.TrimSpace(body.State), Name: strings.TrimSpace(body.Attributes.FriendlyName)}
+	if st.Value == "" {
+		return State{}, errors.New("home assistant reported no state")
+	}
+	if st.Name == "" {
+		st.Name = entity
+	}
+	return st, nil
 }
 
 // Deps is what the reader needs from the house.
@@ -205,6 +271,10 @@ type Deps struct {
 	Seen     *Seen
 	// Webhook posts a word's payload; nil means net/http with a timeout.
 	Webhook func(ctx context.Context, url string, payload map[string]string) error
+	// State reads a Home Assistant entity, for the actions that name one
+	// (`garage?`, done_when). nil means no HA_URL/HA_TOKEN: a "?" is then
+	// punctuation and done_when is never checked.
+	State func(ctx context.Context, entity string) (State, error)
 	// CountryCode normalises the sender's number.
 	CountryCode string
 	Now         func() time.Time
@@ -251,7 +321,7 @@ func postJSON(ctx context.Context, target string, payload map[string]string) err
 // Handle decides and acts on one text. Every path returns an Outcome; only
 // "acted"/"replied" touch anything.
 func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
-	out := Outcome{ID: m.ID}
+	out := Outcome{ID: m.ID, Via: "sms"}
 	if r.d.Seen != nil && !r.d.Seen.Mark(m.ID) {
 		out.Result = "duplicate"
 		return out
@@ -275,6 +345,10 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 		out.Person = caller.Name
 	}
 	text := strings.ToLower(strings.TrimSpace(m.Body))
+	// "garage?" is a question when the action can be asked; the "?" is
+	// read before the punctuation is stripped, and is punctuation again on
+	// a word that has no state to report — "ping?" still answers pong.
+	asked := strings.HasSuffix(strings.TrimRight(text, ".! "), "?")
 	text = strings.TrimRight(text, ".?! ")
 	word, found := r.d.Messages.Lookup(text)
 	if !found {
@@ -314,6 +388,30 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 		if reply == "" {
 			reply = word.Reply
 		}
+		if action.State != "" && r.d.State != nil {
+			if asked {
+				// A question moves nothing and needs no passkey: reading
+				// a door is less than opening it.
+				return r.answerState(ctx, out, n.Value, action)
+			}
+			if action.DoneWhen != "" {
+				st, err := r.d.State(ctx, action.State)
+				if err == nil && st.Value == action.DoneWhen {
+					// Already there: say so, and never call the webhook —
+					// HA would do nothing, but "asked the garage to open"
+					// would be a lie about a door.
+					out.Result = "unchanged"
+					out.State = st.Value
+					r.reply(ctx, &out, n.Value, "It was already "+st.Value)
+					return out
+				}
+				if err != nil {
+					// HA could not be read; the webhook decides, as it
+					// would without done_when, and the reason is kept.
+					out.Detail = "state: " + err.Error()
+				}
+			}
+		}
 	}
 	if confirm == policy.ConfirmPasskey {
 		// Intent, not authority (s19): nothing moves on a text alone. Until
@@ -337,12 +435,38 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 		out.Result = "replied"
 	}
 	if reply != "" {
-		if err := r.d.Edge.Send(ctx, n.Value, reply); err != nil {
-			out.Detail = "reply failed: " + err.Error()
-		} else {
-			out.Reply = reply
-		}
+		r.reply(ctx, &out, n.Value, reply)
 	}
+	return out
+}
+
+// reply sends and records; a failed send is a detail, never a different
+// outcome, because whatever the word did has been done.
+func (r *Reader) reply(ctx context.Context, out *Outcome, to, text string) {
+	if err := r.d.Edge.Send(ctx, to, text); err != nil {
+		if out.Detail != "" {
+			out.Detail += "; "
+		}
+		out.Detail += "reply failed: " + err.Error()
+		return
+	}
+	out.Reply = text
+}
+
+// answerState is the question form: what HA says, in HA's own name for the
+// thing, and nothing moved. A read that fails says so rather than guessing
+// — a lie about a door is worse than an unanswered question.
+func (r *Reader) answerState(ctx context.Context, out Outcome, to string, action policy.Action) Outcome {
+	st, err := r.d.State(ctx, action.State)
+	if err != nil {
+		out.Result = "failed"
+		out.Detail = "state: " + err.Error()
+		r.reply(ctx, &out, to, "I could not check, Home Assistant did not answer")
+		return out
+	}
+	out.Result = "asked"
+	out.State = st.Value
+	r.reply(ctx, &out, to, st.Name+" is "+st.Value)
 	return out
 }
 

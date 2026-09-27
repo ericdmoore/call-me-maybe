@@ -33,7 +33,9 @@ doorman provision         # inventory view: every phone, its file, registered or
 doorman provision <id>    # open a 15-minute HTTPS window, print what to type on
                           # that phone, watch it fetch and register; exit 0 when it has
 doorman inbox             # texts to the house: pull the edge inbox, act on
-                          # messages.toml words, reply through the edge
+                          # messages.toml words, reply through the edge;
+                          # "garage?" reads Home Assistant (HA_URL, HA_TOKEN);
+                          # writes message.*/action.* to the journal
 doorman rotate --phones   # new handset SIP passwords into .env, never printed;
                           # `provision notify` then hands each phone its own
 doorman help              # every subcommand

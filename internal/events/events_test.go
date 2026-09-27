@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -472,5 +473,57 @@ func TestPinnedReaderCannotGrowWALWithoutBound(t *testing.T) {
 	}
 	if err = s.appendRecover(context.Background(), System(DaemonStarted, "reader-released", 0)); err != nil {
 		t.Fatal("writer did not recover:", err)
+	}
+}
+
+// The journal takes a second writer: `doorman inbox` appends beside the
+// daemon, whose owner lock guards bookkeeping, not rows. Both sets of rows
+// are read back in order, and the sibling never creates the journal.
+func TestASiblingWritesBesideTheOwner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal", "events.db")
+	sib := OpenSibling(path, testOptions())
+	defer sib.Close()
+	if err := sib.Append(context.Background(), System(MessageReceived, "unlisted", 0)); !errors.Is(err, ErrNoJournal) {
+		t.Fatalf("a sibling must not create the journal: err = %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("the sibling created the journal")
+	}
+	w := Start(path, testOptions())
+	if err := <-w.ready; err != nil {
+		t.Fatal(err)
+	}
+	w.Post(System(DaemonStarted, "test", 0))
+	waitPage(t, path, func(p Page) bool { return len(p.Events) >= 1 })
+	e := Event{Type: ActionPerformed, Source: "doorman-inbox", Payload: Payload{Reason: "acted", Action: &ActionObservation{Action: "garage", Person: "gabi", Via: "sms", Word: "garage", Message: "m1"}}}
+	if err := sib.Append(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+	w.Post(System(DaemonStopping, "test", 0))
+	p := waitPage(t, path, func(p Page) bool { return len(p.Events) >= 3 })
+	var seen []Type
+	for _, ev := range p.Events {
+		seen = append(seen, ev.Type)
+		if ev.Type == ActionPerformed {
+			if ev.Source != "doorman-inbox" || ev.Payload.Action == nil || ev.Payload.Action.Person != "gabi" || ev.Payload.Action.Via != "sms" {
+				t.Fatalf("sibling row = %+v", ev)
+			}
+		}
+	}
+	if seen[len(seen)-1] != DaemonStopping || seen[len(seen)-2] != ActionPerformed {
+		t.Fatalf("rows out of order: %v", seen)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// And after the owner has gone: still a writer, still no lock needed.
+	if err := sib.Append(context.Background(), System(MessageReceived, "duplicate", 0)); err != nil {
+		t.Fatal(err)
+	}
+	if active, _ := WriterActive(path); active {
+		t.Fatal("a sibling must not hold the owner lock")
+	}
+	if p := readTest(t, path, Query{Limit: 10, EventType: MessageReceived}); len(p.Events) != 1 || p.Events[0].Payload.Reason != "duplicate" {
+		t.Fatalf("page = %+v", p)
 	}
 }

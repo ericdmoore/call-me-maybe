@@ -53,6 +53,17 @@ type Action struct {
 	// Confirm is "none" (default) or "passkey": the request is intent, not
 	// authority, and waits for a passkey (s19) before the webhook fires.
 	Confirm string `toml:"confirm"`
+	// State is the Home Assistant entity whose state answers the question
+	// form of the word — `garage?` — read live from HA by `doorman inbox`
+	// with HA_URL and HA_TOKEN, never remembered here: state you remember
+	// is state you get wrong. Optional; without it a trailing "?" is
+	// punctuation.
+	State string `toml:"state"`
+	// DoneWhen is the state in which performing the action would change
+	// nothing — "open" for an action that opens. With it, a request to a
+	// door already open answers "It was already open" and the webhook is
+	// never called. Needs State.
+	DoneWhen string `toml:"done_when"`
 }
 
 // Confirm values.
@@ -231,10 +242,14 @@ const DefaultCallerIDFormat = "{name} <{number}>"
 
 var (
 	handsetIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
-	endpointPattern  = regexp.MustCompile(`^[A-Za-z0-9]+/\S+$`)
-	pinPattern       = regexp.MustCompile(`^\d+$`)
-	mailboxPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
-	clockPattern     = regexp.MustCompile(`^(\d{1,2}):(\d{2})$`)
+	// entityIDPattern is a Home Assistant entity id — domain, dot, object
+	// id, all lowercase, digits and underscores — what [[actions]] state
+	// names.
+	entityIDPattern = regexp.MustCompile(`^[a-z_]+\.[a-z0-9_]+$`)
+	endpointPattern = regexp.MustCompile(`^[A-Za-z0-9]+/\S+$`)
+	pinPattern      = regexp.MustCompile(`^\d+$`)
+	mailboxPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+	clockPattern    = regexp.MustCompile(`^(\d{1,2}):(\d{2})$`)
 )
 
 var dayIndex = map[string]int{"SU": 0, "MO": 1, "TU": 2, "WE": 3, "TH": 4, "FR": 5, "SA": 6}
@@ -872,6 +887,12 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		case ConfirmNone, ConfirmPasskey:
 		default:
 			fail("%s: confirm %q must be %q or %q", where, a.Confirm, ConfirmNone, ConfirmPasskey)
+		}
+		if a.State != "" && !entityIDPattern.MatchString(a.State) {
+			fail("%s: state %q is not a Home Assistant entity id (domain.object, like cover.garage_door)", where, a.State)
+		}
+		if a.DoneWhen != "" && a.State == "" {
+			fail("%s: done_when needs a state entity to read", where)
 		}
 		if a.Label == "" {
 			a.Label = a.ID

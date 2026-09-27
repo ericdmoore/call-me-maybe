@@ -424,7 +424,19 @@ is absent;
 runs it for good. With
 .BR MAIL_HOOK " and " MAIL_TO
 set, every reply the house sends is copied to the house mailbox, and its own
-outcome log (in the state directory) records what each text did.
+outcome log (in the state directory) records what each text did. With
+.BR HA_URL " and " HA_TOKEN
+set, the question form of a word (\fIgarage?\fR) reads the entity the
+action's
+.B state
+names from Home Assistant and answers with it, and an action whose
+.B done_when
+state already holds is left alone ("It was already open"); an action that
+names a state with neither key set is refused at startup. With
+.B EVENT_JOURNAL_PATH
+set, every text and action is written to the journal beside the daemon's
+events (message.received, message.acted, action.performed, action.refused)
+as a second writer that holds no owner lock.
 .TP
 .BI "doorman digest [\-since " d "] [\-full] [\-mail] [\-subject " s "] [\-env " path "] [\-inbox\-state " dir ]
 Yesterday as one mail: the day's calls from the journal (or the legacy log)

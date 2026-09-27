@@ -94,16 +94,33 @@ func TestActionsAreARegistryWithOwnersAndRules(t *testing.T) {
 		t.Fatalf("actions = %+v", got)
 	}
 	for name, body := range map[string]string{
-		"an unknown person": "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"eric\"]\n",
-		"nobody":            "[[actions]]\nid = \"garage\"\nreply = \"ok\"\n",
-		"a rude reply":      "[[actions]]\nid = \"garage\"\nreply = \"Open \U0001F44D\"\npeople = [\"*\"]\n",
-		"a bad confirm":     "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\nconfirm = \"sms\"\n",
-		"a duplicate id":    "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\n[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\n",
-		"nothing to do":     "[[actions]]\nid = \"garage\"\npeople = [\"*\"]\n",
+		"an unknown person":                "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"eric\"]\n",
+		"nobody":                           "[[actions]]\nid = \"garage\"\nreply = \"ok\"\n",
+		"a rude reply":                     "[[actions]]\nid = \"garage\"\nreply = \"Open \U0001F44D\"\npeople = [\"*\"]\n",
+		"a bad confirm":                    "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\nconfirm = \"sms\"\n",
+		"a duplicate id":                   "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\n[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\n",
+		"nothing to do":                    "[[actions]]\nid = \"garage\"\npeople = [\"*\"]\n",
+		"a state that is not an entity id": "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\nstate = \"Large Door\"\n",
+		"done_when without a state":        "[[actions]]\nid = \"garage\"\nreply = \"ok\"\npeople = [\"*\"]\ndone_when = \"open\"\n",
 	} {
 		if _, err := FromTOML([]byte(base + body)); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// State is read from Home Assistant, never remembered: an action names the
+// entity to ask and, optionally, the state in which asking it to act would
+// change nothing.
+func TestAnActionMayNameTheEntityWhoseStateAnswersTheQuestion(t *testing.T) {
+	base := "[house]\nhandsets = [\"kitchen\"]\n[[handsets]]\nid = \"kitchen\"\nendpoint = \"PJSIP/kitchen\"\n[[extensions]]\npin = \"482913\"\nlabel = \"Family\"\nhandsets = [\"kitchen\"]\n"
+	pol, err := FromTOML([]byte(base + "[[actions]]\nid = \"garage\"\nwebhook = \"http://ha.example.invalid/api/webhook/x\"\nreply = \"Asked the garage to open\"\npeople = [\"*\"]\nstate = \"cover.large_door_door\"\ndone_when = \"open\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, ok := pol.LookupAction("garage")
+	if !ok || a.State != "cover.large_door_door" || a.DoneWhen != "open" {
+		t.Fatalf("action = %+v", a)
 	}
 }
 

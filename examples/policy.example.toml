@@ -197,10 +197,15 @@ people = ["*"]                   # digits, no links, no exclamation marks
 id = "garage"
 label = "Garage door"
 webhook = "http://homeassistant:8123/api/webhook/cmm-garage-open"
-reply = "The garage is open"
+reply = "Asked the garage to open"
 people = ["eric"]                # stricter than the ring allow-list on purpose
 confirm = "none"                 # "passkey": intent, not authority — nothing
                                  # moves until a passkey confirms it (s19)
+state = "cover.garage_door"      # the HA entity "garage?" reads, live, with
+                                 # HA_URL and HA_TOKEN from .env — never
+                                 # remembered here
+done_when = "open"               # already there: "It was already open", and
+                                 # the webhook is not called
 
 [[actions]]
 id = "close"

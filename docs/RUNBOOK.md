@@ -991,6 +991,134 @@ phone gets `pong` back within a couple of seconds. Nothing on the call path
 reads a text, and a handset cannot text an outside number through the house
 at all — that is a second number and a line of its own.
 
+### Actions
+
+An action is one entry in one registry — `[[actions]]` in `policy.toml` —
+that says what the house can do, who may ask, what it says back, whether it
+must be confirmed, and (optionally) which Home Assistant entity tells the
+truth about it. A text word names an action by id; a lobby digit and a
+passkey will name the same id when those doors exist. Home Assistant does
+the thing and keeps the right to say no; doorman never learns what a garage
+is. This section is the whole procedure for adding one.
+
+**1. The entry.** Every key, with the garage as the example:
+
+```toml
+[[actions]]
+id = "garage"                    # what every transport names
+label = "Open the garage"        # for people; defaults to the id
+webhook = "http://homeassistant:8123/api/webhook/cmm-garage-open-7f3a9c"
+reply = "Asked the garage to open"   # plain ASCII, one segment
+people = ["eric", "gabi"]        # [[people]] ids, or ["*"] for everyone listed
+confirm = "none"                 # or "passkey": intent, not authority (s19)
+state = "cover.large_door_door"  # the HA entity "garage?" reads — optional
+done_when = "open"               # already there: nothing moves — optional
+```
+
+Give each person an `id` in their `[[people]]` entry; `doorman check`
+refuses an action naming a person with no id, a word naming an action
+nobody declared, and an action that does nothing (no webhook and no reply).
+A word's `people` may narrow the action's list, never widen it. Closing is
+its own action — `close`, with its own webhook and its own people — because
+a toggle is a door that does the opposite of what you asked when the state
+you remembered was wrong.
+
+**2. The word.** In `messages.toml`:
+
+```toml
+[[words]]
+word = "garage"
+people = ["*"]                   # the action's list still applies
+action = "garage"
+```
+
+**3. The automation.** Home Assistant's webhook trigger, one per action.
+From a box that reaches HA over the tailnet the request is not "local" to
+HA, so `local_only: false` is needed; find the entity id under Settings →
+Devices & services → the device → the entity → its settings cog. Add the
+conditions the house wants here — not after midnight, not while the car is
+out — because this automation, not doorman, is the policy engine for the
+physical world:
+
+```yaml
+alias: Call Me Maybe — open the garage
+mode: single
+triggers:
+  - trigger: webhook
+    webhook_id: cmm-garage-open-7f3a9c      # the id in the action's webhook URL
+    allowed_methods: [POST]
+    local_only: false
+actions:
+  - action: cover.open_cover
+    target:
+      entity_id: cover.large_door_door
+```
+
+The body doorman POSTs is JSON — `{"word","action","person","via","id"}` —
+never the text and never a number, so an automation may branch on
+`trigger.json.person` (only Gabi after 22:00, say) without ever seeing a
+phone number.
+
+**4. The credentials.** Two, with different rules:
+
+- *The webhook id is the whole secret.* Anyone holding the URL can trigger
+  the automation. Make it long and random (`openssl rand -hex 12`), keep it
+  in `policy.toml` (0600), and note that doorman logs the host only.
+- *`HA_URL` and `HA_TOKEN`* are needed only for `state` and `done_when`:
+  the box reads the entity live rather than remembering it. Mint a
+  long-lived access token in HA under your profile → Security → Long-lived
+  access tokens, and put both in `.env`. This is LAN infrastructure like
+  the ARI password, not a provider key: read by `doorman inbox` and never
+  by the daemon, sent as a header and never in a URL. Both or neither;
+  `doorman inbox` refuses to start when an action names a state it has no
+  way to read, and `doorman check` says so first.
+
+**5. Check and restart.**
+
+```bash
+$ ./bin/doorman check
+  actions              : garage (eric,gabi +state), ping (*)
+Texts: 2 words   (messages.toml)
+  garage       from *                        → action garage + garage? asks cover.large_door_door
+$ sudo systemctl restart doorman-inbox && journalctl -u doorman-inbox -n 3
+inbox: Home Assistant state reads on (HA_URL and HA_TOKEN)
+inbox: journal on — texts and actions are written beside the daemon's events
+```
+
+**6. Text it.** From a listed phone:
+
+| you text   | the house says                | what moved                                |
+|------------|-------------------------------|-------------------------------------------|
+| `garage?`  | `Large Door Door is closed`   | nothing — HA was asked, in HA's own name  |
+| `garage`   | `Asked the garage to open`    | the webhook fired; HA decided             |
+| `garage`   | `It was already open`         | nothing — `done_when` held                |
+| `close`    | `That one needs your passkey…`| nothing — `confirm = "passkey"` until s19 |
+
+A question mark is a question only on a word whose action names a
+`state`; on any other word it is punctuation, and `ping?` is still `pong`.
+Grandma, listed for calls but not on the action, gets nothing at all — a
+reply would tell her what the house can do.
+
+**7. The journal.** Every text and every action is a row beside the
+daemon's own events, written by `doorman inbox` as a second writer:
+
+```bash
+$ doorman events --json --eventType action.performed | jq -c '.events[] | {at: .occurred_at, reason: .payload.reason, action: .payload.action}'
+{"at":"2026-09-27T14:02:11Z","reason":"acted","action":{"action":"garage","person":"eric","via":"sms","word":"garage","message_id":"7c1e…"}}
+$ doorman events --json --eventType action.refused | jq -c '.events[].payload'
+{"action":{"action":"garage","person":"gabi","via":"sms","word":"garage","message_id":"9a02…","state":"open"},"reason":"already open"}
+```
+
+`message.received` is written for every text with the outcome as its
+reason — including a stranger's, with no sender and no body — so the
+morning digest and the journal agree on what the house heard.
+
+**A second action** is steps 1 to 3 again with a new id, a new webhook id,
+and its own people; `doorman check` and a text of the new word are the
+whole test. Actions the house names for later: the lights, the thermostat,
+Home Assistant's own security settings — each one entry, each one
+automation, none of them anything doorman understands.
+
 ### Add a second number
 
 One box, several phone numbers, each with its own rules — a curt doorman on

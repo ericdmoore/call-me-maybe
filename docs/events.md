@@ -200,6 +200,22 @@ The vocabulary includes `call.observed`, `admission.decided`, `ring.started`,
 `contacts.refresh_failed`, `ari.connected`, `ari.disconnected`, `daemon.started`,
 `daemon.stopping`, and `journal.coverage_gap`.
 
+Texts to the house and the actions they perform (s13, s15) are written by
+`doorman inbox`, a second process, with `source: doorman-inbox`:
+`message.received` for every text (`reason` is the outcome — acted, replied,
+asked, unchanged, unlisted, unknown-word, not-allowed, needs-confirmation,
+duplicate, failed), then `message.acted` for a word that replied on its own,
+or `action.performed` / `action.refused` when the word named a registry
+action. `payload.action` carries the action id, the person's `[[people]]`
+id, the transport (`sms`), the word, the edge's message id and, when Home
+Assistant was asked, the state it reported — never the text and never a
+number. The inbox is a *sibling* writer: it appends committed rows with the
+same store and the same budget, holds no owner lock, never creates or
+migrates the journal, and does none of the daemon's bookkeeping (the clean
+flag, coverage gaps, CEL, pruning on a timer). Its rows ring no doorbell of
+their own; they are visible to the next read and announced by the daemon's
+next commit.
+
 A `call.answered` event means an originated handset leg answered, not a guarantee
 that bridging succeeded. Ring-stage durations and outcomes are recorded as stages
 finish. Admission events report the reason and credential verdict, never digits.

@@ -584,11 +584,11 @@ func TestCheckRefusesAWordForAPersonWithNoID(t *testing.T) {
 	}
 	lists := allowLists(t, allowGrandma) // Grandma has no id
 	var ok bool
-	out := capture(t, func() { ok = printMessages(path, lists) })
+	out := capture(t, func() { ok = printMessages(path, lists, noSecrets) })
 	if ok || !strings.Contains(out, `"gabi" is not a [[people]] id`) {
 		t.Fatalf("ok=%v\n%s", ok, out)
 	}
-	if ok := printMessages(filepath.Join(dir, "absent.toml"), lists); !ok {
+	if ok := printMessages(filepath.Join(dir, "absent.toml"), lists, noSecrets); !ok {
 		t.Fatal("no messages.toml is the normal state and passes")
 	}
 }
@@ -601,7 +601,7 @@ func TestCheckRefusesAWordForAnUndeclaredAction(t *testing.T) {
 		t.Fatal(err)
 	}
 	var ok bool
-	out := capture(t, func() { ok = printMessages(path, allowLists(t, allowGrandma)) })
+	out := capture(t, func() { ok = printMessages(path, allowLists(t, allowGrandma), noSecrets) })
 	if ok || !strings.Contains(out, `action "garage" is not an [[actions]] entry`) {
 		t.Fatalf("ok=%v\n%s", ok, out)
 	}

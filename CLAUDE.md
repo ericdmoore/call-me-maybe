@@ -105,6 +105,9 @@ Layout:
   Optional `CEL_SPOOL_PATH` ingests Asterisk's private CEL spool with an atomic
   source cursor. CEL captures channel lifecycles, never raw app arguments/DTMF.
   See `docs/events.md`. Never feed journal history into call admission.
+  The daemon is the journal's *owner* (the flock guards its bookkeeping);
+  `doorman inbox` is a *sibling* writer (`events.Sibling`) that appends
+  committed rows with no lock, no bookkeeping, and never creates the file.
 - `internal/notify` — the legacy event webhook. One endpoint, one JSON event per
   ring and per completed call, so Home Assistant can announce or flash
   something. Same non-blocking shape as `internal/calls`, and doorman
@@ -129,8 +132,10 @@ Layout:
   guard the provider package has: a listener that hands out SIP passwords
   never shares a process with the thing that answers the phone.
 - `internal/inbox` — texts to the house number: the edge client (pull,
-  ack, send — token in a header, never in the URL), the seen-id set, and
-  the word dispatcher over `messages.toml`. Reachable from
+  ack, send — token in a header, never in the URL), the seen-id set, the
+  word dispatcher over `messages.toml`, and the Home Assistant state reader
+  (`HA_URL`/`HA_TOKEN`, for `garage?` and `done_when`; a LAN credential
+  like the ARI password, read here and never by the daemon). Reachable from
   `cmd/doorman/inbox.go` and nothing else, asserted by test: nothing on the
   call path reads a text, and the carrier API key is at the edge (`edge/`,
   the Cloudflare Worker), never on the box.

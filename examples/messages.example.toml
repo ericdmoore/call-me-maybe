@@ -23,6 +23,11 @@
 # for everyone on the allow-list, and may only narrow the action's own list.
 # Never a number retyped here.
 #
+# A QUESTION MARK ASKS. When a word's action names a `state` entity in
+# policy.toml, "garage?" reads it from Home Assistant and answers with what
+# it says — "Large Door Door is closed" — and moves nothing. On a word whose
+# action has no state, the ? is punctuation: "ping?" is still pong.
+#
 # REPLIES ARE BORING ON PURPOSE. Plain ASCII, at most 160 characters: one
 # segment on the bill, and no emoji, which halves it. `doorman check` refuses
 # a reply the transport cannot carry, and warns — only warns — about a phone
