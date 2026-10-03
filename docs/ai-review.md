@@ -39,8 +39,11 @@ An explicit OpenRouter choice uses `openrouter/vendor/exact-model-id`, for examp
 before selecting it; this is not a free-model promise. Unsupported providers,
 malformed identifiers and missing credentials fail rather than fall back.
 For a manual second OCR review, use Actions → OCR review → Run workflow on
-`main`, enter the PR number and set `model` to an exact OpenRouter identifier.
-Leave it blank for the repository default. The equivalent CLI command is:
+`main`, enter the PR number and select `model` from the alphabetically sorted
+dropdown. `default` keeps the repository setting; the explicit local choice and
+curated OpenRouter choices apply to this run only. The OpenRouter IDs were checked
+against its model catalog for tool support on 2026-10-03. The list is static: update
+the workflow to add choices as the catalog changes. The equivalent CLI command is:
 
 ```bash
 gh workflow run ocr-review.yml --ref main -R ericdmoore/call-me-maybe \
