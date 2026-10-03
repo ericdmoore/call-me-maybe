@@ -312,9 +312,11 @@ live trunk; never add integration tests requiring a real Asterisk to CI.
 - No voicemail *in doorman*. Asterisk's `app_voicemail` does the recording,
   storage, WAV-attached email and MWI; doorman only releases the caller into
   `[voicemail-drop]` via ContinueToDialplan with `MAILBOX` set. The
-  `VOICEMAIL_*`/`STT_*`/`SMTP_*` keys in `.env` are read by Asterisk and the
+  `VOICEMAIL_*`/`SMTP_*` keys in `.env` are read by Asterisk and the
   notify hook, never by doorman — which is why they look unused here. See
   `docs/TASKS.md` §2; transcription is the only piece still open.
+  `STT_*` is read by `doorman phonebook` alone — the `*88` spoken names,
+  transcribed by a one-minute timer off the call path — never by the daemon.
 
 ## Licensing and packs
 

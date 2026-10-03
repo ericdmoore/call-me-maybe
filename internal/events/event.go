@@ -42,6 +42,8 @@ const (
 	MessageActed          = observation.MessageActed
 	ActionPerformed       = observation.ActionPerformed
 	ActionRefused         = observation.ActionRefused
+	PhonebookAdded        = observation.PhonebookAdded
+	PhonebookNamed        = observation.PhonebookNamed
 	ARIConnected          = observation.ARIConnected
 	ARIDisconnected       = observation.ARIDisconnected
 	DaemonStarted         = observation.DaemonStarted

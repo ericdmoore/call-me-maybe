@@ -86,6 +86,8 @@ func runCommand() int {
 			return runBalance(os.Args[2:])
 		case "provision":
 			return runProvision(os.Args[2:])
+		case "phonebook":
+			os.Exit(runPhonebook(os.Args[2:]))
 		case "inbox":
 			return runInbox(os.Args[2:])
 		case "digest":
@@ -269,6 +271,14 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 EVENT_JOURNAL_PATH set, every text and action
                                 is written to the journal beside the daemon's
                                 events (message.*, action.*)
+  doorman phonebook [flags]     numbers added from handsets with *88: file each
+                                recording's number into that phone's own book
+                                at once (PHONEBOOK_DIR/own/<id>.vcf, served by
+                                the directory), then ask STT_ENDPOINT for the
+                                spoken name and rename the entry when it
+                                answers; doorman-phonebook.timer runs it every
+                                minute. Never on a call; no STT means the
+                                number keeps its number for a name
   doorman digest [flags]        yesterday as one mail: calls from the journal,
                                 texts from the inbox's outcome log, as Markdown
                                 on stdout (redacted) or --mail through MAIL_HOOK
@@ -1213,7 +1223,8 @@ func runRender(args []string) int {
 	// failure the inventory exists to prevent.
 	if len(prov.Phones) > 0 {
 		books, err := loadBooks(bookPaths{handsets: handsetsPath, policy: policyPathArg(*policyFlag),
-			contacts: contactsPathArg(*contactsFlag), countryCode: defaultCountryCode()})
+			contacts: contactsPathArg(*contactsFlag), countryCode: defaultCountryCode(),
+			own: filepath.Join(render.PhonebookDir(env), "own")})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ phone books: %v\n", err)
 			return 1

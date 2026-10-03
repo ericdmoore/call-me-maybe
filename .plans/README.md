@@ -31,6 +31,7 @@ is short enough to live in its plan.
 | **s13** | [Actions](s13-actions/) — one `[[actions]]` registry (what it does, who may, what it says back, whether it confirms) that a text word, a lobby digit and a passkey all point at; HA acts and may refuse; the garage is the first door | M1 (v0.7.2), M3 `garage?`, M5 the journal's second writer, M6 RUNBOOK "Actions" shipped (v0.13.0, 2026-09-27); M2 wired on jepsen, waiting on the HA paste and token; M4 waits on s14 | s15 (the text), s14 (the leaf), s19 (the confirm); the ratgdo in HA |
 | **s19** | [The edge inbox](s19-edge-inbox/) — the house's public front door: the carrier's SMS callback and, later, passkey-signed commands land in one queue at the edge; the hub pulls; the edge holds the carrier key; `login.callmemaybe.cc` as verifier, not authorizer | M1 shipped 2026-09-24 | s15 M2 consumes it; s13 gives the words a door |
 | **s23** | [Curfew](s23-handset-curfew/) — a handset goes dark at bedtime: no ring in, no call out but 911, in-progress call dropped at the hour; the hours are `[[schedules]]`, the handset names a list of them | M1–M4 live on jepsen 2026-10-02; the two clips wait on a piper build | s12 (the DND gate it reuses) |
+| **s24** | [*88 — add a number](s24-add-a-number/) — key a number, say the name; filed into the phone's own book at once, named by off-call transcription minutes later; directory-only, never admission | M1–M4 built 2026-10-02; M5 (jepsen) next | s10 (the directory), s04 (STT by URL) |
 
 ### Archived
 

@@ -514,3 +514,37 @@ func TestCurfewTimeSpecs(t *testing.T) {
 		}
 	}
 }
+
+// *88 is three Asterisk applications in the generated dialplan, with the
+// spool path from PHONEBOOK_DIR and the prompts as separate Playbacks so a
+// pack without the clips still gets the beep.
+func TestRenderGeneratesAddANumber(t *testing.T) {
+	f, err := Build(fixture(), env(secrets), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"exten => *88,1,Answer()\n",
+		" same => n,Set(ADD_ID=${CHANNEL(endpoint)})\n",
+		" same => n,Playback(call-me-maybe/system/add-number)\n same => n,Read(ADD_NUMBER,,15,,2,10)\n",
+		" same => n,Record(/var/lib/doorman/phonebook/spool/${ADD_ID}-${EPOCH}-${ADD_NUMBER}.wav,3,15,k)\n",
+		" same => n,Playback(call-me-maybe/system/add-done)\n same => n(bye),Hangup()\n",
+	} {
+		if !strings.Contains(f.Dialplan, want) {
+			t.Errorf("dialplan missing %q:\n%s", want, f.Dialplan)
+		}
+	}
+	custom := func(k string) (string, bool) {
+		if k == "PHONEBOOK_DIR" {
+			return "/srv/books/", true
+		}
+		return secrets[k], secrets[k] != ""
+	}
+	g, err := Build(fixture(), custom, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(g.Dialplan, "Record(/srv/books/spool/${ADD_ID}") {
+		t.Errorf("PHONEBOOK_DIR not honoured:\n%s", g.Dialplan)
+	}
+}

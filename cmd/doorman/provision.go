@@ -19,6 +19,7 @@ import (
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/provision"
 	provserve "callmemaybe/internal/provision/serve"
+	"callmemaybe/internal/render"
 	"callmemaybe/internal/xdg"
 )
 
@@ -631,7 +632,8 @@ func runProvisionDirectory(args []string) int {
 		return 0
 	}
 	paths := bookPaths{handsets: handsetsPathArg(*handsetsFlag), policy: policyPathArg(*policyFlag),
-		contacts: contactsPathArg(*contactsFlag), countryCode: defaultCountryCode()}
+		contacts: contactsPathArg(*contactsFlag), countryCode: defaultCountryCode(),
+		own: filepath.Join(render.PhonebookDir(render.Env(env)), "own")}
 	handsets, _, err := policy.LoadHandsets(paths.handsets)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)

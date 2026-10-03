@@ -76,7 +76,15 @@ type Config struct {
 	// generation is kept.
 	CallLogMaxBytes int64
 
-	CELSpoolPath          string
+	CELSpoolPath string
+	// PhonebookDir and the STT keys are parsed here so `doorman schema env`
+	// and this file keep agreeing, but the daemon does not use them: they
+	// belong to `doorman phonebook`, the *88 job that runs off the call
+	// path (s24). Transcription never sits on a call (invariant 7).
+	PhonebookDir          string
+	STTEndpoint           string
+	STTModel              string
+	STTTimeout            time.Duration
 	EventJournalPath      string
 	EventJournalMaxBytes  int64
 	EventJournalMaxEvents int
@@ -188,6 +196,10 @@ func load(get func(string) string, requireSecrets bool) (Config, error) {
 		CallLogMaxBytes: int64(integer("CALL_LOG_MAX_BYTES", 32<<20)),
 
 		CELSpoolPath:          str("CEL_SPOOL_PATH", ""),
+		PhonebookDir:          str("PHONEBOOK_DIR", "/var/lib/doorman/phonebook"),
+		STTEndpoint:           str("STT_ENDPOINT", ""),
+		STTModel:              str("STT_MODEL", ""),
+		STTTimeout:            ms("STT_TIMEOUT_MS", 120_000),
 		EventJournalPath:      str("EVENT_JOURNAL_PATH", ""),
 		EventJournalMaxBytes:  int64(integer("EVENT_JOURNAL_MAX_BYTES", 64<<20)),
 		EventJournalMaxEvents: integer("EVENT_JOURNAL_MAX_EVENTS", 100000),

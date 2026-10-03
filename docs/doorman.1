@@ -71,6 +71,14 @@ dangling id fails
 the hours ride in the dialplan, so a change needs
 .B doorman render
 and a reload.
+.B *88
+adds a number to the phone that dialled it: the digits, then the spoken
+name; the number is in that phone's directory within a minute and named
+once
+.B doorman phonebook
+has had the recording transcribed at
+.BR STT_ENDPOINT .
+A directory, never the allow\-list.
 .B [line] failover
 is the ordered list of other trunks a call as that line tries when its own
 answers CHANUNAVAIL or CONGESTION \(em off unless written, because each rung

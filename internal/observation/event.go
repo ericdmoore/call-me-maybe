@@ -50,7 +50,12 @@ const (
 	// ActionRefused is a registry action that moved nothing: the person may
 	// not, it waits for a passkey, the actuator refused or was unreachable,
 	// or the thing was already in the state asked for. Reason says which.
-	ActionRefused   Type = "action.refused"
+	ActionRefused Type = "action.refused"
+	// PhonebookAdded is a number filed from a handset with *88 (s24);
+	// Reason is the handset id. PhonebookNamed is its name arriving from
+	// transcription. Never the number, never the transcript.
+	PhonebookAdded  Type = "phonebook.added"
+	PhonebookNamed  Type = "phonebook.named"
 	ARIConnected    Type = "ari.connected"
 	ARIDisconnected Type = "ari.disconnected"
 	DaemonStarted   Type = "daemon.started"
@@ -62,7 +67,7 @@ func Types() []Type {
 	return append([]Type(nil), eventTypes[:]...)
 }
 
-var eventTypes = [...]Type{JournalNote, ChannelStarted, ChannelAnswered, ChannelHungup, ChannelEnded, ChannelBridgeEntered, ChannelBridgeExited, ChannelTransfer, ChannelLinkedEnded, ChannelDialStarted, ChannelApplication, CallFinished, CallObserved, AdmissionDecided, RingStarted, RingStageFinished, CallAnswered, CallHandedOff, SessionFinished, ConfigReloaded, ConfigReloadFailed, ContactsRefreshed, ContactsRefreshFailed, MessageReceived, MessageActed, ActionPerformed, ActionRefused, ARIConnected, ARIDisconnected, DaemonStarted, DaemonStopping, CoverageGap}
+var eventTypes = [...]Type{JournalNote, ChannelStarted, ChannelAnswered, ChannelHungup, ChannelEnded, ChannelBridgeEntered, ChannelBridgeExited, ChannelTransfer, ChannelLinkedEnded, ChannelDialStarted, ChannelApplication, CallFinished, CallObserved, AdmissionDecided, RingStarted, RingStageFinished, CallAnswered, CallHandedOff, SessionFinished, ConfigReloaded, ConfigReloadFailed, ContactsRefreshed, ContactsRefreshFailed, MessageReceived, MessageActed, ActionPerformed, ActionRefused, PhonebookAdded, PhonebookNamed, ARIConnected, ARIDisconnected, DaemonStarted, DaemonStopping, CoverageGap}
 
 func ValidType(t Type) bool {
 	for _, v := range eventTypes {

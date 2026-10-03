@@ -322,8 +322,9 @@ copy it the same way.
 ```bash
 $ sudo cp scripts/doorman.service scripts/doorman-directory.service /etc/systemd/system/
 $ sudo cp scripts/doorman-balance.service scripts/doorman-balance.timer /etc/systemd/system/
+$ sudo cp scripts/doorman-phonebook.service scripts/doorman-phonebook.timer /etc/systemd/system/
 $ sudo systemctl daemon-reload
-$ sudo systemctl enable --now doorman doorman-directory doorman-balance.timer
+$ sudo systemctl enable --now doorman doorman-directory doorman-balance.timer doorman-phonebook.timer
 $ sudo systemctl status doorman
 $ journalctl -u doorman -f
 ```
@@ -564,6 +565,7 @@ valid **transfer target**.
 | 701–720 | Pick up a parked call from any handset |
 | *4 | **Outbound console**: call as another one of your numbers. Only interesting with more than one line, and it refuses 911 — see "Outbound caller ID" below. This is the one that goes through doorman |
 | *(none)* | **Bedtime** — a `curfew` on the handset in `handsets.toml` names `[[schedules]]`; while one is active the phone rings for nothing, cannot call out (911 excepted), is left out of pages and ring-all, and has its call dropped at the hour. Nothing to dial: it is the house's rule, not the phone's. See "Bedtime" below |
+| *88 | **Add a number to this phone.** Key the number, `#`, say the name after the beep. The number is in this phone's directory within a minute (named by its number), and under the spoken name once the box has had it transcribed. This phone's book only — never the allow-list. See "Add a number from a handset" |
 | *78NN | **Do not disturb** for this phone, NN = 15, 30 or 45 minutes; anything else is refused out loud. Room calls to it say how long and offer its box; the house ring group and the page skip it, except a page from a `page_override` phone. Clears itself when the time is up |
 | *79 | Do not disturb off |
 | *97 | **Voicemail** — the phone's own box, straight in, no PIN (a handset with no `mailbox` gets the old menu). What the voicemail key dials |
@@ -865,6 +867,30 @@ reports include hangs, and nothing in the phone system depends on it.
 
 ---
 
+
+### Add a number from a handset (*88)
+
+`*88` on any handset: `Read` collects the digits until `#`, `Record` takes
+the spoken name (silence ends it, 15 s at most), and the recording lands in
+`PHONEBOOK_DIR/spool/<handset>-<time>-<digits>.wav`. Nothing of doorman's is
+on the call. `doorman-phonebook.timer` runs `doorman phonebook` every minute:
+
+1. The number is filed at once into `PHONEBOOK_DIR/own/<handset>.vcf`, named
+   by its number — "(972) 555-0142" — so it is usable before anyone has
+   heard the name. The directory serves that file to that phone alone as a
+   third book, "Added here", with no `phonebook` entry needed.
+2. If `STT_ENDPOINT` is set, the recording is posted to it (OpenAI-compatible
+   `/v1/audio/transcriptions`, e.g. whisper.cpp's server on another box) and
+   the entry is renamed in place; the audio is deleted. A service that is
+   down leaves the recording to retry; after seven days the job gives up on
+   the name, keeps the number, and says so.
+3. `phonebook.added` and `phonebook.named` go to the journal (handset id
+   only), so the digest can say who added what.
+
+It is a directory, not admission: a number added here never skips the
+lobby. To admit someone, add them to `[[people]]`. The three clips
+(`add-number`, `add-name`, `add-done`) are the bundled pack's; without them
+the phone hears the beep and silence, and still works.
 
 ### Bedtime (curfew)
 

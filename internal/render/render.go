@@ -141,6 +141,21 @@ func dndExpiry(id string) string {
 	return "${IF($[\"${" + v + "}\"!=\"\"]?${" + v + "}:0)}"
 }
 
+// DefaultPhonebookDir is where a handset's own additions and the *88 spool
+// live when PHONEBOOK_DIR is not set; the installer creates it.
+const DefaultPhonebookDir = "/var/lib/doorman/phonebook"
+
+// PhonebookDir is PHONEBOOK_DIR or the default.
+func PhonebookDir(env Env) string {
+	if v, ok := env("PHONEBOOK_DIR"); ok && strings.TrimSpace(v) != "" {
+		return strings.TrimRight(strings.TrimSpace(v), "/")
+	}
+	return DefaultPhonebookDir
+}
+
+// phonebookSpool is where *88 recordings land: asterisk writes, doorman reads.
+func phonebookSpool(env Env) string { return PhonebookDir(env) + "/spool" }
+
 // curfewContext names the dialplan context a curfewed handset's calls enter.
 func curfewContext(id string) string { return "curfew-" + id }
 
@@ -528,6 +543,25 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 		plan.WriteString(" same => n,Hangup()\n")
 		plan.WriteString(" same => n(none),Hangup()\n")
 	}
+
+	// *88 — add a number to this phone's own book (s24): key it, then say
+	// the name after the beep. Three Asterisk applications and nothing of
+	// doorman's; the recording lands in the spool as <handset>-<time>-<digits>
+	// and `doorman phonebook` files the number at once and the name once a
+	// transcription service has heard it. Generated rather than hand-written
+	// in [features-internal] because the path is configuration. The prompts
+	// are separate Playbacks so a pack without the clips degrades to the
+	// beep, which Record always gives.
+	plan.WriteString("\n; *88: add a number to this phone's own book — key it, #, say the name.\n")
+	plan.WriteString("exten => *88,1,Answer()\n")
+	plan.WriteString(" same => n,Set(ADD_ID=${CHANNEL(endpoint)})\n")
+	fmt.Fprintf(&plan, " same => n,Playback(%s/add-number)\n", systemMedia)
+	plan.WriteString(" same => n,Read(ADD_NUMBER,,15,,2,10)\n")
+	plan.WriteString(" same => n,GotoIf($[\"${ADD_NUMBER}\"=\"\"]?bye)\n")
+	fmt.Fprintf(&plan, " same => n,Playback(%s/add-name)\n", systemMedia)
+	fmt.Fprintf(&plan, " same => n,Record(%s/${ADD_ID}-${EPOCH}-${ADD_NUMBER}.wav,3,15,k)\n", phonebookSpool(env))
+	fmt.Fprintf(&plan, " same => n,Playback(%s/add-done)\n", systemMedia)
+	plan.WriteString(" same => n(bye),Hangup()\n")
 
 	// Texts between handsets. Every endpoint above names this context for
 	// SIP MESSAGE, so a message to a room number reaches that phone as a
