@@ -104,3 +104,40 @@ func TestTheHostPackageIsReachableFromInitOnly(t *testing.T) {
 		}
 	}
 }
+
+// The dry run goes through the real command: reads the config, builds the
+// plan against this host (no systemd here, so every unit is "install"),
+// prints it, changes nothing, and exits 0 — then without --dry-run and
+// without root, prints the sudo line and exits 2.
+func TestInitServicesDryRunPrintsThePlanAndTouchesNothing(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root would apply the plan")
+	}
+	dir := t.TempDir()
+	env := filepath.Join(dir, ".env")
+	os.WriteFile(env, []byte("INBOX_URL=https://edge.example\n"), 0o600)
+	messages := filepath.Join(dir, "messages.toml")
+	os.WriteFile(messages, []byte("[[words]]\nword = \"ping\"\nreply = \"pong\"\n"), 0o600)
+	args := []string{"-env", env, "-handsets", filepath.Join(dir, "none.toml"), "-trunks", filepath.Join(dir, "none-trunks.toml"), "-messages", messages}
+	out := capture(t, func() {
+		if rc := runInitServices(append([]string{"-dry-run"}, args...)); rc != 0 {
+			t.Errorf("dry run rc = %d", rc)
+		}
+	})
+	for _, want := range []string{"Plan:", "doorman.service", "doorman-inbox.service", "INBOX_URL and", "daemon-reload"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry run output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "sudo doorman init services") {
+		t.Error("a dry run should not nag about root")
+	}
+	out = capture(t, func() {
+		if rc := runInitServices(args); rc != 2 {
+			t.Errorf("non-root apply rc = %d, want 2", rc)
+		}
+	})
+	if !strings.Contains(out, "sudo doorman init services") {
+		t.Errorf("non-root run should print the sudo line:\n%s", out)
+	}
+}
