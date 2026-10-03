@@ -1,4 +1,28 @@
 {
-  "include": ["**/*_test.go", "**/testdata/**", "**/*.test.mjs", ".plans/**/*.md", "docs/**/*.md", "README.md", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "llms*.txt", "examples/**", "templates/**", ".github/**"],
-  "exclude": ["**/node_modules/**", "**/vendor/**", "bin/**", "site/dist/**", "site/public/schema/**"]
+  "include": [
+    "**/*_test.go",
+    "**/testdata/**",
+    "**/*.test.mjs",
+    ".plans/**/*.md",
+    "docs/**/*.md",
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "llms*.txt",
+    "examples/**",
+    "templates/**",
+    ".github/**",
+    "go.mod",
+    "go.sum",
+    "Makefile",
+    "**/*.sh"
+  ],
+  "exclude": [
+    "**/node_modules/**",
+    "**/vendor/**",
+    "bin/**",
+    "site/dist/**",
+    "site/public/schema/**"
+  ]
 }

@@ -10,13 +10,19 @@ isolated /opt/homebrew/bin/ocr config set llm.extra_body '{"reasoning_effort":"m
 git fetch origin "pull/$PR_NUMBER/head"
 git cat-file -e "$REVIEW_HEAD^{commit}"
 base=$(git merge-base "$REVIEW_BASE" "$REVIEW_HEAD")
+fifo="$AI_JOB_DIR/progress.fifo"
+mkfifo "$fifo"
+tee "$AI_JOB_DIR/stderr.log" < "$fifo" >&2 &
+tee_pid=$!
 set +e
 isolated /opt/homebrew/bin/ocr review --from "$base" --to "$REVIEW_HEAD" \
   --format json --audience human --concurrency 1 --max-tokens 32768 \
   --effort "$REVIEW_EFFORT" --timeout 45 --max-tokens-budget "$REVIEW_BUDGET" \
   --background-file "$AI_JOB_DIR/background.md" --rule "$AI_POLICY/rule.json" \
-  > "$AI_JOB_DIR/result.json" 2> >(tee "$AI_JOB_DIR/stderr.log" >&2)
+  > "$AI_JOB_DIR/result.json" 2> "$fifo"
 status=$?
+wait "$tee_pid"
+rm -f "$fifo"
 set -e
 echo "exit_code=$status" >> "$GITHUB_OUTPUT"
 exit "$status"

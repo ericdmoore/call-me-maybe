@@ -168,8 +168,10 @@ pushed or used a paid provider. An attached-prompt repair dry-run stopped
 without edits or a final assessment; the workflow now rejects that outcome. A fresh
 pass using a direct prompt repaired the guard, added zero/nonzero regression cases
 and passed Go tests. The new test was independently confirmed to fail against the
-original defect. The integration uses that direct prompt form. GitHub push and
-publication behavior still require the trial below. Baseline generated site assets were stale; this PR
+original defect. A cheap OCR re-review selected both the repaired code and its
+regression test, completed both, and reported no findings. The integration uses
+that direct prompt form. GitHub push and publication behavior still require the
+trial below. Baseline generated site assets were stale; this PR
 regenerates them from the current sources so the existing CI freshness check passes.
 
 **Still unverified until activation:** actual GitHub inline/sticky publishing,
