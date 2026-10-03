@@ -823,7 +823,7 @@ func extension() *Schema {
 				Type:        "string",
 				Pattern:     `^\d+$`,
 				Description: "Digits only, minimum 4. Choose one you will remember — a number nobody can recite is a number nobody gives out. Guessable ones are refused at load: all-same digits, runs (including in twos), repeated blocks, palindromes, the handful everyone tries, and — at six digits and up — anything one digit away from all-same or from a run, since a guessing list is the patterns plus one typo. That is 0.31% of the six-digit space; everything else, dates included, is allowed. `doorman rotate` generates one when you would rather not choose.",
-				Rules:       []string{"Must be unique across extensions.", "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer."},
+				Rules:       []string{"Must be unique across extensions.", "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer. With mixed lengths, `#` ends the PIN and so does a pause (INTER_DIGIT_TIMEOUT_MS) once at least the shortest PIN's worth of digits is in; the longest PIN's length is the only count that fires on its own."},
 			},
 			"label":   {Type: "string", Description: "Human name, used by `doorman rotate <label>` and shown in `doorman check`."},
 			"enabled": {Type: "boolean", Default: true, Description: "False disables the extension without deleting it."},
@@ -917,7 +917,7 @@ func Env() *Schema {
 
 		"DEFAULT_COUNTRY_CODE": env("Country code assumed when a caller ID arrives without one.", "string", "1"),
 
-		"EXTENSION_LENGTH":       env("Digits in an extension when PIN lengths are mixed.", "positive integer", 6),
+		"EXTENSION_LENGTH":       env("Digits in an extension when the policy has no extensions to measure. With extensions, their lengths rule: a uniform length fires on the last digit; mixed lengths end on `#`, on a pause after the shortest length, or at the longest.", "positive integer", 6),
 		"FIRST_DIGIT_TIMEOUT_MS": env("Time to dial the FIRST digit, measured from the end of the greeting. Generous on purpose: a stranger reading a PIN off a card needs longer than a stopwatch allows.", "duration (milliseconds)", 10000),
 		"INTER_DIGIT_TIMEOUT_MS": env("Time allowed between subsequent digits.", "duration (milliseconds)", 3000),
 		"RING_TIMEOUT_S":         env("How long the house rings before giving up.", "duration (seconds)", 30),

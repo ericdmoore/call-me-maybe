@@ -146,7 +146,7 @@
             "pattern": "^\\d+$",
             "x-rules": [
               "Must be unique across extensions.",
-              "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer."
+              "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer. With mixed lengths, `#` ends the PIN and so does a pause (INTER_DIGIT_TIMEOUT_MS) once at least the shortest PIN's worth of digits is in; the longest PIN's length is the only count that fires on its own."
             ]
           },
           "steps": {

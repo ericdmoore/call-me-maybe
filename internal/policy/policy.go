@@ -390,6 +390,10 @@ type Policy struct {
 	// lengths. When uniform, the collector can fire the moment the last digit
 	// lands instead of waiting out the inter-digit timer.
 	PinLength int
+	// MinPinLength and MaxPinLength bound the mixed case: `#` or a pause
+	// after at least MinPinLength digits ends the PIN, and MaxPinLength
+	// digits end it on their own. Both 0 when there are no extensions.
+	MinPinLength, MaxPinLength int
 }
 
 // FromTOML parses, validates, and compiles a policy. Any structural problem —
@@ -1082,6 +1086,18 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 			pinLength = l
 		}
 	}
+	// With mixed lengths the lobby cannot fire on a count; it needs the
+	// shortest (a pause after that many digits may be the whole PIN) and
+	// the longest (past which there is nothing left to wait for).
+	minPin, maxPin := 0, 0
+	for l := range lengths {
+		if minPin == 0 || l < minPin {
+			minPin = l
+		}
+		if l > maxPin {
+			maxPin = l
+		}
+	}
 
 	scheduleIDs := make(map[string]bool, len(schedules))
 	for id := range schedules {
@@ -1095,10 +1111,11 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		callerIDFormat: format,
 		line:           line,
 		PinLength:      pinLength,
-		handsets:       handsets,
-		groups:         groups,
-		scheduleIDs:    scheduleIDs,
-		curfews:        curfews,
+		MinPinLength:   minPin, MaxPinLength: maxPin,
+		handsets:    handsets,
+		groups:      groups,
+		scheduleIDs: scheduleIDs,
+		curfews:     curfews,
 	}, nil
 }
 

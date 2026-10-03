@@ -1,6 +1,7 @@
 package lobby
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -743,6 +744,87 @@ func TestAnAwakeCurfewedHandsetRingsAsNormal(t *testing.T) {
 	h.fake.expect(t, "Ring")
 	if o := h.fake.expect(t, "Originate"); o.Args[0] != "PJSIP/kids-room" {
 		t.Fatalf("first stage originated %s, want the kids' room", o.Args[0])
+	}
+	h.sess.CallerGone()
+	h.waitFinished(t)
+}
+
+const mixedPinPolicy = `
+[house]
+handsets = ["kitchen"]
+
+[[handsets]]
+id = "kitchen"
+endpoint = "PJSIP/kitchen"
+
+[[handsets]]
+id = "master-bed"
+endpoint = "PJSIP/master-bed"
+
+[[extensions]]
+pin = "392817"
+label = "Kitchen"
+handsets = ["kitchen"]
+
+[[extensions]]
+pin = "7391048265"
+label = "Master"
+handsets = ["master-bed"]
+`
+
+// Mixed PIN lengths: the long one fires on its last digit, the short one
+// on `#` — or on the pause a caller leaves when nobody told them about `#`.
+func TestMixedLengthPinsEndOnHashOrPauseOrTheLongest(t *testing.T) {
+	// The ten-digit PIN, no terminator: fires on the tenth digit.
+	h := startWith(t, mixedPinPolicy, "9995550199", nil)
+	h.finishPlayback(t)
+	dialPin(h, "7391048265")
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+	if o := h.fake.expect(t, "Originate"); o.Args[0] != "PJSIP/master-bed" {
+		t.Fatalf("originated %s, want the master bedroom", o.Args[0])
+	}
+	h.sess.CallerGone()
+	h.waitFinished(t)
+
+	// The six-digit PIN with `#`: fires at once.
+	h = startWith(t, mixedPinPolicy, "9995550199", nil)
+	h.finishPlayback(t)
+	dialPin(h, "392817#")
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+	if o := h.fake.expect(t, "Originate"); o.Args[0] != "PJSIP/kitchen" {
+		t.Fatalf("originated %s, want the kitchen", o.Args[0])
+	}
+	h.sess.CallerGone()
+	h.waitFinished(t)
+
+	// The six-digit PIN and a pause: the inter-digit timer evaluates it
+	// rather than dismissing the caller.
+	h = startWith(t, mixedPinPolicy, "9995550199", nil)
+	h.finishPlayback(t)
+	dialPin(h, "392817")
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+	if o := h.fake.expect(t, "Originate"); o.Args[0] != "PJSIP/kitchen" {
+		t.Fatalf("originated %s after the pause, want the kitchen", o.Args[0])
+	}
+	h.sess.CallerGone()
+	h.waitFinished(t)
+}
+
+// Too few digits and a pause is still no input: the shortest PIN's length
+// is the floor, so a stray digit does not burn an attempt.
+func TestMixedLengthPinsAPauseBeforeTheShortestIsNoInput(t *testing.T) {
+	h := startWith(t, mixedPinPolicy, "9995550199", nil)
+	h.finishPlayback(t)
+	dialPin(h, "39")
+	// noInput for a stranger: good-day and dismissal, never a bridge.
+	if c := h.fake.expect(t, "Play"); !strings.Contains(fmt.Sprint(c.Args), "good-day") {
+		t.Fatalf("after two digits and a pause the stranger should hear good-day, got %v", c.Args)
 	}
 	h.sess.CallerGone()
 	h.waitFinished(t)
