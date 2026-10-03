@@ -75,6 +75,11 @@ is closed to doorman, so a spool under either is unreachable by the other
 account. One directory of their own — asterisk-owned, doorman group, setgid
 — is the smallest thing both can use, and the installer creates it.
 
+**Apple's engine, not Whisper, on alpaca.** The user pointed at SpeechAnalyzer
+(macOS 26); nothing served it over HTTP, so `tools/speechd` does — the same
+endpoint shape, 250 ms for a phone-quality clip on this Mac. Whisper remains
+what the client speaks; the server behind it is nobody's business.
+
 ## Milestones
 
 - **M1** `internal/ownbook` (vCard subset with UID: load, upsert, rename,

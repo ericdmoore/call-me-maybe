@@ -5,6 +5,9 @@ language model — can live somewhere else on the network, or in somebody's
 cloud, addressed the same way in every case.
 
 **Status:** planned. Nothing started.
+
+**2026-10-02:** the first STT backend shipped ahead of the rest of this stream — `internal/stt` (one method, Whisper-shaped HTTP) for s24's `*88` names, and `tools/speechd`, a Swift shim serving Apple's on-device SpeechAnalyzer on that same endpoint from a Mac on the tailnet. The "exec backend for an Apple SpeechAnalyzer CLI" this plan sketched became an HTTP service instead, because the box that transcribes is not the box that records.
+
 Related: `internal/voice`, `docs/TASKS.md` §2 (transcription), issue #7 (LLM
 features), `.plans/README.md` (primitives).
 
