@@ -127,15 +127,15 @@ prepare() {
   # Catch conflicts before spending time installing packages.
   for target in /opt/call-me-maybe/bin/doorman /usr/local/bin/doorman /etc/systemd/system/doorman.service /etc/systemd/system/doorman-directory.service /etc/systemd/system/doorman-inbox.service /etc/systemd/system/doorman-balance.service /etc/systemd/system/doorman-balance.timer /etc/systemd/system/doorman-digest.service /etc/systemd/system/doorman-digest.timer /etc/systemd/system/doorman-phonebook.service /etc/systemd/system/doorman-phonebook.timer; do
    source=$binary
-   [ "$target" != /etc/systemd/system/doorman.service ] || source=$repo/scripts/doorman.service
-   [ "$target" != /etc/systemd/system/doorman-directory.service ] || source=$repo/scripts/doorman-directory.service
-   [ "$target" != /etc/systemd/system/doorman-inbox.service ] || source=$repo/scripts/doorman-inbox.service
-   [ "$target" != /etc/systemd/system/doorman-balance.service ] || source=$repo/scripts/doorman-balance.service
-   [ "$target" != /etc/systemd/system/doorman-balance.timer ] || source=$repo/scripts/doorman-balance.timer
-   [ "$target" != /etc/systemd/system/doorman-digest.service ] || source=$repo/scripts/doorman-digest.service
-   [ "$target" != /etc/systemd/system/doorman-digest.timer ] || source=$repo/scripts/doorman-digest.timer
-   [ "$target" != /etc/systemd/system/doorman-phonebook.service ] || source=$repo/scripts/doorman-phonebook.service
-   [ "$target" != /etc/systemd/system/doorman-phonebook.timer ] || source=$repo/scripts/doorman-phonebook.timer
+   [ "$target" != /etc/systemd/system/doorman.service ] || source=$repo/internal/host/units/doorman.service
+   [ "$target" != /etc/systemd/system/doorman-directory.service ] || source=$repo/internal/host/units/doorman-directory.service
+   [ "$target" != /etc/systemd/system/doorman-inbox.service ] || source=$repo/internal/host/units/doorman-inbox.service
+   [ "$target" != /etc/systemd/system/doorman-balance.service ] || source=$repo/internal/host/units/doorman-balance.service
+   [ "$target" != /etc/systemd/system/doorman-balance.timer ] || source=$repo/internal/host/units/doorman-balance.timer
+   [ "$target" != /etc/systemd/system/doorman-digest.service ] || source=$repo/internal/host/units/doorman-digest.service
+   [ "$target" != /etc/systemd/system/doorman-digest.timer ] || source=$repo/internal/host/units/doorman-digest.timer
+   [ "$target" != /etc/systemd/system/doorman-phonebook.service ] || source=$repo/internal/host/units/doorman-phonebook.service
+   [ "$target" != /etc/systemd/system/doorman-phonebook.timer ] || source=$repo/internal/host/units/doorman-phonebook.timer
    if [ -e "$target" ] || [ -L "$target" ]; then
     cmp -s "$source" "$target" || fail "$target differs; use the documented upgrade procedure."
    fi
@@ -261,15 +261,15 @@ prepare() {
  # /opt/call-me-maybe/bin/doorman. The unit keeps running the /opt copy.
  run install -d -m 0755 /usr/local/bin
  install_once "$binary" /usr/local/bin/doorman 0755
- install_once "$repo/scripts/doorman.service" /etc/systemd/system/doorman.service 0644
- install_once "$repo/scripts/doorman-directory.service" /etc/systemd/system/doorman-directory.service 0644
- install_once "$repo/scripts/doorman-inbox.service" /etc/systemd/system/doorman-inbox.service 0644
- install_once "$repo/scripts/doorman-balance.service" /etc/systemd/system/doorman-balance.service 0644
- install_once "$repo/scripts/doorman-balance.timer" /etc/systemd/system/doorman-balance.timer 0644
- install_once "$repo/scripts/doorman-digest.service" /etc/systemd/system/doorman-digest.service 0644
- install_once "$repo/scripts/doorman-digest.timer" /etc/systemd/system/doorman-digest.timer 0644
- install_once "$repo/scripts/doorman-phonebook.service" /etc/systemd/system/doorman-phonebook.service 0644
- install_once "$repo/scripts/doorman-phonebook.timer" /etc/systemd/system/doorman-phonebook.timer 0644
+ install_once "$repo/internal/host/units/doorman.service" /etc/systemd/system/doorman.service 0644
+ install_once "$repo/internal/host/units/doorman-directory.service" /etc/systemd/system/doorman-directory.service 0644
+ install_once "$repo/internal/host/units/doorman-inbox.service" /etc/systemd/system/doorman-inbox.service 0644
+ install_once "$repo/internal/host/units/doorman-balance.service" /etc/systemd/system/doorman-balance.service 0644
+ install_once "$repo/internal/host/units/doorman-balance.timer" /etc/systemd/system/doorman-balance.timer 0644
+ install_once "$repo/internal/host/units/doorman-digest.service" /etc/systemd/system/doorman-digest.service 0644
+ install_once "$repo/internal/host/units/doorman-digest.timer" /etc/systemd/system/doorman-digest.timer 0644
+ install_once "$repo/internal/host/units/doorman-phonebook.service" /etc/systemd/system/doorman-phonebook.service 0644
+ install_once "$repo/internal/host/units/doorman-phonebook.timer" /etc/systemd/system/doorman-phonebook.timer 0644
  # `doorman provision notify` sends a check-sync through the Asterisk console,
  # which needs asterisk.conf and the control socket. The service account may
  # run exactly scripts/notify-check-sync — one validated argument — and

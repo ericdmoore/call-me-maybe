@@ -3,9 +3,7 @@
 # Always on, read-only, and it never serves a configuration — that is
 # `doorman provision <id>`, an operator's window, a different process.
 #
-# Install:
-#   sudo cp scripts/doorman-directory.service /etc/systemd/system/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now doorman-directory
+# Installed and enabled by `sudo doorman init services`; a rerun is the upgrade.
 #
 # Exits 0 and stays quiet when PROVISION_ADDRESS is not set in .env: a house
 # with hand-configured phones has no directory to serve.

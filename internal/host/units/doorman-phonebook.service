@@ -4,9 +4,7 @@
 # Run by doorman-phonebook.timer every minute. With no STT_ENDPOINT the
 # number is filed under its number and the recording waits.
 #
-# Install:
-#   sudo cp scripts/doorman-phonebook.service scripts/doorman-phonebook.timer /etc/systemd/system/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now doorman-phonebook.timer
+# Installed and enabled by `sudo doorman init services`; a rerun is the upgrade.
 [Unit]
 Description=Call Me Maybe — file and name the numbers added with *88
 Documentation=https://callmemaybe.cc

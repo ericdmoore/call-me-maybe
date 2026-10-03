@@ -11,9 +11,7 @@
 # mailbox"): HOME is /var/lib/doorman so the CLI keeps it under
 # /var/lib/doorman/.bullmoose, inside the sandbox this unit allows writes to.
 #
-# Install:
-#   sudo cp scripts/doorman-digest.service scripts/doorman-digest.timer /etc/systemd/system/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now doorman-digest.timer
+# Installed and enabled by `sudo doorman init services`; a rerun is the upgrade.
 [Unit]
 Description=Call Me Maybe — yesterday, to the house mailbox
 Documentation=https://callmemaybe.cc

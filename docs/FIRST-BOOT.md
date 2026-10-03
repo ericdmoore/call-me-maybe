@@ -139,6 +139,11 @@ doorman schema          # the whole config surface, as JSON Schema
 the authority, and `doorman check` is the authority on whether a given file is
 valid.
 
+The services come after the config is written (§5), because which of them to
+enable depends on it: `sudo doorman init services` installs the units from
+inside the binary, creates the directories, and enables what `.env` and the
+inventory call for. `--dry-run` shows the plan first.
+
 ---
 
 ## 5 · Configure

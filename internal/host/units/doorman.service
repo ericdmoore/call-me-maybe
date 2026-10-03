@@ -1,6 +1,4 @@
-# Install:
-#   sudo cp scripts/doorman.service /etc/systemd/system/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now doorman
+# Installed and enabled by `sudo doorman init services`; a rerun is the upgrade.
 [Unit]
 Description=Call Me Maybe — doorman (Asterisk ARI lobby)
 Documentation=https://callmemaybe.cc

@@ -317,21 +317,29 @@ outside the pack contract so that swapping the lobby's voice never silences
 an alert. A box provisioned before v0.8.0 has the six and not the directory;
 copy it the same way.
 
-### Service
+### Services
+
+The units ship inside the binary. One command installs them, creates the
+directories each process owns, and enables exactly the ones the config
+calls for — with the reason beside each:
 
 ```bash
-$ sudo cp scripts/doorman.service scripts/doorman-directory.service /etc/systemd/system/
-$ sudo cp scripts/doorman-balance.service scripts/doorman-balance.timer /etc/systemd/system/
-$ sudo cp scripts/doorman-phonebook.service scripts/doorman-phonebook.timer /etc/systemd/system/
-$ sudo systemctl daemon-reload
-$ sudo systemctl enable --now doorman doorman-directory doorman-balance.timer doorman-phonebook.timer
+$ doorman init services --dry-run     # the plan, as the commands it would run
+$ sudo doorman init services          # the same plan, applied
 $ sudo systemctl status doorman
 $ journalctl -u doorman -f
 ```
 
-`doorman-directory` is the phones' directory (see "Add a handset"). With no
-`PROVISION_ADDRESS` in `.env` it exits 0 and stays quiet, so enabling it on a
-box with hand-configured phones is harmless.
+What it enables and why: `doorman` and `doorman-phonebook.timer` always;
+`doorman-directory` with `PROVISION_ADDRESS` and a handset carrying `mac` +
+`model`; `doorman-inbox` with `INBOX_URL` and `messages.toml`;
+`doorman-digest.timer` with `MAIL_HOOK` + `MAIL_TO`; `doorman-balance.timer`
+with `trunks.toml`. A rerun is the upgrade: a unit doorman wrote (it carries
+a "Managed by" first line) is replaced when the binary's copy differs, a
+unit it did not write is left alone and named. Changing `.env` later —
+adding `INBOX_URL`, say — is a rerun, which enables the inbox and nothing
+else. `doorman check` has a "Services" section that compares what the
+config calls for with what the host says, and points here when they differ.
 
 ---
 

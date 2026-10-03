@@ -19,6 +19,9 @@ import (
 // crypto/rand; PINs are printed to stdout exactly once and never logged, which
 // is the rule `doorman rotate` already follows.
 func runInit(args []string) int {
+	if len(args) > 0 && args[0] == "services" {
+		return runInitServices(args[1:])
+	}
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	rooms := fs.String("rooms", "", "comma-separated room names, e.g. \"Kitchen,Office,Kids Room\" (skips the interview)")
 	force := fs.Bool("force", false, "overwrite existing config, backing it up first")

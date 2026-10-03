@@ -37,6 +37,7 @@ import (
 	"callmemaybe/internal/config"
 	"callmemaybe/internal/contacts"
 	"callmemaybe/internal/events"
+	"callmemaybe/internal/host"
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/lsp"
 	"callmemaybe/internal/notify"
@@ -120,6 +121,16 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -rooms "A,B,C"            skip the interview
       -dry-run                  show what would be written
       -force                    replace existing config, backing it up first
+  doorman init services         the units from inside the binary onto the host,
+                                the directories each process owns, and
+                                "enable --now" for exactly the units the config
+                                calls for (directory with PROVISION_ADDRESS and
+                                a provisionable phone; inbox with INBOX_URL and
+                                messages.toml; digest with MAIL_HOOK + MAIL_TO;
+                                balance with trunks.toml; the daemon and the
+                                *88 timer always). Idempotent: a rerun is the
+                                upgrade. Units it did not write are left alone
+      -dry-run                  print the plan and change nothing
   doorman check [flags] [path]  validate policy.toml and handsets.toml, and
                                 report what they add up to — every extension
                                 with every setting, including the defaults it
@@ -516,6 +527,14 @@ func runCheck(args []string) (code int) {
 	// id on some line, or the word could never be said.
 	if !printMessages(messagesPathArg(*messagesFlag), lists, secretLookup(*envFlag)) {
 		rc = 1
+	}
+	{
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		wants := decideWants(secretLookup(*envFlag), handsetsPath, trunksPathArg(*trunksFlag), messagesPathArg(*messagesFlag))
+		if !printServices(ctx, host.System{}, host.DefaultLayout(), wants) {
+			rc = 1
+		}
+		cancel()
 	}
 	return rc
 }

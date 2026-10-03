@@ -79,8 +79,8 @@ availability, distro compatibility, privileges or binary architecture.
   and CEL schema.
 - The same binary at `/usr/local/bin/doorman`, so `doorman` resolves on the
   operator's PATH and on sudo's `secure_path`. The unit runs the `/opt` copy.
-- The repository's `doorman.service`, `doorman-directory.service`,
-  `doorman-inbox.service`, and `doorman-balance.service` with its timer, in
+the nine units `doorman init services` installs from inside the binary (the
+daemon, directory, inbox, phonebook, balance and digest, with their timers).
   `/etc/systemd/system/` (none is enabled; the directory unit is the phones'
   phone book and exits quietly until `PROVISION_ADDRESS` is set; the inbox
   unit is texts to the house and exits quietly until `INBOX_URL` is set and

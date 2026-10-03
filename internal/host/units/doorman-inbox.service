@@ -2,9 +2,7 @@
 # texts to the house number, acts on the words messages.toml allows, and
 # replies through the edge. No listener, no carrier credential on this box.
 #
-# Install:
-#   sudo cp scripts/doorman-inbox.service /etc/systemd/system/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now doorman-inbox
+# Installed and enabled by `sudo doorman init services`; a rerun is the upgrade.
 #
 # Exits 0 and stays quiet when INBOX_URL is not set in .env, or there is no
 # messages.toml: a house that answers no texts has nothing to consume.

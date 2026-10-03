@@ -338,6 +338,24 @@ Everything written here is an
 never hand\-edit it, and never commit the PJSIP files, which hold real
 passwords.
 .TP
+.B doorman init services
+Install the systemd units from inside the binary, create the directories
+each process owns, and
+.B enable \-\-now
+exactly the units the configuration calls for: the daemon and the *88 timer
+always; the directory with
+.B PROVISION_ADDRESS
+and a provisionable handset; the inbox with
+.B INBOX_URL
+and messages.toml; the digest with
+.B MAIL_HOOK
+and
+.BR MAIL_TO ;
+the balance timer with trunks.toml. Idempotent — a rerun is the upgrade; a
+unit doorman did not write is left alone.
+.B \-\-dry\-run
+prints the plan. Needs root for the real thing.
+.TP
 .B doorman lsp
 Run a language server over stdio for
 .IR policy.toml ,

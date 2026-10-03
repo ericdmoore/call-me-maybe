@@ -31,8 +31,8 @@ to JSONL when journal storage fails.
 
 ## Upgrade and validation
 
-Reinstall `scripts/doorman.service` and run `systemctl daemon-reload` when
-upgrading an older unit: `StateDirectory=doorman` grants journal writes under
+Rerun `sudo doorman init services` when
+upgrading an older unit (it replaces the units it wrote and reloads): `StateDirectory=doorman` grants journal writes under
 `ProtectSystem=strict`. systemd reapplies `StateDirectoryMode=0700` on each start;
 other programs writing under `/var/lib/doorman` must use compatible ownership or
 a separate directory. Run `sudo -u doorman doorman check` from the configured
