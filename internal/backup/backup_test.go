@@ -77,8 +77,8 @@ func TestCollectBundleOpenRoundTripIsByteIdentical(t *testing.T) {
 	if f := paths["events.db"]; f.Note != "snapshot" || f.Size == 0 {
 		t.Errorf("journal = %+v", f)
 	}
-	if f := paths[".env"]; f.Tier != "house" || f.Mode != 0o600 {
-		t.Errorf(".env = %+v", f)
+	if f := paths[".env"]; f.Tier != "house" || f.Mode != 0o600 || !filepath.IsAbs(f.Path) {
+		t.Errorf(".env = %+v (must be absolute)", f)
 	}
 	if len(m.Excluded) != 1 || !strings.Contains(m.Excluded[0], "identical") {
 		t.Errorf("excluded = %v", m.Excluded)

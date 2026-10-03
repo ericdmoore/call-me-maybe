@@ -92,6 +92,12 @@ func Collect(src Sources, doormanVersion, host string, now time.Time) ([]Item, *
 	m := &Manifest{Format: FormatVersion, Doorman: doormanVersion, Host: host, CreatedAt: now.UTC()}
 	var items []Item
 	add := func(path, tier, note string, content []byte, mode fs.FileMode) {
+		// Absolute, always: a bundle is restored from wherever the operator
+		// happens to be standing, and "handsets.toml" must mean the one in
+		// /opt/call-me-maybe, not the current directory.
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
 		sum := sha256.Sum256(content)
 		f := File{Path: path, Size: int64(len(content)), SHA256: hex.EncodeToString(sum[:]), Mode: uint32(mode.Perm()), Tier: tier, Note: note}
 		items = append(items, Item{File: f, Content: content})
