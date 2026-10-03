@@ -108,3 +108,23 @@ test('zero CLI exit, provider errors and an empty stop are not repair completion
   assert.throws(() => verify([stop, assessment, {type: 'error'}].map(JSON.stringify).join('\n')));
   assert.doesNotThrow(() => verify([assessment, stop].map(JSON.stringify).join('\n')));
 });
+test('host guard rejects fork events and PR-defined workflows before job steps', () => {
+  const source = `
+import importlib.util
+spec = importlib.util.spec_from_file_location('guard', ${JSON.stringify(path.join(__dirname, 'runner-guard.py'))})
+g = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(g)
+e = {'GITHUB_REPOSITORY': g.REPOSITORY, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+     'GITHUB_WORKFLOW_REF': g.REPOSITORY + '/.github/workflows/ocr-review.yml@refs/heads/main'}
+assert g.allowed(e, {})
+assert not g.allowed(dict(e, GITHUB_EVENT_NAME='pull_request'), {})
+assert not g.allowed(dict(e, GITHUB_WORKFLOW_REF=e['GITHUB_WORKFLOW_REF'].replace('refs/heads/main','refs/pull/12/merge')), {})
+e['GITHUB_EVENT_NAME'] = 'pull_request_target'
+pr = {'state': 'open', 'draft': False, 'head': {'repo': {'full_name': 'outsider/repo'}}}
+assert not g.allowed(e, {'pull_request': pr})
+pr['head']['repo']['full_name'] = g.REPOSITORY
+assert g.allowed(e, {'pull_request': pr})
+`;
+  const result = spawnSync('python3', ['-I', '-c', source], {encoding: 'utf8'});
+  assert.equal(result.status, 0, result.stderr);
+});

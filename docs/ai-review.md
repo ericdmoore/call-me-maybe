@@ -92,6 +92,17 @@ do not protect the machine against a malicious repository writer. OpenCode uses
 `--pure`, disables project configuration, and receives job-local model settings.
 No login-shell HOME or persistent OCR/OpenCode configuration is modified.
 
+The dedicated runner also has a **host-installed job-start guard**, outside all
+checkouts, configured through its own `.env`. It only accepts the two approved
+workflow paths at `refs/heads/main` and the expected event types. It rejects fork
+PR events and PR-defined workflows even if they request this runner's public label.
+On rejection it terminates that job's Runner.Worker before steps execute, since
+an exit code alone could be bypassed with `if: always()`. The listener stays alive.
+Its source is `.github/ai/runner-guard.py` and `runner-started.sh`; updating the
+host copy is a deliberate operator action, not a job step. The guard's predicate
+is covered by tests, and a disposable Worker process verified hard-stop behavior.
+Actual GitHub runner-hook context still needs the approved activation trial.
+
 ## Shared tooling and model contention
 
 OCR is the existing Homebrew `/opt/homebrew/bin/ocr` at **1.12.11**. The workflow
