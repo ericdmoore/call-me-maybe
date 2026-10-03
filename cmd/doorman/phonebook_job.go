@@ -32,7 +32,8 @@ const giveUpAfter = 7 * 24 * time.Hour
 // Deps are plain values so the job runs in a test with a temp dir, a fake
 // transcriber and a fixed clock, exactly as the keeper does.
 type phonebookJob struct {
-	dir         string // PHONEBOOK_DIR
+	dir         string // PHONEBOOK_DIR: own/<id>.vcf
+	spool       string // PHONEBOOK_SPOOL: what *88 recorded
 	handsets    map[string]policy.Handset
 	countryCode string
 	stt         stt.Transcriber // nil: file numbers, leave recordings
@@ -60,7 +61,8 @@ func runPhonebook(args []string) int {
 		byID[h.ID] = h
 	}
 	job := &phonebookJob{
-		dir: render.PhonebookDir(render.Env(env)), handsets: byID, countryCode: defaultCountryCode(),
+		dir: render.PhonebookDir(render.Env(env)), spool: render.PhonebookSpool(render.Env(env)),
+		handsets: byID, countryCode: defaultCountryCode(),
 		now: time.Now, out: func(f string, a ...any) { fmt.Printf(f+"\n", a...) },
 	}
 	if ep, ok := env("STT_ENDPOINT"); ok && strings.TrimSpace(ep) != "" {
@@ -92,8 +94,7 @@ func runPhonebook(args []string) int {
 // run files every recording in the spool, names what it can, and leaves
 // the rest for next time. One bad file never stops the others.
 func (j *phonebookJob) run(ctx context.Context) error {
-	spool := filepath.Join(j.dir, "spool")
-	names, err := filepath.Glob(filepath.Join(spool, "*.wav"))
+	names, err := filepath.Glob(filepath.Join(j.spool, "*.wav"))
 	if err != nil {
 		return err
 	}

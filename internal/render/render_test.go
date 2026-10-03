@@ -527,7 +527,7 @@ func TestRenderGeneratesAddANumber(t *testing.T) {
 		"exten => *88,1,Answer()\n",
 		" same => n,Set(ADD_ID=${CHANNEL(endpoint)})\n",
 		" same => n,Playback(call-me-maybe/system/add-number)\n same => n,Read(ADD_NUMBER,,15,,2,10)\n",
-		" same => n,Record(/var/lib/doorman/phonebook/spool/${ADD_ID}-${EPOCH}-${ADD_NUMBER}.wav,3,15,k)\n",
+		" same => n,Record(/var/spool/call-me-maybe/${ADD_ID}-${EPOCH}-${ADD_NUMBER}.wav,3,15,k)\n",
 		" same => n,Playback(call-me-maybe/system/add-done)\n same => n(bye),Hangup()\n",
 	} {
 		if !strings.Contains(f.Dialplan, want) {
@@ -535,8 +535,8 @@ func TestRenderGeneratesAddANumber(t *testing.T) {
 		}
 	}
 	custom := func(k string) (string, bool) {
-		if k == "PHONEBOOK_DIR" {
-			return "/srv/books/", true
+		if k == "PHONEBOOK_SPOOL" {
+			return "/srv/books/spool/", true
 		}
 		return secrets[k], secrets[k] != ""
 	}

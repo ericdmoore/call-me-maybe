@@ -38,12 +38,12 @@ func (f *fakeJournal) Append(_ context.Context, e events.Event) error {
 func phonebookFixture(t *testing.T) (*phonebookJob, string, *fakeSTT, *fakeJournal) {
 	t.Helper()
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "spool"), 0o750)
+	os.MkdirAll(filepath.Join(dir, "spool"), 0o750) // a spool beside the books, for the test only
 	s := &fakeSTT{text: " Maddie from school. "}
 	j := &fakeJournal{}
 	now := time.Date(2026, 10, 2, 21, 20, 0, 0, time.Local)
 	job := &phonebookJob{
-		dir: dir, countryCode: "1", stt: s, journal: j,
+		dir: dir, spool: filepath.Join(dir, "spool"), countryCode: "1", stt: s, journal: j,
 		handsets: map[string]policy.Handset{"norah": {ID: "norah"}},
 		now:      func() time.Time { return now },
 		out:      func(f string, a ...any) { t.Logf(f, a...) },

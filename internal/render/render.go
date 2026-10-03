@@ -153,8 +153,21 @@ func PhonebookDir(env Env) string {
 	return DefaultPhonebookDir
 }
 
-// phonebookSpool is where *88 recordings land: asterisk writes, doorman reads.
-func phonebookSpool(env Env) string { return PhonebookDir(env) + "/spool" }
+// DefaultPhonebookSpool is where *88 recordings land when PHONEBOOK_SPOOL
+// is not set. Its own top-level directory, not under PHONEBOOK_DIR: the
+// daemon's state directory is 0700 to the doorman user (every unit pins it
+// so) and Asterisk's spool is closed to doorman, so the one place both
+// accounts can meet is a directory of their own — asterisk-owned, doorman
+// group, setgid — which the installer creates.
+const DefaultPhonebookSpool = "/var/spool/call-me-maybe"
+
+// PhonebookSpool is PHONEBOOK_SPOOL or the default.
+func PhonebookSpool(env Env) string {
+	if v, ok := env("PHONEBOOK_SPOOL"); ok && strings.TrimSpace(v) != "" {
+		return strings.TrimRight(strings.TrimSpace(v), "/")
+	}
+	return DefaultPhonebookSpool
+}
 
 // curfewContext names the dialplan context a curfewed handset's calls enter.
 func curfewContext(id string) string { return "curfew-" + id }
@@ -559,7 +572,7 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 	plan.WriteString(" same => n,Read(ADD_NUMBER,,15,,2,10)\n")
 	plan.WriteString(" same => n,GotoIf($[\"${ADD_NUMBER}\"=\"\"]?bye)\n")
 	fmt.Fprintf(&plan, " same => n,Playback(%s/add-name)\n", systemMedia)
-	fmt.Fprintf(&plan, " same => n,Record(%s/${ADD_ID}-${EPOCH}-${ADD_NUMBER}.wav,3,15,k)\n", phonebookSpool(env))
+	fmt.Fprintf(&plan, " same => n,Record(%s/${ADD_ID}-${EPOCH}-${ADD_NUMBER}.wav,3,15,k)\n", PhonebookSpool(env))
 	fmt.Fprintf(&plan, " same => n,Playback(%s/add-done)\n", systemMedia)
 	plan.WriteString(" same => n(bye),Hangup()\n")
 
