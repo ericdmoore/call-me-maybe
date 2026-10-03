@@ -134,6 +134,13 @@ func printPlan(p *host.Plan, w host.Wants) {
 	}
 }
 
+func orAlways(why string, want bool) string {
+	if why == "" && want {
+		return "always"
+	}
+	return why
+}
+
 // printServices is `doorman check`'s "Services" section: each unit the
 // config calls for against what the host says. Silent where there is no
 // systemd to ask (a workstation), so check stays useful everywhere.
@@ -146,7 +153,26 @@ func printServices(ctx context.Context, x host.Exec, lay host.Layout, w host.Wan
 		fmt.Printf("\nServices: %v\n", err)
 		return false
 	}
+	// A box that has never run `init services` has no units at all: that
+	// is a hint, not a failure — a fresh install, or a CI runner checking
+	// a config. Drift — units present but a wanted one not running — is
+	// the failure this section exists to catch.
+	installed := false
+	for _, s := range statuses {
+		if s.Present {
+			installed = true
+		}
+	}
 	fmt.Println("\nServices (what the config calls for, and what the host says):")
+	if !installed {
+		for _, s := range statuses {
+			if s.Want {
+				fmt.Printf("  ! %-28s wanted, not installed — %s\n", s.Name, orAlways(w.Why[s.Name], s.Want))
+			}
+		}
+		fmt.Println("    no doorman unit is installed yet: `sudo doorman init services` installs and enables what the config calls for")
+		return true
+	}
 	ok := true
 	for _, s := range statuses {
 		state := "disabled"
@@ -176,11 +202,7 @@ func printServices(ctx context.Context, x host.Exec, lay host.Layout, w host.Wan
 		if !s.Want {
 			want = "not wanted"
 		}
-		why := w.Why[s.Name]
-		if why == "" && s.Want {
-			why = "always"
-		}
-		fmt.Printf("%s %-28s %-12s %s — %s\n", mark, s.Name, want, state, why)
+		fmt.Printf("%s %-28s %-12s %s — %s\n", mark, s.Name, want, state, orAlways(w.Why[s.Name], s.Want))
 	}
 	if !ok {
 		fmt.Println("    run `sudo doorman init services` to install and enable what the config calls for")

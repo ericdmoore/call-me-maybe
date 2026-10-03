@@ -60,12 +60,22 @@ func TestCheckServicesSectionNamesWhatIsMissing(t *testing.T) {
 	}
 	lay := host.Layout{UnitDir: t.TempDir(), StateDir: t.TempDir(), Spool: t.TempDir(), DoormanUser: "doorman", DoormanGroup: "doorman", AsteriskUser: "asterisk"}
 	out := capture(t, func() {
-		if printServices(context.Background(), &recordingExec{}, lay, host.Wants{Why: map[string]string{}}) {
-			t.Error("nothing installed must fail the check")
+		if !printServices(context.Background(), &recordingExec{}, lay, host.Wants{Why: map[string]string{}}) {
+			t.Error("a box that never ran init services is a hint, not a failure")
 		}
 	})
 	if !strings.Contains(out, "doorman.service") || !strings.Contains(out, "not installed") || !strings.Contains(out, "init services") {
 		t.Errorf("output:\n%s", out)
+	}
+	// Drift: the daemon's unit is installed but not enabled — that fails.
+	os.WriteFile(filepath.Join(lay.UnitDir, "doorman.service"), []byte("# Managed by `doorman init services` — a rerun replaces this file; edit the embedded copy, not this one.\nx"), 0o644)
+	out = capture(t, func() {
+		if printServices(context.Background(), &recordingExec{}, lay, host.Wants{Why: map[string]string{}}) {
+			t.Error("an installed but disabled wanted unit must fail the check")
+		}
+	})
+	if !strings.Contains(out, "✗ doorman.service") {
+		t.Errorf("drift output:\n%s", out)
 	}
 }
 
