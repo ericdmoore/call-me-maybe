@@ -887,7 +887,8 @@ on the call. `doorman-phonebook.timer` runs `doorman phonebook` every minute:
    by its number — "(972) 555-0142" — so it is usable before anyone has
    heard the name. The directory serves that file to that phone alone as a
    third book, "Added here", with no `phonebook` entry needed.
-2. If `STT_ENDPOINT` is set, the recording is posted to it (OpenAI-compatible
+2. If `STT_ENDPOINT` is set (`doorman stt <url>` sets it, `doorman stt none`
+   clears it, `doorman stt` says whether it answers; no restart), the recording is posted to it (OpenAI-compatible
    `/v1/audio/transcriptions`, e.g. whisper.cpp's server on another box) and
    the entry is renamed in place; the audio is deleted. A service that is
    down leaves the recording to retry; after seven days the job gives up on

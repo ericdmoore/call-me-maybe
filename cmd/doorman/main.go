@@ -87,6 +87,8 @@ func runCommand() int {
 			return runBalance(os.Args[2:])
 		case "provision":
 			return runProvision(os.Args[2:])
+		case "stt":
+			os.Exit(runSTT(os.Args[2:]))
 		case "phonebook":
 			os.Exit(runPhonebook(os.Args[2:]))
 		case "inbox":
@@ -290,6 +292,12 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 answers; doorman-phonebook.timer runs it every
                                 minute. Never on a call; no STT means the
                                 number keeps its number for a name
+  doorman stt [url|none]        where *88 names are transcribed: show what is set
+                                and whether it answers; a URL (OpenAI-compatible
+                                /v1/audio/transcriptions — tools/speechd on a Mac,
+                                or whisper-server anywhere) sets STT_ENDPOINT in
+                                .env; "none" clears it. No restart: only the
+                                phonebook job reads it
   doorman digest [flags]        yesterday as one mail: calls from the journal,
                                 texts from the inbox's outcome log, as Markdown
                                 on stdout (redacted) or --mail through MAIL_HOOK
@@ -640,6 +648,13 @@ func checkEnvironment() int {
 			return 1
 		}
 		fmt.Printf("Event journal: %s (CLI reads; webhook mode %s; writer active: %t)\n", envCfg.EventJournalPath, envCfg.WebhookMode, active)
+		fmt.Println(describeSTT(func(k string) (string, bool) {
+			if v, ok := os.LookupEnv(k); ok {
+				return v, true
+			}
+			v, ok := dotenv[k]
+			return v, ok
+		}, 3*time.Second))
 	}
 	if envCfg.CELSpoolPath != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
