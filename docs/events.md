@@ -211,7 +211,9 @@ id, the transport (`sms`), the word, the edge's message id and, when Home
 Assistant was asked, the state it reported — never the text and never a
 number. `doorman phonebook`, another sibling (`source: doorman-phonebook`), writes
 `phonebook.added` when a number keyed with `*88` is filed into a handset's own
-book and `phonebook.named` when its spoken name has been transcribed;
+book and `phonebook.named` when its spoken name has been transcribed; `doorman backup`
+(`source: doorman-backup`) writes `backup.completed` / `backup.failed` per
+destination (`reason` is the destination's name, never a path);
 `reason` is the handset id, never the number or the name. The inbox is a *sibling* writer: it appends committed rows with the
 same store and the same budget, holds no owner lock, never creates or
 migrates the journal, and does none of the daemon's bookkeeping (the clean

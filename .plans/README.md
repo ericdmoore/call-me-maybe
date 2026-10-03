@@ -34,6 +34,7 @@ is short enough to live in its plan.
 | **s24** | [*88 — add a number](s24-add-a-number/) — key a number, say the name; filed into the phone's own book at once, named by off-call transcription minutes later; directory-only, never admission | M1–M4 built 2026-10-02; M5 (jepsen) next | s10 (the directory), s04 (STT by URL) |
 | **s25** | [Handset Ez Join](s25-handset-ez-join/) — a new phone is a question, not a procedure: `provision --adopt` turns an unknown MAC in the window into five answers and does the rest; the box pointing the phone (an HTTP push) is the direction it is shaped for | planned 2026-10-03 | s10 (the window), s09/#28 (services), a spare WP826 for the M2 rehearsal |
 | **s26** | [The family network](s26-family-network/) — two houses, one dial plan: an account-operated overlay, a hundred numbers per house, and what two boxes can do that POTS cannot (rooms with state, standing calls, drop-in, a help key, the absence signal, stories by the real grandma) | planned 2026-10-03 | the dialdoorman account; s23/s12 for room state; s16 for the voice; s24 for books |
+| **s27** | [Backup](s27-backup/) — the house as one sealed file (age to a public key the box holds alone; `.env`, TOMLs, state, voicemail; manifest first), nightly to a directory, an S3-compatible bucket or the account; `restore` turns a fresh install into that box | M1–M3 built 2026-10-03; s3 and the jepsen rehearsal next | s09 (init services owns the timer), the account for `cloud` |
 
 ### Archived
 

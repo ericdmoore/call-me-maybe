@@ -44,6 +44,8 @@ const (
 	ActionRefused         = observation.ActionRefused
 	PhonebookAdded        = observation.PhonebookAdded
 	PhonebookNamed        = observation.PhonebookNamed
+	BackupCompleted       = observation.BackupCompleted
+	BackupFailed          = observation.BackupFailed
 	ARIConnected          = observation.ARIConnected
 	ARIDisconnected       = observation.ARIDisconnected
 	DaemonStarted         = observation.DaemonStarted

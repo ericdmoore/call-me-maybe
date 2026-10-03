@@ -1,0 +1,12 @@
+# Nightly, after the digest has been sent; a missed night runs at the next
+# boot rather than being skipped.
+[Unit]
+Description=Call Me Maybe — the nightly backup
+
+[Timer]
+OnCalendar=*-*-* 05:10:00
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

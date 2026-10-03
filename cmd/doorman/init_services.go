@@ -119,6 +119,20 @@ func decideWants(env func(string) (string, bool), handsetsPath, trunksPath, mess
 	} else {
 		w.Why["doorman-digest.timer"] = "MAIL_HOOK and MAIL_TO are not both set"
 	}
+	dests := 0
+	for _, k := range []string{"BACKUP_PATH", "BACKUP_S3_BUCKET", "BACKUP_CLOUD_TOKEN"} {
+		if set(k) {
+			dests++
+		}
+	}
+	switch {
+	case !set("BACKUP_RECIPIENT"):
+		w.Why["doorman-backup.timer"] = "no BACKUP_RECIPIENT (`doorman backup init` makes the key)"
+	case dests == 0:
+		w.Why["doorman-backup.timer"] = "BACKUP_RECIPIENT is set but no destination is (BACKUP_PATH, BACKUP_S3_*, BACKUP_CLOUD_TOKEN)"
+	default:
+		w.Backup, w.Why["doorman-backup.timer"] = true, fmt.Sprintf("BACKUP_RECIPIENT and %d destination(s)", dests)
+	}
 	if exists(trunksPath) {
 		w.Balance, w.Why["doorman-balance.timer"] = true, trunksPath+" exists"
 	} else {

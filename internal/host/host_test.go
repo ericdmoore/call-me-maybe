@@ -16,6 +16,7 @@ import (
 type fakeExec struct {
 	users map[string]bool
 	ran   [][]string
+	noACL bool // pretend setfacl is not installed
 	// enabled/active answer systemctl is-enabled / is-active.
 	enabled, active map[string]bool
 }
@@ -23,6 +24,11 @@ type fakeExec struct {
 func (f *fakeExec) Run(_ context.Context, argv ...string) (string, error) {
 	f.ran = append(f.ran, argv)
 	switch {
+	case argv[0] == "which":
+		if argv[1] == "setfacl" && f.noACL {
+			return "", os.ErrNotExist
+		}
+		return "/usr/bin/" + argv[1] + "\n", nil
 	case argv[0] == "id":
 		if f.users[argv[2]] {
 			return "1000\n", nil
@@ -71,7 +77,7 @@ func TestEveryEmbeddedUnitHasARuleAndTheDaemonComesFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 9 || units[0].Name != "doorman.service" {
+	if len(units) != 11 || units[0].Name != "doorman.service" {
 		t.Fatalf("units = %d, first %s", len(units), units[0].Name)
 	}
 	for _, u := range units {
@@ -106,8 +112,8 @@ func TestPlanInstallsEnablesAndIsIdempotent(t *testing.T) {
 	if n := x.count("systemctl", "enable", "--now"); n != 3 {
 		t.Errorf("enabled = %d, want the daemon, the *88 timer and the inbox: %v", n, p.Enable)
 	}
-	if n := x.count("systemctl", "disable", "--now"); n != 3 {
-		t.Errorf("disabled = %d, want directory, digest, balance: %v", n, p.Disable)
+	if n := x.count("systemctl", "disable", "--now"); n != 4 {
+		t.Errorf("disabled = %d, want directory, digest, balance, backup: %v", n, p.Disable)
 	}
 	unit, err := os.ReadFile(filepath.Join(lay.UnitDir, "doorman-inbox.service"))
 	if err != nil || !strings.HasPrefix(string(unit), managedMarker) || !strings.Contains(string(unit), "ExecStart=") {
@@ -190,6 +196,33 @@ func TestAnOutOfDateManagedUnitIsReplacedAndAForeignOneIsLeft(t *testing.T) {
 	}
 }
 
+func TestTheBackupReadACLsAreGrantedWhereAsteriskLives(t *testing.T) {
+	lay := layout(t)
+	os.MkdirAll(lay.UnitDir, 0o755)
+	lay.AsteriskDir = filepath.Join(t.TempDir(), "etc")
+	lay.VoicemailDir = filepath.Join(t.TempDir(), "spool", "voicemail")
+	os.MkdirAll(lay.AsteriskDir, 0o755)
+	os.MkdirAll(lay.VoicemailDir, 0o755)
+	os.WriteFile(filepath.Join(lay.AsteriskDir, "pjsip.conf"), []byte("x"), 0o640)
+	x := &fakeExec{users: map[string]bool{"asterisk": true}}
+	p, err := Build(context.Background(), x, lay, Wants{Why: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acl, chmod := 0, 0
+	for _, s := range p.Steps {
+		if len(s.Argv) > 0 && s.Argv[0] == "setfacl" {
+			acl++
+		}
+		if len(s.Argv) > 0 && (s.Argv[0] == "chmod" || s.Argv[0] == "chown") {
+			chmod++
+		}
+	}
+	if acl != 4 || chmod != 0 {
+		t.Errorf("setfacl steps = %d (want the dir, pjsip.conf, the spool parent, the spool), chmod/chown = %d (want none): %+v", acl, chmod, p.Steps)
+	}
+}
+
 func TestNoAsteriskUserMeansTheSpoolWaits(t *testing.T) {
 	lay := layout(t)
 	os.MkdirAll(lay.UnitDir, 0o755)
@@ -245,5 +278,27 @@ func TestEveryUnitHasShippedLegacyContentRegistered(t *testing.T) {
 		if len(legacyUnits[u.Name]) == 0 {
 			t.Errorf("%s has no legacy hash: an installer-era copy could never be adopted", u.Name)
 		}
+	}
+}
+
+func TestAMissingSetfaclIsALineInThePlanNotAFailedApply(t *testing.T) {
+	lay := layout(t)
+	os.MkdirAll(lay.UnitDir, 0o755)
+	lay.AsteriskDir = t.TempDir()
+	x := &fakeExec{users: map[string]bool{"asterisk": true}, noACL: true}
+	p, err := Build(context.Background(), x, lay, Wants{Why: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range p.Steps {
+		if len(s.Argv) > 0 && s.Argv[0] == "setfacl" {
+			t.Error("setfacl planned although absent")
+		}
+	}
+	if err := Apply(context.Background(), x, p); err != nil {
+		t.Fatalf("apply must still install the units: %v", err)
+	}
+	if x.count("install", "-o", "root") == 0 {
+		t.Error("no unit was installed")
 	}
 }

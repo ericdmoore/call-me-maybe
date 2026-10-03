@@ -81,8 +81,20 @@ type Config struct {
 	// and this file keep agreeing, but the daemon does not use them: they
 	// belong to `doorman phonebook`, the *88 job that runs off the call
 	// path (s24). Transcription never sits on a call (invariant 7).
-	PhonebookDir          string
-	PhonebookSpool        string
+	PhonebookDir   string
+	PhonebookSpool string
+	// Backup keys (s27): read by `doorman backup` and `init services`; the
+	// daemon parses and ignores them, as with STT_*.
+	BackupRecipient       string
+	BackupPath            string
+	BackupKeepDaily       int
+	BackupKeepWeekly      int
+	BackupS3Endpoint      string
+	BackupS3Bucket        string
+	BackupS3Region        string
+	BackupS3Prefix        string
+	BackupS3KeyID         string
+	BackupS3Secret        string
 	STTEndpoint           string
 	STTModel              string
 	STTTimeout            time.Duration
@@ -199,6 +211,16 @@ func load(get func(string) string, requireSecrets bool) (Config, error) {
 		CELSpoolPath:          str("CEL_SPOOL_PATH", ""),
 		PhonebookDir:          str("PHONEBOOK_DIR", "/var/lib/doorman/phonebook"),
 		PhonebookSpool:        str("PHONEBOOK_SPOOL", "/var/spool/call-me-maybe"),
+		BackupRecipient:       str("BACKUP_RECIPIENT", ""),
+		BackupPath:            str("BACKUP_PATH", ""),
+		BackupKeepDaily:       integer("BACKUP_KEEP_DAILY", 7),
+		BackupKeepWeekly:      integer("BACKUP_KEEP_WEEKLY", 8),
+		BackupS3Endpoint:      str("BACKUP_S3_ENDPOINT", ""),
+		BackupS3Bucket:        str("BACKUP_S3_BUCKET", ""),
+		BackupS3Region:        str("BACKUP_S3_REGION", "auto"),
+		BackupS3Prefix:        str("BACKUP_S3_PREFIX", ""),
+		BackupS3KeyID:         str("BACKUP_S3_KEY_ID", ""),
+		BackupS3Secret:        str("BACKUP_S3_SECRET", ""),
 		STTEndpoint:           str("STT_ENDPOINT", ""),
 		STTModel:              str("STT_MODEL", ""),
 		STTTimeout:            ms("STT_TIMEOUT_MS", 120_000),

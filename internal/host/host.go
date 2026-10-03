@@ -51,13 +51,21 @@ type Layout struct {
 	Spool    string // /var/spool/call-me-maybe — asterisk writes, doorman reads
 	// Users and groups the directories are owned by.
 	DoormanUser, DoormanGroup, AsteriskUser string
+	// AsteriskDir and VoicemailDir are what the backup reads as doorman;
+	// init services grants the ACLs. Empty skips them.
+	AsteriskDir, VoicemailDir string
 }
+
+// asteriskFiles are the hand-written files the backup carries; the same
+// list cmd/doorman's backup reads.
+var asteriskFiles = []string{"ari.conf", "pjsip.conf", "extensions.conf", "voicemail.conf", "modules.conf", "cel.conf", "cel_sqlite3_custom.conf", "pjsip_notify.conf", "http.conf", "rtp.conf"}
 
 // DefaultLayout is the install every unit assumes.
 func DefaultLayout() Layout {
 	return Layout{
 		UnitDir: "/etc/systemd/system", StateDir: "/var/lib/doorman", Spool: "/var/spool/call-me-maybe",
 		DoormanUser: "doorman", DoormanGroup: "doorman", AsteriskUser: "asterisk",
+		AsteriskDir: "/etc/asterisk", VoicemailDir: "/var/spool/asterisk/voicemail",
 	}
 }
 
@@ -69,6 +77,7 @@ type Wants struct {
 	Inbox     bool // INBOX_URL and messages.toml
 	Digest    bool // MAIL_HOOK and MAIL_TO
 	Balance   bool // trunks.toml
+	Backup    bool // BACKUP_RECIPIENT and at least one destination
 	// Why records the reason for each decision, by unit, for the plan.
 	Why map[string]string
 }
@@ -97,6 +106,8 @@ func Units() ([]Unit, error) {
 		"doorman-digest.timer":      {wanted: func(w Wants) bool { return w.Digest }},
 		"doorman-balance.service":   {},
 		"doorman-balance.timer":     {wanted: func(w Wants) bool { return w.Balance }},
+		"doorman-backup.service":    {},
+		"doorman-backup.timer":      {wanted: func(w Wants) bool { return w.Backup }},
 	}
 	entries, err := fs.ReadDir(unitFS, "units")
 	if err != nil {
@@ -196,6 +207,31 @@ func Build(ctx context.Context, x Exec, lay Layout, w Wants) (*Plan, error) {
 			Argv: []string{"install", "-d", "-o", lay.AsteriskUser, "-g", lay.DoormanGroup, "-m", "2770", lay.Spool}})
 	} else {
 		p.Steps = append(p.Steps, Step{Describe: "skip " + lay.Spool + ": no user " + lay.AsteriskUser + " yet (install Asterisk, rerun)"})
+	}
+
+	// What the nightly backup reads as doorman but Asterisk owns: the
+	// hand-written configuration and the voicemail spool. Read ACLs, the
+	// same way the installer opens the CEL spool — never a group change,
+	// never a chmod on Asterisk's files. Only paths that exist.
+	haveACL := toolExists(ctx, x, "setfacl")
+	if !haveACL && (fileExists(lay.AsteriskDir) || fileExists(lay.VoicemailDir)) {
+		p.Steps = append(p.Steps, Step{Describe: "skip the read ACLs: setfacl is not installed (install the acl package, rerun) — the backup will leave Asterisk's files out until then"})
+	}
+	if haveACL && fileExists(lay.AsteriskDir) {
+		p.Steps = append(p.Steps, Step{Describe: "read ACL for " + lay.DoormanUser + " on " + lay.AsteriskDir + " (the backup reads the hand-written files)",
+			Argv: []string{"setfacl", "-m", "u:" + lay.DoormanUser + ":rX", lay.AsteriskDir}})
+		for _, f := range asteriskFiles {
+			if _, err := os.Stat(filepath.Join(lay.AsteriskDir, f)); err == nil {
+				p.Steps = append(p.Steps, Step{Describe: "read ACL on " + f,
+					Argv: []string{"setfacl", "-m", "u:" + lay.DoormanUser + ":r", filepath.Join(lay.AsteriskDir, f)}})
+			}
+		}
+	}
+	if haveACL && fileExists(lay.VoicemailDir) {
+		p.Steps = append(p.Steps, Step{Describe: "read ACL for " + lay.DoormanUser + " on " + filepath.Dir(lay.VoicemailDir) + " and the voicemail spool (the backup reads the messages)",
+			Argv: []string{"setfacl", "-m", "u:" + lay.DoormanUser + ":rx", filepath.Dir(lay.VoicemailDir)}})
+		p.Steps = append(p.Steps, Step{Describe: "read ACL, recursive and default, on " + lay.VoicemailDir,
+			Argv: []string{"setfacl", "-R", "-m", "u:" + lay.DoormanUser + ":rX,d:u:" + lay.DoormanUser + ":rX", lay.VoicemailDir}})
 	}
 
 	// Units: ours are replaced, foreign ones reported, identical ones skipped.
@@ -377,6 +413,21 @@ var legacyUnits = map[string][]string{
 		"a0f974e4898cc9680b77e13111b390ebd4990afeb463495453d75830aabd62b2",
 		"e56d8724b08955831dca5230c332b15dd5411c713f9e8fcde0464ada981f94c6",
 	},
+}
+
+func fileExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// toolExists asks the host for a command, so a step is never planned that
+// cannot run: a missing tool is a line in the plan, not a failed apply.
+func toolExists(ctx context.Context, x Exec, name string) bool {
+	_, err := x.Run(ctx, "which", name)
+	return err == nil
 }
 
 func userExists(ctx context.Context, x Exec, name string) bool {
