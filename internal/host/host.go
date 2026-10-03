@@ -204,7 +204,7 @@ func Build(ctx context.Context, x Exec, lay Layout, w Wants) (*Plan, error) {
 		switch {
 		case err == nil && bytes.Equal(have, want):
 			p.Steps = append(p.Steps, Step{Describe: "unit " + u.Name + " is current"})
-		case err == nil && !bytes.HasPrefix(have, []byte(managedMarker)):
+		case err == nil && !ours(have):
 			p.Foreign = append(p.Foreign, u.Name)
 			p.Steps = append(p.Steps, Step{Describe: "leave " + target + ": not written by doorman (no marker); yours to keep or remove"})
 			continue
@@ -306,7 +306,7 @@ func Inspect(ctx context.Context, x Exec, lay Layout, w Wants) ([]Status, error)
 		st := Status{Name: u.Name, Want: u.ShouldEnable(w)}
 		if have, err := os.ReadFile(filepath.Join(lay.UnitDir, u.Name)); err == nil {
 			st.Present = true
-			st.Foreign = !bytes.HasPrefix(have, []byte(managedMarker))
+			st.Foreign = !ours(have)
 		}
 		if o, err := x.Run(ctx, "systemctl", "is-enabled", u.Name); err == nil && strings.TrimSpace(o) == "enabled" {
 			st.Enabled = true
@@ -317,6 +317,27 @@ func Inspect(ctx context.Context, x Exec, lay Layout, w Wants) ([]Status, error)
 		out = append(out, st)
 	}
 	return out, nil
+}
+
+// ours reports whether a unit file is doorman's to replace: one this
+// package wrote (the marker), or one the shell installer copied from the
+// repository before the marker existed — recognisable because it runs our
+// binary or names the project. A unit under our name that does neither is
+// somebody's own and stays theirs.
+func ours(content []byte) bool {
+	if bytes.HasPrefix(content, []byte(managedMarker)) {
+		return true
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "ExecStart=") && strings.Contains(line, "bin/doorman") {
+			return true
+		}
+		if strings.HasPrefix(line, "Description=Call Me Maybe") {
+			return true
+		}
+	}
+	return false
 }
 
 func userExists(ctx context.Context, x Exec, name string) bool {
