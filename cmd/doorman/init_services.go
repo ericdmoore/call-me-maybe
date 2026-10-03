@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,7 +28,10 @@ func runInitServices(args []string) int {
 	messagesFlag := fs.String("messages", "", "words file, optional (default $MESSAGES_PATH or ./messages.toml)")
 	_ = fs.Parse(args)
 
-	wants := decideWants(secretLookup(*envPath), handsetsPathArg(*handsetsFlag), trunksPathArg(*trunksFlag), messagesPathArg(*messagesFlag))
+	env := secretLookup(*envPath)
+	base := filepath.Dir(*envPath) // the units' WorkingDirectory: where .env lives
+	wants := decideWants(env, servicePath(*handsetsFlag, "HANDSETS_PATH", "handsets.toml", env, base),
+		servicePath(*trunksFlag, "TRUNKS_PATH", "trunks.toml", env, base), servicePath(*messagesFlag, "MESSAGES_PATH", "messages.toml", env, base))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	x := host.System{}
@@ -54,6 +58,25 @@ func runInitServices(args []string) int {
 	}
 	fmt.Println(". `doorman check` shows their state.")
 	return 0
+}
+
+// servicePath resolves an inventory the way the units will see it: an
+// explicit flag wins; then the variable from the process environment or the
+// chosen .env (the units read .env as EnvironmentFile); then the default
+// name beside .env, which is the units' WorkingDirectory — never the
+// operator's current directory, which is wherever they typed sudo.
+func servicePath(explicit, key, name string, env func(string) (string, bool), base string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if v, ok := env(key); ok && strings.TrimSpace(v) != "" {
+		v = strings.TrimSpace(v)
+		if filepath.IsAbs(v) {
+			return v
+		}
+		return filepath.Join(base, v)
+	}
+	return filepath.Join(base, name)
 }
 
 // decideWants is the one place the enabling rules read the config. Each

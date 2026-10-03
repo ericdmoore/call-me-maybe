@@ -18,7 +18,9 @@ package host
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -204,7 +206,7 @@ func Build(ctx context.Context, x Exec, lay Layout, w Wants) (*Plan, error) {
 		switch {
 		case err == nil && bytes.Equal(have, want):
 			p.Steps = append(p.Steps, Step{Describe: "unit " + u.Name + " is current"})
-		case err == nil && !ours(have):
+		case err == nil && !ours(u.Name, have):
 			p.Foreign = append(p.Foreign, u.Name)
 			p.Steps = append(p.Steps, Step{Describe: "leave " + target + ": not written by doorman (no marker); yours to keep or remove"})
 			continue
@@ -306,7 +308,7 @@ func Inspect(ctx context.Context, x Exec, lay Layout, w Wants) ([]Status, error)
 		st := Status{Name: u.Name, Want: u.ShouldEnable(w)}
 		if have, err := os.ReadFile(filepath.Join(lay.UnitDir, u.Name)); err == nil {
 			st.Present = true
-			st.Foreign = !ours(have)
+			st.Foreign = !ours(u.Name, have)
 		}
 		if o, err := x.Run(ctx, "systemctl", "is-enabled", u.Name); err == nil && strings.TrimSpace(o) == "enabled" {
 			st.Enabled = true
@@ -321,23 +323,60 @@ func Inspect(ctx context.Context, x Exec, lay Layout, w Wants) ([]Status, error)
 
 // ours reports whether a unit file is doorman's to replace: one this
 // package wrote (the marker), or one the shell installer copied from the
-// repository before the marker existed — recognisable because it runs our
-// binary or names the project. A unit under our name that does neither is
-// somebody's own and stays theirs.
-func ours(content []byte) bool {
+// repository before the marker existed — recognised only by matching, byte
+// for byte, a unit some release actually shipped. A unit under our name
+// with any other content is somebody's own and stays theirs: an operator
+// who changed the user, the directory or the schedule did so on purpose.
+func ours(name string, content []byte) bool {
 	if bytes.HasPrefix(content, []byte(managedMarker)) {
 		return true
 	}
-	for _, line := range strings.Split(string(content), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "ExecStart=") && strings.Contains(line, "bin/doorman") {
-			return true
-		}
-		if strings.HasPrefix(line, "Description=Call Me Maybe") {
+	sum := sha256.Sum256(content)
+	hash := hex.EncodeToString(sum[:])
+	for _, h := range legacyUnits[name] {
+		if h == hash {
 			return true
 		}
 	}
 	return false
+}
+
+// legacyUnits is the sha256 of every unit file the repository shipped
+// under scripts/ at any tag before the units moved into the binary — what
+// an installer-era box has on disk. Regenerate with:
+//
+//	for ref in $(git tag) main; do for f in $(git ls-tree -r --name-only $ref -- scripts | grep -E 'doorman.*\.(service|timer)$'); do git show "$ref:$f" | shasum -a 256 | awk -v n="$(basename $f)" '{print $1, n}'; done; done | sort -u
+var legacyUnits = map[string][]string{
+	"doorman-balance.service": {
+		"a11655c5ce9129be5b2682219f9d4f50c9b70026ce9bbc27544b292f64304be4",
+	},
+	"doorman-balance.timer": {
+		"6e00ca2f7fe3c99b4f27ec96a9024a18aaee00550d541d26ee2b02a3eaafa240",
+	},
+	"doorman-digest.service": {
+		"0fc451920b7b7280cfaaec1c8a5d7e0263bd8b027ebd676100ca49d5ff933571",
+	},
+	"doorman-digest.timer": {
+		"a72b9fb4b93c5687b8be936ede71155fb64ae1912324eaa458bba8f427eb2bad",
+	},
+	"doorman-directory.service": {
+		"06e88c2dda5624e9c1f6b9ad91d48901bc3a8f534d05e39256f738bbbe6fa69c",
+	},
+	"doorman-inbox.service": {
+		"8ada18278d86b5150adefa1cf035b763fcb77a91592048fac899214a471948c5",
+		"aecccf066e779f3ee4c20fb2430540e262a9102694e850d6ca96f0a59706625a",
+	},
+	"doorman-phonebook.service": {
+		"e71336a96c3cc9c52f20c207139ae9dfe9c148d1f830aec5a334fd628387eee7",
+	},
+	"doorman-phonebook.timer": {
+		"f5e83d962e839176576ee6a25fbe9b1592ca5edf6695ef7a1391883a3d45a4ab",
+	},
+	"doorman.service": {
+		"13176c69da0e05fe5816c7715ba1ed7afc6a00e3e7a0a09be70fd713a7c49ca1",
+		"a0f974e4898cc9680b77e13111b390ebd4990afeb463495453d75830aabd62b2",
+		"e56d8724b08955831dca5230c332b15dd5411c713f9e8fcde0464ada981f94c6",
+	},
 }
 
 func userExists(ctx context.Context, x Exec, name string) bool {

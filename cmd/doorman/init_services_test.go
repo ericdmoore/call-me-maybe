@@ -141,3 +141,46 @@ func TestInitServicesDryRunPrintsThePlanAndTouchesNothing(t *testing.T) {
 		t.Errorf("non-root run should print the sudo line:\n%s", out)
 	}
 }
+
+// The inventories are resolved as the units see them: from .env's own
+// variables and beside .env, never from wherever sudo was typed.
+func TestServicePathsComeFromTheEnvFileNotTheCurrentDirectory(t *testing.T) {
+	dir := t.TempDir()
+	env := filepath.Join(dir, ".env")
+	elsewhere := filepath.Join(t.TempDir(), "words.toml")
+	os.WriteFile(elsewhere, []byte("[[words]]\nword = \"ping\"\nreply = \"pong\"\n"), 0o600)
+	os.WriteFile(env, []byte("INBOX_URL=https://edge.example\nMESSAGES_PATH="+elsewhere+"\n"), 0o600)
+	lookup := secretLookup(env)
+	base := filepath.Dir(env)
+	if got := servicePath("", "MESSAGES_PATH", "messages.toml", lookup, base); got != elsewhere {
+		t.Errorf("an absolute MESSAGES_PATH in .env must be honoured, got %s", got)
+	}
+	if got := servicePath("", "HANDSETS_PATH", "handsets.toml", lookup, base); got != filepath.Join(dir, "handsets.toml") {
+		t.Errorf("the default must sit beside .env, got %s", got)
+	}
+	if got := servicePath("/explicit.toml", "HANDSETS_PATH", "handsets.toml", lookup, base); got != "/explicit.toml" {
+		t.Errorf("an explicit flag wins, got %s", got)
+	}
+	w := decideWants(lookup, filepath.Join(dir, "handsets.toml"), filepath.Join(dir, "trunks.toml"), servicePath("", "MESSAGES_PATH", "messages.toml", lookup, base))
+	if !w.Inbox {
+		t.Errorf("INBOX_URL plus a MESSAGES_PATH named in .env must want the inbox: %+v", w.Why["doorman-inbox.service"])
+	}
+}
+
+// --policy-only validates files anywhere — CI, a workstation, a box with no
+// units installed yet — so the host's services are not consulted.
+func TestCheckPolicyOnlyDoesNotConsultTheHostServices(t *testing.T) {
+	dir := t.TempDir()
+	policy := filepath.Join(dir, "policy.toml")
+	handsets := filepath.Join(dir, "handsets.toml")
+	os.WriteFile(handsets, []byte("[[handsets]]\nid = \"kitchen\"\nendpoint = \"PJSIP/kitchen\"\nnumber = 101\npassword_env = \"HANDSET_KITCHEN_PASSWORD\"\n"), 0o600)
+	os.WriteFile(policy, []byte("[house]\nhandsets = [\"kitchen\"]\n\n[[people]]\nname = \"Grandma\"\nnumbers = [\"512-555-0100\"]\n\n[[extensions]]\npin = \"428917\"\nlabel = \"Kitchen\"\nhandsets = [\"kitchen\"]\n"), 0o600)
+	out := capture(t, func() {
+		if rc := runCheck([]string{"--policy-only", "--handsets", handsets, "--env", filepath.Join(dir, ".env"), policy}); rc != 0 {
+			t.Errorf("policy-only check rc = %d", rc)
+		}
+	})
+	if strings.Contains(out, "Services (") {
+		t.Errorf("policy-only must not print the host's services:\n%s", out)
+	}
+}

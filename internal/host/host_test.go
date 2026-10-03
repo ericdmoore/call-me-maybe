@@ -2,8 +2,11 @@ package host
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -135,9 +138,15 @@ func TestAnOutOfDateManagedUnitIsReplacedAndAForeignOneIsLeft(t *testing.T) {
 	os.MkdirAll(lay.UnitDir, 0o755)
 	os.WriteFile(filepath.Join(lay.UnitDir, "doorman.service"), []byte(managedMarker+"[Service]\nExecStart=/old\n"), 0o644)
 	os.WriteFile(filepath.Join(lay.UnitDir, "doorman-inbox.service"), []byte("[Service]\nExecStart=/mine\n"), 0o644)
-	// A unit the shell installer copied before the marker existed: ours.
-	os.WriteFile(filepath.Join(lay.UnitDir, "doorman-digest.timer"), []byte("[Unit]\nDescription=Call Me Maybe — the morning digest\n[Timer]\nOnCalendar=daily\n"), 0o644)
-	os.WriteFile(filepath.Join(lay.UnitDir, "doorman-directory.service"), []byte("[Service]\nExecStart=/opt/call-me-maybe/bin/doorman provision directory\n"), 0o644)
+	// Units the shell installer copied before the marker existed: ours only
+	// when byte-identical to something a release shipped. The timer is a
+	// real legacy copy (registered by hash below); the directory unit runs
+	// our binary but was edited by the operator, so it is theirs.
+	legacyTimer := []byte("[Unit]\nDescription=Call Me Maybe — the morning digest\n[Timer]\nOnCalendar=daily\n")
+	sum := sha256.Sum256(legacyTimer)
+	legacyUnits["doorman-digest.timer"] = append(legacyUnits["doorman-digest.timer"], hex.EncodeToString(sum[:]))
+	os.WriteFile(filepath.Join(lay.UnitDir, "doorman-digest.timer"), legacyTimer, 0o644)
+	os.WriteFile(filepath.Join(lay.UnitDir, "doorman-directory.service"), []byte("[Service]\nUser=custom-user\nWorkingDirectory=/srv/my-phone\nExecStart=/usr/local/bin/doorman provision directory\n"), 0o644)
 	x := &fakeExec{users: map[string]bool{"asterisk": true}}
 	w := Wants{Inbox: true, Why: map[string]string{}}
 	p, err := Build(context.Background(), x, lay, w)
@@ -149,15 +158,19 @@ func TestAnOutOfDateManagedUnitIsReplacedAndAForeignOneIsLeft(t *testing.T) {
 		if strings.HasPrefix(s.Describe, "replace unit doorman.service") {
 			replaced++
 		}
-		if strings.HasPrefix(s.Describe, "replace unit doorman-digest.timer") || strings.HasPrefix(s.Describe, "replace unit doorman-directory.service") {
+		if strings.HasPrefix(s.Describe, "replace unit doorman-digest.timer") {
 			adopted++
 		}
-		if strings.HasPrefix(s.Describe, "leave ") && strings.Contains(s.Describe, "doorman-inbox.service") {
+		if strings.HasPrefix(s.Describe, "replace unit doorman-directory.service") {
+			t.Error("an operator's edited unit must not be adopted just because it runs our binary")
+		}
+		if strings.HasPrefix(s.Describe, "leave ") {
 			left++
 		}
 	}
-	if replaced != 1 || left != 1 || adopted != 2 || len(p.Foreign) != 1 || p.Foreign[0] != "doorman-inbox.service" {
-		t.Errorf("replaced=%d left=%d adopted=%d foreign=%v — a pre-marker installer copy is ours to adopt", replaced, left, adopted, p.Foreign)
+	sort.Strings(p.Foreign)
+	if replaced != 1 || left != 2 || adopted != 1 || len(p.Foreign) != 2 || p.Foreign[0] != "doorman-directory.service" || p.Foreign[1] != "doorman-inbox.service" {
+		t.Errorf("replaced=%d left=%d adopted=%d foreign=%v — only a byte-identical shipped copy is ours to adopt", replaced, left, adopted, p.Foreign)
 	}
 	for _, e := range p.Enable {
 		if e == "doorman-inbox.service" {
@@ -220,5 +233,17 @@ func TestInspectReportsWantAgainstHost(t *testing.T) {
 	}
 	if _, has := by["doorman-phonebook.service"]; has {
 		t.Error("a timer's service is not its own status line")
+	}
+}
+
+func TestEveryUnitHasShippedLegacyContentRegistered(t *testing.T) {
+	units, _ := Units()
+	for _, u := range units {
+		if u.Name == "doorman-backup.service" || u.Name == "doorman-backup.timer" {
+			continue // born with the marker; never shipped under scripts/
+		}
+		if len(legacyUnits[u.Name]) == 0 {
+			t.Errorf("%s has no legacy hash: an installer-era copy could never be adopted", u.Name)
+		}
 	}
 }

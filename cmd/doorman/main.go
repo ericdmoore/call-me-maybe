@@ -536,9 +536,13 @@ func runCheck(args []string) (code int) {
 	if !printMessages(messagesPathArg(*messagesFlag), lists, secretLookup(*envFlag)) {
 		rc = 1
 	}
-	{
+	// The host's services are not the policy's business: --policy-only
+	// validates files on any machine, including CI's, where no unit exists.
+	if !*policyOnly {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		wants := decideWants(secretLookup(*envFlag), handsetsPath, trunksPathArg(*trunksFlag), messagesPathArg(*messagesFlag))
+		env := secretLookup(*envFlag)
+		base := filepath.Dir(*envFlag)
+		wants := decideWants(env, handsetsPath, servicePath(*trunksFlag, "TRUNKS_PATH", "trunks.toml", env, base), servicePath(*messagesFlag, "MESSAGES_PATH", "messages.toml", env, base))
 		if !printServices(ctx, host.System{}, host.DefaultLayout(), wants) {
 			rc = 1
 		}
