@@ -324,7 +324,7 @@ placeholder that merely looks wrong — `4242` — works silently forever. This 
 can only fail, loudly, until it is replaced with values from `crypto/rand`.
 PINs print to stdout once and are never logged.
 
-Then `sudo cp scripts/doorman.service /etc/systemd/system/` and enable it.
+Then `sudo doorman init services` installs the units from inside the binary and enables the ones your config calls for.
 
 Or skip the build and take a release binary:
 

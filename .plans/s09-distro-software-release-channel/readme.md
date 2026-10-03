@@ -1,6 +1,6 @@
 # s09 · One binary that installs itself, and the channels it ships through
 
-**Status:** planned (2026-09-21). Drafted the evening the first customer
+**Status:** M2's services half shipped 2026-10-03 as `doorman init services` (issue #28): the nine units embedded, directories, enable-by-config with reasons, --dry-run, the check section, `internal/host` with a fakeable Exec. Packages, the service account, /etc/asterisk and the layout change remain planned. Originally planned (2026-09-21). Drafted the evening the first customer
 install happened — jepsen, an Ubuntu 26.04 x86 box, provisioned only from
 published releases through `callmemaybe.cc/install.sh` and
 `install-scripts/ubuntu.sh`. That rehearsal produced v0.5.0, v0.5.1 and v0.5.2

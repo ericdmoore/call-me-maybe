@@ -7,9 +7,7 @@
 # Run by doorman-balance.timer once a morning. Exits 0 and stays quiet
 # without a trunks.toml, which is every single-provider install.
 #
-# Install:
-#   sudo cp scripts/doorman-balance.service scripts/doorman-balance.timer /etc/systemd/system/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now doorman-balance.timer
+# Installed and enabled by `sudo doorman init services`; a rerun is the upgrade.
 #
 # Know what this puts on the box: the provider's API password, named by
 # api_password_env in trunks.toml, which manages DIDs and billing. The ring

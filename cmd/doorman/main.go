@@ -37,6 +37,7 @@ import (
 	"callmemaybe/internal/config"
 	"callmemaybe/internal/contacts"
 	"callmemaybe/internal/events"
+	"callmemaybe/internal/host"
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/lsp"
 	"callmemaybe/internal/notify"
@@ -86,6 +87,8 @@ func runCommand() int {
 			return runBalance(os.Args[2:])
 		case "provision":
 			return runProvision(os.Args[2:])
+		case "stt":
+			os.Exit(runSTT(os.Args[2:]))
 		case "phonebook":
 			os.Exit(runPhonebook(os.Args[2:]))
 		case "inbox":
@@ -120,6 +123,16 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -rooms "A,B,C"            skip the interview
       -dry-run                  show what would be written
       -force                    replace existing config, backing it up first
+  doorman init services         the units from inside the binary onto the host,
+                                the directories each process owns, and
+                                "enable --now" for exactly the units the config
+                                calls for (directory with PROVISION_ADDRESS and
+                                a provisionable phone; inbox with INBOX_URL and
+                                messages.toml; digest with MAIL_HOOK + MAIL_TO;
+                                balance with trunks.toml; the daemon and the
+                                *88 timer always). Idempotent: a rerun is the
+                                upgrade. Units it did not write are left alone
+      -dry-run                  print the plan and change nothing
   doorman check [flags] [path]  validate policy.toml and handsets.toml, and
                                 report what they add up to — every extension
                                 with every setting, including the defaults it
@@ -279,6 +292,12 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 answers; doorman-phonebook.timer runs it every
                                 minute. Never on a call; no STT means the
                                 number keeps its number for a name
+  doorman stt [url|none]        where *88 names are transcribed: show what is set
+                                and whether it answers; a URL (OpenAI-compatible
+                                /v1/audio/transcriptions — tools/speechd on a Mac,
+                                or whisper-server anywhere) sets STT_ENDPOINT in
+                                .env; "none" clears it. No restart: only the
+                                phonebook job reads it
   doorman digest [flags]        yesterday as one mail: calls from the journal,
                                 texts from the inbox's outcome log, as Markdown
                                 on stdout (redacted) or --mail through MAIL_HOOK
@@ -517,6 +536,18 @@ func runCheck(args []string) (code int) {
 	if !printMessages(messagesPathArg(*messagesFlag), lists, secretLookup(*envFlag)) {
 		rc = 1
 	}
+	// The host's services are not the policy's business: --policy-only
+	// validates files on any machine, including CI's, where no unit exists.
+	if !*policyOnly {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		env := secretLookup(*envFlag)
+		base := filepath.Dir(*envFlag)
+		wants := decideWants(env, handsetsPath, servicePath(*trunksFlag, "TRUNKS_PATH", "trunks.toml", env, base), servicePath(*messagesFlag, "MESSAGES_PATH", "messages.toml", env, base))
+		if !printServices(ctx, host.System{}, host.DefaultLayout(), wants) {
+			rc = 1
+		}
+		cancel()
+	}
 	return rc
 }
 
@@ -621,6 +652,13 @@ func checkEnvironment() int {
 			return 1
 		}
 		fmt.Printf("Event journal: %s (CLI reads; webhook mode %s; writer active: %t)\n", envCfg.EventJournalPath, envCfg.WebhookMode, active)
+		fmt.Println(describeSTT(func(k string) (string, bool) {
+			if v, ok := os.LookupEnv(k); ok {
+				return v, true
+			}
+			v, ok := dotenv[k]
+			return v, ok
+		}, 3*time.Second))
 	}
 	if envCfg.CELSpoolPath != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
