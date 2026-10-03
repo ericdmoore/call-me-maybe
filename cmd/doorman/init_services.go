@@ -153,7 +153,11 @@ func printServices(ctx context.Context, x host.Exec, lay host.Layout, w host.Wan
 		if !s.Want {
 			want = "not wanted"
 		}
-		fmt.Printf("%s %-28s %-12s %s — %s\n", mark, s.Name, want, state, w.Why[s.Name])
+		why := w.Why[s.Name]
+		if why == "" && s.Want {
+			why = "always"
+		}
+		fmt.Printf("%s %-28s %-12s %s — %s\n", mark, s.Name, want, state, why)
 	}
 	if !ok {
 		fmt.Println("    run `sudo doorman init services` to install and enable what the config calls for")
