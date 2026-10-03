@@ -141,6 +141,69 @@ func dndExpiry(id string) string {
 	return "${IF($[\"${" + v + "}\"!=\"\"]?${" + v + "}:0)}"
 }
 
+// curfewContext names the dialplan context a curfewed handset's calls enter.
+func curfewContext(id string) string { return "curfew-" + id }
+
+// curfewExpr is a dialplan expression that is true while any of the windows
+// is active, or "" for a handset with none worth rendering. It is built from
+// IFTIME so it can sit inside $[…] beside the do-not-disturb test, and each
+// window is written the way Afterhours.Active reads it: a window that
+// crosses midnight is its evening on the days it starts and its morning on
+// the days after, because Asterisk tests the weekday and the clock
+// separately and would otherwise end Thursday's bedtime at midnight.
+func curfewExpr(windows []policy.CurfewWindow) string {
+	var specs []string
+	for _, w := range windows {
+		if w.Window == nil { // enabled = false: inert here as everywhere
+			continue
+		}
+		specs = append(specs, timeSpecs(w.Window)...)
+	}
+	if len(specs) == 0 {
+		return ""
+	}
+	terms := make([]string, len(specs))
+	for i, spec := range specs {
+		terms[i] = "${IFTIME(" + spec + ",*,*?1:0)}"
+	}
+	return "(" + strings.Join(terms, " | ") + ")"
+}
+
+// timeSpecs is a window as Asterisk time specifications: "HH:MM-HH:MM,days".
+// Asterisk's ranges are inclusive to the minute, so the end is one minute
+// before the window's exclusive end.
+func timeSpecs(w *policy.Afterhours) []string {
+	clock := func(m int) string { return fmt.Sprintf("%02d:%02d", m/60, m%60) }
+	if w.StartMin < w.EndMin {
+		return []string{clock(w.StartMin) + "-" + clock(w.EndMin-1) + "," + dayList(w.Days)}
+	}
+	// Crosses midnight: the evening on the start days, the morning on the next.
+	var next [7]bool
+	for d, on := range w.Days {
+		next[(d+1)%7] = on
+	}
+	out := []string{clock(w.StartMin) + "-23:59," + dayList(w.Days)}
+	if w.EndMin > 0 {
+		out = append(out, "00:00-"+clock(w.EndMin-1)+","+dayList(next))
+	}
+	return out
+}
+
+// dayList is Asterisk's weekday list for a set of days, "*" for all seven.
+func dayList(days [7]bool) string {
+	names := []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
+	var on []string
+	for d, ok := range days {
+		if ok {
+			on = append(on, names[d])
+		}
+	}
+	if len(on) == 7 {
+		return "*"
+	}
+	return strings.Join(on, "&")
+}
+
 // systemMedia is where the house's own phrases live (the bundled pack's
 // system/ directory), the same prefix internal/lobby plays announcements
 // from; a test in cmd/doorman keeps the two agreeing.
@@ -244,7 +307,9 @@ func (o OutboundIdentity) set() bool { return o.CID != "" || o.Trunk != "" || o.
 // calling working when doorman is down. A handset with no entry gets no
 // set_var, and its endpoint is byte-identical to what it was before per-line
 // identity existed.
-func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdentity) (*Fragments, error) {
+// curfews is each sleeping-capable handset's windows (policy.Curfew); nil
+// renders byte for byte what render produced before curfews existed.
+func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdentity, curfews map[string][]policy.CurfewWindow) (*Fragments, error) {
 	var problems []string
 	fail := func(format string, args ...any) {
 		problems = append(problems, fmt.Sprintf(format, args...))
@@ -255,7 +320,7 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 	plan.WriteString(header("handsets.toml", false))
 	plan.WriteString("[handsets-internal]\n")
 
-	var all, pageMembers, overrides []string
+	var all, pageMembers, overrides, sleepers []string
 	var messageRoutes []messageRoute
 	generated := 0
 
@@ -288,7 +353,14 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 		}
 
 		fmt.Fprintf(&pjsip, "; ── %s ──\n[%s]\n", label, h.ID)
-		pjsip.WriteString("type=endpoint\ncontext=internal\ndisallow=all\nallow=ulaw\nallow=g722\n")
+		// A curfewed phone's calls enter through its own context, which
+		// is [internal] behind a clock (see the [curfew-<id>] contexts).
+		asleep := curfewExpr(curfews[h.ID])
+		callContext := "internal"
+		if asleep != "" {
+			callContext = curfewContext(h.ID)
+		}
+		fmt.Fprintf(&pjsip, "type=endpoint\ncontext=%s\ndisallow=all\nallow=ulaw\nallow=g722\n", callContext)
 		// outbound_auth as well as auth: a Grandstream challenges every NOTIFY
 		// the box sends it (401, digest, the phone's own SIP credentials), and
 		// without this Asterisk never answers the challenge, so a check-sync
@@ -338,7 +410,14 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 			// remain, exactly, then its mailbox if it has one. Outside
 			// callers never reach this — the lobby's ladders are doorman's,
 			// and a child's DND is not a stranger's information.
-			fmt.Fprintf(&plan, "exten => %d,1,GotoIf($[%s > ${EPOCH}]?quiet)\n", h.Number, dndExpiry(h.ID))
+			if asleep != "" {
+				// Asleep is checked before quiet: a curfew is the house's
+				// rule and a bedtime does not count down in minutes.
+				fmt.Fprintf(&plan, "exten => %d,1,GotoIf($[%s]?asleep)\n", h.Number, asleep)
+				fmt.Fprintf(&plan, " same => n,GotoIf($[%s > ${EPOCH}]?quiet)\n", dndExpiry(h.ID))
+			} else {
+				fmt.Fprintf(&plan, "exten => %d,1,GotoIf($[%s > ${EPOCH}]?quiet)\n", h.Number, dndExpiry(h.ID))
+			}
 			fmt.Fprintf(&plan, " same => n,Dial(%s,30)\n", h.Endpoint)
 			if h.Mailbox != "" {
 				// A room call that rings out lands in the room's own box —
@@ -366,12 +445,24 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 				fmt.Fprintf(&plan, " same => n,VoiceMail(%s@household,u)\n", h.Mailbox)
 			}
 			plan.WriteString(" same => n,Hangup()\n")
+			if asleep != "" {
+				// The clip is the bundled pack's; a pack built before it
+				// existed plays nothing here and goes on to the mailbox.
+				fmt.Fprintf(&plan, " same => n(asleep),Playback(%s/curfew-room)\n", systemMedia)
+				if h.Mailbox != "" {
+					fmt.Fprintf(&plan, " same => n,VoiceMail(%s@household,u)\n", h.Mailbox)
+				}
+				plan.WriteString(" same => n,Hangup()\n")
+			}
 			fmt.Fprintf(&plan, "exten => %d,hint,%s\n", h.Number, h.Endpoint)
 			messageRoutes = append(messageRoutes, messageRoute{number: h.Number, id: h.ID, label: label})
 		}
 		all = append(all, h.Endpoint)
 		if h.Page {
 			pageMembers = append(pageMembers, h.Endpoint)
+		}
+		if asleep != "" {
+			sleepers = append(sleepers, h.ID)
 		}
 		if h.PageOverride {
 			overrides = append(overrides, h.ID)
@@ -394,6 +485,10 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 	plan.WriteString("exten => 100,1,Set(MEMBERS=)\n")
 	for _, ep := range all {
 		id := strings.TrimPrefix(ep, "PJSIP/")
+		if asleep := curfewExpr(curfews[id]); asleep != "" {
+			fmt.Fprintf(&plan, " same => n,ExecIf($[%s <= ${EPOCH} & !%s]?Set(MEMBERS=${MEMBERS}&%s))\n", dndExpiry(id), asleep, ep)
+			continue
+		}
 		fmt.Fprintf(&plan, " same => n,ExecIf($[%s <= ${EPOCH}]?Set(MEMBERS=${MEMBERS}&%s))\n", dndExpiry(id), ep)
 	}
 	plan.WriteString(" same => n,GotoIf($[\"${MEMBERS}\"=\"\"]?none)\n")
@@ -419,6 +514,12 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 		}
 		for _, ep := range pageMembers {
 			id := strings.TrimPrefix(ep, "PJSIP/")
+			if asleep := curfewExpr(curfews[id]); asleep != "" {
+				// A parent's page pierces a child's do-not-disturb; it does
+				// not pierce the parent's own bedtime rule for that room.
+				fmt.Fprintf(&plan, " same => n,ExecIf($[(${OVERRIDE} | %s <= ${EPOCH}) & !%s]?Set(MEMBERS=${MEMBERS}&%s):Set(QUIET=1))\n", dndExpiry(id), asleep, ep)
+				continue
+			}
 			fmt.Fprintf(&plan, " same => n,ExecIf($[${OVERRIDE} | %s <= ${EPOCH}]?Set(MEMBERS=${MEMBERS}&%s):Set(QUIET=1))\n", dndExpiry(id), ep)
 		}
 		fmt.Fprintf(&plan, " same => n,ExecIf($[${QUIET}]?Playback(%s/quiet-page))\n", systemMedia)
@@ -463,6 +564,21 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 		fmt.Fprintf(&plan, " same => n,ExecIf($[\"${SENDER}\" = \"%s\"]?Set(MSG_FROM=\"%s\" <sip:%d@${FROMDOM}>))\n", r.id, r.label, r.number)
 	}
 	plan.WriteString(" same => n,Return()\n")
+
+	// One context per sleeping-capable phone: [internal] behind a clock.
+	// 911 goes through first and unconditionally — the whole point of the
+	// context is that nothing else does while the phone is asleep.
+	for _, id := range sleepers {
+		fmt.Fprintf(&plan, "\n; %s is asleep while any of its curfew windows is active (handsets.toml).\n", id)
+		fmt.Fprintf(&plan, "[%s]\n", curfewContext(id))
+		plan.WriteString("exten => 911,1,Goto(internal,${EXTEN},1)\n")
+		fmt.Fprintf(&plan, "exten => _[0-9*#+].,1,GotoIf($[%s]?asleep)\n", curfewExpr(curfews[id]))
+		plan.WriteString(" same => n,Goto(internal,${EXTEN},1)\n")
+		plan.WriteString(" same => n(asleep),Answer()\n")
+		fmt.Fprintf(&plan, " same => n,Playback(%s/curfew-out)\n", systemMedia)
+		plan.WriteString(" same => n,Busy(3)\n")
+		plan.WriteString(" same => n,Hangup()\n")
+	}
 
 	return &Fragments{PJSIP: pjsip.String(), Dialplan: plan.String(), Generated: generated,
 		Voicemail: buildVoicemail(boxes), Mailboxes: boxes, PageOverrides: overrides}, nil

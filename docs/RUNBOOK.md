@@ -563,6 +563,7 @@ valid **transfer target**.
 | 700 | (as a transfer target) **park** the call; Asterisk announces a slot |
 | 701–720 | Pick up a parked call from any handset |
 | *4 | **Outbound console**: call as another one of your numbers. Only interesting with more than one line, and it refuses 911 — see "Outbound caller ID" below. This is the one that goes through doorman |
+| *(none)* | **Bedtime** — a `curfew` on the handset in `handsets.toml` names `[[schedules]]`; while one is active the phone rings for nothing, cannot call out (911 excepted), is left out of pages and ring-all, and has its call dropped at the hour. Nothing to dial: it is the house's rule, not the phone's. See "Bedtime" below |
 | *78NN | **Do not disturb** for this phone, NN = 15, 30 or 45 minutes; anything else is refused out loud. Room calls to it say how long and offer its box; the house ring group and the page skip it, except a page from a `page_override` phone. Clears itself when the time is up |
 | *79 | Do not disturb off |
 | *97 | **Voicemail** — the phone's own box, straight in, no PIN (a handset with no `mailbox` gets the old menu). What the voicemail key dials |
@@ -863,6 +864,63 @@ Treat the whole thing as a fun add-on rather than infrastructure: community
 reports include hangs, and nothing in the phone system depends on it.
 
 ---
+
+
+### Bedtime (curfew)
+
+The hours live in `policy.toml` as `[[schedules]]` — the same blocks an
+extension's `afterhours` names — and the handset names them in
+`handsets.toml`:
+
+```toml
+# policy.toml
+[[schedules]]
+id = "late-weeknights"
+start = "22:45"
+end = "05:00"                            # crosses midnight
+days = ["SU", "MO", "TU", "WE", "TH"]    # the days the window STARTS on
+
+[[schedules]]
+id = "late-weekends"
+start = "23:30"
+end = "05:00"
+days = ["FR", "SA"]
+
+# handsets.toml
+[[handsets]]
+id = "mary-kate"
+curfew = ["late-weeknights", "late-weekends"]   # asleep while ANY is active
+```
+
+While a window is active, three things happen, each in the place that
+already owns it:
+
+1. **It does not ring.** doorman skips the phone in every ring it places —
+   house, extension, ladder stage — through the same gate as do-not-disturb,
+   and the generated dialplan leaves it out of `100` and `500`. A
+   `page_override` phone does *not* reach it: the override is for a child's
+   DND; a curfew is the parent's own rule.
+2. **It cannot call out.** The phone's calls enter a generated
+   `[curfew-<id>]` context that is `[internal]` behind a clock: `911` goes
+   through first and unconditionally, anything else while asleep hears
+   `curfew-out` and a busy tone. A room that dials it hears `curfew-room`
+   and gets its mailbox.
+3. **A call it is on is dropped at the hour.** The daemon looks once a
+   minute for a handset that has just fallen asleep and hangs up its
+   channels — whatever placed the call. A daemon started inside the window
+   leaves an existing call alone; the hour has passed.
+
+`doorman check` lists every curfewed handset with its windows and marks
+**ASLEEP NOW**. A schedule with `enabled = false` is inert here as for
+`afterhours` — the holiday switch — and stays listed as switched off. An id
+no schedule defines fails `check`, naming the handset and the id.
+
+The hours ride in the dialplan, so changing them or the members is
+`doorman render`, copy, `dialplan reload` (and `pjsip reload`, because the
+endpoint's context changes). The lobby's half follows the policy reload on
+its own. The two clips are the bundled pack's (`prompts/manifest.json`); a
+pack built before they existed plays nothing there and the busy tone or the
+mailbox still says what happened.
 
 ## 5. ARI by hand
 

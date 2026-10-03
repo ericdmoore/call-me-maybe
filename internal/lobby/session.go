@@ -841,7 +841,16 @@ func (s *Session) ringStep(endpoints []string, label, callerID string, timeout t
 	// been hung up, so s.legs holds only this stage.
 	quiet := 0
 	for _, endpoint := range endpoints {
-		if s.deps.Quiet != nil && s.deps.Quiet(strings.TrimPrefix(endpoint, "PJSIP/")) {
+		id := strings.TrimPrefix(endpoint, "PJSIP/")
+		// A curfew is the house's rule (handsets.toml), do-not-disturb the
+		// room's own (*78NN); both mean the same thing here — this phone is
+		// not rung — and both count as quiet for the stage's record.
+		if s.pol.Asleep(id, s.now()) {
+			quiet++
+			s.log.Info("handset is asleep (curfew), not ringing it", "endpoint", endpoint, "stage", stage+1)
+			continue
+		}
+		if s.deps.Quiet != nil && s.deps.Quiet(id) {
 			quiet++
 			s.log.Info("handset is quiet, not ringing it", "endpoint", endpoint, "stage", stage+1)
 			continue

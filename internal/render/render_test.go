@@ -28,7 +28,7 @@ var secrets = map[string]string{
 }
 
 func TestRenderGeneratesAllThreePlacesFromOneFile(t *testing.T) {
-	f, err := Build(fixture(), env(secrets), nil)
+	f, err := Build(fixture(), env(secrets), nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestRenderRefusesMissingSecrets(t *testing.T) {
 	_, err := Build(fixture(), env(map[string]string{
 		"HANDSET_KITCHEN_PASSWORD": "x",
 		// kids-room secret absent
-	}), nil)
+	}), nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "HANDSET_KIDS_ROOM_PASSWORD") {
 		t.Errorf("err = %v, want the missing variable named", err)
 	}
@@ -71,14 +71,14 @@ func TestRenderRefusesMissingSecrets(t *testing.T) {
 func TestRenderRefusesEndpointIdMismatch(t *testing.T) {
 	h := fixture()
 	h[0].Endpoint = "PJSIP/cocina"
-	_, err := Build(h, env(secrets), nil)
+	_, err := Build(h, env(secrets), nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "PJSIP/kitchen") {
 		t.Errorf("err = %v, want naming-rule violation", err)
 	}
 }
 
 func TestGeneratedFilesCarryTheDoNotEditHeader(t *testing.T) {
-	f, err := Build(fixture(), env(secrets), nil)
+	f, err := Build(fixture(), env(secrets), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestRenderWritesOutboundCallerIDPerHandset(t *testing.T) {
 	f, err := Build(fixture(), env(secrets), map[string]OutboundIdentity{
 		"kitchen":   {CID: "+15125550142"},
 		"kids-room": {CID: "+15125550100"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestRenderWritesOutboundTrunkBesideTheCallerID(t *testing.T) {
 	f, err := Build(fixture(), env(secrets), map[string]OutboundIdentity{
 		"kitchen":   {CID: "+15125550142", Trunk: "telnyx"},
 		"kids-room": {CID: "+15125550100", Trunk: "voipms"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestRenderWritesOutboundTrunkBesideTheCallerID(t *testing.T) {
 func TestRenderWritesATrunkWithNoCallerID(t *testing.T) {
 	f, err := Build(fixture(), env(secrets), map[string]OutboundIdentity{
 		"kitchen": {Trunk: "telnyx"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -171,11 +171,11 @@ func TestRenderWritesATrunkWithNoCallerID(t *testing.T) {
 // generated endpoint is what it always was. A set_var nobody asked for would
 // be a channel variable the dialplan reads, and an empty one at that.
 func TestRenderWithoutOutboundIdentityIsUnchanged(t *testing.T) {
-	with, err := Build(fixture(), env(secrets), map[string]OutboundIdentity{})
+	with, err := Build(fixture(), env(secrets), map[string]OutboundIdentity{}, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	without, err := Build(fixture(), env(secrets), nil)
+	without, err := Build(fixture(), env(secrets), nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestRenderWithoutOutboundIdentityIsUnchanged(t *testing.T) {
 func TestRenderLeavesUnclaimedHandsetsAlone(t *testing.T) {
 	f, err := Build(fixture(), env(secrets), map[string]OutboundIdentity{
 		"kitchen": {CID: "+15125550142"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestRenderLeavesUnclaimedHandsetsAlone(t *testing.T) {
 // `doorman provision notify` does nothing (first re-provision, 2026-09-23).
 func TestEveryHandsetEndpointCanAnswerAPhonesNotifyChallenge(t *testing.T) {
 	handsets := []policy.Handset{{ID: "kitchen", Label: "Kitchen", Endpoint: "PJSIP/kitchen", Number: 101, PasswordEnv: "HANDSET_KITCHEN_PASSWORD"}}
-	f, err := Build(handsets, func(string) (string, bool) { return "sip-secret", true }, nil)
+	f, err := Build(handsets, func(string) (string, bool) { return "sip-secret", true }, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestHandsetTextsReachTheOtherPhoneAsMessages(t *testing.T) {
 		{ID: "kitchen", Label: "Kitchen", Endpoint: "PJSIP/kitchen", Number: 101, PasswordEnv: "HANDSET_KITCHEN_PASSWORD"},
 		{ID: "theater", Label: "Theater", Endpoint: "PJSIP/theater", Number: 102, PasswordEnv: "HANDSET_THEATER_PASSWORD"},
 	}
-	f, err := Build(handsets, func(string) (string, bool) { return "sip-secret", true }, nil)
+	f, err := Build(handsets, func(string) (string, bool) { return "sip-secret", true }, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestRenderWritesTheFailoverLadderBesideTheTrunk(t *testing.T) {
 	f, err := Build(fixture(), env(secrets), map[string]OutboundIdentity{
 		"kitchen":   {CID: "+15125550100", Trunk: "voipms", Failover: "telnyx,flowroute"},
 		"kids-room": {CID: "+15125550100", Trunk: "voipms"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestRenderWritesTheMailboxesWhosePINsAreInEnv(t *testing.T) {
 		"VOICEMAIL_WHOLE_HOUSE_PIN": "482913", "VOICEMAIL_MASTER_BED_PIN": "917364",
 		// family: no PIN — the hand-written box every older install has.
 	})
-	f, err := Build(hs, e, nil)
+	f, err := Build(hs, e, nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestRenderWritesTheMailboxesWhosePINsAreInEnv(t *testing.T) {
 // A handset with no mailbox is exactly what it was: no set_var, a Dial and
 // nothing after it, and no line in the voicemail file.
 func TestRenderWithoutAMailboxIsUnchanged(t *testing.T) {
-	f, err := Build(fixture(), env(secrets), nil)
+	f, err := Build(fixture(), env(secrets), nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestRenderHonoursDoNotDisturbInRoomsRingAllAndPage(t *testing.T) {
 		{ID: "kitchen", Label: "Kitchen", Endpoint: "PJSIP/kitchen", Number: 101, Page: true, PageOverride: true, Mailbox: "kitchen", PasswordEnv: "HANDSET_KITCHEN_PASSWORD"},
 		{ID: "theater", Label: "Theater", Endpoint: "PJSIP/theater", Number: 102, Page: true, PasswordEnv: "HANDSET_THEATER_PASSWORD"},
 	}
-	f, err := Build(hs, env(map[string]string{"HANDSET_KITCHEN_PASSWORD": "a", "HANDSET_THEATER_PASSWORD": "b", "VOICEMAIL_KITCHEN_PIN": "123456"}), nil)
+	f, err := Build(hs, env(map[string]string{"HANDSET_KITCHEN_PASSWORD": "a", "HANDSET_THEATER_PASSWORD": "b", "VOICEMAIL_KITCHEN_PIN": "123456"}), nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -387,8 +387,130 @@ func TestRenderHonoursDoNotDisturbInRoomsRingAllAndPage(t *testing.T) {
 	}
 	// Nobody overrides: the page still works, and QUIET still tells the pager.
 	hs[0].PageOverride = false
-	f, _ = Build(hs, env(map[string]string{"HANDSET_KITCHEN_PASSWORD": "a", "HANDSET_THEATER_PASSWORD": "b"}), nil)
+	f, _ = Build(hs, env(map[string]string{"HANDSET_KITCHEN_PASSWORD": "a", "HANDSET_THEATER_PASSWORD": "b"}), nil, nil)
 	if !strings.Contains(f.Dialplan, " same => n,Set(OVERRIDE=0)\n") || len(f.PageOverrides) != 0 {
 		t.Errorf("without overrides the page should set OVERRIDE=0:\n%s", f.Dialplan)
+	}
+}
+
+// A curfew touches every path to and from the phone except 911: its calls
+// enter through a context that is [internal] behind a clock, its room
+// number is refused while asleep, and ring-all and page leave it out — even
+// for a page_override phone, whose override is for a child's DND, not for
+// the parent's own bedtime rule.
+func TestRenderCurfewGatesEveryPathButEmergency(t *testing.T) {
+	hs := fixture()
+	hs[1].Page = true
+	hs[0].PageOverride = true
+	windows := []policy.CurfewWindow{
+		{ScheduleID: "late-weeknights", Window: &policy.Afterhours{StartMin: 22*60 + 45, EndMin: 5 * 60,
+			Days: [7]bool{true, true, true, true, true, false, false}}},
+		{ScheduleID: "late-weekends", Window: &policy.Afterhours{StartMin: 23*60 + 30, EndMin: 5 * 60,
+			Days: [7]bool{false, false, false, false, false, true, true}}},
+		{ScheduleID: "holiday", Window: nil}, // enabled = false: inert
+	}
+	f, err := Build(hs, env(secrets), nil, map[string][]policy.CurfewWindow{"kids-room": windows})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	// The endpoint enters through its own context; the kitchen's is untouched.
+	if !strings.Contains(f.PJSIP, "[kids-room]\ntype=endpoint\ncontext=curfew-kids-room\n") {
+		t.Errorf("kids-room endpoint should enter through curfew-kids-room:\n%s", f.PJSIP)
+	}
+	if !strings.Contains(f.PJSIP, "[kitchen]\ntype=endpoint\ncontext=internal\n") {
+		t.Errorf("kitchen endpoint must keep context=internal:\n%s", f.PJSIP)
+	}
+
+	// 911 goes through before the clock is consulted.
+	ctx := f.Dialplan[strings.Index(f.Dialplan, "[curfew-kids-room]"):]
+	emergency := strings.Index(ctx, "exten => 911,1,Goto(internal,${EXTEN},1)")
+	clock := strings.Index(ctx, "GotoIf(")
+	if emergency < 0 || clock < 0 || emergency > clock {
+		t.Errorf("911 must precede the curfew test in the context:\n%s", ctx)
+	}
+	for _, want := range []string{
+		" same => n,Goto(internal,${EXTEN},1)\n",
+		" same => n(asleep),Answer()\n same => n,Playback(call-me-maybe/system/curfew-out)\n same => n,Busy(3)\n",
+	} {
+		if !strings.Contains(ctx, want) {
+			t.Errorf("curfew context missing %q:\n%s", want, ctx)
+		}
+	}
+
+	// The windows are written the way Afterhours.Active reads them: a
+	// window crossing midnight is its evening on the start days and its
+	// morning on the days after; the disabled one is absent.
+	for _, spec := range []string{
+		"${IFTIME(22:45-23:59,sun&mon&tue&wed&thu,*,*?1:0)}",
+		"${IFTIME(00:00-04:59,mon&tue&wed&thu&fri,*,*?1:0)}",
+		"${IFTIME(23:30-23:59,fri&sat,*,*?1:0)}",
+		"${IFTIME(00:00-04:59,sun&sat,*,*?1:0)}",
+	} {
+		if !strings.Contains(ctx, spec) {
+			t.Errorf("curfew context missing %s:\n%s", spec, ctx)
+		}
+	}
+	if strings.Contains(f.Dialplan, "holiday") {
+		t.Error("a switched-off schedule must not reach the dialplan")
+	}
+
+	// The room, ring-all and page all consult the same expression.
+	if !strings.Contains(f.Dialplan, "exten => 105,1,GotoIf($[(${IFTIME(") || !strings.Contains(f.Dialplan, "]?asleep)\n same => n,GotoIf($[${IF(") {
+		t.Errorf("room 105 must test the curfew before do-not-disturb:\n%s", f.Dialplan)
+	}
+	if !strings.Contains(f.Dialplan, " same => n(asleep),Playback(call-me-maybe/system/curfew-room)\n") {
+		t.Error("room 105 asleep label missing")
+	}
+	ringAll := f.Dialplan[strings.Index(f.Dialplan, "exten => 100,1"):strings.Index(f.Dialplan, "exten => 500,1")]
+	if !strings.Contains(ringAll, "<= ${EPOCH} & !(${IFTIME(") || !strings.Contains(ringAll, "&PJSIP/kids-room))") {
+		t.Errorf("ring-all must leave an asleep kids-room out:\n%s", ringAll)
+	}
+	if !strings.Contains(ringAll, "ExecIf($[${IF($[\"${DND_kitchen}\"!=\"\"]?${DND_kitchen}:0)} <= ${EPOCH}]?Set(MEMBERS=${MEMBERS}&PJSIP/kitchen))") {
+		t.Errorf("the kitchen's ring-all line must be exactly as before:\n%s", ringAll)
+	}
+	page := f.Dialplan[strings.Index(f.Dialplan, "exten => 500,1"):]
+	if !strings.Contains(page, "ExecIf($[(${OVERRIDE} | ") || !strings.Contains(page, ") & !(${IFTIME(") {
+		t.Errorf("a page_override must not pierce a curfew:\n%s", page)
+	}
+}
+
+// Without curfews — every install from before they existed — the output is
+// byte for byte what it was.
+func TestRenderWithoutCurfewsIsUnchanged(t *testing.T) {
+	a, err := Build(fixture(), env(secrets), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := Build(fixture(), env(secrets), nil, map[string][]policy.CurfewWindow{
+		"kids-room": {{ScheduleID: "holiday", Window: nil}}, // present but switched off
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.PJSIP != b.PJSIP || a.Dialplan != b.Dialplan {
+		t.Error("a curfew made only of switched-off schedules must render nothing")
+	}
+	if strings.Contains(a.Dialplan, "curfew") || strings.Contains(a.PJSIP, "curfew") {
+		t.Error("no curfew text without curfews")
+	}
+}
+
+func TestCurfewTimeSpecs(t *testing.T) {
+	all := [7]bool{true, true, true, true, true, true, true}
+	cases := []struct {
+		w    policy.Afterhours
+		want []string
+	}{
+		{policy.Afterhours{StartMin: 13 * 60, EndMin: 15 * 60, Days: all}, []string{"13:00-14:59,*"}},
+		{policy.Afterhours{StartMin: 21 * 60, EndMin: 0, Days: [7]bool{true}}, []string{"21:00-23:59,sun"}},
+		{policy.Afterhours{StartMin: 21 * 60, EndMin: 7 * 60, Days: [7]bool{false, false, false, false, false, false, true}},
+			[]string{"21:00-23:59,sat", "00:00-06:59,sun"}},
+	}
+	for _, c := range cases {
+		got := timeSpecs(&c.w)
+		if strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("timeSpecs(%+v) = %v, want %v", c.w, got, c.want)
+		}
 	}
 }

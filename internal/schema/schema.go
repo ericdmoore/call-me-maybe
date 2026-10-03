@@ -204,6 +204,13 @@ func handsetItem() *Schema {
 				Default:     false,
 				CrossRefs:   []string{"asterisk/extensions.conf *78NN / *79", "the generated 500 group in extensions_handsets.conf"},
 			},
+			"curfew": {
+				Type:        "array",
+				Items:       &Schema{Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$"},
+				Description: "Bedtime for this phone: ids of [[schedules]] in policy.toml. While ANY named window is active the phone is asleep — doorman rings it for nothing (house ring, extension, ladder stage), the generated dialplan leaves it out of pages and ring-all and refuses its calls out, and the daemon hangs up a call it is on at the hour. 911 is never refused: it lives outside everything the curfew touches. Several ids because \"22:45 on school nights, 23:30 at weekends\" is two windows. Inventory rather than policy, because the thing that sleeps is the phone in the room, whatever rings it.",
+				CrossRefs:   []string{"policy.toml [[schedules]].id", "the generated curfew context in extensions_handsets.conf", "CURFEW_PROMPT (the clip the dialplan plays to a sleeping phone that dials)"},
+				Rules:       []string{"An id no [[schedules]] entry defines fails `doorman check`, which names the handset and the id.", "A schedule with enabled = false is inert here too: `doorman check` shows it as switched off.", "Changing a curfew's hours or members needs `doorman render` and a reload — the dialplan carries them; the lobby's half follows the policy reload within a second.", "`doorman check` marks a curfewed handset ASLEEP NOW while a window is active."},
+			},
 			"mailbox": {
 				Type:        "string",
 				Description: "This phone's own voicemail box. `doorman render` writes it into voicemail_handsets.conf when VOICEMAIL_<BOX>_PIN is in .env (a box without one is assumed hand-written in voicemail.conf, which is every box from before render made them); a call to this phone's number that rings out — or finds it busy — lands in it; the phone's voicemail key (*97) opens it without asking which or for a PIN; and its message-waiting lamp follows it. Two phones may name one box and share it. A policy file's `voicemail = \"…\"` may name it too, so a stranger with this room's PIN who rings out leaves the message on this room's phone.",
@@ -782,7 +789,7 @@ func schedule() *Schema {
 		Type:     "object",
 		Required: []string{"id", "start", "end"},
 		Properties: map[string]*Schema{
-			"id": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Referenced as afterhours = \"<id>\" from an extension."},
+			"id": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Referenced as afterhours = \"<id>\" from an extension, or in curfew = [\"<id>\", …] on a handset in handsets.toml."},
 			"enabled": {
 				Type:        "boolean",
 				Default:     true,

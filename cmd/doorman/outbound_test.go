@@ -275,7 +275,7 @@ handsets = ["kitchen"]
 // renderPlan is what `doorman render` does with the lines it reads, minus the
 // trunk inventory these cases have no opinion about.
 func renderPlan(policyPath, handsetsPath string) (outboundPlan, error) {
-	ids, err := renderLines(policyPath, handsetsPath, nil)
+	ids, _, err := renderLines(policyPath, handsetsPath, nil)
 	if err != nil {
 		return outboundPlan{}, err
 	}

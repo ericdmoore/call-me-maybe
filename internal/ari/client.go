@@ -268,6 +268,15 @@ func (c *Client) Channel(ctx context.Context, channelID string) (Channel, error)
 	return ch, err
 }
 
+// Channels lists every live channel — GET /channels — Stasis or not. The
+// curfew keeper reads it to find a sleeping handset's legs, which may be a
+// dialplan call doorman never saw.
+func (c *Client) Channels(ctx context.Context) ([]Channel, error) {
+	var out []Channel
+	err := c.do(ctx, http.MethodGet, "/channels", nil, &out)
+	return out, err
+}
+
 // SetChannelVar sets a channel variable, visible to the dialplan after a
 // ContinueToDialplan — how doorman tells voicemail-drop which mailbox.
 func (c *Client) SetChannelVar(ctx context.Context, channelID, name, value string) error {

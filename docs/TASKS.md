@@ -175,8 +175,16 @@ overriding `[house]` for that caller.
 
 - [ ] Optional; absent means today's behaviour.
 - [ ] Validation catches references to handsets that do not exist, at load time.
-- [ ] Interacts sanely with task 3 — decide and document which wins. (Suggest:
-      per-person override wins, since it is the more specific statement.)
+- [ ] Interacts sanely with task 3 — **decided 2026-10-02: the schedule wins.**
+      Quiet hours is a statement about the house; a person's routing is a
+      statement about a caller, and a caller-level preference must not undo a
+      house-level protection. Inside a schedule's window the person's ladder
+      is filtered to the handsets the schedule allows — a stage left with no
+      handsets is skipped — and if nothing survives, the call goes where the
+      schedule already sends it. Outside the window the ladder runs as
+      written. `doorman check` shows the filtered ladder when both apply.
+      Likely shape: `[[people.steps]]`, the same ladder `[[extensions.steps]]`
+      already runs; absent, today's behaviour.
 
 **Files:** `internal/policy/policy.go`, `internal/lobby/session.go`.
 

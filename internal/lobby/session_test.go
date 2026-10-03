@@ -689,3 +689,61 @@ func TestAQuietHandsetIsNotRungAndAQuietLadderEndsInVoicemail(t *testing.T) {
 		t.Errorf("stages = %+v, want the first marked quiet", rec.Stages)
 	}
 }
+
+// A curfew is the house's rule in handsets.toml; do-not-disturb is the
+// room's own. The lobby treats them alike — the phone is not rung — and the
+// stage's record says quiet either way.
+func TestAnAsleepHandsetIsNotRungAndTheLadderMovesOn(t *testing.T) {
+	src := strings.Replace(kidsLadderPolicy, "endpoint = \"PJSIP/kids-room\"\n",
+		"endpoint = \"PJSIP/kids-room\"\ncurfew = [\"school-night\"]\n", 1)
+	// The extension's own afterhours would send the caller straight to
+	// voicemail; drop it so the ladder is what is under test.
+	src = strings.Replace(src, "afterhours = \"school-night\"\n", "", 1)
+	h := startWith(t, src, "9995550199", nil)
+	h.now = time.Date(2026, 7, 7, 21, 30, 0, 0, time.Local) // Tuesday 21:30: asleep
+
+	h.finishPlayback(t)
+	dialPin(h, "555001")
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+
+	o1 := h.fake.expect(t, "Originate")
+	o2 := h.fake.expect(t, "Originate")
+	got := map[string]bool{o1.Args[0]: true, o2.Args[0]: true}
+	if got["PJSIP/kids-room"] || !got["PJSIP/kitchen"] || !got["PJSIP/primary-bed"] {
+		t.Fatalf("originated %v, want the adults only — the kids' room is asleep", got)
+	}
+	<-h.legs
+	<-h.legs
+	h.fake.expectAny(t, "Hangup", "Hangup", "RingStop", "DestroyBridge")
+	h.fake.expect(t, "SetChannelVar")
+	h.fake.expect(t, "Continue")
+	h.sess.CallerLeft()
+	h.waitFinished(t)
+	rec := h.rec.only(t)
+	if len(rec.Stages) < 1 || rec.Stages[0].Result != "quiet" {
+		t.Errorf("stages = %+v, want the first marked quiet", rec.Stages)
+	}
+}
+
+// Outside the window the same policy rings the kids' room first, as ever:
+// a curfew is a clock, not a flag.
+func TestAnAwakeCurfewedHandsetRingsAsNormal(t *testing.T) {
+	src := strings.Replace(kidsLadderPolicy, "endpoint = \"PJSIP/kids-room\"\n",
+		"endpoint = \"PJSIP/kids-room\"\ncurfew = [\"school-night\"]\n", 1)
+	src = strings.Replace(src, "afterhours = \"school-night\"\n", "", 1)
+	h := startWith(t, src, "9995550199", nil)
+	h.now = time.Date(2026, 7, 7, 16, 0, 0, 0, time.Local) // Tuesday 16:00: awake
+
+	h.finishPlayback(t)
+	dialPin(h, "555001")
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+	if o := h.fake.expect(t, "Originate"); o.Args[0] != "PJSIP/kids-room" {
+		t.Fatalf("first stage originated %s, want the kids' room", o.Args[0])
+	}
+	h.sess.CallerGone()
+	h.waitFinished(t)
+}

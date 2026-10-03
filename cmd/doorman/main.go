@@ -840,6 +840,7 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 	fmt.Printf("  provisioning         : %s\n", provisioningSummary(p.HandsetList()))
 	fmt.Printf("  actions              : %s\n", actionsSummary(p.Actions()))
 	fmt.Printf("  house voicemail      : %s\n", orDefault(p.HousePlan().Mailbox, noMailbox))
+	describeCurfews(p, time.Now())
 
 	// Every extension, every setting — including the ones nobody wrote down.
 	// A default rendered as "(none — ...)" is what catches the mistake the
@@ -954,6 +955,37 @@ func describeAfterhours(e policy.ResolvedExtension, now time.Time) string {
 		state = "  ← ACTIVE NOW"
 	}
 	return fmt.Sprintf("%s — %s%s", e.AfterhoursID, e.Afterhours.Describe(), state)
+}
+
+// describeCurfews prints each sleeping-capable handset with every window it
+// names and whether one is active right now — the same "is it on or not"
+// answer describeAfterhours gives, because a bedtime that silently stopped
+// working is the failure this output exists to catch.
+func describeCurfews(p *policy.Policy, now time.Time) {
+	ids := p.CurfewedHandsets()
+	if len(ids) == 0 {
+		return
+	}
+	fmt.Println("\n  Curfews (the phone is asleep while any window is active):")
+	for _, id := range ids {
+		parts := make([]string, 0, 2)
+		asleep := false
+		for _, c := range p.Curfew(id) {
+			if c.Window == nil {
+				parts = append(parts, c.ScheduleID+" (switched off)")
+				continue
+			}
+			if c.Window.Active(now) {
+				asleep = true
+			}
+			parts = append(parts, c.ScheduleID+" "+c.Window.Describe())
+		}
+		state := ""
+		if asleep {
+			state = "  ← ASLEEP NOW"
+		}
+		fmt.Printf("      %-12s %s%s\n", id, strings.Join(parts, "; "), state)
+	}
 }
 
 func describeAfterhoursPlan(e policy.ResolvedExtension) string {
@@ -1094,7 +1126,7 @@ func runRender(args []string) int {
 	// and dials never reaches doorman — which is precisely why outbound calling
 	// survives doorman being down. The trunk half needs [line] number and
 	// [line] trunk from the same read.
-	lineIDs, err := renderLines(policyPathArg(*policyFlag), handsetsPath, trunks)
+	lineIDs, curfews, err := renderLines(policyPathArg(*policyFlag), handsetsPath, trunks)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return 1
@@ -1128,7 +1160,7 @@ func runRender(args []string) int {
 	for _, h := range handsets {
 		ids = append(ids, h.ID)
 	}
-	frags, err := render.Build(handsets, env, plan.identities(ids))
+	frags, err := render.Build(handsets, env, plan.identities(ids), curfews)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return 1
@@ -1527,6 +1559,25 @@ func serve() error {
 	// Everything a line does not own is shared: one ARI client, one prompt
 	// pack, one registry, one call log, one webhook, one concurrency cap, one
 	// address book. What a line owns is its policy and its rate-limit budget.
+	// Bedtime's third effect — the call already up at the hour — belongs to
+	// nobody on the call path, so the daemon keeps it: once a minute, any
+	// handset that has just fallen asleep has its channels dropped.
+	curfewCtx, stopCurfew := context.WithCancel(context.Background())
+	defer stopCurfew()
+	go (&curfewKeeper{
+		policies: func() []*policy.Policy {
+			ps := make([]*policy.Policy, 0, len(opened))
+			for _, o := range opened {
+				ps = append(ps, o.store.Current())
+			}
+			return ps
+		},
+		channels: client.Channels,
+		hangup:   client.Hangup,
+		now:      time.Now,
+		log:      log,
+	}).run(curfewCtx, time.Minute)
+
 	lines := newLineSet()
 	var limiters []*lobby.RateLimiter
 	for _, o := range opened {

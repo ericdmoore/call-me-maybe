@@ -438,12 +438,16 @@ func (p outboundPlan) anyTrunk() bool {
 //
 // trunks is passed through so that a line naming a provider that does not
 // exist fails here rather than producing a DID route in no context at all.
-func renderLines(policyPath, handsetsPath string, trunks *policy.Trunks) ([]lineIdentity, error) {
+// It also returns every curfewed handset's windows, merged across lines: a
+// handset asleep on any line is asleep in the dialplan, because the phone is
+// one phone.
+func renderLines(policyPath, handsetsPath string, trunks *policy.Trunks) ([]lineIdentity, map[string][]policy.CurfewWindow, error) {
 	if _, err := os.Stat(policyPath); errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	files, _ := policy.DiscoverLines(policyPath)
 	ids := make([]lineIdentity, 0, len(files))
+	curfews := map[string][]policy.CurfewWindow{}
 	for _, lf := range files {
 		// AllowPlaceholders because render has no interest in extensions, and
 		// a freshly copied policy.toml still carries the example PINs that
@@ -454,11 +458,14 @@ func renderLines(policyPath, handsetsPath string, trunks *policy.Trunks) ([]line
 			Trunks:            trunks,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", lf.Path, err)
+			return nil, nil, fmt.Errorf("%s: %w", lf.Path, err)
 		}
 		ids = append(ids, lineIdentity{Name: lf.Name, LineIdentity: p.Line()})
+		for _, id := range p.CurfewedHandsets() {
+			curfews[id] = append(curfews[id], p.Curfew(id)...)
+		}
 	}
-	return ids, nil
+	return ids, curfews, nil
 }
 
 // announceOutbound says what the box calls out as, every boot.
