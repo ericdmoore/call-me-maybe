@@ -38,14 +38,34 @@ An explicit OpenRouter choice uses `openrouter/vendor/exact-model-id`, for examp
 `openrouter/openai/gpt-oss-20b`. Verify availability and price with the provider
 before selecting it; this is not a free-model promise. Unsupported providers,
 malformed identifiers and missing credentials fail rather than fall back.
-A writer can override only the repair model for one request:
+For a manual second OCR review, use Actions → OCR review → Run workflow on
+`main`, enter the PR number and set `model` to an exact OpenRouter identifier.
+Leave it blank for the repository default. The equivalent CLI command is:
+
+```bash
+gh workflow run ocr-review.yml --ref main -R ericdmoore/call-me-maybe \
+  -f pr=NUMBER -f model=openrouter/openai/gpt-oss-20b
+```
+
+This override applies only to that review; automatic reviews and repair re-reviews
+keep `OCR_MODEL` (local by default). Run it after the first review completes:
+reviews for the same PR share a concurrency group. The second pass updates the
+sticky summary with its model and coverage, preserves previous inline findings,
+and adds non-overlapping findings. Each run retains its own JSON artifact.
+These controls become available after the integration is merged and activated.
+
+A writer can independently override the repair model for one request:
 
 ```text
 /oc --model openrouter/openai/gpt-oss-20b validate the findings
 ```
 
 No OpenRouter credential or GitHub App credential is configured in this repository.
-Nothing was copied from Bullmoose. To add an OpenRouter key using gh's hidden prompt:
+Nothing was copied from Bullmoose. You do not need to be at Alpaca: add
+`OPENROUTER_API_KEY` through this repository's GitHub Settings → Secrets and
+variables → Actions, using an OpenRouter key obtained from your account. Do not
+paste the key into a PR comment or workflow input. Alternatively, use gh's hidden
+prompt from any authenticated computer:
 
 ```bash
 gh secret set OPENROUTER_API_KEY --repo ericdmoore/call-me-maybe
