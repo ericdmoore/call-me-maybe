@@ -872,7 +872,7 @@ reports include hangs, and nothing in the phone system depends on it.
 
 `*88` on any handset: `Read` collects the digits until `#`, `Record` takes
 the spoken name (silence ends it, 15 s at most), and the recording lands in
-`PHONEBOOK_DIR/spool/<handset>-<time>-<digits>.wav`. Nothing of doorman's is
+`PHONEBOOK_SPOOL/<handset>-<time>-<digits>.wav` (`/var/spool/call-me-maybe`, asterisk-owned, doorman-group). Nothing of doorman's is
 on the call. `doorman-phonebook.timer` runs `doorman phonebook` every minute:
 
 1. The number is filed at once into `PHONEBOOK_DIR/own/<handset>.vcf`, named

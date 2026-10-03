@@ -82,6 +82,7 @@ type Config struct {
 	// belong to `doorman phonebook`, the *88 job that runs off the call
 	// path (s24). Transcription never sits on a call (invariant 7).
 	PhonebookDir          string
+	PhonebookSpool        string
 	STTEndpoint           string
 	STTModel              string
 	STTTimeout            time.Duration
@@ -197,6 +198,7 @@ func load(get func(string) string, requireSecrets bool) (Config, error) {
 
 		CELSpoolPath:          str("CEL_SPOOL_PATH", ""),
 		PhonebookDir:          str("PHONEBOOK_DIR", "/var/lib/doorman/phonebook"),
+		PhonebookSpool:        str("PHONEBOOK_SPOOL", "/var/spool/call-me-maybe"),
 		STTEndpoint:           str("STT_ENDPOINT", ""),
 		STTModel:              str("STT_MODEL", ""),
 		STTTimeout:            ms("STT_TIMEOUT_MS", 120_000),

@@ -27,6 +27,8 @@ ProtectSystem=strict
 ProtectHome=yes
 ReadOnlyPaths=/opt/call-me-maybe
 StateDirectory=doorman
+StateDirectoryMode=0700
+ReadWritePaths=/var/spool/call-me-maybe
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 MemoryMax=64M
 

@@ -276,11 +276,13 @@ prepare() {
  # nothing else. Replaced on every run: it is an output of the release.
  run install -o root -g root -m 0440 "$repo/scripts/doorman-notify.sudoers" /etc/sudoers.d/doorman-notify
  run install -d -o doorman -g doorman -m 0700 /var/lib/doorman /var/lib/doorman/journal /var/lib/doorman/provision /var/lib/doorman/inbox
- # *88 (s24): asterisk records a name into spool/ and doorman files it into
- # own/; the directory (doorman) reads own/. Group doorman on the spool with
- # the setgid bit so doorman can delete what asterisk wrote.
- run install -d -o doorman -g doorman -m 0750 /var/lib/doorman/phonebook /var/lib/doorman/phonebook/own
- run install -d -o asterisk -g doorman -m 2770 /var/lib/doorman/phonebook/spool
+ # *88 (s24): doorman files numbers into own/ and the directory reads it.
+ run install -d -o doorman -g doorman -m 0700 /var/lib/doorman/phonebook /var/lib/doorman/phonebook/own
+ # The recordings: asterisk writes, doorman files and deletes. Its own
+ # directory because the state directory is 0700 to doorman and Asterisk's
+ # spool is closed to doorman — group doorman and the setgid bit so what
+ # asterisk writes is doorman's to remove.
+ run install -d -o asterisk -g doorman -m 2770 /var/spool/call-me-maybe
  run systemctl daemon-reload
  cat <<'EOF_NEXT'
 Host preparation complete. No doorman service was started.

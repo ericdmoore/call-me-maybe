@@ -68,6 +68,13 @@ missing (packs built before it) `Read` fails rather than reading, so the
 prompt is a separate `Playback` that degrades to silence, and `Record`'s
 own beep is the cue that always exists.
 
+**The spool is its own directory, `/var/spool/call-me-maybe`.** Found on
+jepsen the moment the dialplan was live: the daemon's state directory is
+0700 to doorman (every unit pins `StateDirectoryMode`) and Asterisk's spool
+is closed to doorman, so a spool under either is unreachable by the other
+account. One directory of their own — asterisk-owned, doorman group, setgid
+— is the smallest thing both can use, and the installer creates it.
+
 ## Milestones
 
 - **M1** `internal/ownbook` (vCard subset with UID: load, upsert, rename,
