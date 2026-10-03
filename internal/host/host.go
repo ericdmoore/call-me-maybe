@@ -213,7 +213,11 @@ func Build(ctx context.Context, x Exec, lay Layout, w Wants) (*Plan, error) {
 	// hand-written configuration and the voicemail spool. Read ACLs, the
 	// same way the installer opens the CEL spool — never a group change,
 	// never a chmod on Asterisk's files. Only paths that exist.
-	if _, err := os.Stat(lay.AsteriskDir); err == nil {
+	haveACL := toolExists(ctx, x, "setfacl")
+	if !haveACL && (fileExists(lay.AsteriskDir) || fileExists(lay.VoicemailDir)) {
+		p.Steps = append(p.Steps, Step{Describe: "skip the read ACLs: setfacl is not installed (install the acl package, rerun) — the backup will leave Asterisk's files out until then"})
+	}
+	if haveACL && fileExists(lay.AsteriskDir) {
 		p.Steps = append(p.Steps, Step{Describe: "read ACL for " + lay.DoormanUser + " on " + lay.AsteriskDir + " (the backup reads the hand-written files)",
 			Argv: []string{"setfacl", "-m", "u:" + lay.DoormanUser + ":rX", lay.AsteriskDir}})
 		for _, f := range asteriskFiles {
@@ -223,7 +227,7 @@ func Build(ctx context.Context, x Exec, lay Layout, w Wants) (*Plan, error) {
 			}
 		}
 	}
-	if _, err := os.Stat(lay.VoicemailDir); err == nil {
+	if haveACL && fileExists(lay.VoicemailDir) {
 		p.Steps = append(p.Steps, Step{Describe: "read ACL for " + lay.DoormanUser + " on " + filepath.Dir(lay.VoicemailDir) + " and the voicemail spool (the backup reads the messages)",
 			Argv: []string{"setfacl", "-m", "u:" + lay.DoormanUser + ":rx", filepath.Dir(lay.VoicemailDir)}})
 		p.Steps = append(p.Steps, Step{Describe: "read ACL, recursive and default, on " + lay.VoicemailDir,
@@ -409,6 +413,21 @@ var legacyUnits = map[string][]string{
 		"a0f974e4898cc9680b77e13111b390ebd4990afeb463495453d75830aabd62b2",
 		"e56d8724b08955831dca5230c332b15dd5411c713f9e8fcde0464ada981f94c6",
 	},
+}
+
+func fileExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// toolExists asks the host for a command, so a step is never planned that
+// cannot run: a missing tool is a line in the plan, not a failed apply.
+func toolExists(ctx context.Context, x Exec, name string) bool {
+	_, err := x.Run(ctx, "which", name)
+	return err == nil
 }
 
 func userExists(ctx context.Context, x Exec, name string) bool {

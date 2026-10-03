@@ -111,9 +111,12 @@ func TestCollectBundleOpenRoundTripIsByteIdentical(t *testing.T) {
 	}
 	// The snapshot is a working database with the row.
 	out := t.TempDir()
-	written, err := Place(items2, out)
-	if err != nil || len(written) != len(items2) {
-		t.Fatal(err)
+	written, unowned, err := Place(items2, out)
+	if err != nil || len(written) != len(items2) || len(unowned) != 0 {
+		t.Fatalf("Place: %v, written %d, unowned %v", err, len(written), unowned)
+	}
+	if items2[0].Owner == "" {
+		t.Error("the owner's name travels in the manifest")
 	}
 	db, err := sql.Open("sqlite", filepath.Join(out, src.Journal))
 	if err != nil {
@@ -179,4 +182,24 @@ func mustOtherIdentity(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return id
+}
+
+// A file destination under the state directory must not be bundled: a
+// bundle would carry every bundle before it, forever.
+func TestExcludedDirectoriesAreNeverBundled(t *testing.T) {
+	src, root := house(t)
+	dest := filepath.Join(src.StateDir, "backups")
+	os.MkdirAll(dest, 0o700)
+	os.WriteFile(filepath.Join(dest, "callmemaybe-old.age"), []byte("OLD"), 0o600)
+	src.Exclude = []string{dest}
+	_, m, err := Collect(src, "x", "h", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range m.Files {
+		if strings.Contains(f.Path, "backups") {
+			t.Errorf("an excluded directory's file was bundled: %s", f.Path)
+		}
+	}
+	_ = root
 }

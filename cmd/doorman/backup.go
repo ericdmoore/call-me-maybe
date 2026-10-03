@@ -47,7 +47,16 @@ func (o *backupOpts) sources() backup.Sources {
 			return out
 		}(),
 		NoVoicemail: o.noVoicemail,
+		Exclude:     o.excludeDirs(),
 	}
+}
+
+// excludeDirs keeps a file destination out of its own bundles.
+func (o *backupOpts) excludeDirs() []string {
+	if p, ok := o.env("BACKUP_PATH"); ok && strings.TrimSpace(p) != "" {
+		return []string{strings.TrimSpace(p)}
+	}
+	return nil
 }
 
 // destinations is every backend .env names. The file backend is here; s3
@@ -423,9 +432,20 @@ func runRestore(args []string) int {
 		}
 		return 0
 	}
-	target := filepath.Join(*root, o.envPath)
-	if _, err := os.Stat(target); err == nil && !*force {
-		fmt.Fprintf(os.Stderr, "✗ %s exists: this box already has a house. --force restores over it (after backing it up); --dry-run shows what would change.\n", target)
+	// "Already has a house" is judged by the bundle's own targets — the
+	// absolute paths it would write — never by whatever is in the current
+	// directory. Any house-tier file present means a house is here.
+	var present []string
+	for _, it := range items {
+		if it.Tier != "house" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(*root, it.Path)); err == nil {
+			present = append(present, filepath.Join(*root, it.Path))
+		}
+	}
+	if len(present) > 0 && !*force {
+		fmt.Fprintf(os.Stderr, "✗ this box already has a house: %s exists. --force restores over it (every file it replaces is backed up first); --dry-run shows what would change.\n", present[0])
 		return 1
 	}
 	if *root == "" {
@@ -435,16 +455,32 @@ func runRestore(args []string) int {
 		}
 	}
 	if *force {
-		if _, err := os.Stat(target); err == nil {
-			if b, err := setup.Backup(target); err == nil {
-				fmt.Printf("  existing %s kept as %s\n", target, b)
+		// Every file the bundle will replace is kept beside itself first —
+		// not just .env — so a restore can be undone file by file.
+		kept := 0
+		for _, it := range items {
+			target := filepath.Join(*root, it.Path)
+			if _, err := os.Stat(target); err != nil {
+				continue
 			}
+			if _, err := setup.Backup(target); err != nil {
+				fmt.Fprintf(os.Stderr, "✗ could not keep a copy of %s: %v\n", target, err)
+				return 1
+			}
+			kept++
 		}
+		fmt.Printf("  %d existing file(s) kept beside themselves as .bak-<time>\n", kept)
 	}
-	written, err := backup.Place(items, *root)
+	written, unowned, err := backup.Place(items, *root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ after %d file(s): %v\n", len(written), err)
 		return 1
+	}
+	for _, u := range unowned {
+		fmt.Printf("  ! owner not restored: %s (create the user, then chown)\n", u)
+	}
+	if os.Geteuid() != 0 && *root == "" {
+		fmt.Println("  ! not root: owners were not restored; files belong to you. Run as root for a real restore.")
 	}
 	fmt.Printf("✓ %d file(s) restored from %s (doorman %s, %s)\n", len(written), m.Host, m.Doorman, m.CreatedAt.Format(time.RFC3339))
 	fmt.Println("Next: `doorman check`, `doorman render` and the reloads it prints, `sudo doorman init services`, then `sudo systemctl start doorman`.")

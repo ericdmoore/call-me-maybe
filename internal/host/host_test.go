@@ -16,6 +16,7 @@ import (
 type fakeExec struct {
 	users map[string]bool
 	ran   [][]string
+	noACL bool // pretend setfacl is not installed
 	// enabled/active answer systemctl is-enabled / is-active.
 	enabled, active map[string]bool
 }
@@ -23,6 +24,11 @@ type fakeExec struct {
 func (f *fakeExec) Run(_ context.Context, argv ...string) (string, error) {
 	f.ran = append(f.ran, argv)
 	switch {
+	case argv[0] == "which":
+		if argv[1] == "setfacl" && f.noACL {
+			return "", os.ErrNotExist
+		}
+		return "/usr/bin/" + argv[1] + "\n", nil
 	case argv[0] == "id":
 		if f.users[argv[2]] {
 			return "1000\n", nil
@@ -272,5 +278,27 @@ func TestEveryUnitHasShippedLegacyContentRegistered(t *testing.T) {
 		if len(legacyUnits[u.Name]) == 0 {
 			t.Errorf("%s has no legacy hash: an installer-era copy could never be adopted", u.Name)
 		}
+	}
+}
+
+func TestAMissingSetfaclIsALineInThePlanNotAFailedApply(t *testing.T) {
+	lay := layout(t)
+	os.MkdirAll(lay.UnitDir, 0o755)
+	lay.AsteriskDir = t.TempDir()
+	x := &fakeExec{users: map[string]bool{"asterisk": true}, noACL: true}
+	p, err := Build(context.Background(), x, lay, Wants{Why: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range p.Steps {
+		if len(s.Argv) > 0 && s.Argv[0] == "setfacl" {
+			t.Error("setfacl planned although absent")
+		}
+	}
+	if err := Apply(context.Background(), x, p); err != nil {
+		t.Fatalf("apply must still install the units: %v", err)
+	}
+	if x.count("install", "-o", "root") == 0 {
+		t.Error("no unit was installed")
 	}
 }

@@ -23,9 +23,12 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"filippo.io/age"
@@ -60,6 +63,10 @@ type File struct {
 	// Note is "snapshot" for the journal (copied via VACUUM INTO) or
 	// "customised" for an Asterisk file that differs from what shipped.
 	Note string `json:"note,omitempty"`
+	// Owner and Group are names, not ids: a restore on a fresh box looks
+	// them up, and ids differ between installs. Empty when unknown.
+	Owner string `json:"owner,omitempty"`
+	Group string `json:"group,omitempty"`
 }
 
 // Sources is what to collect. Paths that do not exist are skipped, not
@@ -77,6 +84,10 @@ type Sources struct {
 	// every listed file is in.
 	Shipped     func(path string, content []byte) (same bool, known bool)
 	NoVoicemail bool
+	// Exclude are directories never walked, however they fall inside the
+	// others: the file destination when it lives under the state directory,
+	// or a bundle would carry every bundle before it.
+	Exclude []string
 }
 
 // Item is one collected file in memory. Bundles are small — a house is a
@@ -91,7 +102,23 @@ type Item struct {
 func Collect(src Sources, doormanVersion, host string, now time.Time) ([]Item, *Manifest, error) {
 	m := &Manifest{Format: FormatVersion, Doorman: doormanVersion, Host: host, CreatedAt: now.UTC()}
 	var items []Item
-	add := func(path, tier, note string, content []byte, mode fs.FileMode) {
+	excluded := func(path string) bool {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			abs = path
+		}
+		for _, ex := range src.Exclude {
+			exAbs, err := filepath.Abs(ex)
+			if err != nil {
+				exAbs = ex
+			}
+			if abs == exAbs || strings.HasPrefix(abs, exAbs+string(filepath.Separator)) {
+				return true
+			}
+		}
+		return false
+	}
+	add := func(path, tier, note string, content []byte, info fs.FileInfo) {
 		// Absolute, always: a bundle is restored from wherever the operator
 		// happens to be standing, and "handsets.toml" must mean the one in
 		// /opt/call-me-maybe, not the current directory.
@@ -99,7 +126,12 @@ func Collect(src Sources, doormanVersion, host string, now time.Time) ([]Item, *
 			path = abs
 		}
 		sum := sha256.Sum256(content)
-		f := File{Path: path, Size: int64(len(content)), SHA256: hex.EncodeToString(sum[:]), Mode: uint32(mode.Perm()), Tier: tier, Note: note}
+		mode := fs.FileMode(0o600)
+		if info != nil {
+			mode = info.Mode()
+		}
+		owner, group := ownerOf(info)
+		f := File{Path: path, Size: int64(len(content)), SHA256: hex.EncodeToString(sum[:]), Mode: uint32(mode.Perm()), Tier: tier, Note: note, Owner: owner, Group: group}
 		items = append(items, Item{File: f, Content: content})
 		m.Files = append(m.Files, f)
 	}
@@ -111,7 +143,7 @@ func Collect(src Sources, doormanVersion, host string, now time.Time) ([]Item, *
 		if err != nil {
 			return err
 		}
-		add(path, tier, "", content, info.Mode())
+		add(path, tier, "", content, info)
 		return nil
 	}
 
@@ -146,7 +178,7 @@ func Collect(src Sources, doormanVersion, host string, now time.Time) ([]Item, *
 				note = "customised"
 			}
 		}
-		add(p, "asterisk", note, content, info.Mode())
+		add(p, "asterisk", note, content, info)
 	}
 	if src.StateDir != "" {
 		err := filepath.WalkDir(src.StateDir, func(path string, d fs.DirEntry, err error) error {
@@ -157,6 +189,12 @@ func Collect(src Sources, doormanVersion, host string, now time.Time) ([]Item, *
 				return err
 			}
 			if d.IsDir() {
+				if excluded(path) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if excluded(path) {
 				return nil
 			}
 			// The journal and its WAL/SHM are replaced by one snapshot.
@@ -167,7 +205,7 @@ func Collect(src Sources, doormanVersion, host string, now time.Time) ([]Item, *
 			if err != nil {
 				return err
 			}
-			add(path, "state", "", content, info.Mode())
+			add(path, "state", "", content, info)
 			return nil
 		})
 		if err != nil {
@@ -180,20 +218,22 @@ func Collect(src Sources, doormanVersion, host string, now time.Time) ([]Item, *
 			if err != nil {
 				return nil, nil, fmt.Errorf("journal snapshot: %w", err)
 			}
-			add(src.Journal, "state", "snapshot", content, 0o600)
+			// The snapshot takes the journal's own owner and mode.
+			info, _ := os.Stat(src.Journal)
+			add(src.Journal, "state", "snapshot", content, info)
 		}
 	}
 	if src.Voicemail != "" {
 		if src.NoVoicemail {
 			m.Excluded = append(m.Excluded, src.Voicemail+": --no-voicemail")
-		} else if err := walkInto(src.Voicemail, "voicemail", add); errors.Is(err, fs.ErrPermission) {
+		} else if err := walkInto(src.Voicemail, "voicemail", add, excluded); errors.Is(err, fs.ErrPermission) {
 			m.Excluded = append(m.Excluded, src.Voicemail+": unreadable by this user (sudo doorman init services grants it)")
 		} else if err != nil {
 			return nil, nil, err
 		}
 	}
 	if src.Spool != "" {
-		if err := walkInto(src.Spool, "spool", add); err != nil {
+		if err := walkInto(src.Spool, "spool", add, excluded); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -202,7 +242,7 @@ func Collect(src Sources, doormanVersion, host string, now time.Time) ([]Item, *
 	return items, m, nil
 }
 
-func walkInto(root, tier string, add func(path, tier, note string, content []byte, mode fs.FileMode)) error {
+func walkInto(root, tier string, add func(path, tier, note string, content []byte, info fs.FileInfo), excluded func(string) bool) error {
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
@@ -211,15 +251,40 @@ func walkInto(root, tier string, add func(path, tier, note string, content []byt
 			return err
 		}
 		if d.IsDir() {
+			if excluded(path) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if excluded(path) {
 			return nil
 		}
 		content, info, err := readFile(path)
 		if err != nil {
 			return err
 		}
-		add(path, tier, "", content, info.Mode())
+		add(path, tier, "", content, info)
 		return nil
 	})
+}
+
+// ownerOf names a file's owner and group, "" where the platform or the
+// lookup cannot say. Names travel; ids do not.
+func ownerOf(info fs.FileInfo) (owner, group string) {
+	if info == nil {
+		return "", ""
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", ""
+	}
+	if u, err := user.LookupId(strconv.FormatUint(uint64(st.Uid), 10)); err == nil {
+		owner = u.Username
+	}
+	if g, err := user.LookupGroupId(strconv.FormatUint(uint64(st.Gid), 10)); err == nil {
+		group = g.Name
+	}
+	return owner, group
 }
 
 func readFile(path string) ([]byte, fs.FileInfo, error) {
@@ -387,29 +452,79 @@ func NewKey() (recipient, identity string, err error) {
 	return id.Recipient().String(), id.String(), nil
 }
 
-// Place writes items to their paths, creating directories, keeping modes.
-// The journal snapshot lands at the journal's path; the daemon must not be
-// running (restore checks). Returns the paths written.
-func Place(items []Item, root string) ([]string, error) {
-	var written []string
+// Place writes items to their paths, creating directories, keeping modes
+// and — when running as root, which a real restore is — owners, by name,
+// so .env comes back doorman's and /etc/asterisk root's. A name the new
+// box does not know is reported, not fatal: the file is placed, the
+// operator is told. The journal snapshot lands at the journal's path; the
+// daemon must not be running (restore checks). Returns the paths written
+// and the owners it could not set.
+func Place(items []Item, root string) (written []string, unowned []string, err error) {
+	asRoot := os.Geteuid() == 0
+	ids := map[string]int{}
+	lookup := func(name string, group bool) (int, bool) {
+		key := name
+		if group {
+			key = "group:" + name
+		}
+		if id, ok := ids[key]; ok {
+			return id, id >= 0
+		}
+		id := -1
+		if group {
+			if g, err := user.LookupGroup(name); err == nil {
+				id, _ = strconv.Atoi(g.Gid)
+			}
+		} else if u, err := user.Lookup(name); err == nil {
+			id, _ = strconv.Atoi(u.Uid)
+		}
+		ids[key] = id
+		return id, id >= 0
+	}
 	for _, it := range items {
 		path := it.Path
 		if root != "" {
 			path = filepath.Join(root, it.Path)
 		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-			return written, err
+			return written, unowned, err
 		}
 		mode := fs.FileMode(it.Mode)
 		if mode == 0 {
 			mode = 0o600
 		}
 		if err := os.WriteFile(path, it.Content, mode); err != nil {
-			return written, err
+			return written, unowned, err
+		}
+		if err := os.Chmod(path, mode); err != nil { // WriteFile honours umask; the bundle's mode wins
+			return written, unowned, err
 		}
 		written = append(written, path)
+		if !asRoot || it.Owner == "" {
+			continue
+		}
+		uid, okU := lookup(it.Owner, false)
+		gid, okG := -1, true
+		if it.Group != "" {
+			gid, okG = lookup(it.Group, true)
+		}
+		if !okU || !okG {
+			unowned = append(unowned, path+" ("+it.Owner+":"+it.Group+")")
+			continue
+		}
+		if err := os.Chown(path, uid, gid); err != nil {
+			unowned = append(unowned, path+": "+err.Error())
+		}
+		// Directories Place created under a doorman-owned tree must be
+		// doorman's too, or the daemon cannot write beside the file.
+		dir := filepath.Dir(path)
+		if info, err := os.Stat(dir); err == nil && info.Sys() != nil {
+			if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) == 0 && uid != 0 && strings.Contains(path, "/var/lib/doorman") {
+				_ = os.Chown(dir, uid, gid)
+			}
+		}
 	}
-	return written, nil
+	return written, unowned, nil
 }
 
 // Summary is the manifest in one line, for list and dry runs.

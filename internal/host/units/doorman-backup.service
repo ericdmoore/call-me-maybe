@@ -19,7 +19,9 @@ ExecStart=/opt/call-me-maybe/bin/doorman backup run
 
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectSystem=strict
+# full, not strict: BACKUP_PATH may be anywhere the operator mounts a drive
+# (/mnt, /srv, /media); /usr, /boot and /etc stay read-only regardless.
+ProtectSystem=full
 ProtectHome=yes
 ReadOnlyPaths=/opt/call-me-maybe /etc/asterisk /var/spool/asterisk/voicemail /var/spool/call-me-maybe
 StateDirectory=doorman
