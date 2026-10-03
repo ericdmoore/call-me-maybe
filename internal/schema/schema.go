@@ -204,6 +204,13 @@ func handsetItem() *Schema {
 				Default:     false,
 				CrossRefs:   []string{"asterisk/extensions.conf *78NN / *79", "the generated 500 group in extensions_handsets.conf"},
 			},
+			"curfew": {
+				Type:        "array",
+				Items:       &Schema{Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$"},
+				Description: "Bedtime for this phone: ids of [[schedules]] in policy.toml. While ANY named window is active the phone is asleep — doorman rings it for nothing (house ring, extension, ladder stage), the generated dialplan leaves it out of pages and ring-all and refuses its calls out, and the daemon hangs up a call it is on at the hour. 911 is never refused: it lives outside everything the curfew touches. Several ids because \"22:45 on school nights, 23:30 at weekends\" is two windows. Inventory rather than policy, because the thing that sleeps is the phone in the room, whatever rings it.",
+				CrossRefs:   []string{"policy.toml [[schedules]].id", "the generated curfew context in extensions_handsets.conf", "CURFEW_PROMPT (the clip the dialplan plays to a sleeping phone that dials)"},
+				Rules:       []string{"An id no [[schedules]] entry defines fails `doorman check`, which names the handset and the id.", "A schedule with enabled = false is inert here too: `doorman check` shows it as switched off.", "Changing a curfew's hours or members needs `doorman render` and a reload — the dialplan carries them; the lobby's half follows the policy reload within a second.", "`doorman check` marks a curfewed handset ASLEEP NOW while a window is active."},
+			},
 			"mailbox": {
 				Type:        "string",
 				Description: "This phone's own voicemail box. `doorman render` writes it into voicemail_handsets.conf when VOICEMAIL_<BOX>_PIN is in .env (a box without one is assumed hand-written in voicemail.conf, which is every box from before render made them); a call to this phone's number that rings out — or finds it busy — lands in it; the phone's voicemail key (*97) opens it without asking which or for a PIN; and its message-waiting lamp follows it. Two phones may name one box and share it. A policy file's `voicemail = \"…\"` may name it too, so a stranger with this room's PIN who rings out leaves the message on this room's phone.",
@@ -782,7 +789,7 @@ func schedule() *Schema {
 		Type:     "object",
 		Required: []string{"id", "start", "end"},
 		Properties: map[string]*Schema{
-			"id": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Referenced as afterhours = \"<id>\" from an extension."},
+			"id": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Referenced as afterhours = \"<id>\" from an extension, or in curfew = [\"<id>\", …] on a handset in handsets.toml."},
 			"enabled": {
 				Type:        "boolean",
 				Default:     true,
@@ -816,7 +823,7 @@ func extension() *Schema {
 				Type:        "string",
 				Pattern:     `^\d+$`,
 				Description: "Digits only, minimum 4. Choose one you will remember — a number nobody can recite is a number nobody gives out. Guessable ones are refused at load: all-same digits, runs (including in twos), repeated blocks, palindromes, the handful everyone tries, and — at six digits and up — anything one digit away from all-same or from a run, since a guessing list is the patterns plus one typo. That is 0.31% of the six-digit space; everything else, dates included, is allowed. `doorman rotate` generates one when you would rather not choose.",
-				Rules:       []string{"Must be unique across extensions.", "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer."},
+				Rules:       []string{"Must be unique across extensions.", "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer. With mixed lengths, `#` ends the PIN and so does a pause (INTER_DIGIT_TIMEOUT_MS) once at least the shortest PIN's worth of digits is in; the longest PIN's length is the only count that fires on its own."},
 			},
 			"label":   {Type: "string", Description: "Human name, used by `doorman rotate <label>` and shown in `doorman check`."},
 			"enabled": {Type: "boolean", Default: true, Description: "False disables the extension without deleting it."},
@@ -910,7 +917,7 @@ func Env() *Schema {
 
 		"DEFAULT_COUNTRY_CODE": env("Country code assumed when a caller ID arrives without one.", "string", "1"),
 
-		"EXTENSION_LENGTH":       env("Digits in an extension when PIN lengths are mixed.", "positive integer", 6),
+		"EXTENSION_LENGTH":       env("Digits in an extension when the policy has no extensions to measure. With extensions, their lengths rule: a uniform length fires on the last digit; mixed lengths end on `#`, on a pause after the shortest length, or at the longest.", "positive integer", 6),
 		"FIRST_DIGIT_TIMEOUT_MS": env("Time to dial the FIRST digit, measured from the end of the greeting. Generous on purpose: a stranger reading a PIN off a card needs longer than a stopwatch allows.", "duration (milliseconds)", 10000),
 		"INTER_DIGIT_TIMEOUT_MS": env("Time allowed between subsequent digits.", "duration (milliseconds)", 3000),
 		"RING_TIMEOUT_S":         env("How long the house rings before giving up.", "duration (seconds)", 30),
@@ -930,6 +937,11 @@ func Env() *Schema {
 		"CALL_LOG_PATH":        env("Legacy JSONL output, written only when EVENT_JOURNAL_PATH is unset. Enables the per-call record log, one JSON line per completed call and per call placed through the *4 outbound console. Empty (the default) means no call log. Unlike the operational log this file holds full caller IDs — which is what makes \"who called while I was out\" answerable — so it is created 0600 and belongs on the box. Read it with `doorman calls`, which redacts by default. One file for every line, with `line` on the record, so a whole day still reads in order; `line` is absent on the default line and `direction` is absent on an inbound call, so a box answering one number writes exactly what it always did. Written off the call path: a full buffer drops records and counts them rather than delaying a call. Nothing on the call path ever reads it back; it is an output, not state.", "string", ""),
 		"CALL_LOG_MAX_BYTES":   env("Rotate the call log at this size, keeping one previous generation. Twenty calls a day is roughly 2 MB a year, so this cap is for the case that is not twenty calls a day.", "integer", 33554432),
 
+		"PHONEBOOK_DIR":              env("Where handsets' own additions live: own/<id>.vcf per phone, the *88 book the directory serves to that phone alone. Under the daemon's state directory; the installer creates it.", "path", "/var/lib/doorman/phonebook"),
+		"PHONEBOOK_SPOOL":            env("Where Asterisk records *88 spoken names for `doorman phonebook` to file and transcribe. Its own directory because the two accounts share no other: asterisk-owned, doorman group, setgid, created by the installer. The rendered dialplan carries this path, so changing it needs `doorman render` and a reload.", "path", "/var/spool/call-me-maybe"),
+		"STT_ENDPOINT":               env("Speech-to-text service, OpenAI-compatible /v1/audio/transcriptions (whisper.cpp server, faster-whisper-server, speaches). Read by `doorman phonebook` only — the daemon ignores it: transcription runs minutes after the call, never on it (invariant 7). No key; the service is on the tailnet.", "url", ""),
+		"STT_MODEL":                  env("Model name sent to STT_ENDPOINT; empty lets the server choose.", "string", ""),
+		"STT_TIMEOUT_MS":             env("How long `doorman phonebook` waits for one transcription.", "integer", "120000"),
 		"CEL_SPOOL_PATH":             env("Optional Asterisk CEL SQLite spool (AST_LOG_DIR/master.db), initialised with scripts/cel-spool.sql. Requires EVENT_JOURNAL_PATH. Reads committed lifecycle events and resumes after restart; never used for call control.", "path", ""),
 		"EVENT_JOURNAL_PATH":         env("Optional SQLite event journal in a private 0700 directory; empty disables. Access through doorman events --json and doorman calls, not a public database service. When enabled, replaces legacy CALL_LOG_PATH writes. Storage failures degrade observation without delaying calls.", "path", ""),
 		"EVENT_JOURNAL_MAX_BYTES":    env("Physical storage budget, minimum 8 MiB. Usually the binding retention limit: default permits 16 MiB of database pages (roughly 27000 mixed events, workload dependent), not guaranteed 90-day history. A quarter bounds database pages; the rest reserves WAL space for pinned history and a large transaction; a pinned WAL pauses writes rather than growing without bound.", "integer", 67108864),
@@ -969,7 +981,7 @@ func Env() *Schema {
 			"MAIL_HOOK and MAIL_TO are read only by `doorman inbox` and `doorman digest`, never by the daemon and never on a call: the executable that sends one mail (subject as its argument, Markdown body on stdin, MAIL_TO in its environment; the shipped scripts/mail-hook-bullmoose runs the bullmoose CLI) and the house mailbox address. Both or neither. Asterisk's voicemail hook reads the same names from /etc/asterisk/cmm-mail.env.",
 			"BALANCE_RING and BALANCE_PROM are read only by `doorman balance` (and so by doorman-balance.timer), never by the daemon: the handset or group ids to ring when a trunk is below its threshold — an internal call over ARI, so it works when the account is empty, once a day per trunk — and the Prometheus textfile to write on every run. The daemon never checks a balance and never holds the provider API key.",
 			"PROVISION_ADDRESS is read only by `doorman render` and `doorman provision`, never by the daemon: the address phones reach this box at — its LAN IP, optionally :port (default 8443) — required once any handset carries mac and model. Never localhost (on the phone, that is the phone), never a .local name (SIP phones resolve through unicast DNS), and not a Tailscale address unless a phone is on the tailnet.",
-			"The VOICEMAIL_*, STT_*, and SMTP_* keys in examples/.env.example are reserved for the unshipped voicemail feature. They are deliberately not read yet, so .env will not churn when it lands.",
+			"The VOICEMAIL_* and SMTP_* keys in examples/.env.example are reserved for the unshipped voicemail feature and deliberately not read yet, so .env will not churn when it lands. STT_* is now read by `doorman phonebook` (the *88 spoken names, off the call path); the daemon parses and ignores it.",
 		},
 		Properties: props,
 		Required:   []string{"ARI_USERNAME", "ARI_PASSWORD"},

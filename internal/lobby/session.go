@@ -592,11 +592,18 @@ func (s *Session) collect(seed, known string) {
 		timer.Reset(d)
 	}
 
+	// Uniform PIN length: fire the moment the last digit lands instead of
+	// waiting out the inter-digit timer. Mixed lengths: nothing can fire on
+	// a count short of the longest PIN, so `#` ends the PIN, and so does a
+	// pause once at least the shortest PIN's worth of digits is in — a
+	// friend told "dial the kitchen" need not know about `#`. EXTENSION_LENGTH
+	// is only the cap when the policy has no extensions to measure.
 	target := cfg.ExtensionLength
+	mixed := s.pol.PinLength == 0 && s.pol.MaxPinLength > 0
 	if s.pol.PinLength > 0 {
-		// Uniform PIN length: fire the moment the last digit lands instead
-		// of waiting out the inter-digit timer.
 		target = s.pol.PinLength
+	} else if mixed {
+		target = s.pol.MaxPinLength
 	}
 
 	// handle returns true when the call has moved on (ringing or dismissed).
@@ -631,6 +638,14 @@ func (s *Session) collect(seed, known string) {
 				return
 			}
 		case <-timer.C:
+			if mixed && len(digits) >= s.pol.MinPinLength {
+				// The pause is the terminator the caller did not press.
+				s.log.Info("pause ends the extension", "digits", len(digits))
+				if s.evaluate(&digits, &attempts, reset, known) {
+					return
+				}
+				continue
+			}
 			s.log.Info("dial window elapsed", "digits", len(digits))
 			s.noInput(known)
 			return
@@ -841,7 +856,16 @@ func (s *Session) ringStep(endpoints []string, label, callerID string, timeout t
 	// been hung up, so s.legs holds only this stage.
 	quiet := 0
 	for _, endpoint := range endpoints {
-		if s.deps.Quiet != nil && s.deps.Quiet(strings.TrimPrefix(endpoint, "PJSIP/")) {
+		id := strings.TrimPrefix(endpoint, "PJSIP/")
+		// A curfew is the house's rule (handsets.toml), do-not-disturb the
+		// room's own (*78NN); both mean the same thing here — this phone is
+		// not rung — and both count as quiet for the stage's record.
+		if s.pol.Asleep(id, s.now()) {
+			quiet++
+			s.log.Info("handset is asleep (curfew), not ringing it", "endpoint", endpoint, "stage", stage+1)
+			continue
+		}
+		if s.deps.Quiet != nil && s.deps.Quiet(id) {
 			quiet++
 			s.log.Info("handset is quiet, not ringing it", "endpoint", endpoint, "stage", stage+1)
 			continue

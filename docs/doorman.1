@@ -54,6 +54,31 @@ page skip it, except a page from a handset with
 in
 .IR handsets.toml .
 The state is Asterisk's own, time\-boxed, read by doorman and never written.
+.B curfew
+on a handset in
+.I handsets.toml
+names
+.B [[schedules]]
+ids from
+.IR policy.toml ;
+while any is active the phone is asleep: doorman rings it for nothing, the
+generated dialplan leaves it out of the ring\-all and the page (a
+.B page_override
+does not pierce it) and refuses its calls out, 911 excepted, and the daemon
+drops a call it is on at the hour. Several ids make a per\-day bedtime. A
+dangling id fails
+.BR "doorman check" ;
+the hours ride in the dialplan, so a change needs
+.B doorman render
+and a reload.
+.B *88
+adds a number to the phone that dialled it: the digits, then the spoken
+name; the number is in that phone's directory within a minute and named
+once
+.B doorman phonebook
+has had the recording transcribed at
+.BR STT_ENDPOINT .
+A directory, never the allow\-list.
 .B [line] failover
 is the ordered list of other trunks a call as that line tries when its own
 answers CHANUNAVAIL or CONGESTION \(em off unless written, because each rung

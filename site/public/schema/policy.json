@@ -20,6 +20,13 @@
             ],
             "default": "none"
           },
+          "done_when": {
+            "description": "The state in which performing the action would change nothing — \"open\" for an action that opens. A request when the entity is already there answers \"It was already open\" and never calls the webhook.",
+            "type": "string",
+            "x-rules": [
+              "Needs state."
+            ]
+          },
           "id": {
             "description": "What every transport names: `action = \"garage\"` on a word, a lobby leaf, a passkey button.",
             "type": "string",
@@ -52,6 +59,15 @@
             "x-rules": [
               "Plain ASCII, at most 160 characters — one segment, and no emoji, which would halve it. `doorman check` warns about a phone number, the one shape a carrier has dropped from this number, and refuses nothing else.",
               "An action needs a webhook, a reply, or both."
+            ]
+          },
+          "state": {
+            "description": "The Home Assistant entity whose state answers the question form of a word — `garage?` — read live from HA by `doorman inbox` (HA_URL and HA_TOKEN in .env), never remembered on the box: state you remember is state you get wrong. Without it a trailing ? is punctuation.",
+            "type": "string",
+            "pattern": "^[a-z_]+\\.[a-z0-9_]+$",
+            "x-rules": [
+              "A domain.object entity id, like cover.garage_door.",
+              "`doorman inbox` refuses to start when an action names a state and HA_URL or HA_TOKEN is missing."
             ]
           },
           "webhook": {
@@ -130,7 +146,7 @@
             "pattern": "^\\d+$",
             "x-rules": [
               "Must be unique across extensions.",
-              "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer."
+              "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer. With mixed lengths, `#` ends the PIN and so does a pause (INTER_DIGIT_TIMEOUT_MS) once at least the shortest PIN's worth of digits is in; the longest PIN's length is the only count that fires on its own."
             ]
           },
           "steps": {
@@ -423,7 +439,7 @@
             "pattern": "^\\d{1,2}:\\d{2}$"
           },
           "id": {
-            "description": "Referenced as afterhours = \"\u003cid\u003e\" from an extension.",
+            "description": "Referenced as afterhours = \"\u003cid\u003e\" from an extension, or in curfew = [\"\u003cid\u003e\", …] on a handset in handsets.toml.",
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9_-]*$"
           },

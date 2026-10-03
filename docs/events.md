@@ -209,7 +209,10 @@ or `action.performed` / `action.refused` when the word named a registry
 action. `payload.action` carries the action id, the person's `[[people]]`
 id, the transport (`sms`), the word, the edge's message id and, when Home
 Assistant was asked, the state it reported — never the text and never a
-number. The inbox is a *sibling* writer: it appends committed rows with the
+number. `doorman phonebook`, another sibling (`source: doorman-phonebook`), writes
+`phonebook.added` when a number keyed with `*88` is filed into a handset's own
+book and `phonebook.named` when its spoken name has been transcribed;
+`reason` is the handset id, never the number or the name. The inbox is a *sibling* writer: it appends committed rows with the
 same store and the same budget, holds no owner lock, never creates or
 migrates the journal, and does none of the daemon's bookkeeping (the clean
 flag, coverage gaps, CEL, pruning on a timer). Its rows ring no doorbell of

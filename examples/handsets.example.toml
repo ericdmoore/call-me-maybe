@@ -71,6 +71,9 @@ password_env = "HANDSET_KIDS_ROOM_PASSWORD"
 phonebook = ["house"]            # rooms and feature codes only — not the
                                  # allow-list, and never a whole address book.
                                  # Absent means ["house", "people"].
+curfew = ["school-night"]        # asleep while any named [[schedules]] window
+                                 # is active: rings for nothing, cannot call out
+                                 # (911 excepted), dropped at the hour
 
 # A pseudo-handset: any dialplan destination can be a policy target. No SIP
 # registration, so no number/password — render skips it, policy can dial it.

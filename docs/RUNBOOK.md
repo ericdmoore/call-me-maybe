@@ -322,8 +322,9 @@ copy it the same way.
 ```bash
 $ sudo cp scripts/doorman.service scripts/doorman-directory.service /etc/systemd/system/
 $ sudo cp scripts/doorman-balance.service scripts/doorman-balance.timer /etc/systemd/system/
+$ sudo cp scripts/doorman-phonebook.service scripts/doorman-phonebook.timer /etc/systemd/system/
 $ sudo systemctl daemon-reload
-$ sudo systemctl enable --now doorman doorman-directory doorman-balance.timer
+$ sudo systemctl enable --now doorman doorman-directory doorman-balance.timer doorman-phonebook.timer
 $ sudo systemctl status doorman
 $ journalctl -u doorman -f
 ```
@@ -563,6 +564,8 @@ valid **transfer target**.
 | 700 | (as a transfer target) **park** the call; Asterisk announces a slot |
 | 701–720 | Pick up a parked call from any handset |
 | *4 | **Outbound console**: call as another one of your numbers. Only interesting with more than one line, and it refuses 911 — see "Outbound caller ID" below. This is the one that goes through doorman |
+| *(none)* | **Bedtime** — a `curfew` on the handset in `handsets.toml` names `[[schedules]]`; while one is active the phone rings for nothing, cannot call out (911 excepted), is left out of pages and ring-all, and has its call dropped at the hour. Nothing to dial: it is the house's rule, not the phone's. See "Bedtime" below |
+| *88 | **Add a number to this phone.** Key the number, `#`, say the name after the beep. The number is in this phone's directory within a minute (named by its number), and under the spoken name once the box has had it transcribed. This phone's book only — never the allow-list. See "Add a number from a handset" |
 | *78NN | **Do not disturb** for this phone, NN = 15, 30 or 45 minutes; anything else is refused out loud. Room calls to it say how long and offer its box; the house ring group and the page skip it, except a page from a `page_override` phone. Clears itself when the time is up |
 | *79 | Do not disturb off |
 | *97 | **Voicemail** — the phone's own box, straight in, no PIN (a handset with no `mailbox` gets the old menu). What the voicemail key dials |
@@ -863,6 +866,87 @@ Treat the whole thing as a fun add-on rather than infrastructure: community
 reports include hangs, and nothing in the phone system depends on it.
 
 ---
+
+
+### Add a number from a handset (*88)
+
+`*88` on any handset: `Read` collects the digits until `#`, `Record` takes
+the spoken name (silence ends it, 15 s at most), and the recording lands in
+`PHONEBOOK_SPOOL/<handset>-<time>-<digits>.wav` (`/var/spool/call-me-maybe`, asterisk-owned, doorman-group). Nothing of doorman's is
+on the call. `doorman-phonebook.timer` runs `doorman phonebook` every minute:
+
+1. The number is filed at once into `PHONEBOOK_DIR/own/<handset>.vcf`, named
+   by its number — "(972) 555-0142" — so it is usable before anyone has
+   heard the name. The directory serves that file to that phone alone as a
+   third book, "Added here", with no `phonebook` entry needed.
+2. If `STT_ENDPOINT` is set, the recording is posted to it (OpenAI-compatible
+   `/v1/audio/transcriptions`, e.g. whisper.cpp's server on another box) and
+   the entry is renamed in place; the audio is deleted. A service that is
+   down leaves the recording to retry; after seven days the job gives up on
+   the name, keeps the number, and says so.
+3. `phonebook.added` and `phonebook.named` go to the journal (handset id
+   only), so the digest can say who added what.
+
+It is a directory, not admission: a number added here never skips the
+lobby. To admit someone, add them to `[[people]]`. The three clips
+(`add-number`, `add-name`, `add-done`) are the bundled pack's; without them
+the phone hears the beep and silence, and still works.
+
+### Bedtime (curfew)
+
+The hours live in `policy.toml` as `[[schedules]]` — the same blocks an
+extension's `afterhours` names — and the handset names them in
+`handsets.toml`:
+
+```toml
+# policy.toml
+[[schedules]]
+id = "late-weeknights"
+start = "22:45"
+end = "05:00"                            # crosses midnight
+days = ["SU", "MO", "TU", "WE", "TH"]    # the days the window STARTS on
+
+[[schedules]]
+id = "late-weekends"
+start = "23:30"
+end = "05:00"
+days = ["FR", "SA"]
+
+# handsets.toml
+[[handsets]]
+id = "mary-kate"
+curfew = ["late-weeknights", "late-weekends"]   # asleep while ANY is active
+```
+
+While a window is active, three things happen, each in the place that
+already owns it:
+
+1. **It does not ring.** doorman skips the phone in every ring it places —
+   house, extension, ladder stage — through the same gate as do-not-disturb,
+   and the generated dialplan leaves it out of `100` and `500`. A
+   `page_override` phone does *not* reach it: the override is for a child's
+   DND; a curfew is the parent's own rule.
+2. **It cannot call out.** The phone's calls enter a generated
+   `[curfew-<id>]` context that is `[internal]` behind a clock: `911` goes
+   through first and unconditionally, anything else while asleep hears
+   `curfew-out` and a busy tone. A room that dials it hears `curfew-room`
+   and gets its mailbox.
+3. **A call it is on is dropped at the hour.** The daemon looks once a
+   minute for a handset that has just fallen asleep and hangs up its
+   channels — whatever placed the call. A daemon started inside the window
+   leaves an existing call alone; the hour has passed.
+
+`doorman check` lists every curfewed handset with its windows and marks
+**ASLEEP NOW**. A schedule with `enabled = false` is inert here as for
+`afterhours` — the holiday switch — and stays listed as switched off. An id
+no schedule defines fails `check`, naming the handset and the id.
+
+The hours ride in the dialplan, so changing them or the members is
+`doorman render`, copy, `dialplan reload` (and `pjsip reload`, because the
+endpoint's context changes). The lobby's half follows the policy reload on
+its own. The two clips are the bundled pack's (`prompts/manifest.json`); a
+pack built before they existed plays nothing there and the busy tone or the
+mailbox still says what happened.
 
 ## 5. ARI by hand
 

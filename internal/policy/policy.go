@@ -142,6 +142,15 @@ type Handset struct {
 	// source id. Absent means house and people. A child's phone might be
 	// just ["house"].
 	Phonebook []string `toml:"phonebook"`
+	// Curfew names [[schedules]] (ids, in this line's policy) during which
+	// this handset is asleep: doorman rings it for nothing, the generated
+	// dialplan refuses its calls out (911 excepted) and leaves it out of
+	// pages and ring-all, and the daemon drops a call in progress at the
+	// hour. Several ids because "22:45 on school nights, 23:30 at weekends"
+	// is two windows; the phone is asleep while ANY is active. Inventory,
+	// not policy, because the thing that sleeps is the phone in the room,
+	// whatever rings it.
+	Curfew []string `toml:"curfew"`
 }
 
 // PhonebookSelection is what a handset shows when it says nothing: the
@@ -332,6 +341,15 @@ func (a *Afterhours) Describe() string {
 	return fmt.Sprintf("%s–%s %s", clock(a.StartMin), clock(a.EndMin), days)
 }
 
+// CurfewWindow is one schedule a handset's curfew names, kept with its id so
+// `doorman check` can say which window put the phone to sleep. Window is nil
+// when the schedule carries enabled = false: present, inert, and shown as
+// such rather than silently dropped.
+type CurfewWindow struct {
+	ScheduleID string
+	Window     *Afterhours
+}
+
 // ResolvedExtension is an extension compiled into a runnable plan.
 type ResolvedExtension struct {
 	PIN        string
@@ -364,11 +382,18 @@ type Policy struct {
 	handsets    map[string]Handset
 	groups      map[string][]string
 	scheduleIDs map[string]bool
+	// curfews is each curfewed handset's windows, resolved. Read on the
+	// call path (is this phone asleep right now?) and by render.
+	curfews map[string][]CurfewWindow
 
 	// PinLength is the uniform PIN length, or 0 if extensions have mixed
 	// lengths. When uniform, the collector can fire the moment the last digit
 	// lands instead of waiting out the inter-digit timer.
 	PinLength int
+	// MinPinLength and MaxPinLength bound the mixed case: `#` or a pause
+	// after at least MinPinLength digits ends the PIN, and MaxPinLength
+	// digits end it on their own. Both 0 when there are no extensions.
+	MinPinLength, MaxPinLength int
 }
 
 // FromTOML parses, validates, and compiles a policy. Any structural problem —
@@ -722,6 +747,28 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		schedules[sc.ID] = compileWindow("schedule "+sc.ID, sc.Start, sc.End, sc.Days, fail)
 	}
 
+	// A handset's curfew is a cross-file reference — handsets.toml naming
+	// schedules in policy.toml — and is caught here, at load, like a policy
+	// extension naming a handset that does not exist. A disabled schedule
+	// resolves to a nil window: the holiday switch works for bedtime too.
+	curfews := make(map[string][]CurfewWindow)
+	for _, h := range f.Handsets {
+		seen := make(map[string]bool, len(h.Curfew))
+		for _, id := range h.Curfew {
+			if seen[id] {
+				fail("handset %q names curfew schedule %q twice", h.ID, id)
+				continue
+			}
+			seen[id] = true
+			window, known := schedules[id]
+			if !known {
+				fail("handset %q curfew references unknown schedule %q — define it in [[schedules]]", h.ID, id)
+				continue
+			}
+			curfews[h.ID] = append(curfews[h.ID], CurfewWindow{ScheduleID: id, Window: window})
+		}
+	}
+
 	groups := make(map[string][]string, len(f.Groups))
 	// groupMembers is the same expansion in handset ids rather than endpoints.
 	groupMembers := make(map[string][]string, len(f.Groups))
@@ -1039,6 +1086,18 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 			pinLength = l
 		}
 	}
+	// With mixed lengths the lobby cannot fire on a count; it needs the
+	// shortest (a pause after that many digits may be the whole PIN) and
+	// the longest (past which there is nothing left to wait for).
+	minPin, maxPin := 0, 0
+	for l := range lengths {
+		if minPin == 0 || l < minPin {
+			minPin = l
+		}
+		if l > maxPin {
+			maxPin = l
+		}
+	}
 
 	scheduleIDs := make(map[string]bool, len(schedules))
 	for id := range schedules {
@@ -1052,9 +1111,11 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		callerIDFormat: format,
 		line:           line,
 		PinLength:      pinLength,
-		handsets:       handsets,
-		groups:         groups,
-		scheduleIDs:    scheduleIDs,
+		MinPinLength:   minPin, MaxPinLength: maxPin,
+		handsets:    handsets,
+		groups:      groups,
+		scheduleIDs: scheduleIDs,
+		curfews:     curfews,
 	}, nil
 }
 
@@ -1325,6 +1386,40 @@ func (p *Policy) ScheduleIDs() map[string]bool {
 	for id := range p.scheduleIDs {
 		out[id] = true
 	}
+	return out
+}
+
+// Curfew is the windows a handset's curfew names, in the order written, or
+// nil for a handset with none. A window is nil when its schedule is
+// switched off.
+func (p *Policy) Curfew(handsetID string) []CurfewWindow {
+	src := p.curfews[handsetID]
+	if src == nil {
+		return nil
+	}
+	return append([]CurfewWindow(nil), src...)
+}
+
+// Asleep reports whether a handset's curfew is active at t: true while ANY
+// of its windows is. A handset with no curfew is never asleep. This is the
+// one question the call path asks; it never sees the schedules themselves.
+func (p *Policy) Asleep(handsetID string, t time.Time) bool {
+	for _, c := range p.curfews[handsetID] {
+		if c.Window.Active(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// CurfewedHandsets lists the ids that name at least one curfew schedule,
+// sorted, for `check` and `render`.
+func (p *Policy) CurfewedHandsets() []string {
+	out := make([]string, 0, len(p.curfews))
+	for id := range p.curfews {
+		out = append(out, id)
+	}
+	sort.Strings(out)
 	return out
 }
 

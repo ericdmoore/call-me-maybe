@@ -49,6 +49,25 @@
       "items": {
         "type": "object",
         "properties": {
+          "curfew": {
+            "description": "Bedtime for this phone: ids of [[schedules]] in policy.toml. While ANY named window is active the phone is asleep — doorman rings it for nothing (house ring, extension, ladder stage), the generated dialplan leaves it out of pages and ring-all and refuses its calls out, and the daemon hangs up a call it is on at the hour. 911 is never refused: it lives outside everything the curfew touches. Several ids because \"22:45 on school nights, 23:30 at weekends\" is two windows. Inventory rather than policy, because the thing that sleeps is the phone in the room, whatever rings it.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]*$"
+            },
+            "x-cross-references": [
+              "policy.toml [[schedules]].id",
+              "the generated curfew context in extensions_handsets.conf",
+              "CURFEW_PROMPT (the clip the dialplan plays to a sleeping phone that dials)"
+            ],
+            "x-rules": [
+              "An id no [[schedules]] entry defines fails `doorman check`, which names the handset and the id.",
+              "A schedule with enabled = false is inert here too: `doorman check` shows it as switched off.",
+              "Changing a curfew's hours or members needs `doorman render` and a reload — the dialplan carries them; the lobby's half follows the policy reload within a second.",
+              "`doorman check` marks a curfewed handset ASLEEP NOW while a window is active."
+            ]
+          },
           "email": {
             "description": "Where this phone's mailbox mails its messages, with the recording attached (voicemail.conf's attach=yes). Optional; the address on the generated mailbox line. Needs mailbox.",
             "type": "string",

@@ -126,3 +126,20 @@ func TestNamesAndNumbersAreEscapedAndSplit(t *testing.T) {
 		t.Error("a family without a phonebook template must say so")
 	}
 }
+
+func TestTheOwnBookIsAThirdBookAndTheHouseListsStar88(t *testing.T) {
+	own := OwnBook([]OwnEntry{{Name: "(972) 555-0142", E164: "+19725550142"}, {Name: "Maddie", E164: "+19725550199"}})
+	if own.ID != "own" || len(own.Contacts) != 2 || own.Contacts[1].Numbers[0].Dial != "19725550199" || own.Contacts[1].Numbers[0].Kind != "cell" {
+		t.Errorf("OwnBook = %+v", own)
+	}
+	house := HouseBook(bookHandsets)
+	found := false
+	for _, c := range house.Contacts {
+		if c.Numbers[0].Dial == AddNumberCode {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the house book must list *88 so a phone's directory says how to add a number")
+	}
+}
