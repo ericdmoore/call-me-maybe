@@ -101,9 +101,14 @@ func TestBackupLifecycle(t *testing.T) {
 			t.Errorf("verify rc = %d", rc)
 		}
 	})
-	if !strings.Contains(out, "opens:") || !strings.Contains(out, "house") {
+	if !strings.Contains(out, "at file opens:") || !strings.Contains(out, "house") {
 		t.Errorf("verify: %q", out)
 	}
+	out = capture(t, func() {
+		if rc := runBackup(append([]string{"verify", "-from", "s3"}, common...)); rc != 2 {
+			t.Errorf("-from a destination that is not configured must be refused, rc = %d", rc)
+		}
+	})
 	out = capture(t, func() {
 		if rc := runRestore(append([]string{"--latest", "--dry-run"}, common...)); rc != 0 {
 			t.Errorf("dry run rc = %d", rc)

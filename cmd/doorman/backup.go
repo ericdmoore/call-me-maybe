@@ -27,6 +27,20 @@ type backupOpts struct {
 	stateDir, journal, voicemail, spool, asteriskDir      string
 	noVoicemail                                           bool
 	env                                                   func(string) (string, bool)
+	from                                                  string // which destination verify/restore read: "" = the first
+}
+
+// pick returns the destination named by -from, or the first.
+func (o *backupOpts) pick(dests []backup.Destination) (backup.Destination, bool) {
+	if o.from == "" {
+		return dests[0], true
+	}
+	for _, d := range dests {
+		if d.Name() == o.from {
+			return d, true
+		}
+	}
+	return nil, false
 }
 
 func (o *backupOpts) sources() backup.Sources {
@@ -112,7 +126,9 @@ func backupFlags(fs *flag.FlagSet) (*backupOpts, func()) {
 	voicemailFlag := fs.String("voicemail", "/var/spool/asterisk/voicemail", "Asterisk's voicemail spool")
 	asteriskFlag := fs.String("asterisk", "/etc/asterisk", "Asterisk's configuration directory")
 	noVM := fs.Bool("no-voicemail", false, "leave the voicemail messages out (they are the bulk)")
+	fromFlag := fs.String("from", "", "which destination verify and restore read: file or s3 (default: the first configured)")
 	return o, func() {
+		o.from = strings.TrimSpace(*fromFlag)
 		o.envPath = *envFlag
 		o.env = secretLookup(*envFlag)
 		o.handsets, o.policy = handsetsPathArg(*handsetsFlag), policyPathArg(*policyFlag)
@@ -306,7 +322,11 @@ func backupVerify(ctx context.Context, o *backupOpts, args []string) int {
 	if len(args) > 0 {
 		name = args[0]
 	}
-	d := dests[0]
+	d, ok := o.pick(dests)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "✗ no destination named %q is configured\n", o.from)
+		return 2
+	}
 	if name == "" {
 		names, err := d.List(ctx)
 		if err != nil {
@@ -331,7 +351,7 @@ func backupVerify(ctx context.Context, o *backupOpts, args []string) int {
 		fmt.Fprintf(os.Stderr, "✗ %s: %v\n", name, err)
 		return 1
 	}
-	fmt.Printf("✓ %s opens: %s\n", name, m.Summary())
+	fmt.Printf("✓ %s at %s opens: %s\n", name, d.Name(), m.Summary())
 	for _, e := range m.Excluded {
 		fmt.Printf("    excluded: %s\n", e)
 	}
@@ -391,7 +411,12 @@ func runRestore(args []string) int {
 			fmt.Fprintln(os.Stderr, "✗ --latest needs a destination (BACKUP_PATH)")
 			return 2
 		}
-		names, err := dests[0].List(ctx)
+		d, ok := o.pick(dests)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "✗ no destination named %q is configured\n", o.from)
+			return 2
+		}
+		names, err := d.List(ctx)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 			return 1
@@ -401,7 +426,7 @@ func runRestore(args []string) int {
 			fmt.Fprintln(os.Stderr, "✗ no bundles at the destination")
 			return 1
 		}
-		rc, err := dests[0].Get(ctx, n)
+		rc, err := d.Get(ctx, n)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 			return 1
