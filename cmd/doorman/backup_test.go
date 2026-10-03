@@ -92,6 +92,23 @@ func TestBackupLifecycle(t *testing.T) {
 		t.Errorf("stale line = %q, ok=%v", stale, ok)
 	}
 
+	// With the on-box key copy in place, run verifies what it wrote and
+	// the key copy never enters the bundle.
+	os.MkdirAll(filepath.Join(state, "backup"), 0o700)
+	os.WriteFile(identityFile(state), []byte(identity+"\n"), 0o600)
+	out = capture(t, func() {
+		if rc := runBackup(append([]string{"run"}, common...)); rc != 0 {
+			t.Errorf("run rc = %d", rc)
+		}
+	})
+	if !strings.Contains(out, "✓ verified") {
+		t.Errorf("run should verify with the on-box key: %q", out)
+	}
+	line, _ = describeBackup(state, time.Now(), secretsFrom(map[string]string{"BACKUP_RECIPIENT": "age1x"}))
+	if !strings.Contains(line, ", verified") {
+		t.Errorf("check line = %q", line)
+	}
+	os.Remove(identityFile(state))
 	// verify and restore read the identity from a file, never an argument.
 	idFile := filepath.Join(root, "identity")
 	os.WriteFile(idFile, []byte(identity+"\n"), 0o600)
@@ -117,6 +134,15 @@ func TestBackupLifecycle(t *testing.T) {
 	if !strings.Contains(out, "Would write:") || !strings.Contains(out, "cert.pem") {
 		t.Errorf("dry run: %q", out)
 	}
+	if strings.Contains(out, "identity.key") || strings.Contains(out, "last.json") {
+		t.Error("the backup state directory must never be in a bundle")
+	}
+	// An identity file left somewhere a bundle collects is flagged.
+	t.Setenv("BACKUP_IDENTITY_FILE", filepath.Join(state, "provision", "identity.key"))
+	if line, ok := describeBackup(state, time.Now(), secretsFrom(map[string]string{"BACKUP_RECIPIENT": "age1x"})); ok || !strings.Contains(line, "lies where bundles are collected") {
+		t.Errorf("a key inside the collected tree must fail check: %q", line)
+	}
+	t.Setenv("BACKUP_IDENTITY_FILE", idFile)
 	// A real restore into another root is byte-identical.
 	other := filepath.Join(root, "restored")
 	out = capture(t, func() {

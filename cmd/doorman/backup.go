@@ -65,12 +65,14 @@ func (o *backupOpts) sources() backup.Sources {
 	}
 }
 
-// excludeDirs keeps a file destination out of its own bundles.
+// excludeDirs keeps a file destination out of its own bundles, and the
+// backup state directory (last.json, the on-box key copy) out of every one.
 func (o *backupOpts) excludeDirs() []string {
+	out := []string{filepath.Join(o.stateDir, "backup")}
 	if p, ok := o.env("BACKUP_PATH"); ok && strings.TrimSpace(p) != "" {
-		return []string{strings.TrimSpace(p)}
+		out = append(out, strings.TrimSpace(p))
 	}
-	return nil
+	return out
 }
 
 // destinations is every backend .env names. The file backend is here; s3
@@ -204,13 +206,14 @@ func backupInit(o *backupOpts) int {
 }
 
 type lastBackup struct {
-	At      time.Time `json:"at"`
-	Name    string    `json:"name"`
-	Dests   []string  `json:"dests"`
-	Failed  []string  `json:"failed,omitempty"`
-	Files   int       `json:"files"`
-	Bytes   int64     `json:"bytes"`
-	Doorman string    `json:"doorman"`
+	At       time.Time `json:"at"`
+	Name     string    `json:"name"`
+	Dests    []string  `json:"dests"`
+	Failed   []string  `json:"failed,omitempty"`
+	Files    int       `json:"files"`
+	Bytes    int64     `json:"bytes"`
+	Doorman  string    `json:"doorman"`
+	Verified bool      `json:"verified"`
 }
 
 func lastBackupPath(stateDir string) string { return filepath.Join(stateDir, "backup", "last.json") }
@@ -268,6 +271,22 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 		fmt.Println(")")
 		post(ctx, journal, events.BackupCompleted, r.Dest)
 	}
+	// The nightly proof: open what was just written with the on-box key,
+	// when there is one. A bundle that does not open is a failed backup,
+	// whatever the destinations said.
+	if identity, err := identityFrom(o.stateDir); err != nil {
+		fmt.Printf("  ! identity file: %v (bundle not verified)\n", err)
+	} else if identity != "" {
+		if _, err := backup.ReadManifest(bytes.NewReader(buf.Bytes()), identity); err != nil {
+			rc = 1
+			last.Failed = append(last.Failed, "verify")
+			fmt.Printf("✗ verify: the bundle does not open with the on-box key: %v\n", err)
+			post(ctx, journal, events.BackupFailed, "verify")
+		} else {
+			last.Verified = true
+			fmt.Println("✓ verified: the bundle opens with the on-box key")
+		}
+	}
 	if b, err := json.MarshalIndent(last, "", "  "); err == nil {
 		_ = os.MkdirAll(filepath.Dir(lastBackupPath(o.stateDir)), 0o700)
 		_ = os.WriteFile(lastBackupPath(o.stateDir), b, 0o600)
@@ -309,7 +328,7 @@ func backupList(ctx context.Context, o *backupOpts) int {
 // backupVerify opens the newest (or named) bundle with the identity and
 // prints its manifest: proof the key still opens what the box writes.
 func backupVerify(ctx context.Context, o *backupOpts, args []string) int {
-	identity, ok := readIdentity()
+	identity, ok := readIdentity(o.stateDir)
 	if !ok {
 		return 2
 	}
@@ -358,16 +377,39 @@ func backupVerify(ctx context.Context, o *backupOpts, args []string) int {
 	return 0
 }
 
-// readIdentity takes the private key from BACKUP_IDENTITY_FILE, or asks on
-// the terminal. Never from .env, never from an argument (shells remember).
-func readIdentity() (string, bool) {
-	if p := strings.TrimSpace(os.Getenv("BACKUP_IDENTITY_FILE")); p != "" {
-		b, err := os.ReadFile(p)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
-			return "", false
+// identityFile is where the on-box copy of the private key lives when the
+// operator keeps one: beside last.json, in the one directory under the
+// state tree that is never bundled. The authoritative copy is the
+// operator's, off the box; this one lets the box prove nightly that what
+// it wrote opens.
+func identityFile(stateDir string) string { return filepath.Join(stateDir, "backup", "identity.key") }
+
+// identityFrom returns the private key from BACKUP_IDENTITY_FILE, else the
+// on-box copy if there is one. "" means neither exists.
+func identityFrom(stateDir string) (string, error) {
+	p := strings.TrimSpace(os.Getenv("BACKUP_IDENTITY_FILE"))
+	if p == "" {
+		p = identityFile(stateDir)
+		if _, err := os.Stat(p); err != nil {
+			return "", nil
 		}
-		return strings.TrimSpace(string(b)), true
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// readIdentity takes the private key from BACKUP_IDENTITY_FILE, the on-box
+// copy, or asks on the terminal. Never from .env, never from an argument
+// (shells remember).
+func readIdentity(stateDir string) (string, bool) {
+	if id, err := identityFrom(stateDir); err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return "", false
+	} else if id != "" {
+		return id, true
 	}
 	fmt.Fprint(os.Stderr, "Private key (AGE-SECRET-KEY-…): ")
 	var line string
@@ -437,7 +479,7 @@ func runRestore(args []string) int {
 		return 2
 	}
 	defer src.Close()
-	identity, ok := readIdentity()
+	identity, ok := readIdentity(o.stateDir)
 	if !ok {
 		return 2
 	}
@@ -538,6 +580,18 @@ func describeBackup(stateDir string, now time.Time, env func(string) (string, bo
 	age := now.Sub(last.At).Round(time.Minute)
 	line := fmt.Sprintf("Backup: last %s ago → %s (%d files, %s)", age, strings.Join(last.Dests, ", "), last.Files, humanBytes(last.Bytes))
 	ok := true
+	if last.Verified {
+		line += ", verified"
+	} else {
+		line += ", not verified (no on-box key: " + identityFile(stateDir) + ")"
+	}
+	if p := strings.TrimSpace(os.Getenv("BACKUP_IDENTITY_FILE")); p != "" {
+		if abs, err := filepath.Abs(p); err == nil && !strings.HasPrefix(abs, filepath.Join(stateDir, "backup")+string(filepath.Separator)) &&
+			(strings.HasPrefix(abs, stateDir+string(filepath.Separator)) || strings.HasPrefix(abs, "/opt/call-me-maybe/")) {
+			line += " — ! BACKUP_IDENTITY_FILE lies where bundles are collected; move it to " + identityFile(stateDir)
+			ok = false
+		}
+	}
 	if len(last.Failed) > 0 {
 		line += " — failed: " + strings.Join(last.Failed, ", ")
 		ok = false

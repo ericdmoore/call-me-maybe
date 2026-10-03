@@ -917,8 +917,13 @@ $ doorman backup list
 $ BACKUP_IDENTITY_FILE=~/callmemaybe.key doorman backup verify   # proves the key opens what the box writes
 ```
 
-**The private key is printed once and stored nowhere on the box.** Keep it
-with the house's master keys. The box encrypts and can never decrypt; a
+**The private key is printed once and stored nowhere on the box by `init`.**
+Keep it with the house's master keys. You may put a *copy* at
+`/var/lib/doorman/backup/identity.key` (doorman, 0600) — the one directory
+under the state tree that is never bundled — and then every `backup run`
+ends by opening the bundle it just wrote ("verified" in `check`); `verify`
+and `restore` find it there too. The copy is for the box's self-check; the
+authoritative key lives off the box, or the box's death takes it. The box encrypts and can never decrypt; a
 destination holds blobs it cannot read; a stolen box cannot read its own
 backups. Lose the key and every bundle is a brick — by design. Rotating it
 is deliberate: remove `BACKUP_RECIPIENT`, keep the old identity for the old
