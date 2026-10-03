@@ -71,7 +71,7 @@ func TestEveryEmbeddedUnitHasARuleAndTheDaemonComesFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 9 || units[0].Name != "doorman.service" {
+	if len(units) != 11 || units[0].Name != "doorman.service" {
 		t.Fatalf("units = %d, first %s", len(units), units[0].Name)
 	}
 	for _, u := range units {
@@ -106,8 +106,8 @@ func TestPlanInstallsEnablesAndIsIdempotent(t *testing.T) {
 	if n := x.count("systemctl", "enable", "--now"); n != 3 {
 		t.Errorf("enabled = %d, want the daemon, the *88 timer and the inbox: %v", n, p.Enable)
 	}
-	if n := x.count("systemctl", "disable", "--now"); n != 3 {
-		t.Errorf("disabled = %d, want directory, digest, balance: %v", n, p.Disable)
+	if n := x.count("systemctl", "disable", "--now"); n != 4 {
+		t.Errorf("disabled = %d, want directory, digest, balance, backup: %v", n, p.Disable)
 	}
 	unit, err := os.ReadFile(filepath.Join(lay.UnitDir, "doorman-inbox.service"))
 	if err != nil || !strings.HasPrefix(string(unit), managedMarker) || !strings.Contains(string(unit), "ExecStart=") {

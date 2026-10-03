@@ -1,8 +1,9 @@
 # s27 · Backup — the house as one sealed file, and a new box from it
 
-**Status:** planned 2026-10-03 (issue #29, refined with the owner the same
-day); build starts after #31 (`init services`) merges, because the timer is
-one more unit for it to own.
+**Status:** M1–M3 built 2026-10-03 (the package, `backup init|run|list|verify`,
+the file destination, retention, the timer under `init services`, the check
+line, `restore`); M4 (s3) and M5 (jepsen) next. Planned the same day from
+issue #29.
 
 ## What done looks like
 

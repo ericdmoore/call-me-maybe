@@ -69,6 +69,7 @@ type Wants struct {
 	Inbox     bool // INBOX_URL and messages.toml
 	Digest    bool // MAIL_HOOK and MAIL_TO
 	Balance   bool // trunks.toml
+	Backup    bool // BACKUP_RECIPIENT and at least one destination
 	// Why records the reason for each decision, by unit, for the plan.
 	Why map[string]string
 }
@@ -97,6 +98,8 @@ func Units() ([]Unit, error) {
 		"doorman-digest.timer":      {wanted: func(w Wants) bool { return w.Digest }},
 		"doorman-balance.service":   {},
 		"doorman-balance.timer":     {wanted: func(w Wants) bool { return w.Balance }},
+		"doorman-backup.service":    {},
+		"doorman-backup.timer":      {wanted: func(w Wants) bool { return w.Backup }},
 	}
 	entries, err := fs.ReadDir(unitFS, "units")
 	if err != nil {

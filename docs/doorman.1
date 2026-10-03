@@ -364,6 +364,24 @@ sets
 in .env; \fBnone\fR clears it. Only the phonebook job reads it, on its next
 run, so no restart.
 .TP
+.B doorman backup \fBinit\fR|\fBrun\fR|\fBlist\fR|\fBverify\fR
+The house as one sealed file. \fBinit\fR makes the keypair: the public half
+into .env as
+.BR BACKUP_RECIPIENT ,
+the private half printed once and never stored. \fBrun\fR bundles .env, the
+TOMLs, the state directory (the journal snapshotted), voicemail, the *88
+spool and the hand-written Asterisk files, age\-encrypted, and delivers it
+to every destination (\fBBACKUP_PATH\fR), pruning by
+.BR BACKUP_KEEP_DAILY / WEEKLY ;
+doorman\-backup.timer runs it nightly. \fBverify\fR opens the newest with
+the private key (\fBBACKUP_IDENTITY_FILE\fR, or typed).
+.TP
+.B doorman restore \fIbundle\fR|\fB\-\-latest\fR
+A box from a bundle. \fB\-\-dry\-run\fR shows the manifest and what would
+be written; a box with a .env is refused unless \fB\-\-force\fR (it is
+backed up first); \fB\-\-root\fR \fIdir\fR rehearses elsewhere. Then check,
+render, init services, start doorman.
+.TP
 .B doorman lsp
 Run a language server over stdio for
 .IR policy.toml ,

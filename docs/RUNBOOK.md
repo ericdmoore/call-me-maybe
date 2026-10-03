@@ -901,6 +901,50 @@ lobby. To admit someone, add them to `[[people]]`. The three clips
 (`add-number`, `add-name`, `add-done`) are the bundled pack's; without them
 the phone hears the beep and silence, and still works.
 
+### Backup and restore
+
+The house is small — `.env`, the TOMLs, `/var/lib/doorman` (the journal, the
+provisioning certificate the phones already trust, the inbox seen-set, the
+`*88` books), voicemail, un-named `*88` clips, and the hand-written Asterisk
+files; a few megabytes. `doorman backup` makes it one sealed file.
+
+```bash
+$ doorman backup init                 # keypair: public half into .env, private printed ONCE
+$ sudo -u doorman nano .env           # BACKUP_PATH=/mnt/backups/callmemaybe (a directory; s3 and the account follow)
+$ sudo -u doorman doorman backup run  # one bundle, delivered, older ones pruned
+$ sudo doorman init services          # enables doorman-backup.timer (nightly, 05:10)
+$ doorman backup list
+$ BACKUP_IDENTITY_FILE=~/callmemaybe.key doorman backup verify   # proves the key opens what the box writes
+```
+
+**The private key is printed once and stored nowhere on the box.** Keep it
+with the house's master keys. The box encrypts and can never decrypt; a
+destination holds blobs it cannot read; a stolen box cannot read its own
+backups. Lose the key and every bundle is a brick — by design. Rotating it
+is deliberate: remove `BACKUP_RECIPIENT`, keep the old identity for the old
+bundles, run `init` again.
+
+Every bundle starts with `MANIFEST.json`: the box, the doorman version, the
+time, every file's hash, and what was excluded (`--no-voicemail` leaves the
+messages out). `doorman check` prints the last run, its age and where it
+went, and fails the check past a day or after a failed destination.
+`backup.completed` / `backup.failed` go to the journal, by destination name.
+
+**A new box from a bundle:**
+
+```bash
+$ sudo systemctl stop doorman                              # the journal is replaced by a snapshot
+$ doorman restore --latest --dry-run                       # the manifest and what would be written
+$ doorman restore --latest                                 # or: doorman restore callmemaybe-jepsen-….age
+$ doorman check && doorman render                          # and the reloads render prints
+$ sudo doorman init services && sudo systemctl start doorman
+```
+
+`restore` refuses a box that already has a `.env` unless `--force` (which
+backs the existing one up first); `--root DIR` rehearses into a directory.
+The phones reconnect to the restored box without being re-provisioned,
+because the provisioning certificate is in the bundle.
+
 ### Bedtime (curfew)
 
 The hours live in `policy.toml` as `[[schedules]]` — the same blocks an

@@ -87,6 +87,10 @@ func runCommand() int {
 			return runBalance(os.Args[2:])
 		case "provision":
 			return runProvision(os.Args[2:])
+		case "backup":
+			os.Exit(runBackup(os.Args[2:]))
+		case "restore":
+			os.Exit(runRestore(os.Args[2:]))
 		case "stt":
 			os.Exit(runSTT(os.Args[2:]))
 		case "phonebook":
@@ -292,6 +296,24 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 answers; doorman-phonebook.timer runs it every
                                 minute. Never on a call; no STT means the
                                 number keeps its number for a name
+  doorman backup init|run|list|verify
+                                the house as one sealed file: init makes the
+                                keypair (public half into .env, private printed
+                                once, never stored); run collects .env, the TOMLs,
+                                the state directory (journal snapshotted),
+                                voicemail, the *88 spool and the hand-written
+                                Asterisk files into one age-encrypted bundle and
+                                delivers it to every destination (BACKUP_PATH;
+                                s3 and the account later), pruning by
+                                BACKUP_KEEP_DAILY/WEEKLY; doorman-backup.timer
+                                runs it nightly; verify opens the newest with
+                                the private key (BACKUP_IDENTITY_FILE or typed)
+  doorman restore <bundle>|--latest
+                                a box from a bundle: --dry-run shows the
+                                manifest and what would be written; refuses a
+                                box with a .env unless --force (backs it up);
+                                --root DIR for a rehearsal elsewhere. Then
+                                check, render, init services, start doorman
   doorman stt [url|none]        where *88 names are transcribed: show what is set
                                 and whether it answers; a URL (OpenAI-compatible
                                 /v1/audio/transcriptions — tools/speechd on a Mac,
@@ -652,13 +674,6 @@ func checkEnvironment() int {
 			return 1
 		}
 		fmt.Printf("Event journal: %s (CLI reads; webhook mode %s; writer active: %t)\n", envCfg.EventJournalPath, envCfg.WebhookMode, active)
-		fmt.Println(describeSTT(func(k string) (string, bool) {
-			if v, ok := os.LookupEnv(k); ok {
-				return v, true
-			}
-			v, ok := dotenv[k]
-			return v, ok
-		}, 3*time.Second))
 	}
 	if envCfg.CELSpoolPath != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -669,6 +684,29 @@ func checkEnvironment() int {
 			return 1
 		}
 		fmt.Println("CEL spool: readable; verify Asterisk backend with cel show status")
+	}
+	bad := false
+	fmt.Println(describeSTT(func(k string) (string, bool) {
+		if v, ok := os.LookupEnv(k); ok {
+			return v, true
+		}
+		v, ok := dotenv[k]
+		return v, ok
+	}, 3*time.Second))
+	if line, ok := describeBackup("/var/lib/doorman", time.Now(), func(k string) (string, bool) {
+		if v, ok := os.LookupEnv(k); ok {
+			return v, true
+		}
+		v, ok := dotenv[k]
+		return v, ok
+	}); true {
+		fmt.Println(line)
+		if !ok {
+			bad = true
+		}
+	}
+	if bad {
+		return 1
 	}
 	return 0
 }

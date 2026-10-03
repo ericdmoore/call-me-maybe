@@ -54,8 +54,13 @@ const (
 	// PhonebookAdded is a number filed from a handset with *88 (s24);
 	// Reason is the handset id. PhonebookNamed is its name arriving from
 	// transcription. Never the number, never the transcript.
-	PhonebookAdded  Type = "phonebook.added"
-	PhonebookNamed  Type = "phonebook.named"
+	PhonebookAdded Type = "phonebook.added"
+	PhonebookNamed Type = "phonebook.named"
+	// BackupCompleted / BackupFailed are the nightly bundle delivered to a
+	// destination, or not (s27); Reason is the destination's name — never
+	// a path, which may carry a bucket or a token.
+	BackupCompleted Type = "backup.completed"
+	BackupFailed    Type = "backup.failed"
 	ARIConnected    Type = "ari.connected"
 	ARIDisconnected Type = "ari.disconnected"
 	DaemonStarted   Type = "daemon.started"
@@ -67,7 +72,7 @@ func Types() []Type {
 	return append([]Type(nil), eventTypes[:]...)
 }
 
-var eventTypes = [...]Type{JournalNote, ChannelStarted, ChannelAnswered, ChannelHungup, ChannelEnded, ChannelBridgeEntered, ChannelBridgeExited, ChannelTransfer, ChannelLinkedEnded, ChannelDialStarted, ChannelApplication, CallFinished, CallObserved, AdmissionDecided, RingStarted, RingStageFinished, CallAnswered, CallHandedOff, SessionFinished, ConfigReloaded, ConfigReloadFailed, ContactsRefreshed, ContactsRefreshFailed, MessageReceived, MessageActed, ActionPerformed, ActionRefused, PhonebookAdded, PhonebookNamed, ARIConnected, ARIDisconnected, DaemonStarted, DaemonStopping, CoverageGap}
+var eventTypes = [...]Type{JournalNote, ChannelStarted, ChannelAnswered, ChannelHungup, ChannelEnded, ChannelBridgeEntered, ChannelBridgeExited, ChannelTransfer, ChannelLinkedEnded, ChannelDialStarted, ChannelApplication, CallFinished, CallObserved, AdmissionDecided, RingStarted, RingStageFinished, CallAnswered, CallHandedOff, SessionFinished, ConfigReloaded, ConfigReloadFailed, ContactsRefreshed, ContactsRefreshFailed, MessageReceived, MessageActed, ActionPerformed, ActionRefused, PhonebookAdded, PhonebookNamed, BackupCompleted, BackupFailed, ARIConnected, ARIDisconnected, DaemonStarted, DaemonStopping, CoverageGap}
 
 func ValidType(t Type) bool {
 	for _, v := range eventTypes {

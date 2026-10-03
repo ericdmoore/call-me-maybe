@@ -81,8 +81,14 @@ type Config struct {
 	// and this file keep agreeing, but the daemon does not use them: they
 	// belong to `doorman phonebook`, the *88 job that runs off the call
 	// path (s24). Transcription never sits on a call (invariant 7).
-	PhonebookDir          string
-	PhonebookSpool        string
+	PhonebookDir   string
+	PhonebookSpool string
+	// Backup keys (s27): read by `doorman backup` and `init services`; the
+	// daemon parses and ignores them, as with STT_*.
+	BackupRecipient       string
+	BackupPath            string
+	BackupKeepDaily       int
+	BackupKeepWeekly      int
 	STTEndpoint           string
 	STTModel              string
 	STTTimeout            time.Duration
@@ -199,6 +205,10 @@ func load(get func(string) string, requireSecrets bool) (Config, error) {
 		CELSpoolPath:          str("CEL_SPOOL_PATH", ""),
 		PhonebookDir:          str("PHONEBOOK_DIR", "/var/lib/doorman/phonebook"),
 		PhonebookSpool:        str("PHONEBOOK_SPOOL", "/var/spool/call-me-maybe"),
+		BackupRecipient:       str("BACKUP_RECIPIENT", ""),
+		BackupPath:            str("BACKUP_PATH", ""),
+		BackupKeepDaily:       integer("BACKUP_KEEP_DAILY", 7),
+		BackupKeepWeekly:      integer("BACKUP_KEEP_WEEKLY", 8),
 		STTEndpoint:           str("STT_ENDPOINT", ""),
 		STTModel:              str("STT_MODEL", ""),
 		STTTimeout:            ms("STT_TIMEOUT_MS", 120_000),
