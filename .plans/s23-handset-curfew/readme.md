@@ -1,8 +1,13 @@
 # s23 · Curfew — a handset goes dark at bedtime
 
-**Status:** M1–M3 built 2026-10-02, the evening the five new handsets
-(103–107) were provisioned on jepsen and the first question after "they
-ring" was "how do they stop". M4 (jepsen) next.
+**Status:** M1–M4 live on jepsen 2026-10-02 ~21:00 — built the evening the
+five new handsets (103–107) were provisioned and the first question after
+"they ring" was "how do they stop". Annabelle and Norah were ASLEEP NOW
+within the hour; the keeper's first real drop is the 23:30 weekend window.
+Open: the two clips need a `prompts/build.sh` run on a workstation with
+piper (busy tone meanwhile), and the deploy found that jepsen's unit runs
+`/opt/call-me-maybe/bin/doorman`, not the `/usr/local/bin` copy — a release
+mechanism question for s09, not this stream.
 
 ## What done looks like
 
