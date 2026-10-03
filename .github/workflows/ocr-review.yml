@@ -1,0 +1,158 @@
+name: OCR review
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Open same-repository PR number
+        required: true
+        type: string
+      head:
+        description: Expected head (optional stale-run guard)
+        type: string
+      cheap:
+        description: Low-effort repair re-review
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: ocr-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+jobs:
+  authorize:
+    if: >-
+      vars.AI_REVIEW_ENABLED == 'true' &&
+      (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') &&
+      (github.event_name == 'workflow_dispatch' ||
+       (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-latest
+    outputs:
+      head: ${{ steps.gate.outputs.head }}
+      base: ${{ steps.gate.outputs.base }}
+      number: ${{ steps.gate.outputs.number }}
+      model: ${{ steps.gate.outputs.model }}
+      model_id: ${{ steps.gate.outputs.model_id }}
+      provider: ${{ steps.gate.outputs.provider }}
+      url: ${{ steps.gate.outputs.url }}
+      background: ${{ steps.gate.outputs.background }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        id: gate
+        env:
+          POLICY_SHA: ${{ github.workflow_sha }}
+          DEFAULT_MODEL: ${{ vars.OCR_MODEL || 'ollama/bullmoose-ocr:20b' }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          EXPECTED_HEAD: ${{ inputs.head }}
+        with:
+          script: |
+            const pr = await require('./.github/ai/authorize.cjs')({github, context, core});
+            core.setOutput('background', await require('./.github/ai/background.cjs')({github, context, core, pr}));
+  review:
+    needs: authorize
+    runs-on: [self-hosted, macOS, ARM64, call-me-maybe-ai]
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      PR_NUMBER: ${{ needs.authorize.outputs.number }}
+      REVIEW_HEAD: ${{ needs.authorize.outputs.head }}
+      REVIEW_BASE: ${{ needs.authorize.outputs.base }}
+      REVIEW_MODEL: ${{ needs.authorize.outputs.model }}
+      REVIEW_EFFORT: ${{ inputs.cheap && 'low' || 'medium' }}
+      REVIEW_BUDGET: ${{ inputs.cheap && '150000' || '500000' }}
+    steps:
+      - name: Allocate job-local state
+        run: |
+          echo "AI_JOB_DIR=$RUNNER_TEMP/cmm-review-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          echo "AI_POLICY=$RUNNER_TEMP/cmm-review-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/policy" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare private review context
+        env:
+          BACKGROUND: ${{ needs.authorize.outputs.background }}
+        run: |
+          umask 077
+          mkdir -p "$AI_POLICY"
+          cp .github/ai/* "$AI_POLICY/"
+          cp .opencodereview/rule.json "$AI_POLICY/rule.json"
+          printf '%s' "$BACKGROUND" > "$AI_JOB_DIR/background.md"
+      - name: Recheck head before inference
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          script: |
+            const {data: pr} = await github.rest.pulls.get({...context.repo, pull_number: Number(process.env.PR_NUMBER)});
+            if (pr.head.sha !== process.env.REVIEW_HEAD || pr.head.repo?.full_name !== process.env.GITHUB_REPOSITORY || pr.state !== 'open' || pr.draft) throw new Error('PR no longer eligible');
+      - name: OCR with live progress and structured JSON
+        id: review
+        env:
+          OCR_LLM_URL: ${{ needs.authorize.outputs.url }}
+          OCR_LLM_MODEL: ${{ needs.authorize.outputs.model_id }}
+          OCR_LLM_TOKEN: ${{ needs.authorize.outputs.provider == 'openrouter' && secrets.OPENROUTER_API_KEY || 'ollama' }}
+          OCR_USE_ANTHROPIC: 'false'
+          OCR_LLM_PROTOCOL: openai
+          OCR_LLM_TIMEOUT: '1200'
+          OPENROUTER_API_KEY: ${{ needs.authorize.outputs.provider == 'openrouter' && secrets.OPENROUTER_API_KEY || '' }}
+          PROVIDER: ${{ needs.authorize.outputs.provider }}
+        run: |
+          node -e 'require(process.env.AI_POLICY + "/models.cjs").credential(process.env.REVIEW_MODEL, process.env.OPENROUTER_API_KEY)'
+          bash "$AI_POLICY/review.sh"
+      - name: Get pinned upstream publisher
+        if: always() && steps.review.outcome != 'skipped'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: alibaba/open-code-review
+          ref: a758d9cbfb689937c7857ad64b2dd66adb58c0c2 # v1.12.11
+          path: .ocr-upstream
+          persist-credentials: false
+      - name: Publish advisory findings or visible failure
+        if: always() && steps.review.outcome != 'skipped'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        env:
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
+        with:
+          script: |
+            const fs = require('fs');
+            const number = Number(process.env.PR_NUMBER);
+            const {data: pr} = await github.rest.pulls.get({...context.repo, pull_number: number});
+            if (pr.head.sha !== process.env.REVIEW_HEAD) throw new Error('Head changed; discard stale review');
+            if (process.env.REVIEW_OUTCOME !== 'success') {
+              const body = `<!-- ocr-summary -->\nOCR failed or timed out at ${pr.head.sha}; coverage is incomplete. See ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}. This is advisory, not approval.`;
+              const comments = await github.paginate(github.rest.issues.listComments, {...context.repo, issue_number: number, per_page: 100});
+              const previous = comments.find(c => c.user.login === 'github-actions[bot]' && c.body?.includes('<!-- ocr-summary -->'));
+              if (previous) await github.rest.issues.updateComment({...context.repo, comment_id: previous.id, body});
+              else await github.rest.issues.createComment({...context.repo, issue_number: number, body});
+            } else {
+              const {runPostReviewComments} = require('./.ocr-upstream/scripts/github-actions/post-review-comments.js');
+              await runPostReviewComments({github, context, core, fs, prNumber: number,
+                resultPath: `${process.env.AI_JOB_DIR}/result.json`, stderrPath: `${process.env.AI_JOB_DIR}/stderr.log`,
+                stickySummary: true, incremental: true, resolveOutdated: 'false'});
+              const result = JSON.parse(fs.readFileSync(`${process.env.AI_JOB_DIR}/result.json`, 'utf8'));
+              const coverage = require(`${process.env.AI_POLICY}/coverage.cjs`)(result);
+              const comments = await github.paginate(github.rest.issues.listComments, {...context.repo, issue_number: number, per_page: 100});
+              const summary = comments.find(c => c.user.login === 'github-actions[bot]' && c.body?.includes('<!-- ocr-summary -->'));
+              if (!summary) throw new Error('Upstream publisher did not create a summary');
+              await github.rest.issues.updateComment({...context.repo, comment_id: summary.id, body: summary.body + '\n\n' + coverage});
+            }
+      - name: Retain JSON and progress (no credentials or session traces)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ocr-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.AI_JOB_DIR }}/result.json
+            ${{ env.AI_JOB_DIR }}/stderr.log
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Clean job state
+        if: always()
+        run: rm -rf -- "$AI_JOB_DIR"

@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      expected_head:
+        description: Exact repair commit to verify (empty for a normal manual run)
+        type: string
 
 # No write access needed: this workflow only reads the code.
 permissions:
@@ -15,6 +19,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  automation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.expected_head || github.ref }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: node --test .github/ai/*.test.cjs
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -23,6 +38,7 @@ jobs:
           # The coverage-floors check reads scripts/coverage.floors at the
           # base commit; a shallow clone cannot.
           fetch-depth: 0
+          ref: ${{ inputs.expected_head || github.ref }}
 
       - uses: actions/setup-go@v7
         with:
@@ -59,7 +75,9 @@ jobs:
 
       # The ratchet's pawl: a push may raise a floor, never lower one.
       - name: coverage floors never go down
-        run: bash scripts/coverage-floors-check.sh "${{ github.event.pull_request.base.sha || github.event.before }}"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash scripts/coverage-floors-check.sh "${BASE_SHA:-$(git merge-base origin/main HEAD)}"
 
       - uses: actions/upload-artifact@v7
         if: always()
@@ -159,6 +177,8 @@ jobs:
         working-directory: site
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.expected_head || github.ref }}
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -173,6 +193,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.expected_head || github.ref }}
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod

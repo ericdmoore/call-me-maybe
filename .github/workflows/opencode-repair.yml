@@ -1,0 +1,149 @@
+name: OpenCode repair
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number (inline relay)
+        required: true
+        type: string
+      comment:
+        description: Inline /oc comment ID to independently authorize
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: opencode-${{ github.event.issue.number || inputs.pr }}
+  cancel-in-progress: false
+jobs:
+  authorize:
+    if: >-
+      vars.AI_REPAIR_ENABLED == 'true' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.issue.pull_request && github.event.comment.user.type == 'User' &&
+        (startsWith(github.event.comment.body, '/oc ') || github.event.comment.body == '/oc')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      head: ${{ steps.gate.outputs.head }}
+      base: ${{ steps.gate.outputs.base }}
+      ref: ${{ steps.gate.outputs.ref }}
+      number: ${{ steps.gate.outputs.number }}
+      model: ${{ steps.gate.outputs.model }}
+      request: ${{ steps.gate.outputs.request }}
+      source: ${{ steps.gate.outputs.source }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        id: gate
+        env:
+          MODE: repair
+          POLICY_SHA: ${{ github.workflow_sha }}
+          PR_NUMBER: ${{ github.event.issue.number || inputs.pr }}
+          COMMENT_ID: ${{ github.event.comment.id || inputs.comment }}
+          COMMENT_KIND: ${{ github.event_name == 'workflow_dispatch' && 'inline' || 'issue' }}
+          DEFAULT_MODEL: ${{ vars.OPENCODE_MODEL || 'ollama/bullmoose-ocr:20b' }}
+        with:
+          script: |
+            const outputs = {};
+            await require('./.github/ai/authorize.cjs')({github, context,
+              core: {...core, setOutput: (key, value) => { outputs[key] = value; core.setOutput(key, value); }}});
+            await github.rest.issues.createComment({...context.repo, issue_number: Number(outputs.number),
+              body: `${outputs.marker}\nOne OpenCode pass requested at ${outputs.head}. Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}. Failure/cancellation consumes this request; post a new /oc to retry. Completion is not CI approval.`});
+  repair:
+    if: github.run_attempt == 1
+    needs: authorize
+    runs-on: [self-hosted, macOS, ARM64, call-me-maybe-ai]
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write # Explicit CI + OCR dispatch after GITHUB_TOKEN push.
+    env:
+      OPENCODE_BIN: /Users/alpaca/.local/share/ai-tools/opencode/1.18.34/node_modules/.bin/opencode
+      PR_NUMBER: ${{ needs.authorize.outputs.number }}
+      REPAIR_HEAD_SHA: ${{ needs.authorize.outputs.head }}
+      REPAIR_HEAD_REF: ${{ needs.authorize.outputs.ref }}
+      REPAIR_BASE_SHA: ${{ needs.authorize.outputs.base }}
+      REPAIR_MODEL: ${{ needs.authorize.outputs.model }}
+    steps:
+      - name: Allocate job-local state
+        run: |
+          echo "AI_JOB_DIR=$RUNNER_TEMP/cmm-repair-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          echo "AI_POLICY=$RUNNER_TEMP/cmm-repair-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/policy" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare isolated model and trusted policy
+        env:
+          REQUEST: ${{ needs.authorize.outputs.request }}
+          REQUEST_SOURCE: ${{ needs.authorize.outputs.source }}
+          OPENROUTER_API_KEY: ${{ startsWith(needs.authorize.outputs.model, 'openrouter/') && secrets.OPENROUTER_API_KEY || '' }}
+        run: |
+          umask 077
+          mkdir -p "$AI_POLICY"
+          cp .github/ai/* "$AI_POLICY/"
+          cp .github/opencode/repair-prompt.md "$AI_JOB_DIR/prompt.md"
+          chmod +x "$AI_POLICY/pre-push"
+          node <<'JS'
+          const fs = require('fs');
+          const {opencode, credential} = require('./.github/ai/models.cjs');
+          const model = process.env.REPAIR_MODEL;
+          credential(model, process.env.OPENROUTER_API_KEY);
+          fs.appendFileSync(process.env.GITHUB_ENV, `OPENCODE_CONFIG_CONTENT=${JSON.stringify(opencode(model))}\n`);
+          fs.appendFileSync(`${process.env.AI_JOB_DIR}/prompt.md`, `\nRepository: ${process.env.GITHUB_REPOSITORY}; PR #${process.env.PR_NUMBER}; expected head ${process.env.REPAIR_HEAD_SHA}.\nRequest: ${process.env.REQUEST}\nSource: ${process.env.REQUEST_SOURCE}\n`);
+          JS
+      - name: Recheck PR after runner queue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          script: |
+            const {data: pr} = await github.rest.pulls.get({...context.repo, pull_number: Number(process.env.PR_NUMBER)});
+            if (pr.state !== 'open' || pr.draft || pr.head.repo?.full_name !== process.env.GITHUB_REPOSITORY || pr.head.sha !== process.env.REPAIR_HEAD_SHA) throw new Error('PR no longer eligible or head changed while queued');
+      - name: One upstream OpenCode repair pass and validated push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENROUTER_API_KEY: ${{ startsWith(needs.authorize.outputs.model, 'openrouter/') && secrets.OPENROUTER_API_KEY || '' }}
+        run: |
+          # Child-only gh authentication; no Alpaca credential store or git credential persistence.
+          export GIT_CONFIG_GLOBAL=/dev/null
+          export GIT_CONFIG_NOSYSTEM=1
+          export GH_CONFIG_DIR="$AI_JOB_DIR/home/.config/gh"
+          export GIT_CONFIG_COUNT=2
+          export GIT_CONFIG_KEY_0=credential.helper
+          export GIT_CONFIG_VALUE_0=''
+          export GIT_CONFIG_KEY_1=credential.helper
+          export GIT_CONFIG_VALUE_1='!gh auth git-credential'
+          bash "$AI_POLICY/repair.sh"
+      - name: Explicit CI and cheap review for the pushed SHA
+        if: always()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          script: |
+            const fs = require('fs');
+            const file = `${process.env.AI_JOB_DIR}/pushed-sha`;
+            if (!fs.existsSync(file)) {
+              await core.summary.addRaw('No verified repair push. Inspect the repair step and finding replies; failures require a new /oc request.').write();
+              return;
+            }
+            const sha = fs.readFileSync(file, 'utf8').trim();
+            const {data: pr} = await github.rest.pulls.get({...context.repo, pull_number: Number(process.env.PR_NUMBER)});
+            if (pr.head.sha !== sha) throw new Error('Head changed after repair push; no claim of CI coverage');
+            await github.rest.actions.createWorkflowDispatch({...context.repo, workflow_id: 'ci.yml', ref: pr.head.ref, inputs: {expected_head: sha}});
+            await github.rest.actions.createWorkflowDispatch({...context.repo, workflow_id: 'ocr-review.yml', ref: context.payload.repository.default_branch,
+              inputs: {pr: String(pr.number), head: sha, cheap: 'true'}});
+            await github.rest.issues.createComment({...context.repo, issue_number: pr.number,
+              body: `Repair pushed ${sha}. Local validation passed; normal CI and a cheap advisory OCR review were explicitly queued. This is NOT a claim that CI passed. Inspect Actions for this exact SHA and approve any pending run. OCR will not initiate another repair.`});
+      - name: Remove job credentials and state
+        if: always()
+        run: |
+          git config --local --unset core.hooksPath || true
+          rm -rf -- "$AI_JOB_DIR"
