@@ -483,7 +483,17 @@ func runRestore(args []string) int {
 		fmt.Println("  ! not root: owners were not restored; files belong to you. Run as root for a real restore.")
 	}
 	fmt.Printf("✓ %d file(s) restored from %s (doorman %s, %s)\n", len(written), m.Host, m.Doorman, m.CreatedAt.Format(time.RFC3339))
+	if *root != "" {
+		fmt.Println("Laid out under", *root, "— nothing started, nothing registered. Inspect and diff at leisure.")
+		return 0
+	}
 	fmt.Println("Next: `doorman check`, `doorman render` and the reloads it prints, `sudo doorman init services`, then `sudo systemctl start doorman`.")
+	fmt.Println()
+	fmt.Println("If the box this came from is still running, do NOT start Asterisk or the inbox here:")
+	fmt.Println("  the trunk in pjsip.conf registers one sub-account, and the provider keeps the last")
+	fmt.Println("  registration — inbound calls would flip between the two boxes; and two inboxes on one")
+	fmt.Println("  token would split the house's texts. Phones are unaffected: they stay on the box whose")
+	fmt.Println("  window they fetched from. Change PROVISION_ADDRESS in .env if this box has a new IP.")
 	return 0
 }
 

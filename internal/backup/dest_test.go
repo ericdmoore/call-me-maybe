@@ -70,3 +70,21 @@ func TestFileDestinationDeliversAtomicallyAndPrunes(t *testing.T) {
 	}
 	rc.Close()
 }
+
+// Two houses in one bucket keep their own history; neither prunes the other.
+func TestKeepIsPerHost(t *testing.T) {
+	now := time.Date(2026, 10, 30, 6, 0, 0, 0, time.UTC)
+	var names []string
+	for d := 0; d < 10; d++ {
+		names = append(names, Name("jepsen", now.AddDate(0, 0, -d)), Name("grandma", now.AddDate(0, 0, -d)))
+	}
+	keep, _ := Keep(names, 7, 0, now)
+	byHost := map[string]int{}
+	for _, k := range keep {
+		h, _, _ := parseName(k)
+		byHost[h]++
+	}
+	if byHost["jepsen"] != 7 || byHost["grandma"] != 7 {
+		t.Errorf("kept per host = %v, want 7 each", byHost)
+	}
+}

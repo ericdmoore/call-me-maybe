@@ -80,12 +80,18 @@ var bundleName = regexp.MustCompile(`^callmemaybe-(.+)-(\d{8}T\d{6}Z)\.age$`)
 
 // StampOf reads the time out of a bundle name.
 func StampOf(name string) (time.Time, bool) {
+	_, t, ok := parseName(name)
+	return t, ok
+}
+
+// parseName splits a bundle name into its host and time.
+func parseName(name string) (host string, at time.Time, ok bool) {
 	m := bundleName.FindStringSubmatch(filepath.Base(name))
 	if m == nil {
-		return time.Time{}, false
+		return "", time.Time{}, false
 	}
 	t, err := time.Parse("20060102T150405Z", m[2])
-	return t, err == nil
+	return m[1], t, err == nil
 }
 
 // Latest is the newest bundle among names, by its stamp.
@@ -101,44 +107,55 @@ func Latest(names []string) (string, bool) {
 	return best, ok
 }
 
-// Keep decides which bundles stay under a daily/weekly rule: the newest
-// `daily` by day, plus the newest in each of the last `weekly` ISO weeks.
-// Everything else is pruned. Names that are not bundles are never touched.
+// Keep decides which bundles stay under a daily/weekly rule, per host:
+// the newest `daily` by day, plus the newest in each of the last `weekly`
+// ISO weeks, for each box whose bundles share the destination. Everything
+// else is pruned. Two houses in one bucket never prune each other, and
+// names that are not bundles are never touched.
 func Keep(names []string, daily, weekly int, now time.Time) (keep, prune []string) {
 	type b struct {
 		name string
+		host string
 		at   time.Time
 	}
-	var all []b
+	byHost := map[string][]b{}
 	for _, n := range names {
-		if at, ok := StampOf(n); ok {
-			all = append(all, b{n, at})
+		if host, at, ok := parseName(n); ok {
+			byHost[host] = append(byHost[host], b{n, host, at})
 		}
 	}
-	sort.Slice(all, func(i, j int) bool { return all[i].at.After(all[j].at) })
-	kept := map[string]bool{}
-	days := map[string]bool{}
-	for _, x := range all {
-		d := x.at.UTC().Format("2006-01-02")
-		if len(days) < daily && !days[d] {
-			days[d] = true
-			kept[x.name] = true
-		}
+	hosts := make([]string, 0, len(byHost))
+	for h := range byHost {
+		hosts = append(hosts, h)
 	}
-	weeks := map[string]bool{}
-	for _, x := range all {
-		y, w := x.at.UTC().ISOWeek()
-		k := fmt.Sprintf("%d-%02d", y, w)
-		if len(weeks) < weekly && !weeks[k] {
-			weeks[k] = true
-			kept[x.name] = true
+	sort.Strings(hosts)
+	for _, h := range hosts {
+		all := byHost[h]
+		sort.Slice(all, func(i, j int) bool { return all[i].at.After(all[j].at) })
+		kept := map[string]bool{}
+		days := map[string]bool{}
+		for _, x := range all {
+			d := x.at.UTC().Format("2006-01-02")
+			if len(days) < daily && !days[d] {
+				days[d] = true
+				kept[x.name] = true
+			}
 		}
-	}
-	for _, x := range all {
-		if kept[x.name] {
-			keep = append(keep, x.name)
-		} else {
-			prune = append(prune, x.name)
+		weeks := map[string]bool{}
+		for _, x := range all {
+			y, w := x.at.UTC().ISOWeek()
+			k := fmt.Sprintf("%d-%02d", y, w)
+			if len(weeks) < weekly && !weeks[k] {
+				weeks[k] = true
+				kept[x.name] = true
+			}
+		}
+		for _, x := range all {
+			if kept[x.name] {
+				keep = append(keep, x.name)
+			} else {
+				prune = append(prune, x.name)
+			}
 		}
 	}
 	return keep, prune
