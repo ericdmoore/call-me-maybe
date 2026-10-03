@@ -100,3 +100,11 @@ test('cloud credentials are mandatory only for an explicit cloud route', () => {
   assert.throws(() => credential('openrouter/openai/gpt-oss-20b', ''), /no fallback/);
   assert.equal(credential('openrouter/openai/gpt-oss-20b', 'test-placeholder'), 'test-placeholder');
 });
+test('zero CLI exit, provider errors and an empty stop are not repair completion', () => {
+  const verify = require('./repair-result.cjs');
+  const stop = {type: 'step_finish', part: {reason: 'stop'}};
+  const assessment = {type: 'text', part: {text: 'Invalid finding: concrete evidence.'}};
+  assert.throws(() => verify(JSON.stringify(stop)));
+  assert.throws(() => verify([stop, assessment, {type: 'error'}].map(JSON.stringify).join('\n')));
+  assert.doesNotThrow(() => verify([assessment, stop].map(JSON.stringify).join('\n')));
+});

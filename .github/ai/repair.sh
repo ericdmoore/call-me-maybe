@@ -16,12 +16,8 @@ node "$AI_POLICY/isolate.cjs" "$AI_JOB_DIR" "$OPENCODE_BIN" run --pure --auto \
   --model "$REPAIR_MODEL" --format json --file "$AI_JOB_DIR/prompt.md" \
   | tee "$AI_JOB_DIR/opencode.jsonl"
 # Fail closed on upstream error events (the CLI may exit zero after an API error).
-node - "$AI_JOB_DIR/opencode.jsonl" <<'JS'
-const fs = require('fs');
-const events = fs.readFileSync(process.argv[2], 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
-if (!events.some(e => e.type === 'step_finish') || events.some(e => e.type === 'error')) {
-  throw new Error('OpenCode did not complete successfully');
-}
+node - "$AI_JOB_DIR/opencode.jsonl" "$AI_POLICY/repair-result.cjs" <<'JS'
+require(process.argv[3])(require('fs').readFileSync(process.argv[2], 'utf8'));
 JS
 [[ "$(git rev-parse HEAD)" == "$REPAIR_HEAD_SHA" ]] || { echo 'Agent changed HEAD; refusing push'; exit 1; }
 [[ "$(git ls-remote origin "$REPAIR_HEAD_REF" | cut -f1)" == "$REPAIR_HEAD_SHA" ]] || {

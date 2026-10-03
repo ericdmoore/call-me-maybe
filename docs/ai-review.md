@@ -164,7 +164,9 @@ regressions, YAML/shell lint and repository checks. A disposable local Go fixtur
 removed a zero-denominator guard. OCR reported the requirement violation with one
 selected/completed file and no failures. OpenCode 1.18.34 independently read the
 file and confirmed the panic through the same local model. Neither trial published,
-pushed or used a paid provider. Baseline generated site assets were stale; this PR
+pushed or used a paid provider. A subsequent repair dry-run read the fixture but
+stopped without edits or a final assessment; the workflow now rejects that outcome
+rather than claiming success. A full repair pass is not locally verified. Baseline generated site assets were stale; this PR
 regenerates them from the current sources so the existing CI freshness check passes.
 
 **Still unverified until activation:** actual GitHub inline/sticky publishing,
