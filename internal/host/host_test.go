@@ -190,6 +190,33 @@ func TestAnOutOfDateManagedUnitIsReplacedAndAForeignOneIsLeft(t *testing.T) {
 	}
 }
 
+func TestTheBackupReadACLsAreGrantedWhereAsteriskLives(t *testing.T) {
+	lay := layout(t)
+	os.MkdirAll(lay.UnitDir, 0o755)
+	lay.AsteriskDir = filepath.Join(t.TempDir(), "etc")
+	lay.VoicemailDir = filepath.Join(t.TempDir(), "spool", "voicemail")
+	os.MkdirAll(lay.AsteriskDir, 0o755)
+	os.MkdirAll(lay.VoicemailDir, 0o755)
+	os.WriteFile(filepath.Join(lay.AsteriskDir, "pjsip.conf"), []byte("x"), 0o640)
+	x := &fakeExec{users: map[string]bool{"asterisk": true}}
+	p, err := Build(context.Background(), x, lay, Wants{Why: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acl, chmod := 0, 0
+	for _, s := range p.Steps {
+		if len(s.Argv) > 0 && s.Argv[0] == "setfacl" {
+			acl++
+		}
+		if len(s.Argv) > 0 && (s.Argv[0] == "chmod" || s.Argv[0] == "chown") {
+			chmod++
+		}
+	}
+	if acl != 4 || chmod != 0 {
+		t.Errorf("setfacl steps = %d (want the dir, pjsip.conf, the spool parent, the spool), chmod/chown = %d (want none): %+v", acl, chmod, p.Steps)
+	}
+}
+
 func TestNoAsteriskUserMeansTheSpoolWaits(t *testing.T) {
 	lay := layout(t)
 	os.MkdirAll(lay.UnitDir, 0o755)

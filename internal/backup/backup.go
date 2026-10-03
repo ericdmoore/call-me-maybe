@@ -119,6 +119,13 @@ func Collect(src Sources, doormanVersion, host string, now time.Time) ([]Item, *
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
+		if errors.Is(err, fs.ErrPermission) {
+			// Asterisk's files are root:asterisk; the backup runs as doorman.
+			// `init services` grants the read ACL; until it has, say so
+			// rather than fail the whole bundle over a reproducible file.
+			m.Excluded = append(m.Excluded, p+": unreadable by this user (sudo doorman init services grants it)")
+			continue
+		}
 		if err != nil {
 			return nil, nil, err
 		}
@@ -173,7 +180,9 @@ func Collect(src Sources, doormanVersion, host string, now time.Time) ([]Item, *
 	if src.Voicemail != "" {
 		if src.NoVoicemail {
 			m.Excluded = append(m.Excluded, src.Voicemail+": --no-voicemail")
-		} else if err := walkInto(src.Voicemail, "voicemail", add); err != nil {
+		} else if err := walkInto(src.Voicemail, "voicemail", add); errors.Is(err, fs.ErrPermission) {
+			m.Excluded = append(m.Excluded, src.Voicemail+": unreadable by this user (sudo doorman init services grants it)")
+		} else if err != nil {
 			return nil, nil, err
 		}
 	}
