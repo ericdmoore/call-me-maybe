@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"callmemaybe/internal/backup"
 )
 
 // init → run → list → verify → restore --dry-run → restore --root: the
@@ -108,6 +110,27 @@ func TestBackupLifecycle(t *testing.T) {
 	if !strings.Contains(line, ", verified") {
 		t.Errorf("check line = %q", line)
 	}
+	// A wrong on-box key (someone rotated the recipient but not the copy)
+	// must stop the bundle from leaving the box: the good bundles at the
+	// destinations stay, and the failure is recorded.
+	before, _ := filepath.Glob(filepath.Join(dest, "callmemaybe-*.age"))
+	_, wrong, _ := backupNewKeyForTest()
+	os.WriteFile(identityFile(state), []byte(wrong+"\n"), 0o600)
+	out = capture(t, func() {
+		if rc := runBackup(append([]string{"run"}, common...)); rc != 1 {
+			t.Errorf("a bundle that does not open must fail the run, rc = %d", rc)
+		}
+	})
+	if !strings.Contains(out, "not delivered") {
+		t.Errorf("run with a wrong key: %q", out)
+	}
+	after, _ := filepath.Glob(filepath.Join(dest, "callmemaybe-*.age"))
+	if len(after) != len(before) {
+		t.Errorf("an unverifiable bundle was delivered: before %d, after %d", len(before), len(after))
+	}
+	if line, ok := describeBackup(state, time.Now(), secretsFrom(map[string]string{"BACKUP_RECIPIENT": "age1x"})); ok || !strings.Contains(line, "failed: verify") {
+		t.Errorf("check must report the failed verification: %q", line)
+	}
 	os.Remove(identityFile(state))
 	// verify and restore read the identity from a file, never an argument.
 	idFile := filepath.Join(root, "identity")
@@ -198,3 +221,5 @@ func TestTheBackupPackageIsReachableFromItsCommandsOnly(t *testing.T) {
 		}
 	}
 }
+
+func backupNewKeyForTest() (string, string, error) { return backup.NewKey() }

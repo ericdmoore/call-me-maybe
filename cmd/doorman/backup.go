@@ -245,15 +245,32 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 		return 1
 	}
 	name := backup.Name(host, now)
-	daily, weekly := o.retention()
-	results := backup.Deliver(ctx, dests, name, buf.Bytes(), daily, weekly, now)
-
 	var journal *events.Sibling
 	if o.journal != "" {
 		journal = events.OpenSibling(o.journal, events.Options{})
 		defer journal.Close()
 	}
 	last := lastBackup{At: now, Name: name, Files: len(m.Files), Bytes: int64(buf.Len()), Doorman: version}
+
+	// The proof comes BEFORE delivery: a bundle that does not open with
+	// the on-box key is not a backup, and must not replace — or prune —
+	// the good one already at every destination.
+	if identity, err := identityFrom(o.stateDir); err != nil {
+		fmt.Printf("  ! identity file: %v (bundle not verified)\n", err)
+	} else if identity != "" {
+		if _, err := backup.ReadManifest(bytes.NewReader(buf.Bytes()), identity); err != nil {
+			fmt.Printf("✗ verify: the bundle does not open with the on-box key: %v — not delivered\n", err)
+			last.Failed = append(last.Failed, "verify")
+			post(ctx, journal, events.BackupFailed, "verify")
+			writeLast(o.stateDir, last)
+			return 1
+		}
+		last.Verified = true
+		fmt.Println("✓ verified: the bundle opens with the on-box key")
+	}
+
+	daily, weekly := o.retention()
+	results := backup.Deliver(ctx, dests, name, buf.Bytes(), daily, weekly, now)
 	rc := 0
 	for _, r := range results {
 		if r.Err != nil {
@@ -271,27 +288,15 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 		fmt.Println(")")
 		post(ctx, journal, events.BackupCompleted, r.Dest)
 	}
-	// The nightly proof: open what was just written with the on-box key,
-	// when there is one. A bundle that does not open is a failed backup,
-	// whatever the destinations said.
-	if identity, err := identityFrom(o.stateDir); err != nil {
-		fmt.Printf("  ! identity file: %v (bundle not verified)\n", err)
-	} else if identity != "" {
-		if _, err := backup.ReadManifest(bytes.NewReader(buf.Bytes()), identity); err != nil {
-			rc = 1
-			last.Failed = append(last.Failed, "verify")
-			fmt.Printf("✗ verify: the bundle does not open with the on-box key: %v\n", err)
-			post(ctx, journal, events.BackupFailed, "verify")
-		} else {
-			last.Verified = true
-			fmt.Println("✓ verified: the bundle opens with the on-box key")
-		}
-	}
-	if b, err := json.MarshalIndent(last, "", "  "); err == nil {
-		_ = os.MkdirAll(filepath.Dir(lastBackupPath(o.stateDir)), 0o700)
-		_ = os.WriteFile(lastBackupPath(o.stateDir), b, 0o600)
-	}
+	writeLast(o.stateDir, last)
 	return rc
+}
+
+func writeLast(stateDir string, last lastBackup) {
+	if b, err := json.MarshalIndent(last, "", "  "); err == nil {
+		_ = os.MkdirAll(filepath.Dir(lastBackupPath(stateDir)), 0o700)
+		_ = os.WriteFile(lastBackupPath(stateDir), b, 0o600)
+	}
 }
 
 func post(ctx context.Context, j *events.Sibling, t events.Type, dest string) {
