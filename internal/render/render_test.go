@@ -548,3 +548,34 @@ func TestRenderGeneratesAddANumber(t *testing.T) {
 		t.Errorf("PHONEBOOK_DIR not honoured:\n%s", g.Dialplan)
 	}
 }
+
+func TestPhonebookPathsHonourTheEnvironmentAndTrimSlashes(t *testing.T) {
+	none := func(string) (string, bool) { return "", false }
+	if got := PhonebookDir(none); got != DefaultPhonebookDir {
+		t.Errorf("PhonebookDir default = %q", got)
+	}
+	if got := PhonebookSpool(none); got != DefaultPhonebookSpool {
+		t.Errorf("PhonebookSpool default = %q", got)
+	}
+	set := func(k string) (string, bool) {
+		switch k {
+		case "PHONEBOOK_DIR":
+			return " /srv/books/ ", true
+		case "PHONEBOOK_SPOOL":
+			return "", true // set but empty: the default
+		}
+		return "", false
+	}
+	if got := PhonebookDir(set); got != "/srv/books" {
+		t.Errorf("PhonebookDir custom = %q", got)
+	}
+	if got := PhonebookSpool(set); got != DefaultPhonebookSpool {
+		t.Errorf("an empty PHONEBOOK_SPOOL must mean the default, got %q", got)
+	}
+	if got := curfewContext("mary-kate"); got != "curfew-mary-kate" {
+		t.Errorf("curfewContext = %q", got)
+	}
+	if got := curfewExpr(nil); got != "" {
+		t.Errorf("curfewExpr(nil) = %q", got)
+	}
+}
