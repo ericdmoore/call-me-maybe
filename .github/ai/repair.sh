@@ -12,8 +12,8 @@ git config user.name 'github-actions[bot]'
 git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 git config core.hooksPath "$AI_POLICY"
 node "$AI_POLICY/isolate.cjs" "$AI_JOB_DIR" "$OPENCODE_BIN" run --pure --auto \
-  'Perform exactly the attached authorized repair pass. Leave changes uncommitted for workflow validation.' \
-  --model "$REPAIR_MODEL" --format json --file "$AI_JOB_DIR/prompt.md" \
+  "$(cat "$AI_JOB_DIR/prompt.md")" \
+  --model "$REPAIR_MODEL" --format json \
   | tee "$AI_JOB_DIR/opencode.jsonl"
 # Fail closed on upstream error events (the CLI may exit zero after an API error).
 node - "$AI_JOB_DIR/opencode.jsonl" "$AI_POLICY/repair-result.cjs" <<'JS'
