@@ -910,7 +910,7 @@ files; a few megabytes. `doorman backup` makes it one sealed file.
 
 ```bash
 $ doorman backup init                 # keypair: public half into .env, private printed ONCE
-$ sudo -u doorman nano .env           # BACKUP_PATH=/mnt/backups/callmemaybe (a directory; s3 and the account follow)
+$ sudo -u doorman nano .env           # BACKUP_PATH=/mnt/backups/callmemaybe, and/or BACKUP_S3_* for R2 / B2 / S3
 $ sudo -u doorman doorman backup run  # one bundle, delivered, older ones pruned
 $ sudo doorman init services          # enables doorman-backup.timer (nightly, 05:10)
 $ doorman backup list

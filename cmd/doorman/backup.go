@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"callmemaybe/internal/awssig"
 	"callmemaybe/internal/backup"
 	"callmemaybe/internal/events"
 	"callmemaybe/internal/setup"
@@ -58,7 +59,16 @@ func (o *backupOpts) destinations() ([]backup.Destination, []string) {
 		dests = append(dests, backup.FileDest{Dir: strings.TrimSpace(p)})
 	}
 	if b, ok := o.env("BACKUP_S3_BUCKET"); ok && strings.TrimSpace(b) != "" {
-		missing = append(missing, "BACKUP_S3_BUCKET is set but the s3 destination is not built yet (s27 M4)")
+		get := func(k string) string { v, _ := o.env(k); return strings.TrimSpace(v) }
+		switch {
+		case get("BACKUP_S3_ENDPOINT") == "":
+			missing = append(missing, "BACKUP_S3_BUCKET is set but BACKUP_S3_ENDPOINT is not")
+		case get("BACKUP_S3_KEY_ID") == "" || get("BACKUP_S3_SECRET") == "":
+			missing = append(missing, "BACKUP_S3_BUCKET is set but BACKUP_S3_KEY_ID / BACKUP_S3_SECRET are not")
+		default:
+			dests = append(dests, backup.S3Dest{Endpoint: get("BACKUP_S3_ENDPOINT"), Bucket: strings.TrimSpace(b), Region: get("BACKUP_S3_REGION"),
+				Prefix: get("BACKUP_S3_PREFIX"), Creds: awssig.Credentials{AccessKeyID: get("BACKUP_S3_KEY_ID"), SecretAccessKey: get("BACKUP_S3_SECRET")}})
+		}
 	}
 	if t, ok := o.env("BACKUP_CLOUD_TOKEN"); ok && strings.TrimSpace(t) != "" {
 		missing = append(missing, "BACKUP_CLOUD_TOKEN is set but the account destination does not exist yet")

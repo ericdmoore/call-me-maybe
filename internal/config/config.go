@@ -89,6 +89,12 @@ type Config struct {
 	BackupPath            string
 	BackupKeepDaily       int
 	BackupKeepWeekly      int
+	BackupS3Endpoint      string
+	BackupS3Bucket        string
+	BackupS3Region        string
+	BackupS3Prefix        string
+	BackupS3KeyID         string
+	BackupS3Secret        string
 	STTEndpoint           string
 	STTModel              string
 	STTTimeout            time.Duration
@@ -209,6 +215,12 @@ func load(get func(string) string, requireSecrets bool) (Config, error) {
 		BackupPath:            str("BACKUP_PATH", ""),
 		BackupKeepDaily:       integer("BACKUP_KEEP_DAILY", 7),
 		BackupKeepWeekly:      integer("BACKUP_KEEP_WEEKLY", 8),
+		BackupS3Endpoint:      str("BACKUP_S3_ENDPOINT", ""),
+		BackupS3Bucket:        str("BACKUP_S3_BUCKET", ""),
+		BackupS3Region:        str("BACKUP_S3_REGION", "auto"),
+		BackupS3Prefix:        str("BACKUP_S3_PREFIX", ""),
+		BackupS3KeyID:         str("BACKUP_S3_KEY_ID", ""),
+		BackupS3Secret:        str("BACKUP_S3_SECRET", ""),
 		STTEndpoint:           str("STT_ENDPOINT", ""),
 		STTModel:              str("STT_MODEL", ""),
 		STTTimeout:            ms("STT_TIMEOUT_MS", 120_000),

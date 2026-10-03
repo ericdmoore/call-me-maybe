@@ -2,7 +2,7 @@
 
 **Status:** M1–M3 built 2026-10-03 (the package, `backup init|run|list|verify`,
 the file destination, retention, the timer under `init services`, the check
-line, `restore`); M4 (s3) and M5 (jepsen) next. Planned the same day from
+line, `restore`); M4 (s3 via the tree's own SigV4 signer) built the same day; M5 (jepsen) next. Planned the same day from
 issue #29.
 
 ## What done looks like
