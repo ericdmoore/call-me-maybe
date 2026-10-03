@@ -107,30 +107,24 @@ func Latest(names []string) (string, bool) {
 	return best, ok
 }
 
-// Keep decides which bundles stay under a daily/weekly rule, per host:
+// Keep decides which of ONE host's bundles stay under a daily/weekly rule:
 // the newest `daily` by day, plus the newest in each of the last `weekly`
-// ISO weeks, for each box whose bundles share the destination. Everything
-// else is pruned. Two houses in one bucket never prune each other, and
-// names that are not bundles are never touched.
-func Keep(names []string, daily, weekly int, now time.Time) (keep, prune []string) {
+// ISO weeks. Only that host's bundles are considered at all — another
+// house sharing the destination keeps its own history under its own
+// settings, and names that are not bundles are never touched.
+func Keep(host string, names []string, daily, weekly int, now time.Time) (keep, prune []string) {
 	type b struct {
 		name string
 		host string
 		at   time.Time
 	}
-	byHost := map[string][]b{}
+	var all []b
 	for _, n := range names {
-		if host, at, ok := parseName(n); ok {
-			byHost[host] = append(byHost[host], b{n, host, at})
+		if h, at, ok := parseName(n); ok && h == host {
+			all = append(all, b{n, h, at})
 		}
 	}
-	hosts := make([]string, 0, len(byHost))
-	for h := range byHost {
-		hosts = append(hosts, h)
-	}
-	sort.Strings(hosts)
-	for _, h := range hosts {
-		all := byHost[h]
+	{
 		sort.Slice(all, func(i, j int) bool { return all[i].at.After(all[j].at) })
 		kept := map[string]bool{}
 		days := map[string]bool{}
@@ -170,6 +164,7 @@ type Delivery struct {
 }
 
 func Deliver(ctx context.Context, dests []Destination, name string, content []byte, daily, weekly int, now time.Time) []Delivery {
+	host, _, _ := parseName(name)
 	var out []Delivery
 	for _, d := range dests {
 		r := Delivery{Dest: d.Name()}
@@ -184,7 +179,7 @@ func Deliver(ctx context.Context, dests []Destination, name string, content []by
 			out = append(out, r)
 			continue
 		}
-		_, prune := Keep(names, daily, weekly, now)
+		_, prune := Keep(host, names, daily, weekly, now)
 		for _, p := range prune {
 			if err := d.Delete(ctx, p); err != nil {
 				r.Err = fmt.Errorf("delivered, but could not prune %s: %w", p, err)

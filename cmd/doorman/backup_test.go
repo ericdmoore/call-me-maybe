@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,13 +106,24 @@ func TestBackupLifecycle(t *testing.T) {
 			t.Errorf("run rc = %d", rc)
 		}
 	})
-	if !strings.Contains(out, "✓ verified") {
-		t.Errorf("run should verify with the on-box key: %q", out)
+	if !strings.Contains(out, "read back and opened") || !strings.Contains(out, "✓ verified") {
+		t.Errorf("run should read each destination's copy back: %q", out)
 	}
 	line, _ = describeBackup(state, time.Now(), secretsFrom(map[string]string{"BACKUP_RECIPIENT": "age1x"}))
 	if !strings.Contains(line, ", verified") {
 		t.Errorf("check line = %q", line)
 	}
+	// A configured key that cannot be read fails the run and the check.
+	t.Setenv("BACKUP_IDENTITY_FILE", filepath.Join(root, "missing.key"))
+	out = capture(t, func() {
+		if rc := runBackup(append([]string{"run"}, common...)); rc != 1 {
+			t.Errorf("an unreadable configured key must fail the run, rc = %d", rc)
+		}
+	})
+	if line, ok := describeBackup(state, time.Now(), secretsFrom(map[string]string{"BACKUP_RECIPIENT": "age1x"})); ok || !strings.Contains(line, "failed: verify") {
+		t.Errorf("check must fail: %q", line)
+	}
+	t.Setenv("BACKUP_IDENTITY_FILE", "")
 	// A wrong on-box key (someone rotated the recipient but not the copy)
 	// must stop the bundle from leaving the box: the good bundles at the
 	// destinations stay, and the failure is recorded.
@@ -223,3 +237,39 @@ func TestTheBackupPackageIsReachableFromItsCommandsOnly(t *testing.T) {
 }
 
 func backupNewKeyForTest() (string, string, error) { return backup.NewKey() }
+
+// A destination that acknowledges the PUT but keeps a truncated object is
+// a failed destination: "verified" means what was retained opens.
+func TestADestinationThatKeepsATruncatedObjectIsNotVerified(t *testing.T) {
+	rcpt, id, _ := backup.NewKey()
+	bad := &truncatingDest{}
+	ctx := context.Background()
+	var buf bytesBuffer
+	m := &backup.Manifest{Format: backup.FormatVersion, Host: "h", CreatedAt: time.Now()}
+	if err := backup.Bundle(&buf, m, nil, rcpt); err != nil {
+		t.Fatal(err)
+	}
+	res := backup.Deliver(ctx, []backup.Destination{bad}, backup.Name("h", time.Now()), buf.Bytes(), 7, 8, time.Now())
+	if res[0].Err != nil {
+		t.Fatal("the fake must accept the PUT")
+	}
+	if err := readBack(ctx, bad, backup.Name("h", time.Now()), id, 0); err == nil {
+		t.Error("a truncated object must not read back as verified")
+	}
+}
+
+type truncatingDest struct{ kept []byte }
+
+func (d *truncatingDest) Name() string { return "trunc" }
+func (d *truncatingDest) Put(_ context.Context, _ string, r io.Reader) error {
+	b, _ := io.ReadAll(r)
+	d.kept = b[:len(b)/2]
+	return nil
+}
+func (d *truncatingDest) Get(context.Context, string) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(d.kept)), nil
+}
+func (d *truncatingDest) List(context.Context) ([]string, error) { return nil, nil }
+func (d *truncatingDest) Delete(context.Context, string) error   { return nil }
+
+type bytesBuffer = bytes.Buffer

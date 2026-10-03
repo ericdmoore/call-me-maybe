@@ -15,7 +15,7 @@ func TestKeepDailyAndWeekly(t *testing.T) {
 		names = append(names, Name("jepsen", now.AddDate(0, 0, -d)))
 	}
 	names = append(names, "notes.txt")
-	keep, prune := Keep(names, 7, 4, now)
+	keep, prune := Keep("jepsen", names, 7, 4, now)
 	if len(keep) < 7 || len(keep) > 11 {
 		t.Errorf("kept %d: %v", len(keep), keep)
 	}
@@ -78,13 +78,38 @@ func TestKeepIsPerHost(t *testing.T) {
 	for d := 0; d < 10; d++ {
 		names = append(names, Name("jepsen", now.AddDate(0, 0, -d)), Name("grandma", now.AddDate(0, 0, -d)))
 	}
-	keep, _ := Keep(names, 7, 0, now)
-	byHost := map[string]int{}
-	for _, k := range keep {
-		h, _, _ := parseName(k)
-		byHost[h]++
+	keep, prune := Keep("jepsen", names, 7, 0, now)
+	for _, k := range append(keep, prune...) {
+		if h, _, _ := parseName(k); h != "jepsen" {
+			t.Errorf("another host's bundle was considered at all: %s", k)
+		}
 	}
-	if byHost["jepsen"] != 7 || byHost["grandma"] != 7 {
-		t.Errorf("kept per host = %v, want 7 each", byHost)
+	if len(keep) != 7 {
+		t.Errorf("kept %d of jepsen's, want 7", len(keep))
+	}
+}
+
+// The reviewer's reproduction: ten nightly grandma bundles already at the
+// destination, then one jepsen delivery with daily=1 — grandma loses none.
+func TestDeliveryPrunesOnlyTheDeliveringHost(t *testing.T) {
+	dir := t.TempDir()
+	d := FileDest{Dir: dir}
+	now := time.Date(2026, 10, 30, 6, 0, 0, 0, time.UTC)
+	for i := 0; i < 10; i++ {
+		os.WriteFile(filepath.Join(dir, Name("grandma", now.AddDate(0, 0, -i))), []byte("g"), 0o600)
+	}
+	res := Deliver(context.Background(), []Destination{d}, Name("jepsen", now), []byte("j"), 1, 0, now)
+	if res[0].Err != nil || res[0].Pruned != 0 {
+		t.Fatalf("delivery = %+v", res[0])
+	}
+	names, _ := d.List(context.Background())
+	grandma := 0
+	for _, n := range names {
+		if h, _, _ := parseName(n); h == "grandma" {
+			grandma++
+		}
+	}
+	if grandma != 10 {
+		t.Errorf("grandma kept %d of 10 — another house's history was pruned", grandma)
 	}
 }

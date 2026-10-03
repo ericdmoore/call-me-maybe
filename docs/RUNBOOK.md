@@ -918,12 +918,22 @@ $ BACKUP_IDENTITY_FILE=~/callmemaybe.key doorman backup verify   # proves the ke
 ```
 
 **The private key is printed once and stored nowhere on the box by `init`.**
-Keep it with the house's master keys. You may put a *copy* at
-`/var/lib/doorman/backup/identity.key` (doorman, 0600) — the one directory
-under the state tree that is never bundled — and then every `backup run`
-ends by opening the bundle it just wrote ("verified" in `check`); `verify`
-and `restore` find it there too. The copy is for the box's self-check; the
-authoritative key lives off the box, or the box's death takes it. The box encrypts and can never decrypt; a
+Keep it with the house's master keys. With the key off the box, the box
+encrypts and can never decrypt, a destination holds blobs it cannot read,
+and a stolen box cannot read its own backups.
+
+**Optional: a copy on the box, and what it costs.** Put a copy at
+`/var/lib/doorman/backup/identity.key` (doorman, 0600 — the one directory
+under the state tree that is never bundled) and every `backup run` reads
+each delivered bundle back from its destination and opens it ("verified
+(read back)" in `check`); `verify` and `restore` find the key there too. The
+trade is explicit: **with the copy present, the box — and anyone who gets
+root on it — can decrypt every bundle made for that key, past and future.**
+The stolen-box guarantee above applies only while the key stays off the box.
+The copy is for the box's self-check; the authoritative key lives off the
+box either way, or the box's death takes it. A copy that is configured
+(`BACKUP_IDENTITY_FILE`) but cannot be read fails the run, so verification
+never silently stops. The box encrypts and can never decrypt; a
 destination holds blobs it cannot read; a stolen box cannot read its own
 backups. Lose the key and every bundle is a brick — by design. Rotating it
 is deliberate: remove `BACKUP_RECIPIENT`, keep the old identity for the old

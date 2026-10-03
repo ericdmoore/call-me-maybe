@@ -252,12 +252,21 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 	}
 	last := lastBackup{At: now, Name: name, Files: len(m.Files), Bytes: int64(buf.Len()), Doorman: version}
 
-	// The proof comes BEFORE delivery: a bundle that does not open with
-	// the on-box key is not a backup, and must not replace — or prune —
-	// the good one already at every destination.
-	if identity, err := identityFrom(o.stateDir); err != nil {
-		fmt.Printf("  ! identity file: %v (bundle not verified)\n", err)
-	} else if identity != "" {
+	// The on-box key, when the operator keeps one. A key that is
+	// configured but cannot be read is a failed run: verification was
+	// asked for and did not happen. No key at all is the quiet default.
+	identity, err := identityFrom(o.stateDir)
+	if err != nil {
+		fmt.Printf("✗ verify: %v — a configured key that cannot be read fails the run\n", err)
+		last.Failed = append(last.Failed, "verify")
+		post(ctx, journal, events.BackupFailed, "verify")
+		writeLast(o.stateDir, last)
+		return 1
+	}
+	// The first proof comes BEFORE delivery: a bundle that does not open
+	// with the key is not a backup, and must not replace — or prune — the
+	// good one already at every destination.
+	if identity != "" {
 		if _, err := backup.ReadManifest(bytes.NewReader(buf.Bytes()), identity); err != nil {
 			fmt.Printf("✗ verify: the bundle does not open with the on-box key: %v — not delivered\n", err)
 			last.Failed = append(last.Failed, "verify")
@@ -265,14 +274,13 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 			writeLast(o.stateDir, last)
 			return 1
 		}
-		last.Verified = true
-		fmt.Println("✓ verified: the bundle opens with the on-box key")
 	}
 
 	daily, weekly := o.retention()
 	results := backup.Deliver(ctx, dests, name, buf.Bytes(), daily, weekly, now)
 	rc := 0
-	for _, r := range results {
+	verified := identity != ""
+	for i, r := range results {
 		if r.Err != nil {
 			rc = 1
 			last.Failed = append(last.Failed, r.Dest)
@@ -280,16 +288,57 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 			post(ctx, journal, events.BackupFailed, r.Dest)
 			continue
 		}
+		// "Verified" means what the destination RETAINED opens: read the
+		// object back and decrypt it, not the buffer that was sent. A
+		// destination that acknowledged a PUT and kept a truncated object
+		// is a failed destination, whatever it answered.
+		if identity != "" {
+			if err := readBack(ctx, dests[i], name, identity, len(m.Files)); err != nil {
+				rc = 1
+				verified = false
+				last.Failed = append(last.Failed, r.Dest)
+				fmt.Printf("✗ %s: delivered, but what it kept does not open: %v\n", r.Dest, err)
+				post(ctx, journal, events.BackupFailed, r.Dest)
+				continue
+			}
+		}
 		last.Dests = append(last.Dests, r.Dest)
 		fmt.Printf("✓ %s: %s (%d files, %s", r.Dest, name, len(m.Files), humanBytes(int64(buf.Len())))
 		if r.Pruned > 0 {
 			fmt.Printf("; pruned %d", r.Pruned)
 		}
+		if identity != "" {
+			fmt.Print("; read back and opened")
+		}
 		fmt.Println(")")
 		post(ctx, journal, events.BackupCompleted, r.Dest)
 	}
+	last.Verified = verified && len(last.Dests) > 0
+	if last.Verified {
+		fmt.Println("✓ verified: every destination's copy was read back and opened with the on-box key")
+	} else if identity == "" {
+		fmt.Println("  (not verified: no on-box key copy at " + identityFile(o.stateDir) + ")")
+	}
 	writeLast(o.stateDir, last)
 	return rc
+}
+
+// readBack fetches the object a destination just stored and opens it with
+// the identity, checking the manifest lists what was sent.
+func readBack(ctx context.Context, d backup.Destination, name, identity string, files int) error {
+	rc, err := d.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	m, err := backup.ReadManifest(rc, identity)
+	if err != nil {
+		return err
+	}
+	if len(m.Files) != files {
+		return fmt.Errorf("manifest lists %d files, %d were sent", len(m.Files), files)
+	}
+	return nil
 }
 
 func writeLast(stateDir string, last lastBackup) {
@@ -586,8 +635,8 @@ func describeBackup(stateDir string, now time.Time, env func(string) (string, bo
 	line := fmt.Sprintf("Backup: last %s ago → %s (%d files, %s)", age, strings.Join(last.Dests, ", "), last.Files, humanBytes(last.Bytes))
 	ok := true
 	if last.Verified {
-		line += ", verified"
-	} else {
+		line += ", verified (read back)"
+	} else if len(last.Failed) == 0 {
 		line += ", not verified (no on-box key: " + identityFile(stateDir) + ")"
 	}
 	if p := strings.TrimSpace(os.Getenv("BACKUP_IDENTITY_FILE")); p != "" {
