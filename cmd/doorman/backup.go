@@ -27,6 +27,20 @@ type backupOpts struct {
 	stateDir, journal, voicemail, spool, asteriskDir      string
 	noVoicemail                                           bool
 	env                                                   func(string) (string, bool)
+	from                                                  string // which destination verify/restore read: "" = the first
+}
+
+// pick returns the destination named by -from, or the first.
+func (o *backupOpts) pick(dests []backup.Destination) (backup.Destination, bool) {
+	if o.from == "" {
+		return dests[0], true
+	}
+	for _, d := range dests {
+		if d.Name() == o.from {
+			return d, true
+		}
+	}
+	return nil, false
 }
 
 func (o *backupOpts) sources() backup.Sources {
@@ -51,12 +65,14 @@ func (o *backupOpts) sources() backup.Sources {
 	}
 }
 
-// excludeDirs keeps a file destination out of its own bundles.
+// excludeDirs keeps a file destination out of its own bundles, and the
+// backup state directory (last.json, the on-box key copy) out of every one.
 func (o *backupOpts) excludeDirs() []string {
+	out := []string{filepath.Join(o.stateDir, "backup")}
 	if p, ok := o.env("BACKUP_PATH"); ok && strings.TrimSpace(p) != "" {
-		return []string{strings.TrimSpace(p)}
+		out = append(out, strings.TrimSpace(p))
 	}
-	return nil
+	return out
 }
 
 // destinations is every backend .env names. The file backend is here; s3
@@ -112,7 +128,9 @@ func backupFlags(fs *flag.FlagSet) (*backupOpts, func()) {
 	voicemailFlag := fs.String("voicemail", "/var/spool/asterisk/voicemail", "Asterisk's voicemail spool")
 	asteriskFlag := fs.String("asterisk", "/etc/asterisk", "Asterisk's configuration directory")
 	noVM := fs.Bool("no-voicemail", false, "leave the voicemail messages out (they are the bulk)")
+	fromFlag := fs.String("from", "", "which destination verify and restore read: file or s3 (default: the first configured)")
 	return o, func() {
+		o.from = strings.TrimSpace(*fromFlag)
 		o.envPath = *envFlag
 		o.env = secretLookup(*envFlag)
 		o.handsets, o.policy = handsetsPathArg(*handsetsFlag), policyPathArg(*policyFlag)
@@ -188,13 +206,14 @@ func backupInit(o *backupOpts) int {
 }
 
 type lastBackup struct {
-	At      time.Time `json:"at"`
-	Name    string    `json:"name"`
-	Dests   []string  `json:"dests"`
-	Failed  []string  `json:"failed,omitempty"`
-	Files   int       `json:"files"`
-	Bytes   int64     `json:"bytes"`
-	Doorman string    `json:"doorman"`
+	At       time.Time `json:"at"`
+	Name     string    `json:"name"`
+	Dests    []string  `json:"dests"`
+	Failed   []string  `json:"failed,omitempty"`
+	Files    int       `json:"files"`
+	Bytes    int64     `json:"bytes"`
+	Doorman  string    `json:"doorman"`
+	Verified bool      `json:"verified"`
 }
 
 func lastBackupPath(stateDir string) string { return filepath.Join(stateDir, "backup", "last.json") }
@@ -226,17 +245,42 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 		return 1
 	}
 	name := backup.Name(host, now)
-	daily, weekly := o.retention()
-	results := backup.Deliver(ctx, dests, name, buf.Bytes(), daily, weekly, now)
-
 	var journal *events.Sibling
 	if o.journal != "" {
 		journal = events.OpenSibling(o.journal, events.Options{})
 		defer journal.Close()
 	}
 	last := lastBackup{At: now, Name: name, Files: len(m.Files), Bytes: int64(buf.Len()), Doorman: version}
+
+	// The on-box key, when the operator keeps one. A key that is
+	// configured but cannot be read is a failed run: verification was
+	// asked for and did not happen. No key at all is the quiet default.
+	identity, err := identityFrom(o.stateDir)
+	if err != nil {
+		fmt.Printf("✗ verify: %v — a configured key that cannot be read fails the run\n", err)
+		last.Failed = append(last.Failed, "verify")
+		post(ctx, journal, events.BackupFailed, "verify")
+		writeLast(o.stateDir, last)
+		return 1
+	}
+	// The first proof comes BEFORE delivery: a bundle that does not open
+	// with the key is not a backup, and must not replace — or prune — the
+	// good one already at every destination.
+	if identity != "" {
+		if _, err := backup.ReadManifest(bytes.NewReader(buf.Bytes()), identity); err != nil {
+			fmt.Printf("✗ verify: the bundle does not open with the on-box key: %v — not delivered\n", err)
+			last.Failed = append(last.Failed, "verify")
+			post(ctx, journal, events.BackupFailed, "verify")
+			writeLast(o.stateDir, last)
+			return 1
+		}
+	}
+
+	daily, weekly := o.retention()
+	results := backup.Deliver(ctx, dests, name, buf.Bytes(), daily, weekly, now)
 	rc := 0
-	for _, r := range results {
+	verified := identity != ""
+	for i, r := range results {
 		if r.Err != nil {
 			rc = 1
 			last.Failed = append(last.Failed, r.Dest)
@@ -244,19 +288,64 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 			post(ctx, journal, events.BackupFailed, r.Dest)
 			continue
 		}
+		// "Verified" means what the destination RETAINED opens: read the
+		// object back and decrypt it, not the buffer that was sent. A
+		// destination that acknowledged a PUT and kept a truncated object
+		// is a failed destination, whatever it answered.
+		if identity != "" {
+			if err := readBack(ctx, dests[i], name, identity, len(m.Files)); err != nil {
+				rc = 1
+				verified = false
+				last.Failed = append(last.Failed, r.Dest)
+				fmt.Printf("✗ %s: delivered, but what it kept does not open: %v\n", r.Dest, err)
+				post(ctx, journal, events.BackupFailed, r.Dest)
+				continue
+			}
+		}
 		last.Dests = append(last.Dests, r.Dest)
 		fmt.Printf("✓ %s: %s (%d files, %s", r.Dest, name, len(m.Files), humanBytes(int64(buf.Len())))
 		if r.Pruned > 0 {
 			fmt.Printf("; pruned %d", r.Pruned)
 		}
+		if identity != "" {
+			fmt.Print("; read back and opened")
+		}
 		fmt.Println(")")
 		post(ctx, journal, events.BackupCompleted, r.Dest)
 	}
-	if b, err := json.MarshalIndent(last, "", "  "); err == nil {
-		_ = os.MkdirAll(filepath.Dir(lastBackupPath(o.stateDir)), 0o700)
-		_ = os.WriteFile(lastBackupPath(o.stateDir), b, 0o600)
+	last.Verified = verified && len(last.Dests) > 0
+	if last.Verified {
+		fmt.Println("✓ verified: every destination's copy was read back and opened with the on-box key")
+	} else if identity == "" {
+		fmt.Println("  (not verified: no on-box key copy at " + identityFile(o.stateDir) + ")")
 	}
+	writeLast(o.stateDir, last)
 	return rc
+}
+
+// readBack fetches the object a destination just stored and opens it with
+// the identity, checking the manifest lists what was sent.
+func readBack(ctx context.Context, d backup.Destination, name, identity string, files int) error {
+	rc, err := d.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	m, err := backup.ReadManifest(rc, identity)
+	if err != nil {
+		return err
+	}
+	if len(m.Files) != files {
+		return fmt.Errorf("manifest lists %d files, %d were sent", len(m.Files), files)
+	}
+	return nil
+}
+
+func writeLast(stateDir string, last lastBackup) {
+	if b, err := json.MarshalIndent(last, "", "  "); err == nil {
+		_ = os.MkdirAll(filepath.Dir(lastBackupPath(stateDir)), 0o700)
+		_ = os.WriteFile(lastBackupPath(stateDir), b, 0o600)
+	}
 }
 
 func post(ctx context.Context, j *events.Sibling, t events.Type, dest string) {
@@ -293,7 +382,7 @@ func backupList(ctx context.Context, o *backupOpts) int {
 // backupVerify opens the newest (or named) bundle with the identity and
 // prints its manifest: proof the key still opens what the box writes.
 func backupVerify(ctx context.Context, o *backupOpts, args []string) int {
-	identity, ok := readIdentity()
+	identity, ok := readIdentity(o.stateDir)
 	if !ok {
 		return 2
 	}
@@ -306,7 +395,11 @@ func backupVerify(ctx context.Context, o *backupOpts, args []string) int {
 	if len(args) > 0 {
 		name = args[0]
 	}
-	d := dests[0]
+	d, ok := o.pick(dests)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "✗ no destination named %q is configured\n", o.from)
+		return 2
+	}
 	if name == "" {
 		names, err := d.List(ctx)
 		if err != nil {
@@ -331,23 +424,46 @@ func backupVerify(ctx context.Context, o *backupOpts, args []string) int {
 		fmt.Fprintf(os.Stderr, "✗ %s: %v\n", name, err)
 		return 1
 	}
-	fmt.Printf("✓ %s opens: %s\n", name, m.Summary())
+	fmt.Printf("✓ %s at %s opens: %s\n", name, d.Name(), m.Summary())
 	for _, e := range m.Excluded {
 		fmt.Printf("    excluded: %s\n", e)
 	}
 	return 0
 }
 
-// readIdentity takes the private key from BACKUP_IDENTITY_FILE, or asks on
-// the terminal. Never from .env, never from an argument (shells remember).
-func readIdentity() (string, bool) {
-	if p := strings.TrimSpace(os.Getenv("BACKUP_IDENTITY_FILE")); p != "" {
-		b, err := os.ReadFile(p)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
-			return "", false
+// identityFile is where the on-box copy of the private key lives when the
+// operator keeps one: beside last.json, in the one directory under the
+// state tree that is never bundled. The authoritative copy is the
+// operator's, off the box; this one lets the box prove nightly that what
+// it wrote opens.
+func identityFile(stateDir string) string { return filepath.Join(stateDir, "backup", "identity.key") }
+
+// identityFrom returns the private key from BACKUP_IDENTITY_FILE, else the
+// on-box copy if there is one. "" means neither exists.
+func identityFrom(stateDir string) (string, error) {
+	p := strings.TrimSpace(os.Getenv("BACKUP_IDENTITY_FILE"))
+	if p == "" {
+		p = identityFile(stateDir)
+		if _, err := os.Stat(p); err != nil {
+			return "", nil
 		}
-		return strings.TrimSpace(string(b)), true
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// readIdentity takes the private key from BACKUP_IDENTITY_FILE, the on-box
+// copy, or asks on the terminal. Never from .env, never from an argument
+// (shells remember).
+func readIdentity(stateDir string) (string, bool) {
+	if id, err := identityFrom(stateDir); err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return "", false
+	} else if id != "" {
+		return id, true
 	}
 	fmt.Fprint(os.Stderr, "Private key (AGE-SECRET-KEY-…): ")
 	var line string
@@ -391,7 +507,12 @@ func runRestore(args []string) int {
 			fmt.Fprintln(os.Stderr, "✗ --latest needs a destination (BACKUP_PATH)")
 			return 2
 		}
-		names, err := dests[0].List(ctx)
+		d, ok := o.pick(dests)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "✗ no destination named %q is configured\n", o.from)
+			return 2
+		}
+		names, err := d.List(ctx)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 			return 1
@@ -401,7 +522,7 @@ func runRestore(args []string) int {
 			fmt.Fprintln(os.Stderr, "✗ no bundles at the destination")
 			return 1
 		}
-		rc, err := dests[0].Get(ctx, n)
+		rc, err := d.Get(ctx, n)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 			return 1
@@ -412,7 +533,7 @@ func runRestore(args []string) int {
 		return 2
 	}
 	defer src.Close()
-	identity, ok := readIdentity()
+	identity, ok := readIdentity(o.stateDir)
 	if !ok {
 		return 2
 	}
@@ -483,7 +604,17 @@ func runRestore(args []string) int {
 		fmt.Println("  ! not root: owners were not restored; files belong to you. Run as root for a real restore.")
 	}
 	fmt.Printf("✓ %d file(s) restored from %s (doorman %s, %s)\n", len(written), m.Host, m.Doorman, m.CreatedAt.Format(time.RFC3339))
+	if *root != "" {
+		fmt.Println("Laid out under", *root, "— nothing started, nothing registered. Inspect and diff at leisure.")
+		return 0
+	}
 	fmt.Println("Next: `doorman check`, `doorman render` and the reloads it prints, `sudo doorman init services`, then `sudo systemctl start doorman`.")
+	fmt.Println()
+	fmt.Println("If the box this came from is still running, do NOT start Asterisk or the inbox here:")
+	fmt.Println("  the trunk in pjsip.conf registers one sub-account, and the provider keeps the last")
+	fmt.Println("  registration — inbound calls would flip between the two boxes; and two inboxes on one")
+	fmt.Println("  token would split the house's texts. Phones are unaffected: they stay on the box whose")
+	fmt.Println("  window they fetched from. Change PROVISION_ADDRESS in .env if this box has a new IP.")
 	return 0
 }
 
@@ -503,6 +634,18 @@ func describeBackup(stateDir string, now time.Time, env func(string) (string, bo
 	age := now.Sub(last.At).Round(time.Minute)
 	line := fmt.Sprintf("Backup: last %s ago → %s (%d files, %s)", age, strings.Join(last.Dests, ", "), last.Files, humanBytes(last.Bytes))
 	ok := true
+	if last.Verified {
+		line += ", verified (read back)"
+	} else if len(last.Failed) == 0 {
+		line += ", not verified (no on-box key: " + identityFile(stateDir) + ")"
+	}
+	if p := strings.TrimSpace(os.Getenv("BACKUP_IDENTITY_FILE")); p != "" {
+		if abs, err := filepath.Abs(p); err == nil && !strings.HasPrefix(abs, filepath.Join(stateDir, "backup")+string(filepath.Separator)) &&
+			(strings.HasPrefix(abs, stateDir+string(filepath.Separator)) || strings.HasPrefix(abs, "/opt/call-me-maybe/")) {
+			line += " — ! BACKUP_IDENTITY_FILE lies where bundles are collected; move it to " + identityFile(stateDir)
+			ok = false
+		}
+	}
 	if len(last.Failed) > 0 {
 		line += " — failed: " + strings.Join(last.Failed, ", ")
 		ok = false
