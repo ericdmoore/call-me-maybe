@@ -1,0 +1,26 @@
+# This unprivileged relay never runs on Alpaca or executes PR files. The default-
+# branch repair workflow independently fetches and authorizes the comment.
+name: Relay inline repair request
+on:
+  pull_request_review_comment:
+    types: [created]
+permissions:
+  actions: write
+  contents: read
+jobs:
+  relay:
+    if: >-
+      vars.AI_REPAIR_ENABLED == 'true' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.comment.user.type == 'User' &&
+      (startsWith(github.event.comment.body, '/oc ') || github.event.comment.body == '/oc')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const {data: permission} = await github.rest.repos.getCollaboratorPermissionLevel({...context.repo, username: context.payload.comment.user.login});
+            if (!['admin', 'maintain', 'write'].includes(permission.permission)) throw new Error('Writer access required');
+            await github.rest.actions.createWorkflowDispatch({...context.repo, workflow_id: 'opencode-repair.yml',
+              ref: context.payload.repository.default_branch,
+              inputs: {pr: String(context.payload.pull_request.number), comment: String(context.payload.comment.id)}});

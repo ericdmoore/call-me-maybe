@@ -67,6 +67,12 @@ do not lower one to get a push through.
   handset SIP password, an ARI password, or a real extension PIN. Test
   fixtures use `555-01xx` numbers, which are reserved for fiction.
 
+## Optional local AI review
+
+[OCR review and OpenCode repair](docs/ai-review.md) describes the advisory local
+reviewer, writer-only `/oc` requests, validation and activation approval. The normal
+checks and human review still apply.
+
 ## Licensing of contributions
 
 **There is no CLA.** Apache 2.0 §5 already provides that a contribution is
