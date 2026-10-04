@@ -113,6 +113,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OPENROUTER_API_KEY: ${{ startsWith(needs.authorize.outputs.model, 'openrouter/') && secrets.OPENROUTER_API_KEY || '' }}
         run: |
+          node -e 'require(process.env.AI_POLICY + "/limits.cjs").requireRepairBudget(process.env.REPAIR_MODEL, process.env.OPENROUTER_API_KEY).catch(error => { console.error(error.message); process.exit(1); })'
           # Child-only gh authentication; no Alpaca credential store or git credential persistence.
           export GIT_CONFIG_GLOBAL=/dev/null
           export GIT_CONFIG_NOSYSTEM=1

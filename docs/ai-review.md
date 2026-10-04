@@ -7,13 +7,14 @@ check or approval. Every repair requires a new, explicit writer `/oc` request.
 
 ## Activation requires owner approval
 
-The integration ships disabled. On 2026-10-03 the separate repository runner
+The integration ships disabled. After owner approval on 2026-10-03, both review
+and writer-requested repair were enabled. The separate repository runner
 `alpaca-call-me-maybe-ai` was registered at
-`~/.local/share/call-me-maybe-ai/runner`. Its LaunchAgent is installed, stopped,
-and has `RunAtLoad=false`. Bullmoose's runner, configuration and model weights
+`~/.local/share/call-me-maybe-ai/runner`. Its LaunchAgent is running
+with `RunAtLoad=true`. Bullmoose's runner, configuration and model weights
 were not changed. Do not register it again.
 
-After approving and merging this PR, on Alpaca:
+For a future approved reactivation, on Alpaca:
 
 ```bash
 plutil -replace RunAtLoad -bool true ~/Library/LaunchAgents/actions.runner.ericdmoore-call-me-maybe.alpaca-call-me-maybe-ai.plist
@@ -55,7 +56,7 @@ keep `OCR_MODEL` (local by default). Run it after the first review completes:
 reviews for the same PR share a concurrency group. The second pass updates the
 sticky summary with its model and coverage, preserves previous inline findings,
 and adds non-overlapping findings. Each run retains its own JSON artifact.
-These controls become available after the integration is merged and activated.
+These controls are available on the default branch.
 
 A writer can independently override the repair model for one request:
 
@@ -63,8 +64,9 @@ A writer can independently override the repair model for one request:
 /oc --model openrouter/openai/gpt-oss-20b validate the findings
 ```
 
-No OpenRouter credential or GitHub App credential is configured in this repository.
-Nothing was copied from Bullmoose. You do not need to be at Alpaca: add
+The owner added this repository's `OPENROUTER_API_KEY` on 2026-10-03; only its
+presence was verified. No GitHub App credential is configured, and nothing was
+copied from Bullmoose. To replace the key, you do not need to be at Alpaca: add
 `OPENROUTER_API_KEY` through this repository's GitHub Settings → Secrets and
 variables → Actions, using an OpenRouter key obtained from your account. Do not
 paste the key into a PR comment or workflow input. Alternatively, use gh's hidden
@@ -77,6 +79,64 @@ gh secret set OPENROUTER_API_KEY --repo ericdmoore/call-me-maybe
 Set `OCR_MODEL` or `OPENCODE_MODEL` separately with `gh variable set ... --body ...`.
 Returning both to their defaults restores the wholly local route. Even repair's
 small/summary model is explicitly the selected model; provider selection is restricted.
+
+## Runtime and spending budgets
+
+Local reviews use OCR's native `--max-tokens-budget 0`: no aggregate token budget,
+including after a repair. OCR 1.12.11 has no unlimited turn sentinel (`--max-tools 0`
+means its default 100), so local runs use `--max-tools 2147483647`, effectively
+unreachable before the clock expires. No per-group timeout is imposed locally.
+OpenCode already has no configured step or aggregate token cap for local repairs.
+Both stop normally when finished; this does not force them to loop until timeout.
+
+| Setting | Repository variable | Default |
+| --- | --- | --- |
+| OCR inference deadline, all providers | `OCR_REVIEW_MINUTES` | 80 minutes |
+| Cheap re-review inference deadline, all providers | `OCR_REREVIEW_MINUTES` | 20 minutes |
+| Paid OCR input + output allowance | `OCR_PAID_REVIEW_TOKENS` | 500,000 tokens |
+| Paid cheap re-review allowance | `OCR_PAID_REREVIEW_TOKENS` | 150,000 tokens |
+
+Clock values must be whole minutes from 1 to 330. The job gets ten additional
+minutes to publish failures/coverage, upload artifacts and clean up. Repair retains
+its 120-minute job deadline, including validation. Model requests retain their
+20-minute timeout. For example, to allow a four-hour review after this change merges:
+
+```bash
+gh variable set OCR_REVIEW_MINUTES --body 240 -R ericdmoore/call-me-maybe
+gh variable set OCR_PAID_REVIEW_TOKENS --body 500000 -R ericdmoore/call-me-maybe
+```
+
+Provider routing determines the budget, including manual overrides: an OpenRouter
+GPT-OSS model is a paid route, even though the same weights run locally for free.
+Paid token budgets must be positive integers (maximum 2,147,483,647); `0`, negative
+and malformed values fail before scheduling Alpaca. OCR checks reported aggregate
+usage and forecasts new groups; it can stop early or overshoot by in-flight/final
+requests. A token allowance is not an exact dollar ceiling.
+
+OpenCode 1.18.34 has no native total-spend switch. Paid repairs therefore require
+an OpenRouter key with a positive provider-enforced spending limit, remaining
+allowance, and **Include BYOK in limit** enabled. Set the desired dollar amount and
+reset period for this repository's existing key at
+[OpenRouter Keys](https://openrouter.ai/settings/keys). The workflow checks the key's
+[budget metadata](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key)
+before starting OpenCode; absent/unlimited/exhausted budgets and lookup failures
+stop paid repairs. Local repairs never contact that endpoint. No key values or raw
+metadata are logged. No management key, proxy or new agent harness is needed.
+
+This dollar allowance covers **all uses of that key for its configured period**,
+not an independently reserved amount per job. Other calls consume it too, and a
+period reset can replenish it during a run. Use a dedicated repository key and a
+non-resetting cap if that is the intended total allowance. Configure provider-side
+limits for paid reviews too when a dollar ceiling is wanted. The current secret's
+spending settings have not been inspected or changed; paid execution remains untested.
+
+Necessary context/output limits remain: Ollama's 65,536-token context, OCR's
+32,768-token prompt ceiling and 16,384-token response limit, with upstream context
+compression. OCR still stops on unusable responses/compression failures and keeps
+its normal two review passes per group (one for cheap re-reviews), filtering and
+file selection. These are review mechanics and model-capacity boundaries, not a
+spending allowance. Removing budgets does not promise complete coverage; always
+read the manifest and sticky summary.
 
 ## Workflow and trust boundaries
 
@@ -124,7 +184,7 @@ an exit code alone could be bypassed with `if: always()`. The listener stays ali
 Its source is `.github/ai/runner-guard.py` and `runner-started.sh`; updating the
 host copy is a deliberate operator action, not a job step. The guard's predicate
 is covered by tests, and a disposable Worker process verified hard-stop behavior.
-Actual GitHub runner-hook context still needs the approved activation trial.
+The hook passed during the first automatic GitHub OCR review on 2026-10-03.
 
 ## Shared tooling and model contention
 
@@ -149,7 +209,8 @@ GitHub concurrency is repository-local. It cannot serialize against Bullmoose.
 Alpaca's current Ollama service has `OLLAMA_NUM_PARALLEL=1` and
 `OLLAMA_MAX_LOADED_MODELS=1`; the existing server queue serializes model requests
 from both repositories. Reviews use one subtask, 32K prompt ceiling, 20-minute
-request timeout and bounded overall budgets. Jobs can interleave between requests;
+request timeout and clock deadlines. Only paid reviews have total token budgets.
+Jobs can interleave between requests;
 this is not exclusive whole-job scheduling. Heavy competing work can time out or
 exhaust a budget and must report incomplete coverage. There is no automatic cloud
 fallback. If server parallelism is later increased, reassess memory and both runners
@@ -170,7 +231,8 @@ pull-requests write for replies, actions write for explicit follow-up dispatch.
 It is not a PAT or a borrowed Bullmoose credential. **A GITHUB_TOKEN push does not
 establish that normal CI ran.** After a recorded push, the workflow explicitly
 queues `ci.yml` with `expected_head=NEW_SHA` and OCR with the same head and a cheap
-150K-token, low-effort review. Every CI job checks out that exact SHA. Dispatch
+low-effort review (local: clock only; paid: 150K tokens by default). Every CI job
+checks out that exact SHA. Dispatch
 may require human approval or fail; the repair run is never proof that CI passed.
 Inspect Actions and verify that all CI jobs for the reported SHA succeeded before
 merging. Workflow-dispatch CI may not satisfy a branch-protection PR check; use the
@@ -208,9 +270,14 @@ that direct prompt form. GitHub push and publication behavior still require the
 trial below. Baseline generated site assets were stale; this PR
 regenerates them from the current sources so the existing CI freshness check passes.
 
-**Still unverified until activation:** actual GitHub inline/sticky publishing,
-inline relay, unattended repair commit/push and follow-up CI/OCR dispatch. After
-owner approval and merge, use a small disposable same-repository branch:
+The first automatic [PR #38 review](https://github.com/ericdmoore/call-me-maybe/actions/runs/37171069516)
+verified the runner hook, local inference, live logs, JSON artifact and sticky
+publication. It completed 11 of 23 selected files; the previous 500K-token budget
+blocked the remaining 12, correctly reported as incomplete despite a green
+advisory workflow. The clock-only policy needs a post-merge trial.
+
+**Still unverified live:** inline finding publication/relay, unattended repair
+commit/push and follow-up CI/OCR dispatch. Use a small disposable same-repository branch:
 
 1. Add a tiny pure Go function plus test with a deliberately missing zero guard;
    state the expected behavior in the PR body and make the PR ready.
