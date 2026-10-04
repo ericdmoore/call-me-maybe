@@ -71,6 +71,9 @@ var houseFeatures = []struct{ name, dial string }{
 	{"Page everyone", "500"},
 	{"Family conference", "600"},
 	{"Voicemail", VoicemailCode},
+	{"Call back today at (*80)", "*80"},
+	{"Call back in (*81)", "*81"},
+	{"Wake up call (*82)", "*82"},
 	{"Add a number to this phone", AddNumberCode},
 }
 

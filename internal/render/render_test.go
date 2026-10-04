@@ -393,12 +393,13 @@ func TestRenderHonoursDoNotDisturbInRoomsRingAllAndPage(t *testing.T) {
 	}
 }
 
-// A curfew touches every path to and from the phone except 911: its calls
-// enter through a context that is [internal] behind a clock, its room
+// A curfew touches ordinary calls to and from the phone; 911 and the
+// household's explicitly requested reminder apps remain reachable.
+// Ordinary calls enter through [internal] behind a clock; its room
 // number is refused while asleep, and ring-all and page leave it out — even
 // for a page_override phone, whose override is for a child's DND, not for
 // the parent's own bedtime rule.
-func TestRenderCurfewGatesEveryPathButEmergency(t *testing.T) {
+func TestRenderCurfewGatesOrdinaryCalls(t *testing.T) {
 	hs := fixture()
 	hs[1].Page = true
 	hs[0].PageOverride = true

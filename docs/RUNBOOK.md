@@ -330,7 +330,7 @@ $ sudo systemctl status doorman
 $ journalctl -u doorman -f
 ```
 
-What it enables and why: `doorman` and `doorman-phonebook.timer` always;
+What it enables and why: `doorman`, `doorman-phonebook.timer` and `doorman-reminders.timer` always;
 `doorman-directory` with `PROVISION_ADDRESS` and a handset carrying `mac` +
 `model`; `doorman-inbox` with `INBOX_URL` and `messages.toml`;
 `doorman-digest.timer` with `MAIL_HOOK` + `MAIL_TO`; `doorman-balance.timer`
@@ -572,7 +572,10 @@ valid **transfer target**.
 | 700 | (as a transfer target) **park** the call; Asterisk announces a slot |
 | 701–720 | Pick up a parked call from any handset |
 | *4 | **Outbound console**: call as another one of your numbers. Only interesting with more than one line, and it refuses 911 — see "Outbound caller ID" below. This is the one that goes through doorman |
-| *(none)* | **Bedtime** — a `curfew` on the handset in `handsets.toml` names `[[schedules]]`; while one is active the phone rings for nothing, cannot call out (911 excepted), is left out of pages and ring-all, and has its call dropped at the hour. Nothing to dial: it is the house's rule, not the phone's. See "Bedtime" below |
+| *(none)* | **Bedtime** — a `curfew` on the handset in `handsets.toml` names `[[schedules]]`; while one is active the phone skips ordinary incoming calls, cannot call out (911 and the reminder apps excepted), is left out of pages and ring-all, and has ordinary calls dropped at the hour. Nothing to dial: it is the house's rule, not the phone's. See "Bedtime" below |
+| *80 | **Call back today at** an AM/PM time. Past times are refused with a suggestion to use *81. See “Scheduled calls” below |
+| *81 | **Call back in** 0–9 hours and 0–99 minutes. Extra minutes carry into hours; the total must be positive |
+| *82 | **Wake up call** at an AM/PM time tomorrow, once |
 | *88 | **Add a number to this phone.** Key the number, `#`, say the name after the beep. The number is in this phone's directory within a minute (named by its number), and under the spoken name once the box has had it transcribed. This phone's book only — never the allow-list. See "Add a number from a handset" |
 | *78NN | **Do not disturb** for this phone, NN = 15, 30 or 45 minutes; anything else is refused out loud. Room calls to it say how long and offer its box; the house ring group and the page skip it, except a page from a `page_override` phone. Clears itself when the time is up |
 | *79 | Do not disturb off |
@@ -876,6 +879,101 @@ reports include hangs, and nothing in the phone system depends on it.
 ---
 
 
+### Scheduled calls (*80, *81, *82)
+
+These three entries appear in the House phone book with their function numbers.
+Each app first announces **all pending calls for this handset**, including their
+kind, date and time, whether they have a recording, and whether an attempt is due
+or a retry is queued. After each entry, `1` cancels it; `#` or waiting keeps it.
+Then `1` adds a call using the app you dialled; `#` or hanging up leaves the menu.
+With no pending calls, the app goes straight to entry. Up to ten calls can be
+pending per handset; another handset cannot see, cancel or hear them.
+
+- `*80`: choose `1` AM or `2` PM, then `730#` or `0730#` for 7:30 today.
+  A time that has passed is refused; the prompt suggests hanging up and dialling
+  `*81` for a relative delay.
+- `*81`: one digit for hours (0–9), then minutes (0–99), then `#`.
+  `1`, `99#` means 2 hours 39 minutes. Zero total delay is refused. The delay
+  starts when the request is saved, after any recording.
+- `*82`: the same time entry as `*80`, for **tomorrow**, once. It does not recur.
+
+`*` starts the entry again. On an invalid time, the voice reads back at most
+four digits and asks for a new entry followed by `#`; `*` exits that error menu.
+A timeout never accepts a partial time. After a valid time, `1` records up to a
+minute of audio (`#` finishes; five seconds of silence also finishes). `#` or
+waiting chooses the standard message. `*` starts over. Hanging up during entry
+or recording abandons the unfinished request. Once the call has been saved,
+the voice confirms its date and time. The standard message is “This is the call
+you scheduled by dialing star eight zero/one/two”; a recording follows that
+introduction when present.
+
+Times use the appliance's local timezone, the same clock used by Asterisk.
+Check it with `timedatectl` on the Pi. Tomorrow uses a calendar date, not a
+24-hour offset. Nonexistent spring-forward times are refused; in a repeated
+fall-back hour, the first matching time still in the future is selected.
+
+Callbacks dial only the originating PJSIP handset: **30 seconds to answer,
+two retries, three minutes after each unsuccessful attempt**. Busy, unregistered
+and unanswered calls use the same bounded retry policy. Any answer consumes
+the reminder; hanging up during playback does not cause another call. There is
+no voicemail fallback, carrier call, paid service, runtime TTS or auto-answer
+header. They bypass Doorman quiet hours, `*78` and curfew, including the bedtime
+hangup sweep. **The handset's own DND still wins**: it may silence or reject the
+call. Do not rely on this as an alarm that can override a silent phone.
+Cancelling removes future attempts and suppresses playback if an answer races
+cancellation. An attempt already ringing can finish its current 30-second ring.
+
+Asterisk's [native call-file queue](https://docs.asterisk.org/Configuration/Interfaces/Asterisk-Call-Files/)
+owns scheduling and retries, even while the Doorman daemon is down. Jobs survive
+process and machine restarts; a due job may run late when Asterisk returns after
+an outage. `doorman reminders menu|deliver` is a local AGI mode inside the same
+binary, invoked by the generated dialplan as the **asterisk** account. It reads
+no `.env`, caller history or credentials. The endpoint marker generated from
+`handsets.toml` must match `CHANNEL(endpoint)`; caller ID does not select a phone.
+The delivery context is not included in the internal or trunk dialplan.
+
+State and recordings are private under `${ASTSPOOLDIR}/cmm-reminders` (0700;
+files 0600). Metadata contains a random ID, handset, kind and timestamps, never
+entered digit strings or caller numbers. Answered/cancelled recordings are
+removed immediately. `doorman-reminders.timer` prunes exhausted calls hourly and
+crashed drafts after a day. Call files are staged, synced and renamed into
+`outgoing`; publication failures are spoken as failures. The housekeeping job
+has no network or environment credentials. Keep Asterisk AGI/DTMF debug tracing
+off in normal operation: protocol debugging can expose keypad input.
+
+To deploy after review:
+
+1. Install the new binary at `/opt/call-me-maybe/bin/doorman`; rebuild the free
+   audio with `bash prompts/build.sh` on the workstation and copy **the entire
+   output, including `system/`**, into the configured Asterisk sounds prefix.
+2. Run `doorman schema`, then `doorman check` on the real files. No new policy,
+   handset or environment keys are needed. Run `doorman render`, install its
+   generated fragments using the normal procedure, and reload PJSIP/dialplan.
+3. Run `sudo doorman init services` to install the housekeeping timer; restart
+   Doorman so its curfew sweep honours reminder calls. Confirm `res_agi.so` and
+   `pbx_spool.so` are loaded (`asterisk -rx 'module show like res_agi'` and
+   `asterisk -rx 'module show like pbx_spool'`). The installer uses autoload.
+4. The AGI reads Asterisk's actual `ASTSPOOLDIR`. If it is not
+   `/var/spool/asterisk`, override the housekeeping service's `ExecStart` with
+   `doorman reminders prune --spool /your/astspooldir` (use the full binary path),
+   and update its `ReadWritePaths` and `ConditionPathIsDirectory` accordingly.
+   Pending reminders are operational spool state and are **not** included in
+   the current backup/restore bundle; do not restore old call files into a live
+   queue.
+
+A small handset trial (still required after deployment): dial `*81`, enter `0`,
+`1#`, and choose a standard message. Hear the confirmation and hang up. It should
+ring that handset in one minute and announce `*81`. Repeat with a recording;
+answer and verify the introduction and message. Queue a third call, enter a
+different app, and cancel it from the announced list. Check an invalid/past
+`*80` time and a `*82` time tomorrow, then cancel the latter. For retries, leave
+one call unanswered: verify three attempts total, with three minutes between
+failed attempts. Repeat with Doorman quiet/curfew enabled and handset DND off,
+then with handset DND on. Finally, queue a call, restart Doorman/Asterisk before
+it is due, and verify that exactly one reminder remains and is delivered.
+Unit tests cover dialogue, persistence, isolation and races without a real SIP
+system; they do not establish handset ringing, audio or firmware DND behaviour.
+
 ### Add a number from a handset (*88)
 
 `*88` on any handset: `Read` collects the digits until `#`, `Record` takes
@@ -993,15 +1091,16 @@ already owns it:
    house, extension, ladder stage — through the same gate as do-not-disturb,
    and the generated dialplan leaves it out of `100` and `500`. A
    `page_override` phone does *not* reach it: the override is for a child's
-   DND; a curfew is the parent's own rule.
+   DND; a curfew is the parent's own rule. Explicitly scheduled
+   `*80`/`*81`/`*82` calls are an exception and still ring that handset.
 2. **It cannot call out.** The phone's calls enter a generated
    `[curfew-<id>]` context that is `[internal]` behind a clock: `911` goes
-   through first and unconditionally, anything else while asleep hears
+   through first and unconditionally, as do `*80`, `*81` and `*82`; other calls while asleep hear
    `curfew-out` and a busy tone. A room that dials it hears `curfew-room`
    and gets its mailbox.
 3. **A call it is on is dropped at the hour.** The daemon looks once a
    minute for a handset that has just fallen asleep and hangs up its
-   channels — whatever placed the call. A daemon started inside the window
+   ordinary channels. Reminder calls and menus are exempt. A daemon started inside the window
    leaves an existing call alone; the hour has passed.
 
 `doorman check` lists every curfewed handset with its windows and marks

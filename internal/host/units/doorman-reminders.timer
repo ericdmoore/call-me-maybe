@@ -1,0 +1,9 @@
+[Unit]
+Description=Call Me Maybe — reminder recording housekeeping
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target

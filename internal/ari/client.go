@@ -37,10 +37,11 @@ type Event struct {
 }
 
 type Channel struct {
-	ID     string   `json:"id"`
-	Name   string   `json:"name"`
-	State  string   `json:"state"`
-	Caller CallerID `json:"caller"`
+	ID          string   `json:"id"`
+	AccountCode string   `json:"accountcode"`
+	Name        string   `json:"name"`
+	State       string   `json:"state"`
+	Caller      CallerID `json:"caller"`
 }
 
 type CallerID struct {
