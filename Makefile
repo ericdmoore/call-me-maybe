@@ -70,7 +70,7 @@ site-assets: build
 	@cp llms.txt site/public/llms.txt
 	@cp llms-policy.txt site/public/llms-policy.txt
 	@cp install.sh site/public/install.sh
-	@for n in policy handsets trunks contacts env; do \
+	@for n in policy handsets trunks contacts messages env; do \
 		./bin/doorman schema $$n > site/public/schema/$$n.json; \
 	done
 	@# The examples, beside the schema, so a model can fetch a worked
@@ -83,7 +83,7 @@ site-assets: build
 		examples/contacts.example.toml examples/messages.example.toml site/public/examples/
 	@cp examples/.env.example site/public/examples/env.example
 	@cp -R examples/scenarios site/public/examples/scenarios
-	@echo "✓ site/public: llms.txt, llms-policy.txt, install.sh, schema/{policy,handsets,trunks,contacts,env}.json, examples/"
+	@echo "✓ site/public: llms.txt, llms-policy.txt, install.sh, schema/{policy,handsets,trunks,contacts,messages,env}.json, examples/"
 
 ## check: everything that must be green before a commit
 check: fmt-check vet lint test build

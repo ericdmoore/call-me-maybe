@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"callmemaybe/internal/ownbook"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/provision"
 )
@@ -112,5 +113,51 @@ func TestBookCacheFollowsThePolicyFileAndSurvivesABadEdit(t *testing.T) {
 	third, err := cache.current()
 	if err != nil || len(third["people"].Contacts) != 2 {
 		t.Fatalf("a bad edit must keep the last good book: %v %+v", err, third["people"].Contacts)
+	}
+}
+
+func TestSharedCardsRefreshOnlyTheirIntendedPhoneBooks(t *testing.T) {
+	paths := bookFixture(t)
+	paths.own = filepath.Join(filepath.Dir(paths.policy), "phonebook", "own")
+	shared := filepath.Join(filepath.Dir(paths.own), "shared")
+	cache := &bookCache{paths: paths}
+	if _, err := cache.current(); err != nil {
+		t.Fatal(err)
+	}
+	for target, entry := range map[string]ownbook.Entry{
+		"house":           {Name: "Shared Jane", E164: "+15125550123"},
+		"handset:kitchen": {Name: "Private Sam", E164: "+15125550124"},
+	} {
+		if _, err := ownbook.Import(shared, target, []ownbook.Entry{entry}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	books, err := cache.current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := provision.Lookup("grandstream-wp826")
+	for _, id := range []string{"kitchen", "theater"} {
+		xml, err := renderBooks(policy.Handset{ID: id}, m, books)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(xml), "15125550123") {
+			t.Fatal("shared contact missing")
+		}
+		if strings.Contains(string(xml), "15125550124") != (id == "kitchen") {
+			t.Fatal("private contact crossed handset boundary")
+		}
+	}
+	// The imported names are never merged into the People admission book.
+	if len(books["people"].Contacts) != 1 {
+		t.Fatal("admission book changed")
+	}
+	withoutHouse, err := renderBooks(policy.Handset{ID: "theater", Phonebook: []string{"people"}}, m, books)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(withoutHouse), "15125550123") {
+		t.Fatal("explicit house opt-out ignored")
 	}
 }
