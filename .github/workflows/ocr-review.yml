@@ -14,16 +14,16 @@ on:
         default: default
         options:
           - default
-          - ollama/bullmoose-ocr:20b
+          - ollama/gpt-oss:20b
           - openrouter/anthropic/claude-opus-5.5
           - openrouter/anthropic/claude-sonnet-5.5
           - openrouter/deepseek/deepseek-v4.1-flash
           - openrouter/google/gemini-3.8-flash
-          - openrouter/moonshotai/kimi-k2.7-code
+          - openrouter/moonshotai/kimi-k3
           - openrouter/openai/gpt-6.1-sol
-          - openrouter/openai/gpt-oss-120b
-          - openrouter/openai/gpt-oss-20b
           - openrouter/qwen/qwen3-coder-next
+          - openrouter/qwen/qwen3.8-27b:free
+          - openrouter/z-ai/glm-5.3
       head:
         description: Expected head (optional stale-run guard)
         type: string
@@ -53,6 +53,11 @@ jobs:
       provider: ${{ steps.gate.outputs.provider }}
       url: ${{ steps.gate.outputs.url }}
       background: ${{ steps.gate.outputs.background }}
+      review_minutes: ${{ steps.gate.outputs.review_minutes }}
+      job_minutes: ${{ steps.gate.outputs.job_minutes }}
+      token_budget: ${{ steps.gate.outputs.token_budget }}
+      tool_rounds: ${{ steps.gate.outputs.tool_rounds }}
+      task_minutes: ${{ steps.gate.outputs.task_minutes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,17 +67,25 @@ jobs:
         id: gate
         env:
           POLICY_SHA: ${{ github.workflow_sha }}
-          DEFAULT_MODEL: ${{ inputs.model != 'default' && inputs.model || vars.OCR_MODEL || 'ollama/bullmoose-ocr:20b' }}
+          DEFAULT_MODEL: ${{ inputs.model != 'default' && inputs.model || vars.OCR_MODEL || 'ollama/gpt-oss:20b' }}
+          CHEAP_REVIEW: ${{ inputs.cheap && 'true' || 'false' }}
+          OCR_REVIEW_MINUTES: ${{ vars.OCR_REVIEW_MINUTES }}
+          OCR_REREVIEW_MINUTES: ${{ vars.OCR_REREVIEW_MINUTES }}
+          OCR_PAID_REVIEW_TOKENS: ${{ vars.OCR_PAID_REVIEW_TOKENS }}
+          OCR_PAID_REREVIEW_TOKENS: ${{ vars.OCR_PAID_REREVIEW_TOKENS }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
           EXPECTED_HEAD: ${{ inputs.head }}
         with:
           script: |
             const pr = await require('./.github/ai/authorize.cjs')({github, context, core});
+            const limits = require('./.github/ai/limits.cjs').reviewLimits(process.env.DEFAULT_MODEL, process.env.CHEAP_REVIEW === 'true');
+            for (const [key, value] of Object.entries({review_minutes: limits.minutes, job_minutes: limits.jobMinutes,
+              token_budget: limits.tokens, tool_rounds: limits.tools, task_minutes: limits.taskMinutes})) core.setOutput(key, String(value));
             core.setOutput('background', await require('./.github/ai/background.cjs')({github, context, core, pr}));
   review:
     needs: authorize
     runs-on: [self-hosted, macOS, ARM64, call-me-maybe-ai]
-    timeout-minutes: 90
+    timeout-minutes: ${{ fromJSON(needs.authorize.outputs.job_minutes) }}
     permissions:
       contents: read
       pull-requests: write
@@ -82,7 +95,9 @@ jobs:
       REVIEW_BASE: ${{ needs.authorize.outputs.base }}
       REVIEW_MODEL: ${{ needs.authorize.outputs.model }}
       REVIEW_EFFORT: ${{ inputs.cheap && 'low' || 'medium' }}
-      REVIEW_BUDGET: ${{ inputs.cheap && '150000' || '500000' }}
+      REVIEW_BUDGET: ${{ needs.authorize.outputs.token_budget }}
+      REVIEW_MAX_TOOLS: ${{ needs.authorize.outputs.tool_rounds }}
+      REVIEW_TASK_MINUTES: ${{ needs.authorize.outputs.task_minutes }}
     steps:
       - name: Allocate job-local state
         run: |
@@ -110,6 +125,9 @@ jobs:
             if (pr.head.sha !== process.env.REVIEW_HEAD || pr.head.repo?.full_name !== process.env.GITHUB_REPOSITORY || pr.state !== 'open' || pr.draft) throw new Error('PR no longer eligible');
       - name: OCR with live progress and structured JSON
         id: review
+        # Stop inference before the job deadline so always() can publish failures,
+        # retain the JSON/logs and clean credentials during the ten-minute margin.
+        timeout-minutes: ${{ fromJSON(needs.authorize.outputs.review_minutes) }}
         env:
           OCR_LLM_URL: ${{ needs.authorize.outputs.url }}
           OCR_LLM_MODEL: ${{ needs.authorize.outputs.model_id }}

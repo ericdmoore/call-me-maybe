@@ -5,12 +5,32 @@ on:
   workflow_dispatch:
     inputs:
       pr:
-        description: PR number (inline relay)
+        description: Open same-repository PR number
         required: true
         type: string
-      comment:
-        description: Inline /oc comment ID to independently authorize
+      model:
+        description: Model for this manual pass; default uses the repair repository setting
+        type: choice
+        default: default
+        options:
+          - default
+          - ollama/gpt-oss:20b
+          - openrouter/anthropic/claude-opus-5.5
+          - openrouter/anthropic/claude-sonnet-5.5
+          - openrouter/deepseek/deepseek-v4.1-flash
+          - openrouter/google/gemini-3.8-flash
+          - openrouter/moonshotai/kimi-k3
+          - openrouter/openai/gpt-6.1-sol
+          - openrouter/qwen/qwen3-coder-next
+          - openrouter/qwen/qwen3.8-27b:free
+          - openrouter/z-ai/glm-5.3
+      prompt:
+        description: Prompt for OpenCode — type your repair instructions here; no comment link needed
+        type: string
         required: true
+        default: Validate the findings and fix confirmed issues with regression tests.
+      comment:
+        description: Internal inline relay only; leave empty for a manual repair
         type: string
 permissions:
   contents: read
@@ -20,7 +40,7 @@ concurrency:
 jobs:
   authorize:
     if: >-
-      vars.AI_REPAIR_ENABLED == 'true' && github.ref == 'refs/heads/main' &&
+      vars.AI_REPAIR_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.run_attempt == 1 &&
       (github.event_name == 'workflow_dispatch' ||
        (github.event.issue.pull_request && github.event.comment.user.type == 'User' &&
         (startsWith(github.event.comment.body, '/oc ') || github.event.comment.body == '/oc')))
@@ -48,15 +68,18 @@ jobs:
           POLICY_SHA: ${{ github.workflow_sha }}
           PR_NUMBER: ${{ github.event.issue.number || inputs.pr }}
           COMMENT_ID: ${{ github.event.comment.id || inputs.comment }}
-          COMMENT_KIND: ${{ github.event_name == 'workflow_dispatch' && 'inline' || 'issue' }}
-          DEFAULT_MODEL: ${{ vars.OPENCODE_MODEL || 'ollama/bullmoose-ocr:20b' }}
+          COMMENT_KIND: ${{ github.event_name == 'workflow_dispatch' && (inputs.comment && 'inline' || 'manual') || 'issue' }}
+          DEFAULT_MODEL: ${{ vars.OPENCODE_MODEL || 'ollama/gpt-oss:20b' }}
+          MANUAL_MODEL: ${{ inputs.model }}
+          REPAIR_REQUEST: ${{ inputs.prompt }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         with:
           script: |
             const outputs = {};
             await require('./.github/ai/authorize.cjs')({github, context,
               core: {...core, setOutput: (key, value) => { outputs[key] = value; core.setOutput(key, value); }}});
             await github.rest.issues.createComment({...context.repo, issue_number: Number(outputs.number),
-              body: `${outputs.marker}\nOne OpenCode pass requested at ${outputs.head}. Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}. Failure/cancellation consumes this request; post a new /oc to retry. Completion is not CI approval.`});
+              body: `${outputs.marker}\nOne OpenCode pass requested at ${outputs.head} using ${outputs.model}. Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}. Failure/cancellation consumes this request; submit a new manual run or /oc to retry. Completion is not CI approval.`});
   repair:
     if: github.run_attempt == 1
     needs: authorize
@@ -113,6 +136,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OPENROUTER_API_KEY: ${{ startsWith(needs.authorize.outputs.model, 'openrouter/') && secrets.OPENROUTER_API_KEY || '' }}
         run: |
+          node -e 'require(process.env.AI_POLICY + "/limits.cjs").requireRepairBudget(process.env.REPAIR_MODEL, process.env.OPENROUTER_API_KEY).catch(error => { console.error(error.message); process.exit(1); })'
           # Child-only gh authentication; no Alpaca credential store or git credential persistence.
           export GIT_CONFIG_GLOBAL=/dev/null
           export GIT_CONFIG_NOSYSTEM=1
@@ -131,7 +155,7 @@ jobs:
             const fs = require('fs');
             const file = `${process.env.AI_JOB_DIR}/pushed-sha`;
             if (!fs.existsSync(file)) {
-              await core.summary.addRaw('No verified repair push. Inspect the repair step and finding replies; failures require a new /oc request.').write();
+              await core.summary.addRaw('No verified repair push. Inspect the repair step and finding replies; failures require a new manual run or /oc request.').write();
               return;
             }
             const sha = fs.readFileSync(file, 'utf8').trim();
@@ -146,4 +170,9 @@ jobs:
         if: always()
         run: |
           git config --local --unset core.hooksPath || true
+          # Go's module cache contains read-only directories. Only make this
+          # job's directories writable; find does not follow external symlinks.
+          if [[ -d "$AI_JOB_DIR" ]]; then
+            find "$AI_JOB_DIR" -type d -exec chmod u+w {} +
+          fi
           rm -rf -- "$AI_JOB_DIR"

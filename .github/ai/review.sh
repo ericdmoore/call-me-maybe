@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 : "${AI_JOB_DIR:?}" "${REVIEW_HEAD:?}" "${REVIEW_BASE:?}" "${REVIEW_MODEL:?}"
+: "${REVIEW_BUDGET:?}" "${REVIEW_MAX_TOOLS:?}" "${REVIEW_TASK_MINUTES:?}"
 [[ "$(/opt/homebrew/bin/ocr --version)" == *'1.12.11 '* ]] || { echo 'OCR version mismatch'; exit 1; }
 isolated() { node "$AI_POLICY/isolate.cjs" "$AI_JOB_DIR" "$@"; }
 isolated /opt/homebrew/bin/ocr config set telemetry.enabled false
@@ -15,9 +16,11 @@ mkfifo "$fifo"
 tee "$AI_JOB_DIR/stderr.log" < "$fifo" >&2 &
 tee_pid=$!
 set +e
+# Pinned OCR 1.12.11 explicitly treats --timeout 0 as no per-group deadline.
 isolated /opt/homebrew/bin/ocr review --from "$base" --to "$REVIEW_HEAD" \
   --format json --audience human --concurrency 1 --max-tokens 32768 \
-  --effort "$REVIEW_EFFORT" --timeout 45 --max-tokens-budget "$REVIEW_BUDGET" \
+  --effort "$REVIEW_EFFORT" --timeout "$REVIEW_TASK_MINUTES" \
+  --max-tools "$REVIEW_MAX_TOOLS" --max-tokens-budget "$REVIEW_BUDGET" \
   --background-file "$AI_JOB_DIR/background.md" --rule "$AI_POLICY/rule.json" \
   > "$AI_JOB_DIR/result.json" 2> "$fifo"
 status=$?
