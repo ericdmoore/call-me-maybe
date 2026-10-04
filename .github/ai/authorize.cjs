@@ -1,4 +1,4 @@
-const {route} = require('./models.cjs');
+const {route, normalize} = require('./models.cjs');
 module.exports = async function authorize({github, context, core, env = process.env}) {
   if (!env.POLICY_SHA || !env.DEFAULT_MODEL) throw new Error('POLICY_SHA and DEFAULT_MODEL are required');
   const repo = context.repo;
@@ -12,7 +12,7 @@ module.exports = async function authorize({github, context, core, env = process.
     throw new Error('Stale event: PR head changed');
   }
   if (env.EXPECTED_HEAD && env.EXPECTED_HEAD !== pr.head.sha) throw new Error('Stale requested head');
-  let model = env.DEFAULT_MODEL;
+  let model = normalize(env.DEFAULT_MODEL);
   if (env.MODE === 'repair') {
     const id = Number(env.COMMENT_ID);
     if (!Number.isSafeInteger(id) || id < 1) throw new Error('Invalid comment ID');
@@ -28,7 +28,7 @@ module.exports = async function authorize({github, context, core, env = process.
     if (inline && comment.commit_id !== pr.head.sha) throw new Error('Inline request is on an outdated head; request again on the current PR');
     const override = comment.body.match(/^\/oc --model (\S+)(?:\s|$)/);
     if (comment.body.startsWith('/oc --model') && !override) throw new Error('Missing exact model ID');
-    model = override?.[1] || model;
+    model = normalize(override?.[1] || model);
     route(model); // Validate before claiming the request.
     const marker = `<!-- cmm-oc-request:${env.COMMENT_KIND}:${id} -->`;
     const history = await github.paginate(github.rest.issues.listComments, {...repo, issue_number: number, per_page: 100});

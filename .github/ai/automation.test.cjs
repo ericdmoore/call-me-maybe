@@ -20,13 +20,25 @@ async function gate(options = {}) {
     paginate: async () => options.history || []};
   await authorize({github, context: {repo: {owner: 'owner', repo: 'repo'}, payload: options.payload || {}},
     core: {setOutput: (k,v) => outputs[k] = v},
-    env: {MODE: 'repair', POLICY_SHA: 'trusted', DEFAULT_MODEL: 'ollama/bullmoose-ocr:20b',
+    env: {MODE: 'repair', POLICY_SHA: 'trusted', DEFAULT_MODEL: 'ollama/gpt-oss:20b',
       PR_NUMBER: '12', COMMENT_ID: '99', COMMENT_KIND: 'issue', ...options.env}});
   return outputs;
 }
 test('writer gets local model and exact branch/head; maintain also allowed', async () => {
-  assert.equal((await gate()).model, 'ollama/bullmoose-ocr:20b');
+  assert.equal((await gate()).model, 'ollama/gpt-oss:20b');
   assert.equal((await gate({permission: 'maintain'})).ref, 'refs/heads/feature');
+});
+test('the standard local name and legacy setting use the same existing 65K GPT-OSS preset', async () => {
+  const current = await gate();
+  const legacy = await gate({env: {DEFAULT_MODEL: 'ollama/bullmoose-ocr:20b'}});
+  assert.equal(legacy.model, 'ollama/gpt-oss:20b');
+  assert.equal(legacy.model_id, current.model_id);
+  assert.equal(current.model_id, 'bullmoose-ocr:20b');
+  assert.deepEqual(opencode('ollama/bullmoose-ocr:20b'), opencode('ollama/gpt-oss:20b'));
+  const config = opencode(current.model);
+  assert.equal(config.model, 'ollama/gpt-oss:20b');
+  assert.equal(config.provider.ollama.models['gpt-oss:20b'].id, current.model_id);
+  assert.equal(config.provider.ollama.models['gpt-oss:20b'].limit.context, 65536);
 });
 test('deny read/triage, bots, issue-only comments, drafts, closed PRs, forks', async () => {
   for (const o of [{permission: 'read'}, {permission: 'triage'}, {comment: {user: {type: 'Bot'}}},
@@ -53,7 +65,7 @@ test('exact OpenRouter override is opt-in; no other provider or malformed ID', a
   const o = await gate({comment: {body: '/oc --model openrouter/openai/gpt-oss-20b fix'}});
   assert.equal(o.model_id, 'openai/gpt-oss-20b');
   for (const model of ['openrouter/openai/gpt-oss-20b/', 'auto', 'openai/gpt-4', 'ollama/unknown', 'openrouter/auto', 'openrouter/a/b\n']) assert.throws(() => route(model));
-  assert.deepEqual(opencode('ollama/bullmoose-ocr:20b').enabled_providers, ['ollama']);
+  assert.deepEqual(opencode('ollama/gpt-oss:20b').enabled_providers, ['ollama']);
   assert.equal(opencode(o.model).small_model, o.model);
 });
 test('child config and authentication directories are isolated without mutating parent HOME', () => {
@@ -67,6 +79,36 @@ test('child config and authentication directories are isolated without mutating 
     assert.equal(env.OCR_ENABLE_TELEMETRY, 'false');
     assert.equal(env.OPENCODE_DISABLE_PROJECT_CONFIG, 'true');
   } finally {fs.rmSync(root, {recursive: true, force: true});}
+});
+test('repair workflow cleanup removes read-only Go caches without following external links', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmm-cleanup-'));
+  const job = path.join(dir, 'job');
+  const moduleDir = path.join(job, 'home/go/pkg/mod/example@v1');
+  const outside = path.join(dir, 'outside');
+  try {
+    fs.mkdirSync(moduleDir, {recursive: true});
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(moduleDir, 'source.go'), 'package fixture\n', {mode: 0o444});
+    fs.writeFileSync(path.join(outside, 'keep'), 'untouched');
+    fs.symlinkSync(outside, path.join(job, 'external'));
+    fs.chmodSync(moduleDir, 0o555);
+    fs.chmodSync(outside, 0o555);
+    // Run the actual workflow cleanup, with git stubbed so it cannot alter this checkout.
+    fs.writeFileSync(path.join(dir, 'git'), '#!/bin/sh\nexit 0\n', {mode: 0o755});
+    const workflow = fs.readFileSync(path.join(__dirname, '../workflows/opencode-repair.yml'), 'utf8');
+    const cleanup = workflow.split('      - name: Remove job credentials and state\n')[1]
+      .split('        run: |\n')[1].split('\n').map(line => line.replace(/^          /, '')).join('\n');
+    const result = spawnSync('bash', ['-e', '-c', cleanup], {encoding: 'utf8', cwd: dir,
+      env: {...process.env, AI_JOB_DIR: job, PATH: `${dir}:/usr/bin:/bin`}});
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(job), false);
+    assert.equal(fs.readFileSync(path.join(outside, 'keep'), 'utf8'), 'untouched');
+    assert.equal(fs.statSync(outside).mode & 0o777, 0o555);
+  } finally {
+    if (fs.existsSync(moduleDir)) fs.chmodSync(moduleDir, 0o755);
+    fs.chmodSync(outside, 0o755);
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
 });
 test('push hook rejects stale/wrong/multiple refs and propagates validation failures', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmm-hook-'));
@@ -96,7 +138,7 @@ test('zero findings cannot hide incomplete or missing coverage', () => {
 });
 test('cloud credentials are mandatory only for an explicit cloud route', () => {
   const {credential} = require('./models.cjs');
-  assert.equal(credential('ollama/bullmoose-ocr:20b', ''), 'ollama');
+  assert.equal(credential('ollama/gpt-oss:20b', ''), 'ollama');
   assert.throws(() => credential('openrouter/openai/gpt-oss-20b', ''), /no fallback/);
   assert.equal(credential('openrouter/openai/gpt-oss-20b', 'test-placeholder'), 'test-placeholder');
 });
