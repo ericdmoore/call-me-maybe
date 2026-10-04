@@ -24,8 +24,8 @@ on:
           - openrouter/qwen/qwen3-coder-next
           - openrouter/qwen/qwen3.8-27b:free
           - openrouter/z-ai/glm-5.3
-      request:
-        description: Instructions for one repair pass (read the full PR and review context)
+      prompt:
+        description: Prompt for OpenCode — type your repair instructions here; no comment link needed
         type: string
         required: true
         default: Validate the findings and fix confirmed issues with regression tests.
@@ -71,7 +71,7 @@ jobs:
           COMMENT_KIND: ${{ github.event_name == 'workflow_dispatch' && (inputs.comment && 'inline' || 'manual') || 'issue' }}
           DEFAULT_MODEL: ${{ vars.OPENCODE_MODEL || 'ollama/gpt-oss:20b' }}
           MANUAL_MODEL: ${{ inputs.model }}
-          REPAIR_REQUEST: ${{ inputs.request }}
+          REPAIR_REQUEST: ${{ inputs.prompt }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         with:
           script: |

@@ -91,7 +91,9 @@ and adds non-overlapping findings. Each run retains its own JSON artifact.
 These controls are available on the default branch.
 
 A writer can start a repair from **Actions → OpenCode repair → Run workflow** on
-`main`: enter the PR number, select the model, and enter the repair request. Leave
+`main`: enter the PR number, select the model, and type your instructions directly
+in **Prompt for OpenCode**. For example: “Validate every review finding, fix
+confirmed bugs with regression tests, and explain any findings you reject.” Leave
 the internal inline-relay `comment` field empty. No preliminary `/oc` comment is
 needed. `default` uses `OPENCODE_MODEL`, falling back to local GPT-OSS 20B; choose
 `ollama/gpt-oss:20b` explicitly to override a hosted repository default. The choice
@@ -101,7 +103,7 @@ setting. The dispatcher must currently have write, maintain or admin access.
 ```bash
 gh workflow run opencode-repair.yml --ref main -R ericdmoore/call-me-maybe \
   -f pr=NUMBER -f model=openrouter/anthropic/claude-sonnet-5.5 \
-  -f request='Validate the findings and fix confirmed issues with regression tests.'
+  -f prompt='Validate the findings and fix confirmed issues with regression tests.'
 ```
 
 Paid repair selections still require the repository key's verified spending cap
