@@ -1,4 +1,4 @@
-const {route, credential} = require('./models.cjs');
+const {route, credential, FREE_MODEL} = require('./models.cjs');
 
 function positiveInteger(value, fallback, name, max) {
   if (value === undefined || value === '') return fallback;
@@ -26,6 +26,9 @@ function reviewLimits(model, cheap, env = process.env) {
 async function requireRepairBudget(model, key, fetcher = fetch) {
   if (route(model).provider === 'ollama') return; // No key or network dependency locally.
   credential(model, key);
+  // This exact :free variant cannot route to the paid variant. Keep cloud
+  // token/time limits and authentication, but do not require a spending allowance.
+  if (model === FREE_MODEL) return;
   let data;
   try {
     const response = await fetcher('https://openrouter.ai/api/v1/key', {

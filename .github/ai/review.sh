@@ -16,6 +16,7 @@ mkfifo "$fifo"
 tee "$AI_JOB_DIR/stderr.log" < "$fifo" >&2 &
 tee_pid=$!
 set +e
+# Pinned OCR 1.12.11 explicitly treats --timeout 0 as no per-group deadline.
 isolated /opt/homebrew/bin/ocr review --from "$base" --to "$REVIEW_HEAD" \
   --format json --audience human --concurrency 1 --max-tokens 32768 \
   --effort "$REVIEW_EFFORT" --timeout "$REVIEW_TASK_MINUTES" \

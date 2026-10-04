@@ -1,7 +1,7 @@
 # OCR review and OpenCode repair on Alpaca
 
-Both legs default to the existing local `bullmoose-ocr:20b` Ollama alias (GPT-OSS
-20B, 65,536 context) at `http://127.0.0.1:11434/v1`. No subscription, credits,
+Both legs default to `ollama/gpt-oss:20b` (local GPT-OSS 20B, 65,536 context)
+at `http://127.0.0.1:11434/v1`. No subscription, credits,
 purchased pack, or paid fallback is required. OCR is advisory, not a required
 check or approval. Every repair requires a new, explicit writer `/oc` request.
 
@@ -32,11 +32,19 @@ Use launchd/LaunchAgents, never systemctl, on this Mac.
 
 | Leg | Repository variable | Default |
 | --- | --- | --- |
-| Review | `OCR_MODEL` | `ollama/bullmoose-ocr:20b` |
-| Repair | `OPENCODE_MODEL` | `ollama/bullmoose-ocr:20b` |
+| Review | `OCR_MODEL` | `ollama/gpt-oss:20b` |
+| Repair | `OPENCODE_MODEL` | `ollama/gpt-oss:20b` |
+
+The public local model name maps to Alpaca's existing `bullmoose-ocr:20b` serving
+preset, which uses the same GPT-OSS 20B weights with `num_ctx=65536`. The stock
+`gpt-oss:20b` installation has no context override. OCR uses that preset's API ID;
+OpenCode uses its upstream model `id` mapping. No weights are downloaded and neither
+model's persistent configuration is changed. The original repository variable
+`ollama/bullmoose-ocr:20b` remains accepted and is normalized to `ollama/gpt-oss:20b`
+in job output, so existing automatic reviews keep working through the transition.
 
 An explicit OpenRouter choice uses `openrouter/vendor/exact-model-id`, for example
-`openrouter/openai/gpt-oss-20b`. Verify availability and price with the provider
+`openrouter/anthropic/claude-sonnet-5.5`. Verify availability and price with the provider
 before selecting it; this is not a free-model promise. Unsupported providers,
 malformed identifiers and missing credentials fail rather than fall back.
 For a manual second OCR review, use Actions → OCR review → Run workflow on
@@ -44,11 +52,33 @@ For a manual second OCR review, use Actions → OCR review → Run workflow on
 dropdown. `default` keeps the repository setting; the explicit local choice and
 curated OpenRouter choices apply to this run only. The OpenRouter IDs were checked
 against its model catalog for tool support on 2026-10-03. The list is static: update
-the workflow to add choices as the catalog changes. The equivalent CLI command is:
+the workflow to add choices as the catalog changes.
+
+| Model | Exact dropdown value |
+| --- | --- |
+| Local · GPT-OSS 20B | `ollama/gpt-oss:20b` |
+| Claude Opus 5.5 | `openrouter/anthropic/claude-opus-5.5` |
+| Claude Sonnet 5.5 | `openrouter/anthropic/claude-sonnet-5.5` |
+| DeepSeek V4.1 Flash | `openrouter/deepseek/deepseek-v4.1-flash` |
+| Gemini 3.8 Flash | `openrouter/google/gemini-3.8-flash` |
+| Kimi K3 | `openrouter/moonshotai/kimi-k3` |
+| GPT-6.1 Sol | `openrouter/openai/gpt-6.1-sol` |
+| Qwen3 Coder Next | `openrouter/qwen/qwen3-coder-next` |
+| Free · Qwen3.8 27B | `openrouter/qwen/qwen3.8-27b:free` |
+| GLM 5.3 | `openrouter/z-ai/glm-5.3` |
+
+`default` remains the first option, followed by these exact values sorted
+alphabetically. GitHub's native choice input displays the value itself; friendly
+names are documented here. The free Qwen option still requires the repository key
+and is subject to OpenRouter's free-tier availability/rate limits; it never drops
+the `:free` suffix or falls back to a paid model. It keeps the hosted review token
+budgets, but does not require a dollar allowance for repairs.
+
+The equivalent CLI command is:
 
 ```bash
 gh workflow run ocr-review.yml --ref main -R ericdmoore/call-me-maybe \
-  -f pr=NUMBER -f model=openrouter/openai/gpt-oss-20b
+  -f pr=NUMBER -f model=openrouter/anthropic/claude-sonnet-5.5
 ```
 
 This override applies only to that review; automatic reviews and repair re-reviews
@@ -61,7 +91,7 @@ These controls are available on the default branch.
 A writer can independently override the repair model for one request:
 
 ```text
-/oc --model openrouter/openai/gpt-oss-20b validate the findings
+/oc --model openrouter/anthropic/claude-sonnet-5.5 validate the findings
 ```
 
 The owner added this repository's `OPENROUTER_API_KEY` on 2026-10-03; only its
@@ -93,8 +123,8 @@ Both stop normally when finished; this does not force them to loop until timeout
 | --- | --- | --- |
 | OCR inference deadline, all providers | `OCR_REVIEW_MINUTES` | 80 minutes |
 | Cheap re-review inference deadline, all providers | `OCR_REREVIEW_MINUTES` | 20 minutes |
-| Paid OCR input + output allowance | `OCR_PAID_REVIEW_TOKENS` | 500,000 tokens |
-| Paid cheap re-review allowance | `OCR_PAID_REREVIEW_TOKENS` | 150,000 tokens |
+| Hosted OCR input + output allowance (paid/free) | `OCR_PAID_REVIEW_TOKENS` | 500,000 tokens |
+| Hosted cheap re-review allowance (paid/free) | `OCR_PAID_REREVIEW_TOKENS` | 150,000 tokens |
 
 Clock values must be whole minutes from 1 to 330. The job gets ten additional
 minutes to publish failures/coverage, upload artifacts and clean up. Repair retains

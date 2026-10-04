@@ -14,16 +14,16 @@ on:
         default: default
         options:
           - default
-          - ollama/bullmoose-ocr:20b
+          - ollama/gpt-oss:20b
           - openrouter/anthropic/claude-opus-5.5
           - openrouter/anthropic/claude-sonnet-5.5
           - openrouter/deepseek/deepseek-v4.1-flash
           - openrouter/google/gemini-3.8-flash
-          - openrouter/moonshotai/kimi-k2.7-code
+          - openrouter/moonshotai/kimi-k3
           - openrouter/openai/gpt-6.1-sol
-          - openrouter/openai/gpt-oss-120b
-          - openrouter/openai/gpt-oss-20b
           - openrouter/qwen/qwen3-coder-next
+          - openrouter/qwen/qwen3.8-27b:free
+          - openrouter/z-ai/glm-5.3
       head:
         description: Expected head (optional stale-run guard)
         type: string
@@ -67,7 +67,7 @@ jobs:
         id: gate
         env:
           POLICY_SHA: ${{ github.workflow_sha }}
-          DEFAULT_MODEL: ${{ inputs.model != 'default' && inputs.model || vars.OCR_MODEL || 'ollama/bullmoose-ocr:20b' }}
+          DEFAULT_MODEL: ${{ inputs.model != 'default' && inputs.model || vars.OCR_MODEL || 'ollama/gpt-oss:20b' }}
           CHEAP_REVIEW: ${{ inputs.cheap && 'true' || 'false' }}
           OCR_REVIEW_MINUTES: ${{ vars.OCR_REVIEW_MINUTES }}
           OCR_REREVIEW_MINUTES: ${{ vars.OCR_REREVIEW_MINUTES }}
@@ -125,6 +125,8 @@ jobs:
             if (pr.head.sha !== process.env.REVIEW_HEAD || pr.head.repo?.full_name !== process.env.GITHUB_REPOSITORY || pr.state !== 'open' || pr.draft) throw new Error('PR no longer eligible');
       - name: OCR with live progress and structured JSON
         id: review
+        # Stop inference before the job deadline so always() can publish failures,
+        # retain the JSON/logs and clean credentials during the ten-minute margin.
         timeout-minutes: ${{ fromJSON(needs.authorize.outputs.review_minutes) }}
         env:
           OCR_LLM_URL: ${{ needs.authorize.outputs.url }}

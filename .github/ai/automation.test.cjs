@@ -20,13 +20,25 @@ async function gate(options = {}) {
     paginate: async () => options.history || []};
   await authorize({github, context: {repo: {owner: 'owner', repo: 'repo'}, payload: options.payload || {}},
     core: {setOutput: (k,v) => outputs[k] = v},
-    env: {MODE: 'repair', POLICY_SHA: 'trusted', DEFAULT_MODEL: 'ollama/bullmoose-ocr:20b',
+    env: {MODE: 'repair', POLICY_SHA: 'trusted', DEFAULT_MODEL: 'ollama/gpt-oss:20b',
       PR_NUMBER: '12', COMMENT_ID: '99', COMMENT_KIND: 'issue', ...options.env}});
   return outputs;
 }
 test('writer gets local model and exact branch/head; maintain also allowed', async () => {
-  assert.equal((await gate()).model, 'ollama/bullmoose-ocr:20b');
+  assert.equal((await gate()).model, 'ollama/gpt-oss:20b');
   assert.equal((await gate({permission: 'maintain'})).ref, 'refs/heads/feature');
+});
+test('the standard local name and legacy setting use the same existing 65K GPT-OSS preset', async () => {
+  const current = await gate();
+  const legacy = await gate({env: {DEFAULT_MODEL: 'ollama/bullmoose-ocr:20b'}});
+  assert.equal(legacy.model, 'ollama/gpt-oss:20b');
+  assert.equal(legacy.model_id, current.model_id);
+  assert.equal(current.model_id, 'bullmoose-ocr:20b');
+  assert.deepEqual(opencode('ollama/bullmoose-ocr:20b'), opencode('ollama/gpt-oss:20b'));
+  const config = opencode(current.model);
+  assert.equal(config.model, 'ollama/gpt-oss:20b');
+  assert.equal(config.provider.ollama.models['gpt-oss:20b'].id, current.model_id);
+  assert.equal(config.provider.ollama.models['gpt-oss:20b'].limit.context, 65536);
 });
 test('deny read/triage, bots, issue-only comments, drafts, closed PRs, forks', async () => {
   for (const o of [{permission: 'read'}, {permission: 'triage'}, {comment: {user: {type: 'Bot'}}},
@@ -53,7 +65,7 @@ test('exact OpenRouter override is opt-in; no other provider or malformed ID', a
   const o = await gate({comment: {body: '/oc --model openrouter/openai/gpt-oss-20b fix'}});
   assert.equal(o.model_id, 'openai/gpt-oss-20b');
   for (const model of ['openrouter/openai/gpt-oss-20b/', 'auto', 'openai/gpt-4', 'ollama/unknown', 'openrouter/auto', 'openrouter/a/b\n']) assert.throws(() => route(model));
-  assert.deepEqual(opencode('ollama/bullmoose-ocr:20b').enabled_providers, ['ollama']);
+  assert.deepEqual(opencode('ollama/gpt-oss:20b').enabled_providers, ['ollama']);
   assert.equal(opencode(o.model).small_model, o.model);
 });
 test('child config and authentication directories are isolated without mutating parent HOME', () => {
@@ -96,7 +108,7 @@ test('zero findings cannot hide incomplete or missing coverage', () => {
 });
 test('cloud credentials are mandatory only for an explicit cloud route', () => {
   const {credential} = require('./models.cjs');
-  assert.equal(credential('ollama/bullmoose-ocr:20b', ''), 'ollama');
+  assert.equal(credential('ollama/gpt-oss:20b', ''), 'ollama');
   assert.throws(() => credential('openrouter/openai/gpt-oss-20b', ''), /no fallback/);
   assert.equal(credential('openrouter/openai/gpt-oss-20b', 'test-placeholder'), 'test-placeholder');
 });

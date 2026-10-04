@@ -2,7 +2,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {reviewLimits, requireRepairBudget} = require('./limits.cjs');
 const {opencode} = require('./models.cjs');
-const local = 'ollama/bullmoose-ocr:20b';
+const local = 'ollama/gpt-oss:20b';
 const paid = 'openrouter/openai/gpt-oss-20b';
 
 test('local review and re-review spend no token allowance and retain clock/context bounds', () => {
@@ -16,7 +16,7 @@ test('local review and re-review spend no token allowance and retain clock/conte
   }
   const config = opencode(local);
   assert.equal(config.agent?.build?.steps, undefined, 'local repairs have no configured step cap');
-  assert.equal(config.provider.ollama.models['bullmoose-ocr:20b'].limit.context, 65536);
+  assert.equal(config.provider.ollama.models['gpt-oss:20b'].limit.context, 65536);
 });
 
 test('paid reviews keep independent positive token budgets including manual model overrides', () => {
@@ -51,6 +51,21 @@ test('review clocks are adjustable and always reserve publication/cleanup time',
 
 test('local repair never contacts OpenRouter or requires credentials/budget', async () => {
   await requireRepairBudget(local, '', () => {throw new Error('unexpected paid API call');});
+});
+
+test('the exact free cloud variant needs a key but no spend allowance or paid fallback', async () => {
+  const free = 'openrouter/qwen/qwen3.8-27b:free';
+  const noFetch = () => {throw new Error('unexpected budget lookup');};
+  await requireRepairBudget(free, 'test-placeholder', noFetch);
+  await assert.rejects(requireRepairBudget(free, '', noFetch), /requires OPENROUTER_API_KEY/);
+  assert.equal(reviewLimits(free, false, {}).tokens, 500000, 'hosted free route keeps its token budget');
+  assert.equal(opencode(free).model, free);
+  assert.equal(opencode(free).small_model, free);
+  assert.deepEqual(opencode(free).enabled_providers, ['openrouter']);
+  // Dropping :free must not bypass the dollar guard for the paid model.
+  await assert.rejects(requireRepairBudget(free.replace(':free', ''), 'test-placeholder', async () => ({
+    ok: true, json: async () => ({data: {limit: null}}),
+  })), /requires an OpenRouter key/);
 });
 
 test('paid repair verifies the selected key cap without requesting inference or following redirects', async () => {
