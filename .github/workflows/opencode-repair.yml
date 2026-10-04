@@ -147,4 +147,9 @@ jobs:
         if: always()
         run: |
           git config --local --unset core.hooksPath || true
+          # Go's module cache contains read-only directories. Only make this
+          # job's directories writable; find does not follow external symlinks.
+          if [[ -d "$AI_JOB_DIR" ]]; then
+            find "$AI_JOB_DIR" -type d -exec chmod u+w {} +
+          fi
           rm -rf -- "$AI_JOB_DIR"

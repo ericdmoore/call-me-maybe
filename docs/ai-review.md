@@ -309,6 +309,12 @@ advisory workflow. The clock-only policy needs a post-merge trial.
 **Still unverified live:** inline finding publication/relay, unattended repair
 commit/push and follow-up CI/OCR dispatch. Use a small disposable same-repository branch:
 
+A first GitHub `/oc` attempt on PR #39 started OpenCode, read the PR head and ran
+the build, but exited before a completed assessment or push. Its cleanup exposed
+read-only Go module-cache directories; cleanup now makes only job-local directories
+writable before removal, with a regression fixture proving external symlinks are
+not followed. This attempt is not evidence of a successful repair or stale-head trial.
+
 1. Add a tiny pure Go function plus test with a deliberately missing zero guard;
    state the expected behavior in the PR body and make the PR ready.
 2. Confirm automatic OCR logs, JSON artifact, inline finding, coverage and sticky
