@@ -3,7 +3,8 @@
 Both legs default to `ollama/gpt-oss:20b` (local GPT-OSS 20B, 65,536 context)
 at `http://127.0.0.1:11434/v1`. No subscription, credits,
 purchased pack, or paid fallback is required. OCR is advisory, not a required
-check or approval. Every repair requires a new, explicit writer `/oc` request.
+check or approval. Every repair requires a new, explicit writer `/oc` request or
+manual workflow dispatch.
 
 ## Activation requires owner approval
 
@@ -52,7 +53,8 @@ For a manual second OCR review, use Actions → OCR review → Run workflow on
 dropdown. `default` keeps the repository setting; the explicit local choice and
 curated OpenRouter choices apply to this run only. The OpenRouter IDs were checked
 against its model catalog for tool support on 2026-10-03. The list is static: update
-the workflow to add choices as the catalog changes.
+both workflows to add choices as the catalog changes. The manual repair picker
+uses the same sorted options; an automated test keeps the two lists aligned.
 
 | Model | Exact dropdown value |
 | --- | --- |
@@ -88,7 +90,27 @@ sticky summary with its model and coverage, preserves previous inline findings,
 and adds non-overlapping findings. Each run retains its own JSON artifact.
 These controls are available on the default branch.
 
-A writer can independently override the repair model for one request:
+A writer can start a repair from **Actions → OpenCode repair → Run workflow** on
+`main`: enter the PR number, select the model, and enter the repair request. Leave
+the internal inline-relay `comment` field empty. No preliminary `/oc` comment is
+needed. `default` uses `OPENCODE_MODEL`, falling back to local GPT-OSS 20B; choose
+`ollama/gpt-oss:20b` explicitly to override a hosted repository default. The choice
+applies to this pass only and does not change the review model or either repository
+setting. The dispatcher must currently have write, maintain or admin access.
+
+```bash
+gh workflow run opencode-repair.yml --ref main -R ericdmoore/call-me-maybe \
+  -f pr=NUMBER -f model=openrouter/anthropic/claude-sonnet-5.5 \
+  -f request='Validate the findings and fix confirmed issues with regression tests.'
+```
+
+Paid repair selections still require the repository key's verified spending cap
+described below. The local selection needs no key; the exact free Qwen selection
+needs a key but no paid allowance. Do not enter credentials in workflow inputs.
+These new manual-repair controls become available after the integration PR merges
+to `main`; their hosted end-to-end trial is still pending.
+
+A writer can also independently override the repair model in a comment:
 
 ```text
 /oc --model openrouter/anthropic/claude-sonnet-5.5 validate the findings
@@ -185,8 +207,12 @@ read the manifest and sticky summary.
   admin access, the PR is ready and same-repository, and an inline request targets
   the current head. Comments and code are evidence, not authorization to expand scope.
 - A bot-owned request marker consumes each comment once, including failure or
-  cancellation. Workflow reruns do not run another pass. Post a new `/oc` to retry.
+  cancellation. Manual dispatches instead authenticate the launching human writer
+  and consume the workflow run ID. Workflow reruns do not run another pass. Submit
+  a new manual run or post a new `/oc` to retry.
   Edited comments do not trigger repairs. Model reviews never request repairs.
+  The inline relay retains its original writer/comment authorization and `/oc
+  --model` selection; a dispatch picker value cannot override a relayed comment.
 - Upstream OpenCode reads the OCR summary, inline findings and replies, linked
   requirements and repository instructions. It validates findings, repairs confirmed
   defects with regression tests, replies to invalid findings with concrete evidence
