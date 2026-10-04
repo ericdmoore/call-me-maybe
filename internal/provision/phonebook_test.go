@@ -78,6 +78,17 @@ func TestDefaultBooksAreTheHouseAndThePeopleAndNothingElse(t *testing.T) {
 			t.Errorf("missing %q in %s", want, joined)
 		}
 	}
+	for _, code := range []string{"80", "81", "82"} {
+		found := false
+		for _, c := range ab.Contacts {
+			if strings.Contains(c.First+" "+c.Last, "(*"+code+")") && len(c.Phones) == 1 && c.Phones[0].Number == "*"+code {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("missing discoverable and dialable *%s app", code)
+		}
+	}
 	if strings.Contains(string(out), "<FirstName>Front</FirstName>") || strings.Contains(string(out), "Bridge") {
 		t.Errorf("an unselected source or a pseudo-handset leaked in:\n%s", out)
 	}

@@ -64,13 +64,30 @@ ids from
 while any is active the phone is asleep: doorman rings it for nothing, the
 generated dialplan leaves it out of the ring\-all and the page (a
 .B page_override
-does not pierce it) and refuses its calls out, 911 excepted, and the daemon
-drops a call it is on at the hour. Several ids make a per\-day bedtime. A
-dangling id fails
+does not pierce it) and refuses its calls out, 911 and the reminder apps
+excepted, and the daemon drops ordinary calls at the hour. Several ids make
+a per\-day bedtime. A dangling id fails
 .BR "doorman check" ;
 the hours ride in the dialplan, so a change needs
 .B doorman render
 and a reload.
+.B *80
+schedules a call today at an AM/PM time;
+.B *81
+schedules a call in 0\(en9 hours and 0\(en99 minutes (minutes carry into hours);
+.B *82
+schedules a one\-shot wake\-up call tomorrow. Times use the appliance timezone.
+Each menu lists this handset's pending calls and offers cancellation, then
+accepts a time and an optional recorded message. Callbacks ring this handset
+for 30 seconds, with two retries three minutes apart. Asterisk's durable call
+files survive restarts. They bypass server quiet/curfew rules but respect
+handset DND and never auto\-answer. Standard prompts are bundled and free.
+.B doorman reminders prune
+removes finished recordings as the Asterisk user, hourly through
+.BR doorman-reminders.timer ;
+.B --spool
+selects a non\-default Asterisk spool directory (default /var/spool/asterisk).
+The menu/deliver AGI modes are invoked by the generated dialplan, not operators.
 .B *88
 adds a number to the phone that dialled it: the digits, then the spoken
 name; the number is in that phone's directory within a minute and named
@@ -342,8 +359,8 @@ passwords.
 Install the systemd units from inside the binary, create the directories
 each process owns, and
 .B enable \-\-now
-exactly the units the configuration calls for: the daemon and the *88 timer
-always; the directory with
+exactly the units the configuration calls for: the daemon and the
+*88/reminder housekeeping timers always; the directory with
 .B PROVISION_ADDRESS
 and a provisionable handset; the inbox with
 .B INBOX_URL

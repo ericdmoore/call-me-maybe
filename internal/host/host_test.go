@@ -77,7 +77,7 @@ func TestEveryEmbeddedUnitHasARuleAndTheDaemonComesFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 11 || units[0].Name != "doorman.service" {
+	if len(units) != 13 || units[0].Name != "doorman.service" {
 		t.Fatalf("units = %d, first %s", len(units), units[0].Name)
 	}
 	for _, u := range units {
@@ -109,8 +109,8 @@ func TestPlanInstallsEnablesAndIsIdempotent(t *testing.T) {
 	if n := x.count("install", "-d"); n != 7 {
 		t.Errorf("directories created = %d, want 7 (six state dirs + the spool)", n)
 	}
-	if n := x.count("systemctl", "enable", "--now"); n != 3 {
-		t.Errorf("enabled = %d, want the daemon, the *88 timer and the inbox: %v", n, p.Enable)
+	if n := x.count("systemctl", "enable", "--now"); n != 4 {
+		t.Errorf("enabled = %d, want the daemon, both housekeeping timers and the inbox: %v", n, p.Enable)
 	}
 	if n := x.count("systemctl", "disable", "--now"); n != 4 {
 		t.Errorf("disabled = %d, want directory, digest, balance, backup: %v", n, p.Disable)
@@ -272,7 +272,7 @@ func TestInspectReportsWantAgainstHost(t *testing.T) {
 func TestEveryUnitHasShippedLegacyContentRegistered(t *testing.T) {
 	units, _ := Units()
 	for _, u := range units {
-		if u.Name == "doorman-backup.service" || u.Name == "doorman-backup.timer" {
+		if strings.HasPrefix(u.Name, "doorman-backup.") || strings.HasPrefix(u.Name, "doorman-reminders.") {
 			continue // born with the marker; never shipped under scripts/
 		}
 		if len(legacyUnits[u.Name]) == 0 {

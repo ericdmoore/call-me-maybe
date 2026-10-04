@@ -8,6 +8,7 @@ import (
 
 	"callmemaybe/internal/ari"
 	"callmemaybe/internal/policy"
+	"callmemaybe/internal/reminder"
 )
 
 // curfewKeeper is the third thing a curfew does, and the one neither the
@@ -16,7 +17,8 @@ import (
 // already up at 21:00 — a room-to-room chat, an outbound call — is in
 // neither's hands. So the daemon, which owns the clock and an ARI client,
 // looks once a minute for a handset that has just fallen asleep and drops
-// every channel it is on. Nothing is remembered between restarts: a handset
+// every ordinary channel it is on. Reminder calls and menus are exempt.
+// Nothing is remembered between restarts: a handset
 // found already asleep at startup keeps whatever call it has, because the
 // hour that would have dropped it has passed.
 type curfewKeeper struct {
@@ -82,7 +84,7 @@ func (k *curfewKeeper) drop(ctx context.Context, ids []string) {
 	for _, id := range ids {
 		dropped := 0
 		for _, ch := range chans {
-			if !channelOf(ch.Name, id) {
+			if !channelOf(ch.Name, id) || ch.AccountCode == reminder.Account {
 				continue
 			}
 			if err := k.hangup(ctx, ch.ID); err != nil {
