@@ -6,27 +6,31 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 )
 
 const (
-	MaxPending = 10
-	Account    = "cmm-reminder"
+	MaxPending    = 10
+	Account       = "cmm-reminder"
+	retryInterval = 3 * time.Minute
 )
 
 var (
-	idPattern      = regexp.MustCompile(`^[a-f0-9]{32}$`)
-	handsetPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
-	mediaPattern   = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
-	ErrFull        = errors.New("reminder limit reached")
-	ErrMissing     = errors.New("reminder is no longer pending")
+	idPattern       = regexp.MustCompile(`^[a-f0-9]{32}$`)
+	handsetPattern  = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
+	mediaPattern    = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
+	retryEndPattern = regexp.MustCompile(`^EndRetry: [1-9][0-9]* [1-9][0-9]* \(([0-9]+)\)$`)
+	ErrFull         = errors.New("reminder limit reached")
+	ErrMissing      = errors.New("reminder is no longer pending")
 )
 
 type Job struct {
@@ -38,7 +42,8 @@ type Job struct {
 	Media   string    `json:"media"`
 	Audio   bool      `json:"audio"`
 	State   string    `json:"state"`
-	// Next is a snapshot of Asterisk's queue mtime, never our own retry clock.
+	// Next is a verified queued-retry snapshot, not our own retry clock.
+	// Active or uncertain attempts leave it zero: a future mtime alone is not a retry.
 	Next time.Time `json:"-"`
 }
 
@@ -201,7 +206,7 @@ func (s *Store) Commit(j Job, now time.Time) error {
 	}
 	// Direct PJSIP dial: no lobby, voicemail fallback, quiet-hour gate or
 	// auto-answer header. The physical handset's DND remains authoritative.
-	call := fmt.Sprintf("Channel: PJSIP/%s\nCallerid: Scheduled call <*%s>\nWaitTime: 30\nMaxRetries: 2\nRetryTime: 180\nAccount: %s\nContext: cmm-reminder-deliver\nExtension: %s\nPriority: 1\nArchive: yes\n", j.Handset, j.Code, Account, j.ID)
+	call := fmt.Sprintf("Channel: PJSIP/%s\nCallerid: Scheduled call <*%s>\nWaitTime: 30\nMaxRetries: 2\nRetryTime: %d\nAccount: %s\nContext: cmm-reminder-deliver\nExtension: %s\nPriority: 1\nArchive: yes\n", j.Handset, j.Code, int(retryInterval/time.Second), Account, j.ID)
 	if err := s.atomic(s.queue("outgoing", j.ID), []byte(call), j.Due); err != nil {
 		// A failure after rename still must not leave an unacknowledged job.
 		_ = os.Remove(s.queue("outgoing", j.ID))
@@ -237,14 +242,14 @@ func (s *Store) pending(handset string) ([]Job, error) {
 		if j.Handset != handset || j.State != "pending" {
 			continue
 		}
-		fi, err := os.Stat(s.queue("outgoing", j.ID))
+		next, err := queuedRetry(s.queue("outgoing", j.ID))
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		} // finished, or never published
 		if err != nil {
 			return nil, err
 		}
-		j.Next = fi.ModTime()
+		j.Next = next
 		out = append(out, j)
 	}
 	sort.Slice(out, func(i, k int) bool {
@@ -254,6 +259,41 @@ func (s *Store) pending(handset string) ([]Job, error) {
 		return out[i].Due.Before(out[k].Due)
 	})
 	return out, nil
+}
+
+// Asterisk's pbx_spool.c also moves mtime into the future during StartRetry
+// and DelayedRetry. Only a final EndRetry plus its matching mtime establishes
+// a waiting retry. Appending the record and updating mtime are separate writes;
+// a partial or inconsistent snapshot must not invent a future appointment.
+func queuedRetry(path string) (time.Time, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer f.Close()
+	const maxQueueBytes = 64 << 10
+	b, err := io.ReadAll(io.LimitReader(f, maxQueueBytes+1))
+	if err != nil {
+		return time.Time{}, err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return time.Time{}, err
+	}
+	if len(b) == 0 || len(b) > maxQueueBytes || fi.Size() != int64(len(b)) || b[len(b)-1] != '\n' {
+		return time.Time{}, nil
+	}
+	last := string(b[:len(b)-1])
+	last = last[strings.LastIndexByte(last, '\n')+1:]
+	match := retryEndPattern.FindStringSubmatch(last)
+	if match == nil {
+		return time.Time{}, nil
+	}
+	ended, err := strconv.ParseInt(match[1], 10, 64)
+	if err != nil || ended <= 0 || !fi.ModTime().Equal(time.Unix(ended, 0).Add(retryInterval)) {
+		return time.Time{}, nil
+	}
+	return fi.ModTime(), nil
 }
 
 func (s *Store) Cancel(handset, id string) error {

@@ -889,6 +889,12 @@ Then `1` adds a call using the app you dialled; `#` or hanging up leaves the men
 With no pending calls, the app goes straight to entry. Up to ten calls can be
 pending per handset; another handset cannot see, cancel or hear them.
 
+Retry announcements use a completed-attempt marker and its matching queue
+timestamp. Asterisk also moves that timestamp forward while ringing, so it is
+not a retry time on its own. Active attempts and incomplete queue updates are
+announced as “due or already ringing”; only a verified waiting retry gets a new
+time readback. These are snapshots, and cancellation still rechecks the job.
+
 - `*80`: choose `1` AM or `2` PM, then `730#` or `0730#` for 7:30 today.
   A time that has passed is refused; the prompt suggests hanging up and dialling
   `*81` for a relative delay.

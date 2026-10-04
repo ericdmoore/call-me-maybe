@@ -224,6 +224,93 @@ func TestPendingAcrossAllAppsAnnouncedAndCancelledByThisPhoneOnly(t *testing.T) 
 	}
 }
 
+func TestPendingAnnouncementsDistinguishActiveAttemptsFromQueuedRetries(t *testing.T) {
+	due := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	// These records and mtimes mirror Asterisk's pbx_spool.c safe_append:
+	// StartRetry is written before dialling, EndRetry after a failed attempt.
+	start := fmt.Sprintf("\nStartRetry: 1234 1 (%d)\n", due.Add(3*time.Minute).Unix())
+	end := fmt.Sprintf("\nEndRetry: 1234 1 (%d)\n", due.Add(30*time.Second).Unix())
+	for _, tc := range []struct {
+		name, records string
+		mtime, now    time.Time
+		retrying      bool
+	}{
+		{"initial ring", start, due.Add(6 * time.Minute), due.Add(5 * time.Second), false},
+		{"failed attempt awaiting retry", start + end, due.Add(210 * time.Second), due.Add(35 * time.Second), true},
+		{"retry now ringing", start + end + fmt.Sprintf("\nStartRetry: 1234 2 (%d)\n", due.Add(390*time.Second).Unix()), due.Add(570 * time.Second), due.Add(215 * time.Second), false},
+		{"delayed active attempt", start + fmt.Sprintf("\nDelayedRetry: 1234 1 (%d)\n", due.Add(60*time.Second).Unix()), due.Add(240 * time.Second), due.Add(65 * time.Second), false},
+		{"aborted attempt after restart", start + fmt.Sprintf("\nAbortRetry: 5678 1 (%d)\n", due.Add(60*time.Second).Unix()), due.Add(240 * time.Second), due.Add(65 * time.Second), false},
+		{"no native attempt marker", "", due.Add(6 * time.Minute), due.Add(5 * time.Second), false},
+		{"end marker before native timestamp update", start + end, due.Add(6 * time.Minute), due.Add(35 * time.Second), false},
+		{"partial next marker", start + end + "\nStartRetry: 1234", due.Add(210 * time.Second), due.Add(35 * time.Second), false},
+		{"malformed end marker", start + "\nEndRetry: malformed\n", due.Add(210 * time.Second), due.Add(35 * time.Second), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			j := testJob(t, "kitchen", due.Add(-time.Hour))
+			mustCommit(t, s, j, due.Add(-time.Minute))
+			writeAttempt(t, s, j.ID, tc.records, tc.mtime)
+			a, p := newPhone(t, s.Spool, scriptedKey{"cancel", "#"}, scriptedKey{"new", "#"})
+			if err := Run(a, "menu", "80", func() time.Time { return tc.now }); err != nil {
+				t.Fatal(err)
+			}
+			p.finished()
+			if p.saw("reminder-retrying") != tc.retrying || p.saw("reminder-due") == tc.retrying {
+				t.Fatalf("incorrect announcement: retrying=%v, due=%v", p.saw("reminder-retrying"), p.saw("reminder-due"))
+			}
+			if p.saw(fmt.Sprintf("SAY DATETIME %d", tc.mtime.Unix())) != tc.retrying {
+				t.Fatal("announced an unverified retry time, or omitted a verified one")
+			}
+		})
+	}
+}
+
+func TestCancelDuringActiveAttemptRemovesRecordingAndSuppressesAnswer(t *testing.T) {
+	s := testStore(t)
+	due := time.Now().Truncate(time.Second)
+	j := testJob(t, "kitchen", due.Add(-time.Hour))
+	j.Audio = true
+	if err := os.WriteFile(s.audio(j.ID), make([]byte, 100), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustCommit(t, s, j, due.Add(-time.Minute))
+	writeAttempt(t, s, j.ID, fmt.Sprintf("\nStartRetry: 1234 1 (%d)\n", due.Add(3*time.Minute).Unix()), due.Add(6*time.Minute))
+	a, p := newPhone(t, s.Spool, scriptedKey{"cancel", "1"}, scriptedKey{"new", "#"})
+	if err := Run(a, "menu", "80", func() time.Time { return due.Add(5 * time.Second) }); err != nil {
+		t.Fatal(err)
+	}
+	p.finished()
+	if !p.saw("reminder-due") || !p.saw("reminder-cancelled") || p.saw("reminder-retrying") {
+		t.Fatal("active cancellation was not announced accurately")
+	}
+	for _, file := range []string{s.audio(j.ID), s.queue("outgoing", j.ID)} {
+		if _, err := os.Stat(file); !os.IsNotExist(err) {
+			t.Fatalf("cancelled recording or queue remains: %v", err)
+		}
+	}
+	a, p = newPhone(t, s.Spool)
+	if err := Run(a, "deliver", j.ID, time.Now); !errors.Is(err, ErrMissing) || p.saw("STREAM FILE") {
+		t.Fatalf("cancelled active attempt played on answer: %v", err)
+	}
+}
+
+func writeAttempt(t *testing.T, s *Store, id, records string, mtime time.Time) {
+	t.Helper()
+	file := s.queue("outgoing", id)
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString(records)
+	closeErr := f.Close()
+	if err != nil || closeErr != nil {
+		t.Fatalf("append native attempt: %v %v", err, closeErr)
+	}
+	if err := os.Chtimes(file, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRecordedMessagePlaybackAndCleanup(t *testing.T) {
 	s := testStore(t)
 	now := time.Now()
