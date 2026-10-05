@@ -234,8 +234,9 @@ do not protect the machine against a malicious repository writer. OpenCode uses
 No login-shell HOME or persistent OCR/OpenCode configuration is modified.
 
 The dedicated runner also has a **host-installed job-start guard**, outside all
-checkouts, configured through its own `.env`. It only accepts the two approved
-workflow paths at `refs/heads/main` and the expected event types. It rejects fork
+checkouts, configured through its own `.env`. It only accepts the approved AI
+workflow paths and the static-site preview workflow (see [site previews](site-previews.md))
+at `refs/heads/main` and the expected event types. It rejects fork
 PR events and PR-defined workflows even if they request this runner's public label.
 On rejection it terminates that job's Runner.Worker before steps execute, since
 an exit code alone could be bypassed with `if: always()`. The listener stays alive.
