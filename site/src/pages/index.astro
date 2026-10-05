@@ -1,5 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
+import { Image } from 'astro:assets';
+import nostalgiaSpammers from '../assets/nostalgia-spammers.png';
 import ThresholdScales from '../components/Threshold-scales.astro';
 import Divider from '../components/Divider.astro';
 import InstallCommand from '../components/InstallCommand.astro';
@@ -316,7 +318,17 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
 
       <div class="prose setup-signoff">
         <p><strong>Park the screens. Pick up the phone. Kick it old-school cool.*</strong></p>
-        <p class="setup-footnote">*The nostalgia is welcome. The spammers get the lobby.</p>
+        <details class="setup-meme">
+          <summary class="setup-footnote">*The nostalgia is welcome. The spammers get the lobby.</summary>
+          <Image
+            src={nostalgiaSpammers}
+            alt="A doorman holds up his palm to reject Spammers, then smiles and welcomes Nostalgia."
+            width={640}
+            format="webp"
+            loading="lazy"
+            class="nostalgia-meme"
+          />
+        </details>
       </div>
     </div>
   </section>
@@ -420,5 +432,22 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
 
   .setup-footnote {
     font-size: var(--t-sm);
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 0.2em;
+  }
+
+  .setup-footnote:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+  }
+
+  .nostalgia-meme {
+    display: block;
+    width: 100%;
+    max-width: 40rem;
+    height: auto;
+    margin-top: 1rem;
   }
 </style>
