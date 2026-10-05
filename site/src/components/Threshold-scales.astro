@@ -1,0 +1,35 @@
+---
+import { randomUUID } from 'node:crypto';
+import artwork from '../../../brand/mark-threshold-ornate-scales.svg?raw';
+
+// Keep the exported artwork as the source of truth. Only adapt its presentation
+// and document IDs for inline use; white mask fills must stay white.
+const prefix = `threshold-scales-${randomUUID()}`;
+const referencedIds = new Set(
+  [...artwork.matchAll(/(?:href="#|url\(#)([^"\)]+)/g)].map((match) => match[1]),
+);
+const drawing = artwork
+  .replace(/<\?xml[^>]*\?>\s*/, '')
+  .replace(/<svg\b[^>]*>/, '')
+  .replace(/<\/svg>\s*$/, '')
+  .replace(/<title>[\s\S]*?<\/title>/, '')
+  .replace(/(fill|stroke)="#000000"/g, '$1="currentColor"')
+  // The inner doorway's rays follow the existing lobby state animation.
+  .replace('mask="url(#mask-4)"', 'class="th-light" mask="url(#mask-4)"')
+  .replace(/\s+id="([^"]+)"/g, (_, id) =>
+    referencedIds.has(id) ? ` id="${prefix}-${id}"` : '',
+  )
+  .replace(/xlink:href="#([^"]+)"/g, (_, id) => `href="#${prefix}-${id}"`)
+  .replace(/url\(#([^\)]+)\)/g, (_, id) => `url(#${prefix}-${id})`);
+---
+
+<svg
+  class="threshold-mark"
+  viewBox="0 0 194 194"
+  xmlns="http://www.w3.org/2000/svg"
+  role="img"
+  aria-labelledby={`${prefix}-title`}
+>
+  <title id={`${prefix}-title`}>A lit doorway inside an Art Deco medallion with a scalloped border</title>
+  <Fragment set:html={drawing} />
+</svg>

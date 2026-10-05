@@ -10,7 +10,7 @@ and updates the comment. Production deployment remains `npm run deploy` in `site
 
 The workflow must be merged into `main` before `pull_request_target` can run it.
 After merging, push a site change or reopen an existing site PR to test the whole
-workflow. The `site/**`, `.github/site/**` and preview workflow paths trigger it.
+workflow. The `site/**`, `brand/**`, `.github/site/**` and preview workflow paths trigger it.
 Changes to Go-generated public files should include `make site-assets` outputs.
 The ordinary CI site build still runs for all PRs, including forks.
 
