@@ -15,6 +15,7 @@ Same idea at three settings. Pick by context rather than picking one forever.
 | `mark-threshold.svg` | plain | Small sizes, inline in text, anywhere the frame would clutter |
 | `mark-threshold-framed.svg` | framed | Chamfered cartouche, bead run, fluted flanks. The middle setting. |
 | `mark-threshold-ornate.svg` | ornate | Nested frames, bead border, corner ray-fans, lozenge. Hero and wordmark lockups. |
+| `mark-threshold-ornate-scales.svg` | ornate with scales | Current site mark, with scalloped corner decoration. Imported directly by `site/src/components/Threshold-scales.astro`. |
 
 **At 22px the ornate version collapses into a bright dot** — the frame stops
 helping and starts hurting. Use `ornate` large, and something plainer for the
@@ -65,3 +66,7 @@ if you edit it.
 The marks that *do* carry ids (`mark-threshold-ornate.svg` uses clipPaths) are
 fine inlined once per page. Inline one more than once and the ids need
 suffixing.
+
+The scales wrapper converts the export’s black strokes/fills to `currentColor`,
+keeps white masks intact, and gives referenced IDs a unique prefix per instance.
+Edit the source SVG to update its artwork; no second copy needs maintaining.

@@ -5,6 +5,7 @@ on:
     types: [opened, synchronize, reopened, closed]
     paths:
       - 'site/**'
+      - 'brand/**'
       - '.github/site/**'
       - '.github/workflows/site-preview.yml'
 permissions:
