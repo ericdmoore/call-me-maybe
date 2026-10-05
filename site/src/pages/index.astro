@@ -7,7 +7,7 @@ import Divider from '../components/Divider.astro';
 import InstallCommand from '../components/InstallCommand.astro';
 import Softphones from '../components/Softphones.astro';
 import Keypad from '../components/Keypad.astro';
-import { byKind, kindLabels, type Kind } from '../data/hardware';
+import { byKind, kindLabels, priceCheckedDate, type Kind } from '../data/hardware';
 
 const repo = 'https://github.com/ericdmoore/call-me-maybe';
 
@@ -348,7 +348,7 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
           already in your house may need nothing bought at all.
         </p>
         <p>
-          For the PhoneBrain &mdash; a Raspberry Pi or MiniPC &mdash; one choice is worth being rigid about:
+          For the PhoneBrain &mdash; a Raspberry Pi or MiniPC &mdash; one choice is worth being rigid about:{' '}
           <strong>use wired Ethernet</strong>. Wi-Fi jitter on the box handling
           audio is the difference between a clear call and someone sounding
           underwater. Then put it on a small UPS &mdash; a house phone that dies
@@ -360,6 +360,12 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
         kinds.map((kind) => (
           <div class="hw-group">
             <h3>{kindLabels[kind]}</h3>
+            <div class="hw-list-heading" aria-hidden="true">
+              <span>Hardware</span>
+              <span>Type</span>
+              <span>Approx. price</span>
+              <span>Why pick it</span>
+            </div>
             <ul class="hw-list">
               {
                 byKind(kind).map((item) => (
@@ -368,6 +374,11 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
                       {item.url ? <a href={item.url} rel="nofollow sponsored noopener">{item.name}</a> : item.name}
                     </span>
                     <span class="hw-type">{item.type}</span>
+                    <div class="hw-price">
+                      <span class="hw-price-label">Approx. price: </span>
+                      <a href={item.priceSource} aria-label={`Approximate price for ${item.name}: ${item.approxPrice} USD. View price source.`}>{item.approxPrice}</a>
+                      <small>{item.priceBasis}</small>
+                    </div>
                     <p class="hw-note">{item.note}</p>
                   </li>
                 ))
@@ -378,11 +389,19 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
       }
 
       <p class="disclosure">
+        <strong>Budgeting, not a live quote.</strong> Approximate new-hardware prices in USD,
+        checked <time datetime={priceCheckedDate}>October 5, 2026</time>, before tax and shipping.
+        Price links show the reference listing; Amazon prices and bundles may differ.
+        Pi prices cover the board only: allow for a power supply, storage, case and any cooling.
+        DECT bases and extra handsets are separate unless marked as a bundle.
+      </p>
+
+      <p class="disclosure">
         <strong>Disclosure.</strong> The Amazon links above are affiliate links
         &mdash; buy through one and the project earns a commission at no cost to
         you. Nothing here is sponsored and no vendor has paid for placement. Be
-        aware of the obvious bias anyway: every product link in those tables
-        earns something, so the honest guidance is the part that does not.
+        aware of the obvious bias anyway: the Amazon product links earn
+        something, while the price references do not.
         <code>doorman</code> works with any SIP endpoint, the ATA above may mean
         buying nothing at all, and a free softphone will test your whole ringer
         ladder before you spend a cent.
