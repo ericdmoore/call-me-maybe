@@ -4,7 +4,7 @@ import { captureContacts, type Contact } from "./contacts.ts";
 // The house's edge inbox.
 //
 // The carrier callback and the authenticated box routes:
-//   GET  /h/:house/sms/:callbackToken?from=&to=&message=&id=&media=   VoIP.ms calls this
+//   GET  /h/:house/sms/:callbackToken?from=&to=&message=&id=&media=&timestamp=   VoIP.ms calls this
 //   GET  /h/:house/inbox/pull?wait=20      Bearer inbox token: long-poll for texts
 //   POST /h/:house/inbox/ack   {ids}       Bearer inbox token: handled, do not repeat
 //   POST /h/:house/inbox/send  {to,message} Bearer inbox token: reply from the house number
@@ -100,6 +100,11 @@ export default {
       const from = q.get("from") ?? "";
       const to = q.get("to") ?? "";
       const body = q.get("message") ?? "";
+      // The carrier does not specify the timestamp's format or timezone.
+      // Retain bounded metadata verbatim; never let it change queue order or
+      // prevent message delivery when missing, unsafe or left unexpanded.
+      const timestamp = q.get("timestamp") ?? "";
+      const providerTimestamp = timestamp.length <= 64 && timestamp !== "{TIMESTAMP}" && !/[\u0000-\u001f\u007f]/.test(timestamp) ? timestamp : "";
       let media: string[];
       try { media = mediaList(q.get("media")); }
       catch { return new Response("invalid media", { status: 400 }); }
@@ -117,8 +122,8 @@ export default {
       catch { return new Response("media unavailable", { status: 503 }); }
       // Idempotent by (house, id): VoIP.ms retries.
       await env.DB.prepare(
-        "INSERT OR IGNORE INTO messages (house, id, received_at, sender, recipient, body, media_count, contacts, contact_error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      ).bind(house, id, new Date().toISOString(), from, to, body, media.length, JSON.stringify(captured.contacts), captured.error).run();
+        "INSERT OR IGNORE INTO messages (house, id, received_at, sender, recipient, body, media_count, contacts, contact_error, provider_timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).bind(house, id, new Date().toISOString(), from, to, body, media.length, JSON.stringify(captured.contacts), captured.error, providerTimestamp).run();
       return new Response("ok");
     }
 
@@ -131,11 +136,11 @@ export default {
       const deadline = Date.now() + wait * 1000;
       for (;;) {
         const rows = await env.DB.prepare(
-          "SELECT id, received_at, sender, recipient, body, media_count, contacts, contact_error FROM messages WHERE house = ? AND acked_at IS NULL ORDER BY received_at LIMIT 10",
-        ).bind(house).all<{ id: string; received_at: string; sender: string; recipient: string; body: string; media_count: number; contacts: string; contact_error: string }>();
+          "SELECT id, received_at, sender, recipient, body, media_count, contacts, contact_error, provider_timestamp FROM messages WHERE house = ? AND acked_at IS NULL ORDER BY received_at LIMIT 10",
+        ).bind(house).all<{ id: string; received_at: string; sender: string; recipient: string; body: string; media_count: number; contacts: string; contact_error: string; provider_timestamp: string }>();
         if (rows.results.length > 0 || Date.now() >= deadline) {
           return json({
-            messages: rows.results.map((r) => ({ id: r.id, from: r.sender, to: r.recipient, body: r.body, received_at: r.received_at, media_count: r.media_count, contacts: JSON.parse(r.contacts) as Contact[], contact_error: r.contact_error })),
+            messages: rows.results.map((r) => ({ id: r.id, from: r.sender, to: r.recipient, body: r.body, received_at: r.received_at, provider_timestamp: r.provider_timestamp, media_count: r.media_count, contacts: JSON.parse(r.contacts) as Contact[], contact_error: r.contact_error })),
           });
         }
         await new Promise((res) => setTimeout(res, 1000));

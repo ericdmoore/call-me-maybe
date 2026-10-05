@@ -16,7 +16,7 @@ reasons: `.plans/s19-edge-inbox/`.
     npm run deploy
 
 Then on VoIP.ms, the DID's SMS URL callback is
-`https://edge.callmemaybe.cc/h/midbury/sms/<callback token>?from={FROM}&to={TO}&message={MESSAGE}&id={ID}&media={MEDIA}`
+`https://edge.callmemaybe.cc/h/midbury/sms/<callback token>?from={FROM}&to={TO}&message={MESSAGE}&id={ID}&media={MEDIA}&timestamp={TIMESTAMP}`
 and the box's `.env` gets `INBOX_URL=https://edge.callmemaybe.cc/h/midbury`
 and `INBOX_TOKEN=<inbox token>`. The VoIP.ms API IP allow-list must admit
 the Worker's egress, which is Cloudflare's address space — and it calls
@@ -24,6 +24,25 @@ VoIP.ms over IPv6, from `2a06:98c0:3600::/40` (inside Cloudflare's published
 `2a06:98c0::/29`), so the IPv6 range is the one that matters. Ask the Worker
 what the carrier sees: `GET /h/<house>/inbox/whoami` with the inbox token.
 Or `0.0.0.0` to disable the restriction.
+
+This URL requests all six fields in the carrier's [documented SMS/MMS callback](https://wiki.voip.ms/article/SMS-MMS#Configuring_the_SMS.2FMMS_service).
+Leave the separate SMS/MMS Webhook URL empty; this Worker accepts the GET
+callback, not the alternative POST/JSON webhook.
+
+`timestamp={TIMESTAMP}` is stored in D1 and returned by inbox pulls as
+`provider_timestamp`, separately from the Worker's UTC `received_at`. The
+carrier's format and timezone are unspecified, so the value is preserved
+verbatim, never parsed or used to order messages. Missing values, an unexpanded
+`{TIMESTAMP}`, values over 64 characters, and values containing ASCII control
+characters become an empty string without rejecting the message. Existing
+rows also get an empty string. Duplicate callbacks preserve the first accepted
+message and both timestamps. The field follows the queue's existing retention:
+acknowledged rows older than seven days are pruned on subsequent acknowledgements.
+Existing home inbox binaries safely ignore the added response field.
+
+For an existing deployment, run `npm run db:migrate` before `npm run deploy`,
+then append `&timestamp={TIMESTAMP}` to the carrier callback. This timestamp
+update requires no home-service restart.
 
 
 ## Contact-card attachments
@@ -66,7 +85,7 @@ npm run deploy
 ```
 
 For a new database, `npm run db:init` applies both the base schema and the
-migrations. Add `&media={MEDIA}` to the DID's callback in the VoIP.ms portal,
+migrations. Include `&media={MEDIA}&timestamp={TIMESTAMP}` in the DID's callback in the VoIP.ms portal,
 enable callback retries, then update the box's binary, configure the phone book
 words in `messages.toml`, run `doorman check`, and restart
 `doorman-inbox.service`.

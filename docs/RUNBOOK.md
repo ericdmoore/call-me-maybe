@@ -1066,7 +1066,10 @@ these files. These are **directory additions only**: importing a contact
 changes neither `[[people]]`, `contacts.toml`, nor call-screening permissions.
 
 Deploy the edge migration and Worker from `edge/README.md`, and include
-`&media={MEDIA}` in the carrier callback, with callback retries enabled.
+`&media={MEDIA}&timestamp={TIMESTAMP}` in the carrier callback, with callback retries enabled.
+The edge queue keeps the carrier's raw `provider_timestamp` separately from
+its own UTC `received_at`; no timezone is inferred. Leave the separate
+SMS/MMS Webhook URL empty. See `edge/README.md` for the complete callback URL.
 Upgrade and restart the inbox and directory services after running
 `doorman check`. Carrier delivery of `.vcf`
 attachments still needs a live test: VoIP.ms documents MMS media callbacks,
