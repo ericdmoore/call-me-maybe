@@ -95,6 +95,8 @@ func runCommand() int {
 			os.Exit(runSTT(os.Args[2:]))
 		case "phonebook":
 			os.Exit(runPhonebook(os.Args[2:]))
+		case "reminders":
+			return runReminders(os.Args[2:])
 		case "inbox":
 			return runInbox(os.Args[2:])
 		case "digest":
@@ -288,6 +290,9 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 EVENT_JOURNAL_PATH set, every text and action
                                 is written to the journal beside the daemon's
                                 events (message.*, action.*)
+  doorman reminders prune       remove finished reminder recordings (Asterisk user);
+                                --spool overrides /var/spool/asterisk. The
+                                *80/*81/*82 menus run through Asterisk AGI.
   doorman phonebook [flags]     numbers added from handsets with *88: file each
                                 recording's number into that phone's own book
                                 at once (PHONEBOOK_DIR/own/<id>.vcf, served by

@@ -139,6 +139,11 @@ Layout:
   `cmd/doorman/inbox.go` and nothing else, asserted by test: nothing on the
   call path reads a text, and the carrier API key is at the edge (`edge/`,
   the Cloudflare Worker), never on the box.
+- `internal/reminder` — local handset AGI menus for *80/*81/*82; Asterisk call
+  files own durable scheduling/retries. Recordings and metadata belong to the
+  asterisk user under its private spool. No daemon credentials or journal reads.
+  The curfew sweep exempts channels with accountcode `cmm-reminder`. See RUNBOOK
+  “Scheduled calls” for deployment and a real handset trial.
 - Contact cards sent to the house are downloaded and parsed by the Worker.
   Only bounded `{name, number}` metadata and fixed error codes enter the queue;
   no raw files, media URLs, photos or arbitrary properties reach the house.

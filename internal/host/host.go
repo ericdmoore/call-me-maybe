@@ -70,8 +70,8 @@ func DefaultLayout() Layout {
 }
 
 // Wants is which optional units the configuration calls for. The daemon
-// and the *88 timer are always wanted; cmd/doorman decides the rest from
-// .env and the files, and this package never reads either.
+// and both housekeeping timers (*88 and reminders) are always wanted.
+// cmd/doorman decides the rest from .env and the files; this package reads neither.
 type Wants struct {
 	Directory bool // PROVISION_ADDRESS and a phone with mac+model
 	Inbox     bool // INBOX_URL and messages.toml
@@ -100,6 +100,8 @@ func Units() ([]Unit, error) {
 		"doorman.service":           {always: true},
 		"doorman-phonebook.service": {},
 		"doorman-phonebook.timer":   {always: true},
+		"doorman-reminders.service": {},
+		"doorman-reminders.timer":   {always: true},
 		"doorman-directory.service": {wanted: func(w Wants) bool { return w.Directory }},
 		"doorman-inbox.service":     {wanted: func(w Wants) bool { return w.Inbox }},
 		"doorman-digest.service":    {},

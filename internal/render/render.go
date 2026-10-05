@@ -401,6 +401,9 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 		// phone as an anonymous call and delivers nothing (first re-provision,
 		// 2026-09-24). [cmm-messages] below hands it to the phone as a message.
 		pjsip.WriteString("message_context=cmm-messages\n")
+		// An endpoint marker, not caller ID: only a rendered local handset
+		// can create or hear its own reminders through the AGI menus.
+		fmt.Fprintf(&pjsip, "set_var=CMM_REMINDER_HANDSET=%s\n", h.ID)
 		if h.Number > 0 {
 			fmt.Fprintf(&pjsip, "callerid=%s <%d>\n", label, h.Number)
 		} else {
@@ -557,6 +560,17 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 		plan.WriteString(" same => n(none),Hangup()\n")
 	}
 
+	// Durable timers are Asterisk call files. The AGI subcommand only owns
+	// the handset dialogue and private metadata, not SIP or a daemon clock.
+	for _, code := range []string{"80", "81", "82"} {
+		fmt.Fprintf(&plan, "\n; *%s: one-shot reminder on this handset.\nexten => *%s,1,Answer()\n", code, code)
+		plan.WriteString(" same => n,Set(CHANNEL(accountcode)=cmm-reminder)\n")
+		plan.WriteString(" same => n,Set(AGISIGHUP=no)\n same => n,Set(TIMEOUT(absolute)=600)\n")
+		fmt.Fprintf(&plan, " same => n,Set(CMM_REMINDER_MEDIA=%s)\n", systemMedia)
+		fmt.Fprintf(&plan, " same => n,AGI(/opt/call-me-maybe/bin/doorman,reminders,menu,%s)\n", code)
+		plan.WriteString(" same => n,Hangup()\n")
+	}
+
 	// *88 — add a number to this phone's own book (s24): key it, then say
 	// the name after the beep. Three Asterisk applications and nothing of
 	// doorman's; the recording lands in the spool as <handset>-<time>-<digits>
@@ -575,6 +589,12 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 	fmt.Fprintf(&plan, " same => n,Record(%s/${ADD_ID}-${EPOCH}-${ADD_NUMBER}.wav,3,15,k)\n", PhonebookSpool(env))
 	fmt.Fprintf(&plan, " same => n,Playback(%s/add-done)\n", systemMedia)
 	plan.WriteString(" same => n(bye),Hangup()\n")
+
+	// No include from [internal] or an inbound trunk. Only the private spool
+	// enters here after the named handset answers; AGI verifies its identity.
+	plan.WriteString("\n[cmm-reminder-deliver]\nexten => _[0-9a-f].,1,Set(AGISIGHUP=no)\n")
+	plan.WriteString(" same => n,Set(TIMEOUT(absolute)=90)\n")
+	plan.WriteString(" same => n,AGI(/opt/call-me-maybe/bin/doorman,reminders,deliver,${EXTEN})\n same => n,Hangup()\n")
 
 	// Texts between handsets. Every endpoint above names this context for
 	// SIP MESSAGE, so a message to a room number reaches that phone as a
@@ -613,12 +633,15 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 	plan.WriteString(" same => n,Return()\n")
 
 	// One context per sleeping-capable phone: [internal] behind a clock.
-	// 911 goes through first and unconditionally — the whole point of the
-	// context is that nothing else does while the phone is asleep.
+	// Emergency calls and the explicitly requested reminder apps go through
+	// unconditionally; ordinary calls stay behind the bedtime gate.
 	for _, id := range sleepers {
 		fmt.Fprintf(&plan, "\n; %s is asleep while any of its curfew windows is active (handsets.toml).\n", id)
 		fmt.Fprintf(&plan, "[%s]\n", curfewContext(id))
 		plan.WriteString("exten => 911,1,Goto(internal,${EXTEN},1)\n")
+		for _, code := range []string{"80", "81", "82"} {
+			fmt.Fprintf(&plan, "exten => *%s,1,Goto(internal,${EXTEN},1)\n", code)
+		}
 		fmt.Fprintf(&plan, "exten => _[0-9*#+].,1,GotoIf($[%s]?asleep)\n", curfewExpr(curfews[id]))
 		plan.WriteString(" same => n,Goto(internal,${EXTEN},1)\n")
 		plan.WriteString(" same => n(asleep),Answer()\n")
