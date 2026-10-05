@@ -226,6 +226,14 @@ pr = {'state': 'open', 'draft': False, 'head': {'repo': {'full_name': 'outsider/
 assert not g.allowed(e, {'pull_request': pr})
 pr['head']['repo']['full_name'] = g.REPOSITORY
 assert g.allowed(e, {'pull_request': pr})
+e['GITHUB_WORKFLOW_REF'] = g.REPOSITORY + '/.github/workflows/site-preview.yml@refs/heads/main'
+pr['base'] = {'ref': 'main'}
+for action in ['opened', 'synchronize', 'reopened', 'closed']:
+    assert g.allowed(e, {'action': action, 'pull_request': pr})
+assert not g.allowed(e, {'action': 'edited', 'pull_request': pr})
+assert not g.allowed(dict(e, GITHUB_EVENT_NAME='pull_request'), {'action': 'opened', 'pull_request': pr})
+pr['head']['repo']['full_name'] = 'outsider/repo'
+assert not g.allowed(e, {'action': 'opened', 'pull_request': pr})
 `;
   const result = spawnSync('python3', ['-I', '-c', source], {encoding: 'utf8'});
   assert.equal(result.status, 0, result.stderr);

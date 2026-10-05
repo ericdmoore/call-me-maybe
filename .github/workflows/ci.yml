@@ -28,7 +28,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - run: node --test .github/ai/*.test.cjs
+      - run: node --test .github/ai/*.test.cjs .github/site/*.test.cjs
 
   test:
     runs-on: ubuntu-latest

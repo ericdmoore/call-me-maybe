@@ -13,6 +13,12 @@ WORKFLOWS = {'ocr-review.yml', 'opencode-repair.yml'}
 def allowed(env, event):
     if env.get('GITHUB_REPOSITORY') != REPOSITORY:
         return False
+    if env.get('GITHUB_WORKFLOW_REF') == f'{REPOSITORY}/.github/workflows/site-preview.yml@refs/heads/main':
+        pr = event.get('pull_request', {})
+        return (env.get('GITHUB_EVENT_NAME') == 'pull_request_target'
+                and event.get('action') in {'opened', 'synchronize', 'reopened', 'closed'}
+                and pr.get('head', {}).get('repo', {}).get('full_name') == REPOSITORY
+                and pr.get('base', {}).get('ref') == 'main')
     refs = {f'{REPOSITORY}/.github/workflows/{name}@refs/heads/main' for name in WORKFLOWS}
     if env.get('GITHUB_WORKFLOW_REF') not in refs:
         return False

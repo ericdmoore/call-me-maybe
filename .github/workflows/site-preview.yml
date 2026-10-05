@@ -1,0 +1,95 @@
+name: Site preview
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, closed]
+    paths:
+      - 'site/**'
+      - '.github/site/**'
+      - '.github/workflows/site-preview.yml'
+permissions:
+  contents: read
+concurrency:
+  group: site-preview-${{ github.event.pull_request.number }}
+  # Finish uploads before a newer run or close removes/replaces the preview.
+  cancel-in-progress: false
+jobs:
+  build:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # PR code runs only here: no Cloudflare credentials or write token.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - run: npm ci && npm run build
+        working-directory: site
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: site-preview
+          path: site/dist/
+          if-no-files-found: error
+          retention-days: 3
+  deploy:
+    needs: build
+    if: >-
+      always() && !cancelled() &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (needs.build.result == 'success' || github.event.action == 'closed')
+    runs-on: [self-hosted, macOS, ARM64, call-me-maybe-ai]
+    timeout-minutes: 10
+    outputs:
+      url: ${{ steps.preview.outputs.url }}
+      stale: ${{ steps.preview.outputs.stale }}
+    steps:
+      # Only trusted base policy is checked out on Alpaca. Never the PR revision.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Allocate temporary upload directory
+        run: |
+          preview_dir=$(mktemp -d "$RUNNER_TEMP/cmm-site-preview.XXXXXX")
+          echo "PREVIEW_DIR=$preview_dir" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        if: github.event.action != 'closed'
+        with:
+          name: site-preview
+          path: ${{ env.PREVIEW_DIR }}/dist
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        id: preview
+        with:
+          script: await require('./.github/site/preview.cjs').deploy({github, context, core});
+      - name: Remove temporary upload directory
+        if: always() && env.PREVIEW_DIR != ''
+        run: rm -rf -- "$PREVIEW_DIR"
+  comment:
+    needs: [build, deploy]
+    if: >-
+      always() && !cancelled() &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.deploy.outputs.stale != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        env:
+          RESULT: ${{ needs.deploy.result }}
+          PREVIEW_URL: ${{ needs.deploy.outputs.url }}
+        with:
+          script: |
+            await require('./.github/site/preview.cjs').comment({github, context},
+              process.env.RESULT, process.env.PREVIEW_URL);
