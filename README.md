@@ -1,6 +1,6 @@
 <p align="center">
-  <img src="brand/readme/mark-threshold-ornate-brass.svg" width="190"
-       alt="The Call Me Maybe mark: a lit doorway inside an Art Deco medallion" />
+  <img src="brand/readme/mark-threshold-ornate-scales-brass.svg" width="190"
+       alt="The Call Me Maybe mark: a lit doorway inside an Art Deco medallion with a scalloped border" />
 </p>
 
 <p align="center">

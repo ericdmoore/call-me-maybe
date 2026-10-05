@@ -70,3 +70,8 @@ suffixing.
 The scales wrapper converts the export’s black strokes/fills to `currentColor`,
 keeps white masks intact, and gives referenced IDs a unique prefix per instance.
 Edit the source SVG to update its artwork; no second copy needs maintaining.
+
+The top-level README uses `brand/readme/mark-threshold-ornate-scales-brass.svg`,
+a generated copy with black fills/strokes replaced by `#c8a24a` for GitHub’s
+image rendering. Regenerate that copy from the source SVG when the artwork changes;
+leave white mask fills unchanged.
