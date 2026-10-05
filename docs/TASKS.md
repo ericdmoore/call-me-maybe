@@ -6,6 +6,15 @@ criteria are the definition of done — if they all hold, the task is finished.
 Ground rules for every task: `make check` green (vet + test + build), no
 secrets committed, and the invariants in `CLAUDE.md` intact.
 
+## Communication-review follow-ups — 2026-10-05
+
+The [site/repository audit](positioning/communication-audit.md#roadmap-nudges-proposals-not-implemented-features)
+adds evidence and acceptance criteria for five proposed follow-ups. Start with
+Flowroute: §8's postpaid assumption is contradicted by the provider's prepaid
+account documentation. The site advice is corrected; the runtime balance
+classification remains a priority fix. The review also distinguishes a possible
+outgoing contact allow-list from today's incoming caller screening.
+
 ---
 
 ## 1. Mock ARI harness — DONE (shipped with the Go port)

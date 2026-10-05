@@ -1,6 +1,6 @@
 ---
 title: Quiet hours
-tagline: A line that stops ringing at bedtime, and can send the call somewhere awake instead.
+tagline: Route an extension to voicemail or an adult during its quiet hours.
 audience: Anyone whose phone is in a room where someone sleeps.
 order: 20
 ---
@@ -10,10 +10,8 @@ order: 20
 A phone in a child's room is useful right up until 11pm, when it is a machine
 for waking a household on behalf of strangers.
 
-The usual answers are all bad. Turning the ringer off means the phone is
-useless in an emergency and stays off for a week because nobody remembers.
-Unplugging it is the same thing with extra steps. Do-not-disturb on a mobile is
-per-device, so it has to be set on every phone by every person.
+Turning a ringer off is easy to forget. A configured schedule lets you decide
+where calls for an extension should go while someone is asleep.
 
 ## What quiet hours do
 
@@ -27,8 +25,11 @@ end = "07:00"
 days = ["SU", "MO", "TU", "WE", "TH"]
 ```
 
-Any line can reference it. During the window that line does not ring at all —
-the caller goes straight to voicemail, and the house stays asleep.
+An extension can reference it. During the window, calls routed to that
+extension go to its configured voicemail unless an alternate ring group is set.
+Configuration validation requires a mailbox or an afterhours destination.
+This does not silence every route to the handset or restrict outgoing calls.
+For that, use a [handset bedtime](/features/bedtime/).
 
 **Or the call goes somewhere that is awake:**
 
@@ -37,8 +38,8 @@ afterhours = "school-night"
 afterhours_ring = ["adults"]
 ```
 
-Now a 2am call for the kids' line rings the adults instead. If nobody answers
-*that*, it still takes a message, so the redirect narrows what happens during
+Now a 2am call for the kids' extension rings the adults instead. If nobody answers
+*that*, it takes a message if a mailbox is configured, so the redirect narrows what happens during
 the window rather than removing the safety net.
 
 ## What that one field expresses
@@ -56,9 +57,9 @@ school-night schedule lists Sunday through Thursday: Friday and Saturday
 evenings stay open, which is what you meant.
 
 **`enabled = false` is the holiday switch.** One edit turns bedtime off for
-spring break without hunting through every line that references it — and turns
+spring break without hunting through every extension that references it — and turns
 it back on without reconstructing the times from memory.
 
-**Schedules are shared.** Define `school-night` once and every line that should
+**Schedules are shared.** Define `school-night` once and every extension that should
 respect it points at the same window, so there is one place to change when term
 ends.
