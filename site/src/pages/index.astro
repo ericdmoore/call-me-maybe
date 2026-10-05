@@ -11,6 +11,18 @@ const repo = 'https://github.com/ericdmoore/call-me-maybe';
 
 const features = [
   {
+    slug: 'bedtime', term: 'A phone with a bedtime',
+    body: 'Handset curfews pause ordinary incoming and outgoing calls. Emergency dialing and scheduled reminder calls remain exceptions.',
+  },
+  {
+    slug: 'contacts', term: 'A familiar address book',
+    body: 'Import vCard contact exports for caller screening. Share phone-book entries separately, without changing who gets through.',
+  },
+  {
+    slug: 'home-assistant', term: 'Let the house announce a call',
+    body: 'An optional webhook lets Home Assistant announce a caller or signal with a light.',
+  },
+  {
     slug: 'ringer-ladders',
     term: 'Ringer ladders',
     body: 'Ring the kids’ room for three cycles, escalate to the adults for four more, then take a message. Per extension.',
@@ -18,7 +30,7 @@ const features = [
   {
     slug: 'quiet-hours',
     term: 'Quiet hours',
-    body: 'A named schedule like school-night, referenced by any extension. Between 20:30 and 07:00 that line does not ring at all.',
+    body: 'A named schedule like school-night, referenced by any extension. Route calls for that extension to voicemail or an adult during its quiet window.',
   },
   {
     slug: 'paging',
@@ -59,7 +71,7 @@ const features = [
 const steps = [
   {
     title: 'Grab a number',
-    body: 'A sub-account with a VoIP provider, a DID pointed at it, and E911 switched on. A couple of dollars a month, and E911 is the one line item worth not skipping on a phone your family will reach for in a hurry.',
+    body: 'A sub-account with a VoIP provider, a DID pointed at it, and E911 switched on. Budget for the number, incoming and outgoing minutes, E911 and taxes. The comparison includes light-use examples.',
       link: { href: '/providers/', text: 'Compare providers' },
   },
   {
@@ -72,7 +84,7 @@ const steps = [
   },
   {
     title: 'Add the house rules',
-    body: 'Who is known, what rings, and when. Run doorman check, enable the service, and you are answering calls. Edits go live within a second, and a file that fails validation is discarded rather than applied.',
+    body: 'Who is known, what rings, and when. Run doorman check, enable the service, and you are answering calls. Policy edits reload automatically; invalid edits leave the last valid policy in place. Hardware, trunk and generated dialplan changes require rendering and an Asterisk reload.',
   },
 ];
 
@@ -81,7 +93,7 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
 
 <Base
   title="Call Me Maybe — a programmable home phone. Can run on a Raspberry Pi."
-  description="Known callers ring the whole house. Everyone else meets the lobby: dial a six-digit extension, or the bouncer says Good day and hangs up. Runs on a Raspberry Pi, or anything that runs Asterisk. No port forwarding."
+  description="Give your family a home phone for calling friends without handing over a smartphone. Open-source, self-hosted calling with room routing, bedtime rules and your choice of provider."
 >
   <!-- ── The lobby ──────────────────────────────────────────────────────── -->
   <header class="lobby">
@@ -96,13 +108,43 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
       </h1>
 
       <p class="tagline">
-        A programmable home phone. Known callers ring the whole house.
-        Everyone else meets the doorman.
+        A home phone for calling friends, without handing over a smartphone.
+        Your phones, your provider, your house rules.
       </p>
 
+      <p class="tagline" style="font-size:var(--t-sm);">Open-source software you run at home on a Raspberry Pi or another Asterisk host.</p>
+      <p><a href="#family-fit">Is this for our family?</a> · <a href="/providers/">Compare running costs</a></p>
       <Keypad />
     </div>
   </header>
+
+  <section class="panel" id="family-fit">
+    <div class="wrap">
+      <p class="eyebrow">A little more independence</p>
+      <h2 class="display">Let them make the call</h2>
+      <div class="prose">
+        <p>Your child wants to call a friend after school. You want that too.
+          A shared home phone gives them a place to make plans, tell a story,
+          or call Grandma without borrowing your smartphone.</p>
+        <p>Choose a simple handset, set up the people who should ring through,
+          and give friends an extension for the right room. Add a
+          <a href="/features/bedtime/">bedtime for the handset</a> when the day is done.
+          Friends can use ordinary phone numbers through your provider; they
+          do not need to install Call Me Maybe.</p>
+        <p><strong>A good fit if someone in your household is comfortable maintaining
+          a small Linux phone system.</strong> You choose the hardware and carrier,
+          edit configuration files, and look after updates and account credit.
+          A ready-made family phone service may suit you better if you want
+          app-based setup and one company handling support.</p>
+        <p>The lobby screens incoming calls. It is not an approved-contacts-only
+          outgoing dialer: outside a configured curfew, the supplied dialplan
+          allows ordinary US/Canada-format numbers. Handsets vary; choose one
+          without the apps or screens you are trying to avoid.</p>
+        <p>This is a supplementary phone that depends on power, internet and a
+          configured provider. Keep another way to reach emergency services.</p>
+      </div>
+    </div>
+  </section>
 
   <!-- ── The two doors ──────────────────────────────────────────────────── -->
   <section class="panel">
@@ -112,10 +154,10 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
 
       <div class="prose" style="margin-top:1.25rem;">
         <p>
-          Like any quality doorman, every caller is checked against the list. 
-          Favored guests are automatiically allowed to ring the house phones. 
-          Their numbers formatted and fashioned into a universal form first to prevent confusion.
-          Which makes sure grandma never has to meet the bouncer (unless you want her to).
+          Known numbers can ring through; other callers hear the lobby and can enter an extension.
+          Caller numbers are normalized before comparison, so formatting differences
+          do not send Grandma to the wrong door. Caller ID can be spoofed: this is
+          call screening, not proof of who is calling.
         </p>
       </div>
 
@@ -125,7 +167,7 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
           <p class="said">&ldquo;Welcome, I&rsquo;ll connect you.&rdquo;</p>
           <p class="then">
             Every handset in the house rings at once. The first to answer gets
-            the call. Classic Landline. No extensions needed. No spam callers.
+            the call. A familiar landline experience, subject to your ringing and bedtime rules. No extension needed.
           </p>
         </div>
         <div>
@@ -133,7 +175,7 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
           <p class="said">&ldquo;Welcome to the phone lobby. Please dial an extension.&rdquo;</p>
           <p class="then">
             These callers get ten seconds to start dialing an extension. Valid extension rings that room. 
-            Silence, or wrong guess, gets &ldquo;Good day.&rdquo; and a click.
+            By default, silence or exhausted attempts gets &ldquo;Good day.&rdquo; and a click. You can also route silence to voicemail or the house.
           </p>
         </div>
       </div>
@@ -236,7 +278,7 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
       <div class="prose" style="margin-top:1.25rem;">
         <p>
           A rotary dial and a bakelite handset, answered by something that
-          understands SIP, cryptographic randomness, and your calendar. In this
+          follows your call-routing rules and configured schedules. A rotary phone may need a pulse-to-tone converter as well as an analog adapter. In this
           order, and confirm each rung before climbing — a failure low down
           explains every symptom above it, which is why the runbook is written
           as a ladder rather than a checklist.

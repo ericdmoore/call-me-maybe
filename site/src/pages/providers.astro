@@ -2,12 +2,12 @@
 import Base from '../layouts/Base.astro';
 import Divider from '../components/Divider.astro';
 import Switchboard from '../components/Switchboard.astro';
-import { providers, track } from '../data/providers';
+import { providers, track, checkedAt } from '../data/providers';
 ---
 
 <Base
   title="Phone providers — Call Me Maybe"
-  description="An honest comparison of SIP trunk providers that work with a home phone behind NAT: VoIP.ms, Telnyx, Flowroute. No affiliate links."
+  description="An honest comparison of SIP trunk providers that work with a home phone behind NAT: VoIP.ms, Telnyx, Flowroute and Callcentric. Dated prices, setup caveats and no affiliate links."
 >
   <header class="lobby prov-hero" style="padding-block:clamp(2.5rem,6vw,4rem) 0;">
     <div class="prov-tangle prov-tangle--l"><Switchboard /></div>
@@ -17,7 +17,7 @@ import { providers, track } from '../data/providers';
       <h1 class="wordmark" style="font-size:clamp(2rem,6vw,3.6rem);">Providers</h1>
       <p class="tagline">
         You bring the number. Here is who to buy it from, what each one is good
-        at, and where each one will annoy you.
+        at, and what to check before signing up.
       </p>
       <Divider />
     </div>
@@ -26,39 +26,81 @@ import { providers, track } from '../data/providers';
   <section class="panel">
     <div class="wrap">
       <div class="prose">
-        <h2>One requirement decides everything</h2>
+        <h2>Start with SIP registration</h2>
         <p>
-          This phone lives behind your router with <strong>no ports open</strong>.
+          This phone lives behind your router with <strong>no port forwarding</strong>.
           It opens the connection outward and calls arrive back down that same
-          pipe. So the only question that matters when shopping is:
+          pipe. The first question to ask is:
         </p>
         <p class="prov-rule">
           <strong>Does the provider accept an outbound SIP registration?</strong>
         </p>
         <p>
-          If yes, it will work. If the provider only authenticates by pushing
-          calls at a fixed IP address, it cannot work here without opening your
-          network up — which is the thing this design exists to avoid. That
-          rules out Twilio&rsquo;s Elastic SIP Trunking for this architecture,
-          and it is not a criticism of Twilio; it is a different shape of
-          product.
+          Registration makes a provider a candidate. You still need to verify
+          incoming calls, two-way audio, keypad tones, caller ID and emergency
+          routing with your configuration. Providers that require unsolicited
+          inbound connections to a public IP need a different network setup
+          from the one documented here.
         </p>
 
         <h2 class="prov-h">Nobody is paying for this placement</h2>
         <p>
-          There are no affiliate or referral links on this page. The programs
-          exist and the traffic would be worth money, but the advice is worth
-          more &mdash; the moment a recommendation carries a commission you have
-          to wonder which it is. The links carry
-          <code>utm_</code> parameters so we can see which providers people
-          actually choose, and nothing else. If that ever changes it will say so
-          here, in this paragraph, before anything else on the page.
+          No provider pays for placement, and none of these links earns a
+          commission. They carry <code>utm_</code> parameters identifying
+          Call Me Maybe as the referring site to the provider. Those tags alone
+          do not tell us who clicked or signed up.
         </p>
         <p>
-          Rates move constantly, so no prices are quoted below. Every card links
-          to the provider&rsquo;s own pricing page. Check it &mdash; a stale
-          number on a page about honesty would be a poor joke.
+          Prices below were checked on <strong>{checkedAt}</strong>. They are
+          USD examples for US local voice service, before taxes and regulatory
+          surcharges. Starting rates vary by destination and number availability;
+          follow the sources for a quote. Hardware, internet, electricity,
+          messaging and optional services are extra.
         </p>
+      </div>
+
+      <div class="prov-table" role="region" aria-label="Provider price comparison" tabindex="0">
+        <table>
+          <caption>US local voice pricing · checked {checkedAt} · USD</caption>
+          <thead><tr><th scope="col">Provider</th><th scope="col">Phone number</th><th scope="col">Incoming calls</th><th scope="col">Outgoing calls</th><th scope="col">E911</th><th scope="col">Setup / funding</th></tr></thead>
+          <tbody>{providers.map(p => <tr>
+            <th scope="row"><a href={track(p.pricingUrl, `${p.name.toLowerCase()}-comparison`)}>{p.name}</a></th>
+            <td>{p.number}</td><td>{p.incoming}</td><td>{p.outgoing}</td><td>{p.emergency}</td><td>{p.setup}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+      <div class="prov-table" role="region" aria-label="Provider feature comparison" tabindex="0">
+        <table>
+          <caption>Features and setup evidence</caption>
+          <thead><tr><th scope="col">Provider</th><th scope="col">SIP registration</th><th scope="col">Call Me Maybe setup</th><th scope="col">Account model</th><th scope="col">Useful features</th></tr></thead>
+          <tbody>{providers.map(p => <tr>
+            <th scope="row">{p.name}</th>
+            <td>{p.registration === 'yes' ? 'Documented' : 'Verify with provider'}</td>
+            <td>{p.weUseThis ? 'Project’s worked setup' : 'Live validation needed'}</td>
+            <td>{p.billing}</td>
+            <td><ul>{p.pros.map(pro => <li>{pro}</li>)}</ul></td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+      <div class="prose">
+        <h2 class="prov-h">What a light-use month might cost</h2>
+        <p>For one number, 100 incoming minutes and 100 outgoing minutes:
+          VoIP.ms is <strong>from $4.00</strong> ($1.10 + $0.90 + $0.50 + $1.50 E911);
+          Telnyx is <strong>from $3.32</strong> ($1.00 + $0.32 + $0.50 + $1.50 E911).
+          These use advertised starting rates, not guaranteed destination quotes.</p>
+        <p>Callcentric’s Pay Per Minute DID plus North America Basic is
+          <strong>$5.40</strong> ($1.95 number + $1.50 incoming + $1.95 outgoing plan,
+          including E911). The 100 outgoing minutes fit within its 120-minute allowance.
+          All examples exclude setup, taxes and surcharges. A prepaid deposit funds
+          future use; it is separate from the monthly usage calculation.</p>
+        <p><strong>Our starting recommendation:</strong> VoIP.ms for the documented
+          Call Me Maybe setup. Compare Callcentric for bundled minutes, and Telnyx
+          or Flowroute if their carrier tools suit you. A lower advertised minute
+          rate is only one part of the decision.</p>
+        <p>This is a supplementary home phone. Configure and verify the registered
+          emergency address and routing using the provider’s testing procedure.
+          Power and internet outages can interrupt service; keep another way to
+          reach emergency services.</p>
       </div>
 
       <ul class="prov-list">
@@ -75,7 +117,7 @@ import { providers, track } from '../data/providers';
                       p.registration === 'yes' ? 'prov-tag--ok' : 'prov-tag--todo',
                     ]}
                   >
-                    {p.registration === 'yes' ? 'registration ✓' : 'unverified'}
+                    {p.registration === 'yes' ? 'registration documented' : 'registration: verify'}
                   </span>
                   <span class="prov-tag">{p.billing}</span>
                 </span>
@@ -83,13 +125,14 @@ import { providers, track } from '../data/providers';
 
               <p class="prov-summary">{p.summary}</p>
 
+              <p><strong>Call Me Maybe validation:</strong> {p.weUseThis ? 'Project’s documented setup' : 'Not live-tested in this review'}</p>
               <div class="prov-cols">
                 <div>
-                  <h4>Good</h4>
+                  <h4>Useful features</h4>
                   <ul>{p.pros.map((x) => <li>{x}</li>)}</ul>
                 </div>
                 <div>
-                  <h4>Less good</h4>
+                  <h4>Check before choosing</h4>
                   <ul>{p.cons.map((x) => <li>{x}</li>)}</ul>
                 </div>
               </div>
@@ -105,6 +148,7 @@ import { providers, track } from '../data/providers';
                   Their rates &rarr;
                 </a>
               </p>
+              <p class="prov-sources">Sources checked {checkedAt}: {p.sources.map((source, i) => <span>{i > 0 && ' · '}<a href={track(source.url, `${p.name.toLowerCase()}-source-${i + 1}`)}>{source.label}</a></span>)}</p>
             </li>
           ))
         }
@@ -131,13 +175,13 @@ import { providers, track } from '../data/providers';
             makes a second line cheap instead of a second trunk.
           </li>
           <li>
-            <strong>Prepaid or postpaid?</strong> Prepaid fails silently: the
-            balance reaches zero and the phone simply stops ringing, which is
+            <strong>Prepaid or postpaid?</strong> Prepaid can stop service when the
+            balance reaches zero. A phone that simply stops ringing is
             indistinguishable from a quiet week. If prepaid, set up a balance
             alert on day one.
           </li>
           <li>
-            <strong>E911?</strong> Decide deliberately. A house phone that
+            <strong>E911?</strong> Confirm availability, address and charges. A house phone that
             cannot reach emergency services is a thing the people in that house
             should know about.
           </li>
@@ -154,6 +198,13 @@ import { providers, track } from '../data/providers';
 </Base>
 
 <style>
+  .prov-table { overflow-x: auto; margin-top: 2rem; }
+  table { border-collapse: collapse; width: 100%; min-width: 58rem; }
+  caption { text-align: left; margin-bottom: 1rem; color: var(--text-soft); }
+  th, td { text-align: left; vertical-align: top; padding: 0.85rem; border: 1px solid var(--rule); }
+  thead { background: var(--raised); }
+  .prov-sources { color: var(--text-soft); font-size: var(--t-sm); }
+
   .prov-hero {
     position: relative;
     overflow: hidden;
