@@ -70,10 +70,20 @@ site-assets: build
 	@cp llms.txt site/public/llms.txt
 	@cp llms-policy.txt site/public/llms-policy.txt
 	@cp install.sh site/public/install.sh
-	@for n in policy handsets trunks contacts env; do \
+	@for n in policy handsets trunks contacts messages env; do \
 		./bin/doorman schema $$n > site/public/schema/$$n.json; \
 	done
-	@echo "✓ site/public: llms.txt, llms-policy.txt, install.sh, schema/{policy,handsets,trunks,contacts,env}.json"
+	@# The examples, beside the schema, so a model can fetch a worked
+	@# configuration from the same host as the surface it was written to.
+	@# .env.example is published without its dot: static hosts and browsers
+	@# treat a dotfile as hidden, and a hidden template helps nobody.
+	@rm -rf site/public/examples && mkdir -p site/public/examples
+	@cp examples/README.md site/public/examples/README.md
+	@cp examples/policy.example.toml examples/handsets.example.toml examples/trunks.example.toml \
+		examples/contacts.example.toml examples/messages.example.toml site/public/examples/
+	@cp examples/.env.example site/public/examples/env.example
+	@cp -R examples/scenarios site/public/examples/scenarios
+	@echo "✓ site/public: llms.txt, llms-policy.txt, install.sh, schema/{policy,handsets,trunks,contacts,messages,env}.json, examples/"
 
 ## check: everything that must be green before a commit
 check: fmt-check vet lint test build
@@ -81,6 +91,11 @@ check: fmt-check vet lint test build
 ## cover: tests with -race plus the per-package coverage floors
 cover:
 	bash scripts/coverage.sh
+
+## cover-ratchet: the same, then raise every floor in scripts/coverage.floors
+## to what was just measured. Floors only go up; commit them with the tests.
+cover-ratchet:
+	bash scripts/coverage.sh --ratchet
 
 ## hooks: install the versioned pre-push gate (fmt, vet, tests, secret scan)
 hooks:

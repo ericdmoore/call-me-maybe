@@ -101,6 +101,14 @@ A pack **must** supply all six. It may not add new ones — a new prompt name
 requires a code change, which is deliberate: the contract is the thing that
 guarantees a pack cannot half-work.
 
+**The house's own phrases are not part of it.** Things doorman says to the
+household rather than to a caller — the low-balance call's *"the calling
+credit is running low, it is down to about"* — live in the bundled pack's
+`system/` directory (`prompts/manifest.json` under `"system"`) and are
+played from there whatever `PROMPT_MEDIA_PREFIX` says. A pack does not
+supply them and cannot silence them; the lobby's voice is the pack's, the
+house's is its own.
+
 ### Installing
 
 Packs are directories under Asterisk's sounds tree, selected by the

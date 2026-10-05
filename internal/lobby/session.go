@@ -118,6 +118,11 @@ type Contact struct {
 	// Blocked means a block source named this number. It beats every other
 	// tier, including [[people]].
 	Blocked bool
+	// Source is the id of the address book that named this caller. Not
+	// caller data — it is the operator's own label from contacts.toml — and
+	// it is what answers "why did the phone ring for someone I never
+	// allow-listed" in the call record.
+	Source string
 }
 
 type Deps struct {
@@ -155,6 +160,15 @@ type Deps struct {
 	// Notify receives call events for the house to react to. Nil disables
 	// the webhook, same as Calls — absent config means the feature is off.
 	Notify Notifier
+
+	// Quiet says whether a handset has set do-not-disturb (s12): asked
+	// before each leg is originated, by handset id, and answered by Asterisk
+	// — the global DND_<id> read through ARI — never by anything doorman
+	// keeps. Nil is nobody quiet, which is every install
+	// that has not dialled *78. A step whose every handset is quiet is a
+	// step that rang nobody, and a ladder of those ends where an unanswered
+	// one does: the mailbox.
+	Quiet func(handsetID string) bool
 
 	// OnLegCreated lets the event router map an originated leg's channel ID
 	// back to this session.
@@ -420,6 +434,7 @@ func (s *Session) Run() {
 	// redundant and gives an override that needed no new mechanism.
 	if known, ok := s.pol.LookupCaller(s.callerE164); ok {
 		s.rec.Known = known.Name
+		s.rec.Via = calls.ViaPeople
 		s.observe(events.AdmissionDecided, "allow-list")
 		s.log.Info("known caller, welcoming", "name", known.Name)
 		s.welcome(known.Name)
@@ -432,8 +447,9 @@ func (s *Session) Run() {
 	// the lobby" is one question with two sources of answer.
 	if inBook && !contact.Published {
 		s.rec.Known = contact.Name
+		s.rec.Via = calls.ViaContacts + contact.Source
 		s.observe(events.AdmissionDecided, "personal-contact")
-		s.log.Info("contact admitted, welcoming", "name", contact.Name)
+		s.log.Info("contact admitted, welcoming", "name", contact.Name, "source", contact.Source)
 		s.welcome(contact.Name)
 		return
 	}
@@ -576,11 +592,18 @@ func (s *Session) collect(seed, known string) {
 		timer.Reset(d)
 	}
 
+	// Uniform PIN length: fire the moment the last digit lands instead of
+	// waiting out the inter-digit timer. Mixed lengths: nothing can fire on
+	// a count short of the longest PIN, so `#` ends the PIN, and so does a
+	// pause once at least the shortest PIN's worth of digits is in — a
+	// friend told "dial the kitchen" need not know about `#`. EXTENSION_LENGTH
+	// is only the cap when the policy has no extensions to measure.
 	target := cfg.ExtensionLength
+	mixed := s.pol.PinLength == 0 && s.pol.MaxPinLength > 0
 	if s.pol.PinLength > 0 {
-		// Uniform PIN length: fire the moment the last digit lands instead
-		// of waiting out the inter-digit timer.
 		target = s.pol.PinLength
+	} else if mixed {
+		target = s.pol.MaxPinLength
 	}
 
 	// handle returns true when the call has moved on (ringing or dismissed).
@@ -615,6 +638,14 @@ func (s *Session) collect(seed, known string) {
 				return
 			}
 		case <-timer.C:
+			if mixed && len(digits) >= s.pol.MinPinLength {
+				// The pause is the terminator the caller did not press.
+				s.log.Info("pause ends the extension", "digits", len(digits))
+				if s.evaluate(&digits, &attempts, reset, known) {
+					return
+				}
+				continue
+			}
 			s.log.Info("dial window elapsed", "digits", len(digits))
 			s.noInput(known)
 			return
@@ -823,7 +854,22 @@ func (s *Session) ringStep(endpoints []string, label, callerID string, timeout t
 
 	// Escalation is a handoff, not a pile-on: the previous stage has already
 	// been hung up, so s.legs holds only this stage.
+	quiet := 0
 	for _, endpoint := range endpoints {
+		id := strings.TrimPrefix(endpoint, "PJSIP/")
+		// A curfew is the house's rule (handsets.toml), do-not-disturb the
+		// room's own (*78NN); both mean the same thing here — this phone is
+		// not rung — and both count as quiet for the stage's record.
+		if s.pol.Asleep(id, s.now()) {
+			quiet++
+			s.log.Info("handset is asleep (curfew), not ringing it", "endpoint", endpoint, "stage", stage+1)
+			continue
+		}
+		if s.deps.Quiet != nil && s.deps.Quiet(id) {
+			quiet++
+			s.log.Info("handset is quiet, not ringing it", "endpoint", endpoint, "stage", stage+1)
+			continue
+		}
 		legID, err := s.deps.ARI.Originate(s.ctx, OriginateParams{
 			Endpoint: endpoint,
 			AppArgs:  "leg," + s.ID,
@@ -844,6 +890,11 @@ func (s *Session) ringStep(endpoints []string, label, callerID string, timeout t
 	}
 
 	if len(s.legs) == 0 {
+		if quiet == len(endpoints) {
+			s.log.Info("every handset in this stage is quiet", "stage", stage+1)
+			rang("quiet")
+			return false
+		}
 		s.log.Warn("no legs could be originated", "stage", stage+1)
 		rang("failed")
 		return false

@@ -11,6 +11,7 @@ type Type = observation.Type
 type Event = observation.Event
 type Payload = observation.Payload
 type ChannelObservation = observation.ChannelObservation
+type ActionObservation = observation.ActionObservation
 type Sink = observation.Sink
 
 const (
@@ -37,6 +38,14 @@ const (
 	ConfigReloadFailed    = observation.ConfigReloadFailed
 	ContactsRefreshed     = observation.ContactsRefreshed
 	ContactsRefreshFailed = observation.ContactsRefreshFailed
+	MessageReceived       = observation.MessageReceived
+	MessageActed          = observation.MessageActed
+	ActionPerformed       = observation.ActionPerformed
+	ActionRefused         = observation.ActionRefused
+	PhonebookAdded        = observation.PhonebookAdded
+	PhonebookNamed        = observation.PhonebookNamed
+	BackupCompleted       = observation.BackupCompleted
+	BackupFailed          = observation.BackupFailed
 	ARIConnected          = observation.ARIConnected
 	ARIDisconnected       = observation.ARIDisconnected
 	DaemonStarted         = observation.DaemonStarted

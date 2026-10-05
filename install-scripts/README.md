@@ -79,12 +79,19 @@ availability, distro compatibility, privileges or binary architecture.
   and CEL schema.
 - The same binary at `/usr/local/bin/doorman`, so `doorman` resolves on the
   operator's PATH and on sudo's `secure_path`. The unit runs the `/opt` copy.
-- The repository's `doorman.service` and `doorman-directory.service` in
-  `/etc/systemd/system/` (neither is enabled; the directory unit is the
-  phones' phone book and exits quietly until `PROVISION_ADDRESS` is set).
+the nine units `doorman init services` installs from inside the binary (the
+daemon, directory, inbox, phonebook, balance and digest, with their timers).
+  `/etc/systemd/system/` (none is enabled; the directory unit is the phones'
+  phone book and exits quietly until `PROVISION_ADDRESS` is set; the inbox
+  unit is texts to the house and exits quietly until `INBOX_URL` is set and
+  a `messages.toml` exists; the balance timer asks each provider every
+  morning and says there is nothing to check until a `trunks.toml` exists).
 - Private `/var/lib/doorman` and `/var/lib/doorman/journal` directories (0700).
 
-The scripts preserve existing config. Different installed binaries, units or
+The scripts preserve your configuration — `/etc/asterisk`, `.env`, the TOML
+files, generated output — and replace their own staged copies (examples, docs,
+templates, the Asterisk files under `/opt/call-me-maybe/asterisk`, `smoke.sh`)
+on every run, because those are outputs of the release. Different installed binaries, units or
 managed templates cause a refusal instead of an implicit upgrade. Public docs
 and templates copied by rsync keep destination edits. This is repeatable host
 preparation, not a transactional rollback or an upgrade tool: a failure can
@@ -109,10 +116,13 @@ sudo -u doorman doorman init --rooms 'Kitchen,Office'
 sudo -u doorman doorman check
 ```
 
-Record the generated PINs securely. Continue with [RUNBOOK §2](../docs/RUNBOOK.md):
-set your people/provider/handset configuration, install Asterisk configuration,
-put the same generated ARI credentials in `.env` and `ari.conf`, and keep
-`http.conf` bound to **127.0.0.1:8088**. Render as doorman and install its generated
+Record the generated PINs securely. Continue with [RUNBOOK §2](../docs/RUNBOOK.md)
+from "Asterisk config": set your people/provider/handset configuration, install
+the Asterisk configuration, put the `ARI_PASSWORD` that `init` wrote to `.env`
+into `ari.conf`, and keep `http.conf` bound to **127.0.0.1:8088**. Render
+before restarting Asterisk: the shipped `pjsip.conf` and `extensions.conf`
+`#tryinclude` the generated files, so a missing one is tolerated, but nothing
+rings until they exist. Render as doorman and install its generated
 files with the permissions described there. Copy your prerecorded prompts.
 
 Review optional journal/CEL setup in [events.md](../docs/events.md). Enabling CEL
@@ -124,9 +134,12 @@ After configuration and validation, explicitly activate services:
 ```bash
 sudo systemctl enable --now asterisk
 sudo systemctl restart asterisk  # loads the configuration you just installed
-sudo systemctl enable --now doorman
+sudo systemctl enable --now doorman doorman-directory
 sudo bash scripts/smoke.sh
 ```
+
+`doorman-directory` is the phones' directory (RUNBOOK → "Add a handset");
+without `PROVISION_ADDRESS` in `.env` it exits 0 and stays quiet.
 
 Do this before putting the hub into use; restarting Asterisk interrupts calls.
 Follow the runbook for LAN/provider-specific SIP/RTP firewall access. The final

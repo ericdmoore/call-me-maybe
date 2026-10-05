@@ -29,12 +29,20 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ContactFile is the raw shape of contacts.toml.
 type ContactFile struct {
+	// CacheDir holds each url source's last good copy, 0600. Optional:
+	// absent means a contacts-cache directory beside this file.
+	CacheDir string `toml:"cache_dir"`
+	// Refresh is how often the daemon fetches url sources: a duration such
+	// as "6h". Optional, default 6h, never less than a minute.
+	Refresh string          `toml:"refresh"`
 	Sources []ContactSource `toml:"sources"`
 }
 
@@ -83,8 +91,49 @@ type Contacts struct {
 	// compiled from bytes rather than read from disk.
 	Path string
 
-	present bool
-	list    []ContactSource
+	present  bool
+	list     []ContactSource
+	cacheDir string
+	refresh  time.Duration
+}
+
+// DefaultContactsRefresh is how often url sources are fetched when the
+// inventory does not say. Six-hourly is a few requests a day against a
+// book that changes a few times a year, and conditional requests make an
+// unchanged fetch nearly free.
+const DefaultContactsRefresh = 6 * time.Hour
+
+// CacheDir is where url sources are cached: cache_dir, or contacts-cache
+// beside the inventory.
+func (c *Contacts) CacheDir() string {
+	if c == nil {
+		return ""
+	}
+	if c.cacheDir != "" {
+		if filepath.IsAbs(c.cacheDir) {
+			return c.cacheDir
+		}
+		return filepath.Join(filepath.Dir(c.Where()), c.cacheDir)
+	}
+	return filepath.Join(filepath.Dir(c.Where()), "contacts-cache")
+}
+
+// Refresh is how often the daemon fetches url sources.
+func (c *Contacts) Refresh() time.Duration {
+	if c == nil || c.refresh == 0 {
+		return DefaultContactsRefresh
+	}
+	return c.refresh
+}
+
+// HasURLSources reports whether anything here is fetched rather than read.
+func (c *Contacts) HasURLSources() bool {
+	for _, s := range c.All() {
+		if s.URL != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Present reports whether there is a contacts.toml at all.
@@ -202,7 +251,18 @@ func compileContacts(f ContactFile) (*Contacts, []string) {
 		problems = append(problems, fmt.Sprintf(format, args...))
 	}
 
-	c := &Contacts{present: true}
+	c := &Contacts{present: true, cacheDir: f.CacheDir}
+	if f.Refresh != "" {
+		d, err := time.ParseDuration(f.Refresh)
+		switch {
+		case err != nil:
+			fail("refresh %q is not a duration — write it like \"6h\" or \"30m\"", f.Refresh)
+		case d < time.Minute:
+			fail("refresh %q is under a minute — that is a poll, not a refresh; the minimum is 1m", f.Refresh)
+		default:
+			c.refresh = d
+		}
+	}
 	if len(f.Sources) == 0 {
 		fail("at least one [[sources]] entry is required — " +
 			"delete contacts.toml entirely to go back to [[people]] as the only list")

@@ -6,6 +6,15 @@ criteria are the definition of done — if they all hold, the task is finished.
 Ground rules for every task: `make check` green (vet + test + build), no
 secrets committed, and the invariants in `CLAUDE.md` intact.
 
+## Communication-review follow-ups — 2026-10-05
+
+The [site/repository audit](positioning/communication-audit.md#roadmap-nudges-proposals-not-implemented-features)
+adds evidence and acceptance criteria for five proposed follow-ups. Start with
+Flowroute: §8's postpaid assumption is contradicted by the provider's prepaid
+account documentation. The site advice is corrected; the runtime balance
+classification remains a priority fix. The review also distinguishes a possible
+outgoing contact allow-list from today's incoming caller screening.
+
 ---
 
 ## 1. Mock ARI harness — DONE (shipped with the Go port)
@@ -175,8 +184,16 @@ overriding `[house]` for that caller.
 
 - [ ] Optional; absent means today's behaviour.
 - [ ] Validation catches references to handsets that do not exist, at load time.
-- [ ] Interacts sanely with task 3 — decide and document which wins. (Suggest:
-      per-person override wins, since it is the more specific statement.)
+- [ ] Interacts sanely with task 3 — **decided 2026-10-02: the schedule wins.**
+      Quiet hours is a statement about the house; a person's routing is a
+      statement about a caller, and a caller-level preference must not undo a
+      house-level protection. Inside a schedule's window the person's ladder
+      is filtered to the handsets the schedule allows — a stage left with no
+      handsets is skipped — and if nothing survives, the call goes where the
+      schedule already sends it. Outside the window the ladder runs as
+      written. `doorman check` shows the filtered ladder when both apply.
+      Likely shape: `[[people.steps]]`, the same ladder `[[extensions.steps]]`
+      already runs; absent, today's behaviour.
 
 **Files:** `internal/policy/policy.go`, `internal/lobby/session.go`.
 
@@ -250,7 +267,7 @@ independent of each other.**
 under 7b is the schedules-at-line-scope item, which is a `[[schedules]]`
 question rather than a line one.
 
-Several *providers* is Phase 2 of `.plans/s01-multiple-DIDs/readme.md`, and it
+Several *providers* is Phase 2 of `.plans/_archives/s01-multiple-DIDs/readme.md`, and it
 **has now landed in full** — M2.4, per-provider health, closed it. `trunks.toml` is a provider
 inventory rendered the way `handsets.toml` is, `[line] trunk` names which
 provider a number arrives on, and `doorman render` generates the registrations,
@@ -393,7 +410,7 @@ resolves them; `internal/lobby/console.go` is `*4`.
       forever, fights `*97` and every future feature code, and with five
       ventures nobody remembers which digit is which. A menu that says the
       numbers out loud beats a mapping you have to memorise.
-      See `.plans/s01-multiple-DIDs/readme.md`.
+      See `.plans/_archives/s01-multiple-DIDs/readme.md`.
 - [x] Outbound calls in the call log. Landed in 7d, where it belonged: it
       wanted a direction on the record, not just a line.
 
@@ -431,6 +448,16 @@ Phase 2 (several *providers*) is a separate problem and starts at `trunks.toml`.
 - [ ] If §4 metrics land, a `line` label — and still **no caller identifiers
       in labels**.
 
+### 7e. Outbound failover — DONE (s01 Phase 3, v0.9.0)
+
+`[line] failover`, an ordered list of other declared trunks; the ladder in the
+hand-written `[cmm-outbound]` climbs it on `CHANUNAVAIL`/`CONGESTION` only,
+each rung a generated `[cmm-failover-<id>]` presenting that trunk's own
+number, the call ending there so CEL records which trunk carried it; all-down
+is audible. Off unless written, because a fallback changes the number a
+customer sees. Inbound failover stays the provider's failover DID, documented
+beside E911.
+
 ---
 
 ## 8. Provider account health — CLI DONE (the alert and the gauge are open)
@@ -462,9 +489,18 @@ process. No `trunks.toml` means there is nothing to check and exit 0.
       Flowroute is in the backend map precisely so the postpaid branch is real
       rather than theoretical: "Flowroute is postpaid — no balance to report".
       A provider with no client at all is reported too, never skipped.
-- [ ] Exposed as a gauge for §4 rather than doorman growing SMTP, webhooks and
-      threshold config. Thresholds and delivery are operator decisions.
-- [ ] **The alert rings a handset.** An earlier draft of this line said the
+- [x] Exposed as a gauge rather than doorman growing SMTP, webhooks and
+      threshold config. Thresholds and delivery are operator decisions. Not
+      on a §4 endpoint — the daemon never checks a balance — but as
+      `doorman balance --prom <file>`, the Prometheus text format for
+      node_exporter's textfile collector, written atomically on every run
+      (s03 M3, v0.8.0).
+- [x] **The alert rings a handset.** Shipped as `doorman balance --ring
+      <handset>` and `BALANCE_RING` for the timer (s03 M2, v0.8.0): the CLI
+      originates over ARI with `announce,balance,<n>` as Stasis arguments
+      and the daemon's `lobby.Announcement` says a bundled `system/` clip,
+      the number, and goodbye — the first, smallest form of s05's live
+      call. Once a day per trunk. An earlier draft of this line said the
       alert path must not be the phone, reasoning that a zero balance cannot
       pay for an outbound call to report itself. That was wrong: an *internal*
       call never touches a trunk — no provider, no credit, no registration — so

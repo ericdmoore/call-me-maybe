@@ -1,6 +1,7 @@
 package lobby
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -646,5 +647,185 @@ func TestAfterhoursRingFallsBackToVoicemail(t *testing.T) {
 	h.fake.expect(t, "Continue")
 
 	h.sess.CallerLeft()
+	h.waitFinished(t)
+}
+
+// Do not disturb (s12): a quiet handset is not rung. Asterisk owns the
+// state; the session only asks. A stage whose every handset is quiet is a
+// stage that rang nobody, and a ladder of those ends at the mailbox — the
+// friend with the kids' PIN leaves a message rather than hearing a phone
+// that will not ring.
+func TestAQuietHandsetIsNotRungAndAQuietLadderEndsInVoicemail(t *testing.T) {
+	quiet := map[string]bool{"kids-room": true}
+	h := startTuned(t, kidsLadderPolicy, "9995550199", nil, func(d *Deps) {
+		d.Quiet = func(id string) bool { return quiet[id] }
+	})
+	h.finishPlayback(t)
+	dialPin(h, "555001")
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+
+	// Stage 1 is the kids' room alone, and it is quiet: nothing originates,
+	// and the ladder moves straight to the adults.
+	o1 := h.fake.expect(t, "Originate")
+	o2 := h.fake.expect(t, "Originate")
+	got := map[string]bool{o1.Args[0]: true, o2.Args[0]: true}
+	if got["PJSIP/kids-room"] || !got["PJSIP/kitchen"] || !got["PJSIP/primary-bed"] {
+		t.Fatalf("originated %v, want the adults only", got)
+	}
+	<-h.legs
+	<-h.legs
+	// Nobody answers the adults either → voicemail, as ever.
+	h.fake.expectAny(t, "Hangup", "Hangup", "RingStop", "DestroyBridge")
+	if c := h.fake.expect(t, "SetChannelVar"); c.Args[1] != "MAILBOX" || c.Args[2] != "kids" {
+		t.Fatalf("SetChannelVar = %v, want MAILBOX=kids", c.Args)
+	}
+	h.fake.expect(t, "Continue")
+	h.sess.CallerLeft()
+	h.waitFinished(t)
+	// The record says the first stage rang nobody because it was quiet.
+	rec := h.rec.only(t)
+	if len(rec.Stages) < 1 || rec.Stages[0].Result != "quiet" {
+		t.Errorf("stages = %+v, want the first marked quiet", rec.Stages)
+	}
+}
+
+// A curfew is the house's rule in handsets.toml; do-not-disturb is the
+// room's own. The lobby treats them alike — the phone is not rung — and the
+// stage's record says quiet either way.
+func TestAnAsleepHandsetIsNotRungAndTheLadderMovesOn(t *testing.T) {
+	src := strings.Replace(kidsLadderPolicy, "endpoint = \"PJSIP/kids-room\"\n",
+		"endpoint = \"PJSIP/kids-room\"\ncurfew = [\"school-night\"]\n", 1)
+	// The extension's own afterhours would send the caller straight to
+	// voicemail; drop it so the ladder is what is under test.
+	src = strings.Replace(src, "afterhours = \"school-night\"\n", "", 1)
+	h := startWith(t, src, "9995550199", nil)
+	h.now = time.Date(2026, 7, 7, 21, 30, 0, 0, time.Local) // Tuesday 21:30: asleep
+
+	h.finishPlayback(t)
+	dialPin(h, "555001")
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+
+	o1 := h.fake.expect(t, "Originate")
+	o2 := h.fake.expect(t, "Originate")
+	got := map[string]bool{o1.Args[0]: true, o2.Args[0]: true}
+	if got["PJSIP/kids-room"] || !got["PJSIP/kitchen"] || !got["PJSIP/primary-bed"] {
+		t.Fatalf("originated %v, want the adults only — the kids' room is asleep", got)
+	}
+	<-h.legs
+	<-h.legs
+	h.fake.expectAny(t, "Hangup", "Hangup", "RingStop", "DestroyBridge")
+	h.fake.expect(t, "SetChannelVar")
+	h.fake.expect(t, "Continue")
+	h.sess.CallerLeft()
+	h.waitFinished(t)
+	rec := h.rec.only(t)
+	if len(rec.Stages) < 1 || rec.Stages[0].Result != "quiet" {
+		t.Errorf("stages = %+v, want the first marked quiet", rec.Stages)
+	}
+}
+
+// Outside the window the same policy rings the kids' room first, as ever:
+// a curfew is a clock, not a flag.
+func TestAnAwakeCurfewedHandsetRingsAsNormal(t *testing.T) {
+	src := strings.Replace(kidsLadderPolicy, "endpoint = \"PJSIP/kids-room\"\n",
+		"endpoint = \"PJSIP/kids-room\"\ncurfew = [\"school-night\"]\n", 1)
+	src = strings.Replace(src, "afterhours = \"school-night\"\n", "", 1)
+	h := startWith(t, src, "9995550199", nil)
+	h.now = time.Date(2026, 7, 7, 16, 0, 0, 0, time.Local) // Tuesday 16:00: awake
+
+	h.finishPlayback(t)
+	dialPin(h, "555001")
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+	if o := h.fake.expect(t, "Originate"); o.Args[0] != "PJSIP/kids-room" {
+		t.Fatalf("first stage originated %s, want the kids' room", o.Args[0])
+	}
+	h.sess.CallerGone()
+	h.waitFinished(t)
+}
+
+const mixedPinPolicy = `
+[house]
+handsets = ["kitchen"]
+
+[[handsets]]
+id = "kitchen"
+endpoint = "PJSIP/kitchen"
+
+[[handsets]]
+id = "master-bed"
+endpoint = "PJSIP/master-bed"
+
+[[extensions]]
+pin = "392817"
+label = "Kitchen"
+handsets = ["kitchen"]
+
+[[extensions]]
+pin = "7391048265"
+label = "Master"
+handsets = ["master-bed"]
+`
+
+// Mixed PIN lengths: the long one fires on its last digit, the short one
+// on `#` — or on the pause a caller leaves when nobody told them about `#`.
+func TestMixedLengthPinsEndOnHashOrPauseOrTheLongest(t *testing.T) {
+	// The ten-digit PIN, no terminator: fires on the tenth digit.
+	h := startWith(t, mixedPinPolicy, "9995550199", nil)
+	h.finishPlayback(t)
+	dialPin(h, "7391048265")
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+	if o := h.fake.expect(t, "Originate"); o.Args[0] != "PJSIP/master-bed" {
+		t.Fatalf("originated %s, want the master bedroom", o.Args[0])
+	}
+	h.sess.CallerGone()
+	h.waitFinished(t)
+
+	// The six-digit PIN with `#`: fires at once.
+	h = startWith(t, mixedPinPolicy, "9995550199", nil)
+	h.finishPlayback(t)
+	dialPin(h, "392817#")
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+	if o := h.fake.expect(t, "Originate"); o.Args[0] != "PJSIP/kitchen" {
+		t.Fatalf("originated %s, want the kitchen", o.Args[0])
+	}
+	h.sess.CallerGone()
+	h.waitFinished(t)
+
+	// The six-digit PIN and a pause: the inter-digit timer evaluates it
+	// rather than dismissing the caller.
+	h = startWith(t, mixedPinPolicy, "9995550199", nil)
+	h.finishPlayback(t)
+	dialPin(h, "392817")
+	h.fake.expect(t, "CreateBridge")
+	h.fake.expect(t, "AddToBridge")
+	h.fake.expect(t, "Ring")
+	if o := h.fake.expect(t, "Originate"); o.Args[0] != "PJSIP/kitchen" {
+		t.Fatalf("originated %s after the pause, want the kitchen", o.Args[0])
+	}
+	h.sess.CallerGone()
+	h.waitFinished(t)
+}
+
+// Too few digits and a pause is still no input: the shortest PIN's length
+// is the floor, so a stray digit does not burn an attempt.
+func TestMixedLengthPinsAPauseBeforeTheShortestIsNoInput(t *testing.T) {
+	h := startWith(t, mixedPinPolicy, "9995550199", nil)
+	h.finishPlayback(t)
+	dialPin(h, "39")
+	// noInput for a stranger: good-day and dismissal, never a bridge.
+	if c := h.fake.expect(t, "Play"); !strings.Contains(fmt.Sprint(c.Args), "good-day") {
+		t.Fatalf("after two digits and a pause the stranger should hear good-day, got %v", c.Args)
+	}
+	h.sess.CallerGone()
 	h.waitFinished(t)
 }

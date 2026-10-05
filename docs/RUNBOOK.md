@@ -31,10 +31,19 @@ is the whole rollback.
 the normal state**: with no file nothing is read, nothing is logged, and
 `doorman check` prints nothing about contacts. Each `[[sources]]` block names a
 vCard export by `path` — a relative one resolves against `contacts.toml`
-itself — and `kind = "block"` marks one as the nuisance list. `doorman check`
-reports what each source contributed: cards read, and how many numbers came out
-personal, published, blocked or skipped, with counts only and never a name or a
-number.
+itself — or by `url`, and `kind = "block"` marks one as the nuisance list. A
+`url` source is fetched by the daemon at startup and every `refresh` (default
+6h) into `cache_dir`, one file per source, 0600; a fetch that fails keeps the
+last good copy, a source that has never succeeded contributes nothing, and no
+call ever waits on a fetch. Its bearer token is named by `token_env`
+(`CONTACTS_<ID>_TOKEN` in `.env`) and sent in a header, never in the URL.
+`doorman check` reports what each source contributed — cards read, how many
+numbers came out personal, published, blocked or skipped, and how old the copy
+is — with counts only and never a name or a number; `doorman check --fetch`
+fetches the url sources now rather than reporting the daemon's cache. A caller
+admitted from an address book is recorded with the source that named them
+(`doorman calls` shows `Grandma (contacts/eric)`), which is the answer to "why
+did the phone ring for someone I never allow-listed".
 
 With a file, the lobby walks a five-rung ladder and the first match wins:
 
@@ -113,6 +122,14 @@ the main account login this section just told you to keep off it.
 ---
 
 ## 2. Provision the host
+
+> **On Ubuntu, Debian, Fedora, CentOS or Arch, do not do this section by
+> hand.** `curl -fsSL https://callmemaybe.cc/install.sh | bash` installs the
+> CLI, and `sudo bash install-scripts/<distro>.sh --binary ~/.local/bin/doorman`
+> from a checkout of the matching tag prepares the host: Asterisk, the
+> service account, `/opt/call-me-maybe`, both units. Then continue at
+> "Asterisk config" below. The steps here are the Pi path, and the manual
+> equivalent of what the installer does.
 
 For a new Linux x86 hub, start with [install-scripts](../install-scripts/README.md).
 There are entrypoints for Ubuntu, Debian, CentOS Stream/Rocky/AlmaLinux/RHEL,
@@ -194,19 +211,51 @@ run. Only a strictly newer semantic version is advertised.
 
 ```bash
 $ cd /opt/call-me-maybe
-$ sudo cp asterisk/extensions.conf asterisk/http.conf asterisk/rtp.conf /etc/asterisk/
-$ sudo cp asterisk/pjsip.conf.example /etc/asterisk/pjsip.conf
-$ sudo cp asterisk/ari.conf.example   /etc/asterisk/ari.conf
+$ sudo cp asterisk/cel.conf asterisk/cel_sqlite3_custom.conf /etc/asterisk/   # the installer already did, on Linux
+$ sudo cp asterisk/extensions.conf asterisk/http.conf asterisk/rtp.conf \
+          asterisk/musiconhold.conf asterisk/res_parking.conf asterisk/pjsip_notify.conf /etc/asterisk/
+$ sudo cp asterisk/pjsip.conf.example     /etc/asterisk/pjsip.conf
+$ sudo cp asterisk/ari.conf.example       /etc/asterisk/ari.conf
+$ sudo cp asterisk/voicemail.conf.example /etc/asterisk/voicemail.conf
 
-# Generate an ARI password and put the SAME value in both places.
-$ openssl rand -base64 24
-$ sudo nano /etc/asterisk/ari.conf     # password = <that value>
-$ sudo nano /etc/asterisk/pjsip.conf   # sub account, POP, handset passwords
+# ari.conf takes the SAME password `doorman init` wrote to .env as ARI_PASSWORD
+# (run init first — see "doorman config" — then copy the value across):
+$ sudo nano /etc/asterisk/ari.conf     # password = <ARI_PASSWORD from .env>
+$ sudo nano /etc/asterisk/pjsip.conf   # sub account, POP, password — and the
+                                       # two identify patterns: sub account + every DID
+$ sudo nano /etc/asterisk/voicemail.conf   # mailbox passwords: never 4242
 
 $ sudo chown asterisk:asterisk /etc/asterisk/*.conf
 $ sudo chmod 640 /etc/asterisk/pjsip.conf /etc/asterisk/ari.conf
 $ sudo systemctl restart asterisk
 ```
+
+Two things in that template are there because the first install lost an
+afternoon to them. The `identify` blocks match inbound calls by the
+sub-account name and the DID: VoIP.ms does not echo the `;line=` tag that
+`line=yes` relies on, so without them an inbound call is dropped as "No
+matching endpoint found" and nothing rings. And there is no `from_user` on
+the endpoint: with it, VoIP.ms answers 503 on every outbound call.
+
+On Debian and Ubuntu the installer also sets the distro's sample AEL and Lua
+dialplans aside (`extensions.ael.distro`, `extensions.lua.distro`) and adds
+`noload => pbx_ael.so` and `noload => pbx_lua.so` to `modules.conf`, so
+`extensions.conf` is the only dialplan loaded. On a hand-prepared host, do
+the same — **inside the `[modules]` section**, right after `autoload=yes`.
+The distro's file ends with a `[global]` section, and a `noload` appended
+there is silently ignored (the installer did exactly that until
+2026-09-25; a rerun moves the lines).
+
+It also adds `noload => app_voicemail_odbc.so` and `noload =>
+app_voicemail_imap.so` in the same place. Asterisk 22 builds voicemail three ways and only one
+may load; with all three autoloaded the ODBC one fails for want of a
+database and, on declining, **unregisters the `VoiceMail()` applications
+the file-storage one had registered**. The module still shows Running,
+`core show application VoiceMail` says it is not registered, and every
+caller handed to voicemail is hung up on with a single warning in
+`messages.log`. Found on the first customer's box two days after a
+rebuild, during which no message had been left. `scripts/smoke.sh` now
+checks it; on a hand-prepared host add the two lines and restart Asterisk.
 
 ### doorman config
 
@@ -216,30 +265,34 @@ the `chown` at the end — see `INSTALL-LINUX.md` → "Finish configuration".
 
 ```bash
 $ cd /opt/call-me-maybe
-$ doorman init                         # interview: which rooms get a phone
+$ sudo -u doorman doorman init         # interview: which rooms get a phone
                                        # generates every secret with crypto/rand,
                                        # writes .env, handsets.toml, policy.toml,
                                        # and prints the PINs once. Write them down.
-$ nano policy.toml                     # add your people to the allow-list
+$ sudo -u doorman nano policy.toml     # add your people to the allow-list
+$ sudo -u doorman nano handsets.toml   # mac + model per phone (see "Add a handset")
+$ sudo -u doorman nano .env            # PROVISION_ADDRESS = this box's reserved LAN IP
 
 # Non-interactive, for a scripted build:
-$ doorman init --rooms "Kitchen,Living Room,Kids Room,Office"
-$ ./bin/doorman check
+$ sudo -u doorman doorman init --rooms "Kitchen,Living Room,Kids Room,Office"
+$ sudo -u doorman doorman check
 
-# Generate the per-handset Asterisk config and install it:
-$ ./bin/doorman render
-$ sudo cp asterisk/generated/*_handsets.conf /etc/asterisk/
+# Generate the per-handset Asterisk config and install it. Name the files:
+# asterisk/generated is 0700 doorman, so a shell glob under sudo finds nothing.
+$ sudo -u doorman doorman render
+$ sudo cp asterisk/generated/pjsip_handsets.conf asterisk/generated/extensions_handsets.conf asterisk/generated/voicemail_handsets.conf /etc/asterisk/
 $ sudo chown asterisk:asterisk /etc/asterisk/*_handsets.conf
 $ sudo chmod 640 /etc/asterisk/*_handsets.conf
 $ sudo asterisk -rx 'pjsip reload' && sudo asterisk -rx 'dialplan reload'
 
 # Never hand-pick PINs. Rotate every example PIN to a crypto/rand one in a
 # single step (comments and formatting in the file survive):
-$ ./bin/doorman rotate
-
-$ sudo chown -R doorman:doorman /opt/call-me-maybe
-$ sudo chmod 600 /opt/call-me-maybe/.env /opt/call-me-maybe/policy.toml
+$ sudo -u doorman doorman rotate
 ```
+
+On a hand-prepared host without the service account owning the directory,
+finish with `sudo chown -R doorman:doorman /opt/call-me-maybe` and
+`sudo chmod 600 /opt/call-me-maybe/.env /opt/call-me-maybe/policy.toml`.
 
 ### Prompts
 
@@ -251,25 +304,42 @@ $ bash prompts/build.sh
 $ rsync -av prompts/build/ pi@raspberrypi:/tmp/cmm-prompts/
 
 # On the Pi:
-$ sudo mkdir -p /var/lib/asterisk/sounds/call-me-maybe
-$ sudo cp /tmp/cmm-prompts/* /var/lib/asterisk/sounds/call-me-maybe/
-$ sudo chown -R asterisk:asterisk /var/lib/asterisk/sounds/call-me-maybe
+$ ASTDATA=$(sudo asterisk -rx 'core show settings' | awk -F': *' '/Data directory/ {print $2}')
+$ sudo mkdir -p "$ASTDATA/sounds/call-me-maybe"        # /var/lib/asterisk on the Pi, /usr/share/asterisk on Ubuntu
+$ sudo cp -R /tmp/cmm-prompts/* "$ASTDATA/sounds/call-me-maybe/"
+$ sudo chown -R asterisk:asterisk "$ASTDATA/sounds/call-me-maybe"
 $ rm -rf /tmp/cmm-prompts
 ```
 
-### Service
+`-R` because the build has a `system/` directory beside the six lobby
+prompts: the house's own phrases, such as the low-balance call, which live
+outside the pack contract so that swapping the lobby's voice never silences
+an alert. A box provisioned before v0.8.0 has the six and not the directory;
+copy it the same way.
+
+### Services
+
+The units ship inside the binary. One command installs them, creates the
+directories each process owns, and enables exactly the ones the config
+calls for — with the reason beside each:
 
 ```bash
-$ sudo cp scripts/doorman.service scripts/doorman-directory.service /etc/systemd/system/
-$ sudo systemctl daemon-reload
-$ sudo systemctl enable --now doorman doorman-directory
+$ doorman init services --dry-run     # the plan, as the commands it would run
+$ sudo doorman init services          # the same plan, applied
 $ sudo systemctl status doorman
 $ journalctl -u doorman -f
 ```
 
-`doorman-directory` is the phones' directory (see "Add a handset"). With no
-`PROVISION_ADDRESS` in `.env` it exits 0 and stays quiet, so enabling it on a
-box with hand-configured phones is harmless.
+What it enables and why: `doorman`, `doorman-phonebook.timer` and `doorman-reminders.timer` always;
+`doorman-directory` with `PROVISION_ADDRESS` and a handset carrying `mac` +
+`model`; `doorman-inbox` with `INBOX_URL` and `messages.toml`;
+`doorman-digest.timer` with `MAIL_HOOK` + `MAIL_TO`; `doorman-balance.timer`
+with `trunks.toml`. A rerun is the upgrade: a unit doorman wrote (it carries
+a "Managed by" first line) is replaced when the binary's copy differs, a
+unit it did not write is left alone and named. Changing `.env` later —
+adding `INBOX_URL`, say — is a rerun, which enables the inbox and nothing
+else. `doorman check` has a "Services" section that compares what the
+config calls for with what the host says, and points here when they differ.
 
 ---
 
@@ -364,8 +434,8 @@ there before you rely on any of it.
 ### Rung 6 — prompts are present and in the right format
 
 ```bash
-$ ls -la /var/lib/asterisk/sounds/call-me-maybe/
-$ soxi /var/lib/asterisk/sounds/call-me-maybe/good-day.wav
+$ ls -la "$ASTDATA/sounds/call-me-maybe/"     # ASTDATA from the Prompts step: the data directory Asterisk reports
+$ soxi "$ASTDATA/sounds/call-me-maybe/good-day.wav"
 ```
 
 Want 8000 Hz, 1 channel, 16-bit. A prompt at 22050 Hz will either fail to play
@@ -394,9 +464,11 @@ Caller hears ringing forever, or a provider error.
 2. `sudo asterisk -rvvv` then place a call. No output at all means the packets
    are not arriving: check the DID routing in the portal.
 3. Output showing endpoint `anonymous` means the inbound call did not match the
-   trunk endpoint. **This is almost always a missing `line=yes` or
-   `endpoint=voipms` on the registration object.** That pairing is what binds
-   inbound traffic to the endpoint without an `identify` block.
+   trunk endpoint. **Check `line=yes` and `endpoint=voipms` on the
+   registration object, then the two `identify` blocks** — VoIP.ms does
+   not echo the `;line=` tag, so the identify patterns (sub-account and
+   every DID) are what actually match its calls. `pjsip set logger on`
+   shows the INVITE and "No matching endpoint found" when they do not.
 4. `sudo asterisk -rx "dialplan show inbound-trunk"` — confirm the context
    exists and matches `context=` on the endpoint.
 
@@ -444,13 +516,13 @@ Withheld caller ID is `anonymous` and always meets the bouncer by design.
 
 ```bash
 $ sudo asterisk -rx "core show channels"
-$ ls -la /var/lib/asterisk/sounds/call-me-maybe/
+$ ls -la "$ASTDATA/sounds/call-me-maybe/"
 $ journalctl -u doorman | grep "playback failed"
 ```
 
 Usually one of: prompts not installed, wrong ownership (`asterisk:asterisk`),
 or wrong sample rate. `PROMPT_MEDIA_PREFIX` in `.env` must match the directory
-name under `/var/lib/asterisk/sounds/`.
+name under `<astdatadir>/sounds/` (`asterisk -rx 'core show settings'` → Data directory).
 
 ### One-way audio
 
@@ -500,8 +572,18 @@ valid **transfer target**.
 | 700 | (as a transfer target) **park** the call; Asterisk announces a slot |
 | 701–720 | Pick up a parked call from any handset |
 | *4 | **Outbound console**: call as another one of your numbers. Only interesting with more than one line, and it refuses 911 — see "Outbound caller ID" below. This is the one that goes through doorman |
-| *97 | Check **voicemail** (prompts for mailbox + password) |
+| *(none)* | **Bedtime** — a `curfew` on the handset in `handsets.toml` names `[[schedules]]`; while one is active the phone skips ordinary incoming calls, cannot call out (911 and the reminder apps excepted), is left out of pages and ring-all, and has ordinary calls dropped at the hour. Nothing to dial: it is the house's rule, not the phone's. See "Bedtime" below |
+| *80 | **Call back today at** an AM/PM time. Past times are refused with a suggestion to use *81. See “Scheduled calls” below |
+| *81 | **Call back in** 0–9 hours and 0–99 minutes. Extra minutes carry into hours; the total must be positive |
+| *82 | **Wake up call** at an AM/PM time tomorrow, once |
+| *88 | **Add a number to this phone.** Key the number, `#`, say the name after the beep. The number is in this phone's directory within a minute (named by its number), and under the spoken name once the box has had it transcribed. This phone's book only — never the allow-list. See "Add a number from a handset" |
+| *78NN | **Do not disturb** for this phone, NN = 15, 30 or 45 minutes; anything else is refused out loud. Room calls to it say how long and offer its box; the house ring group and the page skip it, except a page from a `page_override` phone. Clears itself when the time is up |
+| *79 | Do not disturb off |
+| *97 | **Voicemail** — the phone's own box, straight in, no PIN (a handset with no `mailbox` gets the old menu). What the voicemail key dials |
+| *98 | Any mailbox, with its PIN — the old `*97` menu, for checking another room's box |
+| *6 + digits | **The hunt** (optional, commented out by default): plays the greeting of the mailbox with that number and hangs up — a scavenger hunt whose answers are what you dial. `*6X.` is reserved for it whether or not you play. See `HUNT.md` |
 | 9196 | Echo test — your voice comes straight back; isolates RTP problems |
+| *(text)* | A message typed on a handset to a room number reaches that phone as a message, and to `100` reaches every phone (SIP MESSAGE, routed by the generated `[cmm-messages]` context) |
 | 9197 | Speaking clock — proves audio path without a second person |
 | 555 | **Home Assistant Assist** (optional, disabled by default) |
 
@@ -516,12 +598,92 @@ One-time phone-side setup:
 - **MWI lamps**: add `mailboxes=kids@household` (etc.) to an endpoint in
   `pjsip.conf` and that phone's message light follows the mailbox.
 
+### Do not disturb
+
+A child in the theater dials `*7830`, hears "do not disturb for thirty
+minutes", and for half an hour:
+
+- someone in the kitchen dialling `102` hears "that phone isn't taking
+  calls for another twenty minutes" and lands in the theater's mailbox if
+  it has one;
+- a known caller from outside rings every phone but the theater; the
+  theater's own lobby extension plays the ordinary unavailable greeting
+  and its mailbox, with no mention of quiet — a child's DND is not a
+  stranger's information;
+- `100` (ring all) and `500` (page) skip it, and whoever paged hears "one
+  phone is quiet; the others heard you" — **unless the page comes from a
+  phone with `page_override = true` in `handsets.toml`**, which reaches
+  every room regardless. Mark the kitchen and the parents' room. This is
+  what makes DND safe to hand to a child, and `doorman check` warns when
+  no phone has it.
+
+At the thirty-first minute everything is normal with nobody having done
+anything; `*79` ends it early. Only 15, 30 and 45 are accepted, because
+"quiet for 480 minutes" is a phone that stopped ringing and nobody
+remembers why. A phone can only quiet itself: the code reads the endpoint
+off the channel, not the keypad.
+
+The state is Asterisk's — the global variable `DND_<handset>` holds the
+expiry, written by `*78` and read by the generated dialplan and by doorman
+(over ARI, before each leg it rings). doorman never writes it, so a page
+works with the daemon down and the two can never disagree; `sudo asterisk
+-rx 'dialplan show globals' | grep DND_` is the whole truth. A global rather
+than the AstDB because ARI refuses to read `DB()` unless `asterisk.conf`
+opens every "dangerous" function to every ARI user; the cost is that an
+Asterisk restart clears a quiet phone early, which is the one failure this
+feature can afford. The phrases are the bundled pack's own
+(`system/quiet-*`), so a swapped lobby voice never silences them.
+
+Not a schedule: quiet hours for a room are `afterhours` on its extension,
+and the two compose. Not the phone's own DND button either — that one is
+indefinite, invisible to the house, and blocks a parent's page, which is
+the problem this replaces. Turn it off in the phone's menu.
+
 ### Voicemail
 
-`asterisk/voicemail.conf.example` → `/etc/asterisk/voicemail.conf`. The
-mailboxes there (`kids`, `adults`, `family` in the `[household]` section) are
-what `voicemail = "..."` in `policy.toml` refers to. **Change the placeholder
-passwords** — they are dialable from any handset via *97.
+Every phone has its own box, and the tool makes it. Adding a phone is four
+facts in `handsets.toml` — a name, a number, the address books it shows,
+and its voicemail:
+
+```toml
+[[handsets]]
+id = "master-bed"
+label = "Master bedroom"       # the name
+number = 103                   # the number
+phonebook = ["house", "caroline"]   # the address books
+mailbox = "master-bed"         # its own voicemail
+email = "caroline@example.com" # optional: messages mailed here, recording attached
+```
+
+Then `doorman render`, copy, reload — and a call to 103 that rings out (or
+finds the phone busy) leaves a message in the master bedroom's box; that
+phone's lamp lights; its voicemail key (`*97`) opens the box with no
+"mailbox?" and no PIN, because a phone on the LAN is already trusted to
+call as the house and page every room; a stranger with the master
+bedroom's lobby PIN who rings out lands in the same box when the extension
+says `voicemail = "master-bed"`. Two phones may name one box (`kitchen` and
+`theater` → `"whole-house"`), one line and two lamps.
+
+**The PIN lives in `.env`**, as the phone's passwords do —
+`VOICEMAIL_MASTER_BED_PIN` — and `doorman render` writes the box into
+`voicemail_handsets.conf`, which `voicemail.conf` reaches through the
+`#tryinclude` at its end (the example has it; an older `voicemail.conf`
+needs the line added). `doorman init` gives every room a box and a PIN;
+`doorman rotate --voicemail [box …]` sets or rotates them — run it once on
+a box that predates all this. The PIN is for `*98`, another phone
+reaching this box; the phone that owns it never types it.
+
+**A box with no PIN in `.env` is left to `voicemail.conf`.** That is
+`family`, and every box from before render made them: `doorman check`
+lists each mailbox handsets name or policy sends callers to, and says
+whether render writes it or the hand-written file must. `mailbox =
+"family"` on every phone with `family` hand-written keeps working exactly
+as it did, plus room calls landing there and `*97` opening it.
+
+`asterisk/voicemail.conf.example` → `/etc/asterisk/voicemail.conf` still
+holds the house box (`family`) and whatever else you write by hand.
+**Change its placeholder password** — a hand-written box is dialable from
+any handset via `*98`.
 
 `attach = yes` emails every message with the recording attached. For delivery,
 install msmtp configured to relay through your provider (SES works fine) and
@@ -536,6 +698,142 @@ $ ls /var/spool/asterisk/voicemail/household/kids/INBOX/
 Doorman hands callers to voicemail by releasing the channel into the
 `[voicemail-drop]` dialplan context with `MAILBOX` set — after that handoff
 the call belongs to Asterisk, and doorman deliberately never touches it again.
+
+### The house mailbox
+
+One address that hears everything the house hears. This section is the
+voicemail feed; texts arrive by the carrier's own forwarding, and the
+house's replies and a morning digest are planned (`.plans/s22`). The shape
+is always the same: **doorman never learns to send mail.** Asterisk or the
+CLI prints, and a hook sends. The shipped hook uses the bullmoose CLI,
+because it is one static binary with tokens scoped to `draft,send` and nothing
+else; any other mail system is a ten-line script with the same contract
+(subject as the one argument, Markdown body on stdin, non-zero exit if it
+did not send).
+
+**1. Install the CLI on the box.** One binary, from the bullmoose releases
+(`cli-go/v*` tags). The repository is private, so fetch it on the
+workstation with an authenticated `gh` and copy it over — an anonymous
+`curl` on the box answers 404:
+
+```bash
+# On the workstation:
+$ V=v0.5.1   # check the releases page
+$ gh release download "cli-go/$V" -R ericdmoore/bullmoose.cc -p "bullmoose_${V}_linux_amd64" -p checksums.txt -D /tmp/bmcli
+$ (cd /tmp/bmcli && grep linux_amd64 checksums.txt && shasum -a 256 "bullmoose_${V}_linux_amd64")   # must match
+$ scp "/tmp/bmcli/bullmoose_${V}_linux_amd64" jepsen:/tmp/bullmoose
+
+# On the box:
+$ sudo install -m 0755 /tmp/bullmoose /usr/local/bin/bullmoose && rm /tmp/bullmoose
+$ bullmoose version
+```
+
+**2. Mint a send-only token, on the workstation, never on the box.** The
+operator's admin login mints tokens for any account; the token can send mail
+as the house and do nothing else, and losing the box means revoking one
+token:
+
+```bash
+$ bullmoose admin token create midbury@example.com --name jepsen-voicemail --scopes draft,send
+```
+
+Both scopes, and only those: `send` submits, but the message has to be
+created first and that is `draft` — a token with `send` alone fails at
+`Email/set` with "token lacks the draft scope" (found on the first box,
+2026-09-25). Neither reads anything.
+
+It is shown once. Put it in a bootstrap bundle rather than on a command
+line, so it never lands in a shell history:
+
+```bash
+$ umask 077 && printf '{"base":"https://app.bullmoose.cc","token":"bm_…","accountId":"t_…"}' > /tmp/midbury.json
+$ scp /tmp/midbury.json jepsen:/tmp/midbury.json && rm /tmp/midbury.json
+```
+
+**3. Log the asterisk user in.** The hook runs as whoever calls it, and
+`externnotify` runs as Asterisk's own user, whose home is `/var/lib/asterisk`.
+The CLI keeps its state under `$HOME/.bullmoose`:
+
+```bash
+$ sudo install -o asterisk -g asterisk -m 0400 /tmp/midbury.json /tmp/midbury-bundle.json && rm /tmp/midbury.json
+$ sudo -u asterisk HOME=/var/lib/asterisk bullmoose init --base file:///tmp/midbury-bundle.json
+$ sudo rm /tmp/midbury-bundle.json
+$ sudo -u asterisk HOME=/var/lib/asterisk bullmoose accounts     # the house account, listed
+```
+
+The `install` matters: a file copied in as the operator is unreadable to
+the asterisk user, and `init` says so rather than guessing.
+
+**4. Name the address, and turn the hook on.**
+
+```bash
+$ printf 'MAIL_TO=midbury@example.com\n' | sudo tee /etc/asterisk/cmm-mail.env >/dev/null
+$ sudo chown root:asterisk /etc/asterisk/cmm-mail.env && sudo chmod 0640 /etc/asterisk/cmm-mail.env
+$ sudo nano /etc/asterisk/voicemail.conf     # under [general]:
+#   externnotify = /opt/call-me-maybe/scripts/voicemail-notify
+$ sudo asterisk -rx 'voicemail reload'
+```
+
+**5. Leave yourself a message** — from a mobile through the lobby, or from
+the console without ringing anyone: a global `MAILBOX` stands in for the
+channel variable doorman would have set, and a Local channel plays a clip
+into the box as if somebody were talking:
+
+```bash
+$ sudo asterisk -rx 'dialplan set global MAILBOX family'
+$ sudo asterisk -rx 'channel originate Local/s@voicemail-drop application Playback demo-congrats'
+$ sudo asterisk -rx 'dialplan set global MAILBOX ""'
+$ journalctl -t cmm-voicemail -n 3        # "sent family's new message to …"
+```
+
+The mail arrives with the recording attached. **If it does not,** the
+message is still in the box and the lamp is still lit: mail is a feed, never
+the record. `journalctl -t cmm-voicemail` says why — no `MAIL_TO`, the CLI
+not on `PATH`, a token revoked. Nothing about a failed send reaches a
+caller, and nothing here runs on a call.
+
+**What this puts on the box:** a token that can send as the house, in
+`/var/lib/asterisk/.bullmoose/`, and the address in a root-owned file. No
+mail password, no login, and no way to read the mailbox from here. The
+mailbox itself becomes the most sensitive thing in the house — recordings
+and full caller numbers — so keep it to people who would answer the phone.
+
+#### The other three feeds
+
+**Texts to the house** arrive by the carrier's own forwarding, which needs
+nothing on the box: on VoIP.ms, *DID Numbers → Manage DIDs → SMS/MMS
+settings*, enable email forwarding to the house address (the same thing the
+API's `setSMS … email_enabled=1` does). The box never sees the carrier's
+key and cannot lose the text.
+
+**The house's replies and the morning digest** come from doorman's own
+commands, which run as the service account and so need their own login —
+a second token, minted the same way (`--scopes draft,send`), handed over
+the same way, with the CLI's state under the service account's state
+directory:
+
+```bash
+$ sudo install -o doorman -g doorman -m 0400 /tmp/midbury.json /tmp/midbury-doorman.json && rm /tmp/midbury.json
+$ sudo -u doorman HOME=/var/lib/doorman bullmoose init --base file:///tmp/midbury-doorman.json
+$ sudo rm /tmp/midbury-doorman.json
+```
+
+Then two lines in `.env`, and the units:
+
+```bash
+# .env
+MAIL_HOOK=/opt/call-me-maybe/scripts/mail-hook-bullmoose
+MAIL_TO=midbury@example.com
+
+$ sudo systemctl restart doorman-inbox                  # every reply, copied as it is sent
+$ sudo systemctl enable --now doorman-digest.timer      # yesterday, at 07:30
+$ cd /opt/call-me-maybe && sudo -u doorman HOME=/var/lib/doorman doorman digest --mail --full   # one now
+```
+
+`doorman digest` on its own prints the same Markdown, redacted, for a look
+before it goes anywhere. The inbox keeps its own outcome log
+(`/var/lib/doorman/inbox/outcomes.jsonl`, 0600, rotated at 8 MiB) because
+the journal has one writer and the inbox is not it; the digest reads both.
 
 ### Ringer ladders and afterhours
 
@@ -579,6 +877,322 @@ Treat the whole thing as a fun add-on rather than infrastructure: community
 reports include hangs, and nothing in the phone system depends on it.
 
 ---
+
+
+### Scheduled calls (*80, *81, *82)
+
+These three entries appear in the House phone book with their function numbers.
+Each app first announces **all pending calls for this handset**, including their
+kind, date and time, whether they have a recording, and whether an attempt is due
+or a retry is queued. After each entry, `1` cancels it; `#` or waiting keeps it.
+Then `1` adds a call using the app you dialled; `#` or hanging up leaves the menu.
+With no pending calls, the app goes straight to entry. Up to ten calls can be
+pending per handset; another handset cannot see, cancel or hear them.
+
+Retry announcements use a completed-attempt marker and its matching queue
+timestamp. Asterisk also moves that timestamp forward while ringing, so it is
+not a retry time on its own. Active attempts and incomplete queue updates are
+announced as “due or already ringing”; only a verified waiting retry gets a new
+time readback. These are snapshots, and cancellation still rechecks the job.
+
+- `*80`: choose `1` AM or `2` PM, then `730#` or `0730#` for 7:30 today.
+  A time that has passed is refused; the prompt suggests hanging up and dialling
+  `*81` for a relative delay.
+- `*81`: one digit for hours (0–9), then minutes (0–99), then `#`.
+  `1`, `99#` means 2 hours 39 minutes. Zero total delay is refused. The delay
+  starts when the request is saved, after any recording.
+- `*82`: the same time entry as `*80`, for **tomorrow**, once. It does not recur.
+
+`*` starts the entry again. On an invalid time, the voice reads back at most
+four digits and asks for a new entry followed by `#`; `*` exits that error menu.
+A timeout never accepts a partial time. After a valid time, `1` records up to a
+minute of audio (`#` finishes; five seconds of silence also finishes). `#` or
+waiting chooses the standard message. `*` starts over. Hanging up during entry
+or recording abandons the unfinished request. Once the call has been saved,
+the voice confirms its date and time. The standard message is “This is the call
+you scheduled by dialing star eight zero/one/two”; a recording follows that
+introduction when present.
+
+Times use the appliance's local timezone, the same clock used by Asterisk.
+Check it with `timedatectl` on the Pi. Tomorrow uses a calendar date, not a
+24-hour offset. Nonexistent spring-forward times are refused; in a repeated
+fall-back hour, the first matching time still in the future is selected.
+
+Callbacks dial only the originating PJSIP handset: **30 seconds to answer,
+two retries, three minutes after each unsuccessful attempt**. Busy, unregistered
+and unanswered calls use the same bounded retry policy. Any answer consumes
+the reminder; hanging up during playback does not cause another call. There is
+no voicemail fallback, carrier call, paid service, runtime TTS or auto-answer
+header. They bypass Doorman quiet hours, `*78` and curfew, including the bedtime
+hangup sweep. **The handset's own DND still wins**: it may silence or reject the
+call. Do not rely on this as an alarm that can override a silent phone.
+Cancelling removes future attempts and suppresses playback if an answer races
+cancellation. An attempt already ringing can finish its current 30-second ring.
+
+Asterisk's [native call-file queue](https://docs.asterisk.org/Configuration/Interfaces/Asterisk-Call-Files/)
+owns scheduling and retries, even while the Doorman daemon is down. Jobs survive
+process and machine restarts; a due job may run late when Asterisk returns after
+an outage. `doorman reminders menu|deliver` is a local AGI mode inside the same
+binary, invoked by the generated dialplan as the **asterisk** account. It reads
+no `.env`, caller history or credentials. The endpoint marker generated from
+`handsets.toml` must match `CHANNEL(endpoint)`; caller ID does not select a phone.
+The delivery context is not included in the internal or trunk dialplan.
+
+State and recordings are private under `${ASTSPOOLDIR}/cmm-reminders` (0700;
+files 0600). Metadata contains a random ID, handset, kind and timestamps, never
+entered digit strings or caller numbers. Answered/cancelled recordings are
+removed immediately. `doorman-reminders.timer` prunes exhausted calls hourly and
+crashed drafts after a day. Call files are staged, synced and renamed into
+`outgoing`; publication failures are spoken as failures. The housekeeping job
+has no network or environment credentials. Keep Asterisk AGI/DTMF debug tracing
+off in normal operation: protocol debugging can expose keypad input.
+
+To deploy after review:
+
+1. Install the new binary at `/opt/call-me-maybe/bin/doorman`; rebuild the free
+   audio with `bash prompts/build.sh` on the workstation and copy **the entire
+   output, including `system/`**, into the configured Asterisk sounds prefix.
+2. Run `doorman schema`, then `doorman check` on the real files. No new policy,
+   handset or environment keys are needed. Run `doorman render`, install its
+   generated fragments using the normal procedure, and reload PJSIP/dialplan.
+3. Run `sudo doorman init services` to install the housekeeping timer; restart
+   Doorman so its curfew sweep honours reminder calls. Confirm `res_agi.so` and
+   `pbx_spool.so` are loaded (`asterisk -rx 'module show like res_agi'` and
+   `asterisk -rx 'module show like pbx_spool'`). The installer uses autoload.
+4. The AGI reads Asterisk's actual `ASTSPOOLDIR`. If it is not
+   `/var/spool/asterisk`, override the housekeeping service's `ExecStart` with
+   `doorman reminders prune --spool /your/astspooldir` (use the full binary path),
+   and update its `ReadWritePaths` and `ConditionPathIsDirectory` accordingly.
+   Pending reminders are operational spool state and are **not** included in
+   the current backup/restore bundle; do not restore old call files into a live
+   queue.
+
+A small handset trial (still required after deployment): dial `*81`, enter `0`,
+`1#`, and choose a standard message. Hear the confirmation and hang up. It should
+ring that handset in one minute and announce `*81`. Repeat with a recording;
+answer and verify the introduction and message. Queue a third call, enter a
+different app, and cancel it from the announced list. Check an invalid/past
+`*80` time and a `*82` time tomorrow, then cancel the latter. For retries, leave
+one call unanswered: verify three attempts total, with three minutes between
+failed attempts. Repeat with Doorman quiet/curfew enabled and handset DND off,
+then with handset DND on. Finally, queue a call, restart Doorman/Asterisk before
+it is due, and verify that exactly one reminder remains and is delivered.
+Unit tests cover dialogue, persistence, isolation and races without a real SIP
+system; they do not establish handset ringing, audio or firmware DND behaviour.
+
+### Add a number from a handset (*88)
+
+`*88` on any handset: `Read` collects the digits until `#`, `Record` takes
+the spoken name (silence ends it, 15 s at most), and the recording lands in
+`PHONEBOOK_SPOOL/<handset>-<time>-<digits>.wav` (`/var/spool/call-me-maybe`, asterisk-owned, doorman-group). Nothing of doorman's is
+on the call. `doorman-phonebook.timer` runs `doorman phonebook` every minute:
+
+1. The number is filed at once into `PHONEBOOK_DIR/own/<handset>.vcf`, named
+   by its number — "(972) 555-0142" — so it is usable before anyone has
+   heard the name. The directory serves that file to that phone alone as a
+   third book, "Added here", with no `phonebook` entry needed.
+2. If `STT_ENDPOINT` is set (`doorman stt <url>` sets it, `doorman stt none`
+   clears it, `doorman stt` says whether it answers; no restart), the recording is posted to it (OpenAI-compatible
+   `/v1/audio/transcriptions`, e.g. whisper.cpp's server on another box) and
+   the entry is renamed in place; the audio is deleted. A service that is
+   down leaves the recording to retry; after seven days the job gives up on
+   the name, keeps the number, and says so.
+3. `phonebook.added` and `phonebook.named` go to the journal (handset id
+   only), so the digest can say who added what.
+
+It is a directory, not admission: a number added here never skips the
+lobby. To admit someone, add them to `[[people]]`. The three clips
+(`add-number`, `add-name`, `add-done`) are the bundled pack's; without them
+the phone hears the beep and silence, and still works.
+
+### Share a contact to a phone book
+
+Share one or more contacts as `.vcf` (vCard) attachments to the house number.
+Add a caption such as `Add to: House, Kitchen` in the **same message** to
+choose one or more destinations. Put these entries in `messages.toml`, replacing `gabi` with a
+household member's `[[people]] id` and `kitchen` with the handset id:
+
+```toml
+[[words]]
+word = "house"
+people = ["gabi"]
+phonebook = "house"
+
+[[words]]
+word = "kitchen"
+people = ["gabi"]
+phonebook = "handset:kitchen"
+```
+
+`house` puts the cards in the House directory on every phone that selects
+`house` in its `phonebook` list (the default). `kitchen` adds them to that
+handset's "Added here" directory only. A handset literally named `house`
+is addressed with `phonebook = "handset:house"`. The caption words are yours
+to choose; each has its own sender permissions. Captions ignore case and spaces
+around commas: `Add to: house,kitchen` works too. Each name is a configured
+word, so `Add to: Norah` requires a `norah` word pointing at her handset.
+Repeated names or aliases for the same book import only once. A bare word such
+as `house` still works for one destination. Unknown or empty names reject the
+whole request before saving, and the sender must be allowed to use every
+named word. `phonebook` cannot be combined
+with `action`, `webhook` or `reply`: the importer sends the result itself.
+
+The reply says how many new numbers were saved and how many already existed.
+Names and every valid phone number are kept; photos, email addresses and other
+fields are not. Existing names are preserved on duplicate numbers. The Worker
+downloads and parses the vCards in its own memory before queuing the message. The house pulls only structured names and numbers, validates
+them again, and saves them after checking sender and destination permissions.
+The original attachment and its URL never reach the house. Photos, emails
+and other vCard properties are discarded at the edge.
+
+All cards in a message must parse before any contacts are queued. Limits:
+three attachments, 1300 KiB per attachment, 100 distinct number strings per
+message, 200 characters per name. National numbers use the house's country
+code when imported. Permanent parsing failures queue a short error code with
+no partial contacts; temporary download failures make the carrier retry the
+callback. A missing or malformed card gets an explanation from the house;
+a stranger or a person not allowed to use that word gets no response and
+nothing is saved. The Worker parses before these local permission checks.
+Structured contacts are reused for all selected books. If a disk
+write fails after some books were saved, the reply reports how many completed;
+resending the same card and caption completes the remaining books without
+duplicating entries in the ones already updated.
+
+Cards live under `PHONEBOOK_DIR/shared/house.vcf` or
+`PHONEBOOK_DIR/shared/handsets/<id>.vcf`, separate from `*88`'s own files. The
+phone-directory service notices changes automatically; each phone shows them
+on its next directory refresh. The normal state-directory backup includes
+these files. These are **directory additions only**: importing a contact
+changes neither `[[people]]`, `contacts.toml`, nor call-screening permissions.
+
+Deploy the edge migration and Worker from `edge/README.md`, and include
+`&media={MEDIA}&timestamp={TIMESTAMP}` in the carrier callback, with callback retries enabled.
+The edge queue keeps the carrier's raw `provider_timestamp` separately from
+its own UTC `received_at`; no timezone is inferred. Leave the separate
+SMS/MMS Webhook URL empty. See `edge/README.md` for the complete callback URL.
+Upgrade and restart the inbox and directory services after running
+`doorman check`. Carrier delivery of `.vcf`
+attachments still needs a live test: VoIP.ms documents MMS media callbacks,
+but does not promise incoming contact-card support. Test a fictional card
+from the sending phone and check the queued structured contact data and the
+house's import reply before relying on it. The carrier Message Center may not
+show the original file even when it records an MMS.
+
+### Backup and restore
+
+The house is small — `.env`, the TOMLs, `/var/lib/doorman` (the journal, the
+provisioning certificate the phones already trust, the inbox seen-set, the
+`*88` books), voicemail, un-named `*88` clips, and the hand-written Asterisk
+files; a few megabytes. `doorman backup` makes it one sealed file.
+
+```bash
+$ doorman backup init                 # keypair: public half into .env, private printed ONCE
+$ sudo -u doorman nano .env           # BACKUP_PATH=/mnt/backups/callmemaybe, and/or BACKUP_S3_* for R2 / B2 / S3
+$ sudo -u doorman doorman backup run  # one bundle, delivered, older ones pruned
+$ sudo doorman init services          # enables doorman-backup.timer (nightly, 05:10)
+$ doorman backup list
+$ BACKUP_IDENTITY_FILE=~/callmemaybe.key doorman backup verify   # proves the key opens what the box writes
+```
+
+**The private key is printed once and stored nowhere on the box by `init`.**
+Keep it with the house's master keys. With the key off the box, the box
+encrypts and can never decrypt, a destination holds blobs it cannot read,
+and a stolen box cannot read its own backups.
+
+**Optional: a copy on the box, and what it costs.** Put a copy at
+`/var/lib/doorman/backup/identity.key` (doorman, 0600 — the one directory
+under the state tree that is never bundled) and every `backup run` reads
+each delivered bundle back from its destination and opens it ("verified
+(read back)" in `check`); `verify` and `restore` find the key there too. The
+trade is explicit: **with the copy present, the box — and anyone who gets
+root on it — can decrypt every bundle made for that key, past and future.**
+The stolen-box guarantee above applies only while the key stays off the box.
+The copy is for the box's self-check; the authoritative key lives off the
+box either way, or the box's death takes it. A copy that is configured
+(`BACKUP_IDENTITY_FILE`) but cannot be read fails the run, so verification
+never silently stops. The box encrypts and can never decrypt; a
+destination holds blobs it cannot read; a stolen box cannot read its own
+backups. Lose the key and every bundle is a brick — by design. Rotating it
+is deliberate: remove `BACKUP_RECIPIENT`, keep the old identity for the old
+bundles, run `init` again.
+
+Every bundle starts with `MANIFEST.json`: the box, the doorman version, the
+time, every file's hash, and what was excluded (`--no-voicemail` leaves the
+messages out). `doorman check` prints the last run, its age and where it
+went, and fails the check past a day or after a failed destination.
+`backup.completed` / `backup.failed` go to the journal, by destination name.
+
+**A new box from a bundle:**
+
+```bash
+$ sudo systemctl stop doorman                              # the journal is replaced by a snapshot
+$ doorman restore --latest --dry-run                       # the manifest and what would be written
+$ doorman restore --latest                                 # or: doorman restore callmemaybe-jepsen-….age
+$ doorman check && doorman render                          # and the reloads render prints
+$ sudo doorman init services && sudo systemctl start doorman
+```
+
+`restore` refuses a box that already has a `.env` unless `--force` (which
+backs the existing one up first); `--root DIR` rehearses into a directory.
+The phones reconnect to the restored box without being re-provisioned,
+because the provisioning certificate is in the bundle.
+
+### Bedtime (curfew)
+
+The hours live in `policy.toml` as `[[schedules]]` — the same blocks an
+extension's `afterhours` names — and the handset names them in
+`handsets.toml`:
+
+```toml
+# policy.toml
+[[schedules]]
+id = "late-weeknights"
+start = "22:45"
+end = "05:00"                            # crosses midnight
+days = ["SU", "MO", "TU", "WE", "TH"]    # the days the window STARTS on
+
+[[schedules]]
+id = "late-weekends"
+start = "23:30"
+end = "05:00"
+days = ["FR", "SA"]
+
+# handsets.toml
+[[handsets]]
+id = "mary-kate"
+curfew = ["late-weeknights", "late-weekends"]   # asleep while ANY is active
+```
+
+While a window is active, three things happen, each in the place that
+already owns it:
+
+1. **It does not ring.** doorman skips the phone in every ring it places —
+   house, extension, ladder stage — through the same gate as do-not-disturb,
+   and the generated dialplan leaves it out of `100` and `500`. A
+   `page_override` phone does *not* reach it: the override is for a child's
+   DND; a curfew is the parent's own rule. Explicitly scheduled
+   `*80`/`*81`/`*82` calls are an exception and still ring that handset.
+2. **It cannot call out.** The phone's calls enter a generated
+   `[curfew-<id>]` context that is `[internal]` behind a clock: `911` goes
+   through first and unconditionally, as do `*80`, `*81` and `*82`; other calls while asleep hear
+   `curfew-out` and a busy tone. A room that dials it hears `curfew-room`
+   and gets its mailbox.
+3. **A call it is on is dropped at the hour.** The daemon looks once a
+   minute for a handset that has just fallen asleep and hangs up its
+   ordinary channels. Reminder calls and menus are exempt. A daemon started inside the window
+   leaves an existing call alone; the hour has passed.
+
+`doorman check` lists every curfewed handset with its windows and marks
+**ASLEEP NOW**. A schedule with `enabled = false` is inert here as for
+`afterhours` — the holiday switch — and stays listed as switched off. An id
+no schedule defines fails `check`, naming the handset and the id.
+
+The hours ride in the dialplan, so changing them or the members is
+`doorman render`, copy, `dialplan reload` (and `pjsip reload`, because the
+endpoint's context changes). The lobby's half follows the policy reload on
+its own. The two clips are the bundled pack's (`prompts/manifest.json`); a
+pack built before they existed plays nothing there and the busy tone or the
+mailbox still says what happened.
 
 ## 5. ARI by hand
 
@@ -666,6 +1280,174 @@ The phones' directory — the other rooms, the feature codes, and `[[people]]`
 the provisioning window. A name added to `[[people]]` is on every phone at
 its next poll (hourly) with nothing rendered and no window opened. A handset's
 `phonebook` key narrows what it shows: `["house"]` for a child's room.
+
+### Texts to the house
+
+A text to the house number is control plane, never conversation: a known
+word from a listed person does one thing and gets one boring reply;
+everything else is archived by the carrier's email forwarding and never
+answered. The pieces, in order:
+
+1. **The archive.** On VoIP.ms, forward the DID's SMS and MMS to the house's
+   mailbox. No code; every text and photo lands there for good.
+2. **The edge.** Deploy `edge/` (its README is the whole procedure): the
+   Worker VoIP.ms calls back, that this box pulls from, and that holds the
+   carrier API key so this box never does. Give VoIP.ms the callback URL
+   with the house's callback token in the path, and admit Cloudflare's
+   egress to the API allow-list.
+3. **The actions and the words.** An action in `policy.toml` says what the
+   house can do, who may, what it says back, and whether it confirms:
+
+   ```toml
+   [[actions]]
+   id = "garage"
+   webhook = "http://homeassistant:8123/api/webhook/cmm-garage-open"
+   reply = "The garage is open"
+   people = ["gabi", "eric"]        # [[people]] ids; "*" is everyone listed
+   confirm = "none"                 # "passkey" once s19 exists
+   ```
+
+   Then `cp examples/messages.example.toml messages.toml`, and each word
+   names its action: `action = "garage"`. Give the people an `id` in
+   `policy.toml`, and `doorman check` — it refuses a word for an action or a
+   person nobody declared. Home Assistant decides what a garage is and may
+   say no; the box only asks.
+4. **The consumer.** `INBOX_URL` and `INBOX_TOKEN` in `.env`, then
+   `doorman inbox` in a tab to watch it work, and
+   `sudo systemctl enable --now doorman-inbox` to keep it working.
+
+Text `ping` from an allow-listed phone: the tab prints the outcome and the
+phone gets `pong` back within a couple of seconds. Nothing on the call path
+reads a text, and a handset cannot text an outside number through the house
+at all — that is a second number and a line of its own.
+
+### Actions
+
+An action is one entry in one registry — `[[actions]]` in `policy.toml` —
+that says what the house can do, who may ask, what it says back, whether it
+must be confirmed, and (optionally) which Home Assistant entity tells the
+truth about it. A text word names an action by id; a lobby digit and a
+passkey will name the same id when those doors exist. Home Assistant does
+the thing and keeps the right to say no; doorman never learns what a garage
+is. This section is the whole procedure for adding one.
+
+**1. The entry.** Every key, with the garage as the example:
+
+```toml
+[[actions]]
+id = "garage"                    # what every transport names
+label = "Open the garage"        # for people; defaults to the id
+webhook = "http://homeassistant:8123/api/webhook/cmm-garage-open-7f3a9c"
+reply = "Asked the garage to open"   # plain ASCII, one segment
+people = ["eric", "gabi"]        # [[people]] ids, or ["*"] for everyone listed
+confirm = "none"                 # or "passkey": intent, not authority (s19)
+state = "cover.large_door_door"  # the HA entity "garage?" reads — optional
+done_when = "open"               # already there: nothing moves — optional
+```
+
+Give each person an `id` in their `[[people]]` entry; `doorman check`
+refuses an action naming a person with no id, a word naming an action
+nobody declared, and an action that does nothing (no webhook and no reply).
+A word's `people` may narrow the action's list, never widen it. Closing is
+its own action — `close`, with its own webhook and its own people — because
+a toggle is a door that does the opposite of what you asked when the state
+you remembered was wrong.
+
+**2. The word.** In `messages.toml`:
+
+```toml
+[[words]]
+word = "garage"
+people = ["*"]                   # the action's list still applies
+action = "garage"
+```
+
+**3. The automation.** Home Assistant's webhook trigger, one per action.
+From a box that reaches HA over the tailnet the request is not "local" to
+HA, so `local_only: false` is needed; find the entity id under Settings →
+Devices & services → the device → the entity → its settings cog. Add the
+conditions the house wants here — not after midnight, not while the car is
+out — because this automation, not doorman, is the policy engine for the
+physical world:
+
+```yaml
+alias: Call Me Maybe — open the garage
+mode: single
+triggers:
+  - trigger: webhook
+    webhook_id: cmm-garage-open-7f3a9c      # the id in the action's webhook URL
+    allowed_methods: [POST]
+    local_only: false
+actions:
+  - action: cover.open_cover
+    target:
+      entity_id: cover.large_door_door
+```
+
+The body doorman POSTs is JSON — `{"word","action","person","via","id"}` —
+never the text and never a number, so an automation may branch on
+`trigger.json.person` (only Gabi after 22:00, say) without ever seeing a
+phone number.
+
+**4. The credentials.** Two, with different rules:
+
+- *The webhook id is the whole secret.* Anyone holding the URL can trigger
+  the automation. Make it long and random (`openssl rand -hex 12`), keep it
+  in `policy.toml` (0600), and note that doorman logs the host only.
+- *`HA_URL` and `HA_TOKEN`* are needed only for `state` and `done_when`:
+  the box reads the entity live rather than remembering it. Mint a
+  long-lived access token in HA under your profile → Security → Long-lived
+  access tokens, and put both in `.env`. This is LAN infrastructure like
+  the ARI password, not a provider key: read by `doorman inbox` and never
+  by the daemon, sent as a header and never in a URL. Both or neither;
+  `doorman inbox` refuses to start when an action names a state it has no
+  way to read, and `doorman check` says so first.
+
+**5. Check and restart.**
+
+```bash
+$ ./bin/doorman check
+  actions              : garage (eric,gabi +state), ping (*)
+Texts: 2 words   (messages.toml)
+  garage       from *                        → action garage + garage? asks cover.large_door_door
+$ sudo systemctl restart doorman-inbox && journalctl -u doorman-inbox -n 3
+inbox: Home Assistant state reads on (HA_URL and HA_TOKEN)
+inbox: journal on — texts and actions are written beside the daemon's events
+```
+
+**6. Text it.** From a listed phone:
+
+| you text   | the house says                | what moved                                |
+|------------|-------------------------------|-------------------------------------------|
+| `garage?`  | `Large Door Door is closed`   | nothing — HA was asked, in HA's own name  |
+| `garage`   | `Asked the garage to open`    | the webhook fired; HA decided             |
+| `garage`   | `It was already open`         | nothing — `done_when` held                |
+| `close`    | `That one needs your passkey…`| nothing — `confirm = "passkey"` until s19 |
+
+A question mark is a question only on a word whose action names a
+`state`; on any other word it is punctuation, and `ping?` is still `pong`.
+Grandma, listed for calls but not on the action, gets nothing at all — a
+reply would tell her what the house can do.
+
+**7. The journal.** Every text and every action is a row beside the
+daemon's own events, written by `doorman inbox` as a second writer:
+
+```bash
+$ doorman events --json --eventType action.performed | jq -c '.events[] | {at: .occurred_at, reason: .payload.reason, action: .payload.action}'
+{"at":"2026-09-27T14:02:11Z","reason":"acted","action":{"action":"garage","person":"eric","via":"sms","word":"garage","message_id":"7c1e…"}}
+$ doorman events --json --eventType action.refused | jq -c '.events[].payload'
+{"action":{"action":"garage","person":"gabi","via":"sms","word":"garage","message_id":"9a02…","state":"open"},"reason":"already open"}
+```
+
+`message.received` is written for every text with the outcome as its
+reason — including a stranger's, with no sender and no body — so the
+morning digest and the journal agree on what the house heard.
+
+**A second action** is steps 1 to 3 again with a new id, a new webhook id,
+and its own people; `doorman check` and a text of the new word are the
+whole test. Actions the house names for later: the lights, the thermostat,
+Home Assistant's own security settings — each one entry, each one
+automation, none of them anything doorman understands.
 
 ### Add a second number
 
@@ -1193,6 +1975,76 @@ perfectly normal call from this end.
 `outbound_cid` anywhere, nothing is generated and every outbound call presents
 the trunk default again, exactly as before.
 
+### Outbound failover
+
+**Off unless you write it, and here is why.** When a line's trunk cannot carry
+a call, the next trunk can — but it cannot present the line's number, because
+a provider will not carry a number its account does not own. So a call that
+falls over reaches the customer **from a different number**: the number of
+whichever line lives at the fallback trunk. That is a choice about what your
+customers see, not a resilience setting to switch on by reflex.
+
+```toml
+# policy.bakery.toml
+[line]
+trunk    = "telnyx"
+failover = ["voipms"]        # other declared trunks, in order; never its own
+```
+
+```bash
+$ doorman check          # prints, per line, what each rung presents:
+#   When telnyx cannot carry a call as bakery, it falls over — in order, presenting
+#   that trunk's own number rather than this line's:
+#     1. voipms     presents +15125550100
+$ doorman render         # OUTBOUND_FAILOVER on the phones this line claims,
+                         # and one [cmm-failover-<id>] context per trunk in
+                         # extensions_trunks.conf; copy and reload as usual
+```
+
+**What climbs the ladder, and what never does.** Only `CHANUNAVAIL` and
+`CONGESTION` — which, from the dialplan's side, is what a lost registration, a
+provider outage, an exhausted balance and a dead network all look like, and
+they are deliberately not told apart. Busy, no answer and the caller hanging
+up are answers from the far end and are never retried down another provider:
+somebody who declined the call once must not get it again from a new number.
+Nothing is asked whether it is registered; the trunk is tried, and a dead one
+fails in milliseconds.
+
+**What a customer sees.** A different caller ID, and a call that took a few
+seconds longer to ring. If they save it, they ring the other line back next
+time. Say so to whoever answers that line.
+
+**What you see.** A call that fell over ends in the fallback trunk's own
+context, so with the journal on:
+
+```bash
+$ doorman events --json --eventType channel.ended | grep cmm-failover-
+```
+
+names the trunk that actually carried it — the answer to "why did they see the
+wrong number" that is not a guess. Nothing in doorman placed or watched the
+call: the dialplan did it and CEL recorded it.
+
+**When nothing can carry it**, with or without a ladder, the caller now hears
+"all circuits are busy now" and a congestion tone rather than a click. A
+silent failure is how a dead trunk goes unnoticed for a week.
+
+**911 is not affected.** Emergency calls have their own ladder in
+`[cmm-emergency]`, ordered by which trunk has a street address on file, and
+read neither `failover` nor a line's caller ID. See "Which trunk carries 911".
+
+**Inbound has no equivalent here, and that is a real answer.** If a
+registration is down, calls never reach the box at all — there is no code path
+to write. What exists is the provider's **failover DID** (VoIP.ms: DID
+settings → Failover, route to a mobile when the trunk is unreachable), and it
+is the single most valuable thing you can configure that this project will
+never implement. Set it beside the E911 address, once.
+
+**Upgrading a box provisioned before v0.9.0:** the ladder lives in the
+hand-written `[cmm-outbound]` in `asterisk/extensions.conf`. Copy the new
+template over `/etc/asterisk/extensions.conf` (keeping your own edits) and
+`dialplan reload`; without it the key is accepted, rendered, and never read.
+
 ### Rotate a PIN
 
 SSH in, one command, no restart:
@@ -1230,9 +2082,10 @@ $ sudo -u doorman doorman provision notify kitchen   # each phone fetches and re
 
 Nothing prints the new passwords: `.env` is rewritten atomically beside a
 timestamped backup, and the phone fetches its own through `provision notify`,
-which opens the window, sends a `check-sync` NOTIFY through the Asterisk
-console (the shipped `pjsip_notify.conf` defines it), and watches the phone
-fetch and register. A phone that is off during the rotation fetches its new
+which opens the window, sends a `check-sync` NOTIFY with `reboot=true`
+through the Asterisk console (the shipped `pjsip_notify.conf` defines it;
+a Grandstream acknowledges the plain form and does nothing), and watches the
+phone restart, fetch and register — about a minute per phone. A phone that is off during the rotation fetches its new
 password the next time it boots inside a window — `doorman provision <id>`
 opens one.
 
@@ -1311,6 +2164,80 @@ needs a daemon, an Asterisk, or a phone:
 If you do keep it on the Pi, know that you have widened the blast radius of a
 compromised Pi from "a sub-account that can make calls" to "the account that
 owns the DIDs", and scope the key as far down as the provider allows.
+
+#### Let it ring the kitchen
+
+The obvious alert is email, and the obvious objection is that at zero you
+cannot afford to be told. Both are wrong: **an internal call never touches a
+trunk.** No provider, no credit, no registration — a dead account can still
+ring the kitchen to say it is dead.
+
+```bash
+$ doorman balance --ring kitchen            # a handset id, or a group, from handsets.toml
+$ doorman balance --ring adults,kitchen     # in order: the first to answer hears it
+```
+
+When a trunk is below its threshold the kitchen rings, and whoever picks up
+hears *"This is the house phone. The calling credit is running low. It is
+down to about — twelve — goodbye."* The number is the lowest low balance,
+rounded down; the currency is whatever you pay in and is deliberately not
+spoken. Nobody answering is not an error: the house has been told as much as
+a phone can tell it. The table still prints and the exit code is still 1.
+
+Three things follow:
+
+- **It needs the daemon**, on this box, because the announcement is an
+  internal call placed over ARI, and ARI binds to loopback. So a run that
+  rings is a run on the box, and the API key comes with it — see above for
+  what that costs. `ARI_USERNAME` and `ARI_PASSWORD` come from `.env` as for
+  the daemon.
+- **It rings once a day per trunk**, not every run. `--repeat 24h` is the
+  default and `--state` is where the last alert is remembered
+  (`$XDG_STATE_HOME/doorman/balance.json`; the unit uses
+  `/var/lib/doorman/balance.json`). A trunk that recovers is forgotten, so
+  its next dip rings straight away. `--repeat 0` rings every run, for
+  testing.
+- **Nothing is synthesised.** The phrase is a pre-rendered clip in the
+  bundled pack's `system/` directory and the number is read by Asterisk.
+  A pack replacing the lobby's voice does not have to supply it and cannot
+  silence it. If the kitchen rings and says nothing but a number, the
+  `system/` directory was not copied — see "Prompts" above.
+
+Set `BALANCE_RING=kitchen` in `.env` and the timer below does the same
+every morning without the flag.
+
+#### On a timer
+
+`doorman-balance.timer` runs the check at 09:00 local, with a few minutes
+of jitter, and on the next boot if the box was off. Enable it whether or not
+there is a `trunks.toml`: without one the run says there is nothing to
+check and exits 0.
+
+```bash
+$ sudo systemctl enable --now doorman-balance.timer
+$ systemctl list-timers doorman-balance.timer
+$ sudo systemctl start doorman-balance.service && journalctl -u doorman-balance -n 20
+```
+
+A low balance leaves the service unit in a failed state — exit 1 — which is
+visible in `systemctl --failed` and is the point, not a bug to silence.
+
+#### A gauge for Prometheus
+
+```bash
+$ doorman balance --prom /var/lib/node_exporter/textfile_collector/doorman_balance.prom
+```
+
+Writes the Prometheus text format for node_exporter's textfile collector,
+atomically, on every run — including the runs where nothing is low, because
+a file that stops changing is itself a signal. `doorman_trunk_balance`,
+`doorman_trunk_balance_threshold`, `doorman_trunk_balance_known` (1 when the
+last check read a number) and `doorman_balance_last_check_timestamp_seconds`,
+labelled by trunk id and provider and never by an account name. Thresholds
+and delivery stay in your alerting stack; the daemon never serves this,
+because the daemon never checks a balance. `BALANCE_PROM` in `.env` sets it
+for the timer, with a `ReadWritePaths=` drop-in on the unit when the path is
+outside `/var/lib/doorman`.
 
 #### Setting it up on VoIP.ms
 
@@ -1615,8 +2542,9 @@ Mitigations, in the order they are worth doing:
    environment variable per phone precisely so they can differ. Generate them:
    `openssl rand -base64 18`.
 2. **Change the voicemail PINs.** `asterisk/voicemail.conf.example` ships `4242`
-   for every mailbox as an obvious placeholder. It is still `4242` until you
-   change it, and voicemail is reachable from any handset with `*97`.
+   for every hand-written mailbox as an obvious placeholder. It is still
+   `4242` until you change it, and any box is reachable from any handset with
+   `*98`. The boxes render writes get their PINs from `.env`.
 3. **Keep SIP off the WAN.** Nothing in this design needs an inbound port. If
    your router forwards 5060 anywhere, undo it.
 4. **Put handsets on a network guests do not share.** A guest Wi-Fi password

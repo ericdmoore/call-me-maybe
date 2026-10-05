@@ -29,7 +29,8 @@ semantic rules (those appear as `x-cross-references` and `x-rules`).
 
 ```bash
 make check                 # gofmt + vet + lint + test + build; green before any commit
-make cover                 # -race plus per-package coverage floors
+make cover                 # -race plus per-package coverage floors (scripts/coverage.floors)
+make cover-ratchet         # raise the floors to what you just measured; floors only go up
 make lint                  # nilness + the no-secrets-in-logs analyzer
 make hooks                 # install the pre-push gate (once per clone)
 make build                 # → bin/doorman for the host
@@ -43,9 +44,13 @@ make run                   # dev run with .env sourced (needs reachable Asterisk
 ./bin/doorman lsp          # language server for the config files (stdio)
 ./bin/doorman e164 <num>   # show how a raw caller ID normalises
 ./bin/doorman events --json # durable events, --after/--limit/--eventType
-./bin/doorman balance      # prepaid credit per trunk; exit 1 under threshold
+./bin/doorman balance      # prepaid credit per trunk; exit 1 under threshold;
+                           # --ring <handset> has the house say so; --prom <file> is the gauge
 ./bin/doorman provision    # inventory view; with ids: window + instructions + watch
 ./bin/doorman rotate --phones  # new handset SIP passwords; `provision notify` delivers
+./bin/doorman rotate --voicemail  # set/rotate the PINs of the boxes handsets name (.env); render writes them
+./bin/doorman inbox        # texts to the house: consume the edge inbox per messages.toml
+./bin/doorman digest       # yesterday as Markdown from the journal + inbox outcomes; --mail sends it
 ./scripts/smoke.sh         # full deployment verification, run ON the Pi
 ```
 
@@ -100,6 +105,9 @@ Layout:
   Optional `CEL_SPOOL_PATH` ingests Asterisk's private CEL spool with an atomic
   source cursor. CEL captures channel lifecycles, never raw app arguments/DTMF.
   See `docs/events.md`. Never feed journal history into call admission.
+  The daemon is the journal's *owner* (the flock guards its bookkeeping);
+  `doorman inbox` is a *sibling* writer (`events.Sibling`) that appends
+  committed rows with no lock, no bookkeeping, and never creates the file.
 - `internal/notify` — the legacy event webhook. One endpoint, one JSON event per
   ring and per completed call, so Home Assistant can announce or flash
   something. Same non-blocking shape as `internal/calls`, and doorman
@@ -110,7 +118,12 @@ Layout:
   one-method interface on `Deps` (`lobby.Contacts`), so the state machine
   never imports this package — the adapter in `cmd/doorman` is the one
   translation point, exactly as it is for ARI. Derived and disposable:
-  deleting every source only sends those callers back to the lobby.
+  deleting every source only sends those callers back to the lobby. `url`
+  sources are fetched by `contacts.Fetcher` into a per-source cache
+  (`cache_dir`, 0600, last-good-on-failure, conditional requests, bearer
+  token in a header and never in the URL) by a refresher goroutine in
+  `cmd/doorman` that swaps the merged set whole; a call reads the last
+  fetch and never waits on one.
 - `internal/provision` — the phone's half of the inventory: the model
   registry, per-vendor configuration and phone-book templates, and
   `PROVISION_ADDRESS`. `internal/provision/serve` is the LAN listener (the
@@ -118,11 +131,35 @@ Layout:
   `cmd/doorman/provision.go` and nothing else — asserted by test, the same
   guard the provider package has: a listener that hands out SIP passwords
   never shares a process with the thing that answers the phone.
+- `internal/inbox` — texts to the house number: the edge client (pull,
+  ack, send — token in a header, never in the URL), the seen-id set, the
+  word dispatcher over `messages.toml`, and the Home Assistant state reader
+  (`HA_URL`/`HA_TOKEN`, for `garage?` and `done_when`; a LAN credential
+  like the ARI password, read here and never by the daemon). Reachable from
+  `cmd/doorman/inbox.go` and nothing else, asserted by test: nothing on the
+  call path reads a text, and the carrier API key is at the edge (`edge/`,
+  the Cloudflare Worker), never on the box.
+- `internal/reminder` — local handset AGI menus for *80/*81/*82; Asterisk call
+  files own durable scheduling/retries. Recordings and metadata belong to the
+  asterisk user under its private spool. No daemon credentials or journal reads.
+  The curfew sweep exempts channels with accountcode `cmm-reminder`. See RUNBOOK
+  “Scheduled calls” for deployment and a real handset trial.
+- Contact cards sent to the house are downloaded and parsed by the Worker.
+  Only bounded `{name, number}` metadata and fixed error codes enter the queue;
+  no raw files, media URLs, photos or arbitrary properties reach the house.
+  `internal/inbox` validates structured contacts again before writing. `messages.toml` words with `phonebook` select `house`
+  or `handset:<id>` and restrict senders. `Add to: word,word` routes to all
+  named destinations after checking every permission; a bare word still works.
+  `PHONEBOOK_DIR/shared` is directory
+  storage, never an admission source; it is separate from the *88 writer.
 - `internal/config` — env parsing; names match `examples/.env.example` exactly.
 
 Config interfaces: `.env` (secrets + tuning), `handsets.toml` (hardware
 inventory — source of truth for the generated Asterisk config), `policy.toml`
-(rules: allow-list, extensions, ladders, `[[schedules]]`), and optionally
+(rules: allow-list, extensions, ladders, `[[schedules]]`, and `[[actions]]` —
+the one registry of things the house can do, which a text word, a lobby
+digit and a passkey all name by id), `messages.toml` (optional: the words a
+text to the house number may carry, each naming an action), and optionally
 `trunks.toml` (the providers — source of truth for the generated trunk config
 and inbound contexts) and `contacts.toml` (the address books to read — the
 ambient list, where `[[people]]` is the deliberate one). Each file owns its
@@ -186,15 +223,26 @@ Break these and the phone fails in ways that look like working software.
    lobby is deaf and every stranger is dismissed. No runtime symptom other
    than "nobody can ever get in".
 
-9b. **Every trunk registration carries `line=yes` *and* `endpoint=<id>`.**
-   That pair binds inbound traffic on a registration to its endpoint, which
-   is what removes the need for an `identify` block, a provider IP allow-list
-   and any port forward. Without both, inbound calls hit the `anonymous`
-   endpoint and vanish — no error, no log line, just a number that never
-   rings. `internal/render.registrationBinding` is the one place that emits
-   them and `TestEveryRegistrationBindsInboundToItsEndpoint` is the guard.
-   Do not generate an `identify` block instead: an IP allow-list goes stale
-   silently the day a provider adds a media server.
+9b. **Every trunk registration carries `line=yes` *and* `endpoint=<id>`,
+   and every trunk is also identified by its own identity — never by IP.**
+   The pair binds inbound traffic on a registration to its endpoint; it is
+   what removes the need for a provider IP allow-list and any port forward,
+   and `internal/render.registrationBinding` is the one place that emits it
+   (`TestEveryRegistrationBindsInboundToItsEndpoint` guards). It is not
+   sufficient on its own: VoIP.ms strips the `;line=` parameter from the
+   Contact it calls back, so the INVITE arrives untagged, matches nothing,
+   and is dropped as "No matching endpoint found" — no ring, no log line at
+   default verbosity (found on the first customer's box, 2026-09-21). So
+   beside the registration there are two `identify` blocks that match the
+   *request URI* and the *To header* against the sub-account name and every
+   DID the trunk answers. That is identification by something we own and
+   can never go stale; an IP allow-list (`match=`) goes stale silently the
+   day a provider adds a media server, and must never be generated or
+   written. The hand-written `asterisk/pjsip.conf.example` and the
+   generated `pjsip_trunks.conf` both carry the pair and the two blocks.
+   And never set `from_user` to the sub-account on the endpoint: VoIP.ms
+   answers 503 on outbound unless the DID rides in From, which
+   `CALLERID(num)` puts there when `from_user` is left alone.
 
 11. **A call never leaves by a trunk that does not own the number it
    presents, and emergency calls leave by the designated trunk or fail
@@ -277,9 +325,11 @@ live trunk; never add integration tests requiring a real Asterisk to CI.
 - No voicemail *in doorman*. Asterisk's `app_voicemail` does the recording,
   storage, WAV-attached email and MWI; doorman only releases the caller into
   `[voicemail-drop]` via ContinueToDialplan with `MAILBOX` set. The
-  `VOICEMAIL_*`/`STT_*`/`SMTP_*` keys in `.env` are read by Asterisk and the
+  `VOICEMAIL_*`/`SMTP_*` keys in `.env` are read by Asterisk and the
   notify hook, never by doorman — which is why they look unused here. See
   `docs/TASKS.md` §2; transcription is the only piece still open.
+  `STT_*` is read by `doorman phonebook` alone — the `*88` spoken names,
+  transcribed by a one-minute timer off the call path — never by the daemon.
 
 ## Licensing and packs
 

@@ -37,10 +37,11 @@ type Event struct {
 }
 
 type Channel struct {
-	ID     string   `json:"id"`
-	Name   string   `json:"name"`
-	State  string   `json:"state"`
-	Caller CallerID `json:"caller"`
+	ID          string   `json:"id"`
+	AccountCode string   `json:"accountcode"`
+	Name        string   `json:"name"`
+	State       string   `json:"state"`
+	Caller      CallerID `json:"caller"`
 }
 
 type CallerID struct {
@@ -232,6 +233,49 @@ func (c *Client) RingStop(ctx context.Context, channelID string) error {
 
 func (c *Client) Hangup(ctx context.Context, channelID string) error {
 	return c.do(ctx, http.MethodDelete, "/channels/"+channelID, nil, nil)
+}
+
+// Variable evaluates a global variable — GET /asterisk/variable — and
+// returns its value. A dialplan function with arguments comes back empty
+// from this endpoint (found live: DB(), DB_EXISTS(), MATH() all answered
+// "" while EPOCH did), so anything that needs one goes through a channel.
+func (c *Client) Variable(ctx context.Context, name string) (string, error) {
+	var out struct {
+		Value string `json:"value"`
+	}
+	err := c.do(ctx, http.MethodGet, "/asterisk/variable", url.Values{"variable": {name}}, &out)
+	return out.Value, err
+}
+
+// ChannelVar evaluates a variable or a dialplan function on a channel — GET
+// /channels/{id}/variable. Read by the daemon to ask whether a handset is
+// quiet (DB(DND/<id>)) on the caller's own channel: Asterisk's own,
+// time-boxed state that doorman reads and never writes.
+func (c *Client) ChannelVar(ctx context.Context, channelID, name string) (string, error) {
+	var out struct {
+		Value string `json:"value"`
+	}
+	err := c.do(ctx, http.MethodGet, "/channels/"+channelID+"/variable", url.Values{"variable": {name}}, &out)
+	return out.Value, err
+}
+
+// Channel reads one channel's current state — GET /channels/{id}. A channel
+// that has ended answers 404 (IsNotFound). Read by `doorman balance` to watch
+// an announcement it originated ring, answer and end; never by the call path,
+// which learns what happened to a channel from the event stream.
+func (c *Client) Channel(ctx context.Context, channelID string) (Channel, error) {
+	var ch Channel
+	err := c.do(ctx, http.MethodGet, "/channels/"+channelID, nil, &ch)
+	return ch, err
+}
+
+// Channels lists every live channel — GET /channels — Stasis or not. The
+// curfew keeper reads it to find a sleeping handset's legs, which may be a
+// dialplan call doorman never saw.
+func (c *Client) Channels(ctx context.Context) ([]Channel, error) {
+	var out []Channel
+	err := c.do(ctx, http.MethodGet, "/channels", nil, &out)
+	return out, err
 }
 
 // SetChannelVar sets a channel variable, visible to the dialplan after a

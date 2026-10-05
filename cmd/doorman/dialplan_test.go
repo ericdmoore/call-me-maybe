@@ -4,6 +4,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"callmemaybe/internal/lobby"
+	"callmemaybe/internal/render"
 )
 
 // The shipped dialplan is the one interface in this system that is not Go, and
@@ -128,10 +131,107 @@ func TestBothOutboundPathsShareOneContext(t *testing.T) {
 		"ExecIf($[\"${OUTBOUND_TRUNK}\" != \"\"]?Set(CMM_TRUNK=${OUTBOUND_TRUNK}))",
 		"ExecIf($[\"${OUTBOUND_CID}\" != \"\"]?Set(CALLERID(num)=${OUTBOUND_CID}))",
 		"Dial(PJSIP/${EXTEN}@${CMM_TRUNK},60)",
-		"Dial(PJSIP/1${EXTEN}@${CMM_TRUNK},60)",
+		// Ten digits join the eleven-digit path rather than copying its
+		// Dial, so there is one ladder and not two that can drift.
+		"exten => _NXXNXXXXXX,1,Goto(cmm-outbound,1${EXTEN},1)",
 	} {
 		if !strings.Contains(ctx, want) {
 			t.Errorf("[cmm-outbound] is missing %q:\n%s", want, ctx)
 		}
+	}
+	if strings.Contains(ctx, "Dial(PJSIP/1${EXTEN}@${CMM_TRUNK},60)") {
+		t.Error("[cmm-outbound] carries a second Dial for ten digits — one ladder, not two")
+	}
+}
+
+// The failover ladder: only a trunk failure climbs it, every step is a
+// generated per-trunk context reached by name, and nothing at the bottom is
+// silent. The far end being busy, not answering, or the caller hanging up are
+// answers and never retried down another provider — a customer who declined
+// the call once must not get it again from a different number.
+func TestOutboundLadderClimbsOnlyOnTrunkFailure(t *testing.T) {
+	ctx := dialplanContext(t, shippedDialplan(t), "cmm-outbound")
+	for _, want := range []string{
+		`GotoIf($["${DIALSTATUS}"="CHANUNAVAIL" | "${DIALSTATUS}"="CONGESTION"]?ladder:done)`,
+		"same => n(ladder),Set(CMM_LADDER=${OUTBOUND_FAILOVER})",
+		`same => n(more),GotoIf($["${CMM_LADDER}"=""]?failed)`,
+		`Set(CMM_TRUNK=${CUT(CMM_LADDER,\,,1)})`,
+		`Set(CMM_LADDER=${CUT(CMM_LADDER,\,,2-)})`,
+		"GotoIf(${DIALPLAN_EXISTS(cmm-failover-${CMM_TRUNK},${EXTEN},1)}?cmm-failover-${CMM_TRUNK},${EXTEN},1)",
+		"same => n(failed),NoOp(NO TRUNK COULD CARRY THIS CALL)",
+		"same => n,Playback(all-circuits-busy-now)",
+		"same => n,Congestion(5)",
+		"same => n(done),Hangup()",
+	} {
+		if !strings.Contains(ctx, want) {
+			t.Errorf("[cmm-outbound] is missing %q:\n%s", want, ctx)
+		}
+	}
+	for _, never := range []string{`"BUSY"`, `"NOANSWER"`, `"CANCEL"`} {
+		if strings.Contains(ctx, never) {
+			t.Errorf("[cmm-outbound] retries on %s — that is an answer from the far end, not a trunk failure", never)
+		}
+	}
+}
+
+// *97 is the phone's own box, no questions; *98 is the old menu, for any
+// box with its PIN. A handset with no box gets the menu on *97 too.
+func TestVoicemailKeyOpensThePhonesOwnBox(t *testing.T) {
+	body := shippedDialplan(t)
+	ctx := dialplanContext(t, body, "features-internal")
+	for _, want := range []string{
+		`exten => *97,1,Answer()`,
+		` same => n,GotoIf($["${CMM_MAILBOX}" != ""]?own)`,
+		` same => n,VoiceMailMain(@household)`,
+		` same => n(own),VoiceMailMain(${CMM_MAILBOX}@household,s)`,
+		`exten => *98,1,Answer()`,
+	} {
+		if !strings.Contains(ctx, want) {
+			t.Errorf("[features-internal] is missing %q", want)
+		}
+	}
+}
+
+// *78NN quiets the phone that dialled it — the endpoint comes from the
+// channel, never the keypad — for 15, 30 or 45 minutes and nothing else;
+// *79 clears it. The state is an Asterisk global, which the generated
+// dialplan and doorman both read and only this code writes.
+func TestDoNotDisturbCodesWriteAsteriskOwnedState(t *testing.T) {
+	ctx := dialplanContext(t, shippedDialplan(t), "features-internal")
+	for _, want := range []string{
+		`exten => _*78XX,1,Answer()`,
+		` same => n,GotoIf($["${MINS}"="15" | "${MINS}"="30" | "${MINS}"="45"]?ok)`,
+		` same => n,Playback(call-me-maybe/system/quiet-refused)`,
+		` same => n(ok),Set(EP=${CHANNEL(endpoint)})`,
+		` same => n,Set(GLOBAL(DND_${REPLACE(EP,-,_)})=$[${EPOCH} + ${MINS} * 60])`,
+		` same => n,SayNumber(${MINS})`,
+		`exten => *79,1,Answer()`,
+		` same => n,Set(GLOBAL(DND_${REPLACE(EP,-,_)})=)`,
+	} {
+		if !strings.Contains(ctx, want) {
+			t.Errorf("[features-internal] is missing %q", want)
+		}
+	}
+}
+
+// The system phrases the dialplan and the daemon play live under one
+// prefix, and it is the bundled pack's — a swapped lobby voice must not
+// silence a do-not-disturb answer or a balance alert.
+func TestSystemPhrasesShareOnePrefix(t *testing.T) {
+	body := shippedDialplan(t)
+	if !strings.Contains(body, "call-me-maybe/system/quiet-for") {
+		t.Fatal("the dialplan does not play the system phrases from call-me-maybe/system")
+	}
+	media, _ := lobby.AnnounceMedia(lobby.AnnounceKindBalance, "1")
+	if len(media) == 0 || !strings.HasPrefix(media[0], "sound:call-me-maybe/system/") {
+		t.Fatalf("the daemon plays from %v, want sound:call-me-maybe/system/…", media)
+	}
+}
+
+// A dashed handset id becomes an underscored variable on both sides, or the
+// phone that set it and the dialplan that reads it name different things.
+func TestDNDVariableNameMatchesTheDialplansReplace(t *testing.T) {
+	if got := render.DNDVar("master-bed"); got != "DND_master_bed" {
+		t.Errorf("DNDVar = %q", got)
 	}
 }

@@ -343,3 +343,23 @@ func TestUpdatePreferenceDocumentation(t *testing.T) {
 		}
 	}
 }
+
+// messages.toml is a fifth root struct and needs the same guard.
+func TestEveryMessageTOMLKeyIsDocumented(t *testing.T) {
+	documented := map[string]bool{}
+	collectProperties(schema.Messages(), documented)
+	for _, key := range tomlKeys(reflect.TypeOf(policy.MessageFile{})) {
+		if !documented[key] {
+			t.Errorf("policy.MessageFile exposes toml key %q but `doorman schema messages` does not document it", key)
+		}
+	}
+}
+
+func TestMessagesSchemaStatesOneNumberOnePurpose(t *testing.T) {
+	joined := strings.Join(schema.Messages().Rules, " ")
+	for _, want := range []string{"One number, one purpose", "never answered", "160"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("messages schema no longer says %q", want)
+		}
+	}
+}

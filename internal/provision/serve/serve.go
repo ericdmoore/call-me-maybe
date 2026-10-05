@@ -73,6 +73,14 @@ type Server struct {
 	byID   map[string]provision.Phone
 	mu     sync.Mutex
 	seen   map[string]time.Time // MAC canonical -> first contact
+	// contact is which address made first contact in THIS window. A phone
+	// fetches its configuration more than once while applying it — the
+	// first rehearsal saw a second fetch one second after the first, before
+	// the credential in the file could possibly have been applied — so
+	// within the window the same address may fetch again without it. A
+	// different address may not: it is the window plus the MAC plus the
+	// address that gates, and the credential from the second window on.
+	contact map[string]string
 }
 
 // New validates the options and loads first-contact state.
@@ -83,7 +91,7 @@ func New(opts Options) (*Server, error) {
 	if err := os.MkdirAll(opts.StateDir, 0o700); err != nil {
 		return nil, err
 	}
-	s := &Server{opts: opts, byFile: map[string]provision.Phone{}, byID: map[string]provision.Phone{}, seen: map[string]time.Time{}}
+	s := &Server{opts: opts, byFile: map[string]provision.Phone{}, byID: map[string]provision.Phone{}, seen: map[string]time.Time{}, contact: map[string]string{}}
 	for _, p := range opts.Phones {
 		s.byFile[p.FileName()] = p
 		s.byID[p.ID] = p
@@ -196,8 +204,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.emit(Event{Kind: "connected", Handset: p.ID, MAC: p.MAC, Remote: remote})
-		if s.Seen(p.MAC) && !s.authorised(r, p) {
-			s.emit(Event{Kind: "unauthorized", Handset: p.ID, MAC: p.MAC, Remote: remote, Detail: "fetch after first contact without the phone's credential"})
+		if s.Seen(p.MAC) && !s.authorised(r, p) && !s.sameContact(p.MAC, remote) {
+			// Usually not a fault: a Grandstream sends no credential until it is
+			// challenged, and retries with it a moment later.
+			s.emit(Event{Kind: "unauthorized", Handset: p.ID, MAC: p.MAC, Remote: remote, Detail: "challenged — no credential presented; a phone that has one retries with it"})
 			w.Header().Set("WWW-Authenticate", `Basic realm="doorman"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -215,6 +225,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(body)
 		}
 		s.markSeen(p.MAC)
+		s.markContact(p.MAC, remote)
 		s.emit(Event{Kind: "fetched", Handset: p.ID, MAC: p.MAC, Remote: remote, Detail: fmt.Sprintf("%s (%d bytes)", rest, len(body))})
 		return
 	}
@@ -248,17 +259,35 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The phone's directory: <id>/phonebook.xml. Caller data, so never
-	// on the unauthenticated path — the phone always presents its credential.
-	if parts := strings.Split(rest, "/"); len(parts) == 2 && parts[1] == "phonebook.xml" {
+	// The phone's directory: <id>/<token>/phonebook.xml, or <id>/phonebook.xml
+	// with the phone's credential. Caller data, so never without one of the
+	// two: the token is the credential for a downloader that cannot send
+	// one any other way (the WP826), the basic-auth form is for everything
+	// else and for an operator's browser.
+	if parts := strings.Split(rest, "/"); (len(parts) == 2 || len(parts) == 3) && parts[len(parts)-1] == "phonebook.xml" {
 		p, ok := s.byID[parts[0]]
-		if !ok || !s.authorised(r, p) {
-			if ok {
-				w.Header().Set("WWW-Authenticate", `Basic realm="doorman"`)
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
+		if !ok {
+			s.emit(Event{Kind: "refused", Remote: remote, Detail: fmt.Sprintf("a phone at %s asked for the phonebook of %q, which is not a handset", remote, parts[0])})
 			http.NotFound(w, r)
+			return
+		}
+		byToken := len(parts) == 3 && parts[1] != "" && parts[1] == provision.PhonebookToken(p.ProvisionPassword)
+		if len(parts) == 3 && !byToken {
+			s.emit(Event{Kind: "unauthorized", Handset: p.ID, MAC: p.MAC, Remote: remote, Detail: "phonebook: the token in the path is not this phone's"})
+			http.NotFound(w, r)
+			return
+		}
+		if !byToken && !s.authorised(r, p) {
+			// Said out loud: a phone that never sends its credential for the
+			// phonebook looks, from the handset, like "download failed".
+			user, _, has := r.BasicAuth()
+			why := "no credential presented"
+			if has {
+				why = fmt.Sprintf("credential presented for %q did not match", user)
+			}
+			s.emit(Event{Kind: "unauthorized", Handset: p.ID, MAC: p.MAC, Remote: remote, Detail: "phonebook: " + why})
+			w.Header().Set("WWW-Authenticate", `Basic realm="doorman"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		var body []byte
@@ -283,6 +312,23 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.NotFound(w, r)
+}
+
+// markContact remembers, for this window only, the address a phone first
+// fetched from; sameContact is the check.
+func (s *Server) markContact(mac, remote string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.contact[mac]; !ok {
+		s.contact[mac] = remote
+	}
+}
+
+func (s *Server) sameContact(mac, remote string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	first, ok := s.contact[mac]
+	return ok && remote != "" && first == remote
 }
 
 func (s *Server) authorised(r *http.Request, p provision.Phone) bool {

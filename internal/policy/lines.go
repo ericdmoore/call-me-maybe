@@ -67,6 +67,15 @@ type Line struct {
 	// `doorman check` can answer, because it is the only thing that reads
 	// every line at once.
 	OutboundHandsets []string `toml:"outbound_handsets"`
+	// Failover is the trunks a call placed as this line tries, in order, when
+	// its own trunk cannot carry it — CHANUNAVAIL or CONGESTION, which from
+	// the dialplan's side is what a lost registration, a provider outage, an
+	// exhausted balance and a dead network all look like. A fallback presents
+	// that trunk's own number, never this line's, because a provider will not
+	// carry a number its account does not own; `doorman check` prints which.
+	// Off unless written: a call that falls over shows the customer a
+	// different number, and that is a choice, not a default.
+	Failover []string `toml:"failover"`
 }
 
 // empty reports a [line] section nobody wrote. Not `l == Line{}`: the slice
@@ -123,6 +132,10 @@ type LineIdentity struct {
 	// `doorman render` writes one set_var per handset id, and `doorman check`
 	// names them.
 	OutboundHandsets []string
+	// Failover is the ordered ladder of trunk ids a call placed as this line
+	// falls over to when Trunk cannot carry it; empty means it fails audibly
+	// on Trunk alone, which is what every line did before this key existed.
+	Failover []string
 }
 
 // promptPrefix is what an Asterisk media prefix may look like: path segments
@@ -186,6 +199,40 @@ func compileLine(l Line, houseMailbox string, handsetIDs func(where string, ids 
 		case !known:
 			fail("[line] trunk %q is not declared in %s (it has %s)",
 				l.Trunk, trunks.Where(), strings.Join(trunks.IDs(), ", "))
+		}
+	}
+
+	if len(l.Failover) > 0 {
+		// The ladder starts from the trunk this line leaves by, so a line that
+		// names none has nothing to fall over FROM: the dialplan's
+		// DEFAULT_TRUNK is not a name doorman knows.
+		if l.Trunk == "" {
+			fail("[line] failover needs trunk — the ladder starts from the trunk this line's calls leave by")
+		}
+		seen := make(map[string]bool, len(l.Failover))
+		for _, id := range l.Failover {
+			switch {
+			case id == "":
+				fail("[line] failover has an empty trunk id")
+				continue
+			case id == l.Trunk:
+				fail("[line] failover lists %q, which is this line's own trunk — a call that failed there does not succeed there", id)
+				continue
+			case seen[id]:
+				fail("[line] failover names trunk %q twice", id)
+				continue
+			}
+			seen[id] = true
+			if trunks != nil {
+				switch _, known := trunks.Lookup(id); {
+				case !trunks.Present():
+					fail("[line] failover names trunk %q, but there is no %s", id, trunks.Where())
+				case !known:
+					fail("[line] failover names trunk %q, which is not declared in %s (it has %s)",
+						id, trunks.Where(), strings.Join(trunks.IDs(), ", "))
+				}
+			}
+			out.Failover = append(out.Failover, id)
 		}
 	}
 

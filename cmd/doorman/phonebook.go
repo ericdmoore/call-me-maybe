@@ -3,10 +3,12 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"callmemaybe/internal/contacts"
+	"callmemaybe/internal/ownbook"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/provision"
 )
@@ -21,7 +23,12 @@ import (
 type bookPaths struct {
 	handsets, policy, contacts string
 	countryCode                string
+	// own is the directory of per-handset additions (*88); empty means none.
+	own string
 }
+
+// ownBookID is the book key for a handset's own additions.
+func ownBookID(handset string) string { return "own:" + handset }
 
 // loadBooks reads every book the house can render.
 func loadBooks(paths bookPaths) (provision.Books, error) {
@@ -60,6 +67,62 @@ func loadBooks(paths bookPaths) (provision.Books, error) {
 			books[rep.ID] = provision.SourceBook(rep.ID, rep.ID, bySource[rep.ID])
 		}
 	}
+	// A phone's own additions (*88): keyed so Select can never be pointed
+	// at another phone's, and served only to the phone that filed them.
+	if paths.own != "" {
+		ids, err := ownbook.Handsets(paths.own)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			b, err := ownbook.Load(paths.own, id)
+			if err != nil {
+				return nil, err
+			}
+			entries := make([]provision.OwnEntry, 0, len(b.Entries))
+			for _, e := range b.Entries {
+				entries = append(entries, provision.OwnEntry{Name: e.Name, E164: e.E164})
+			}
+			books[ownBookID(id)] = provision.OwnBook(entries)
+		}
+		shared := filepath.Join(filepath.Dir(paths.own), "shared")
+		targets := []string{"house"}
+		for _, h := range handsets {
+			targets = append(targets, "handset:"+h.ID)
+		}
+		for _, target := range targets {
+			dir, id, _ := ownbook.SharedLocation(shared, target)
+			b, err := ownbook.Load(dir, id)
+			if err != nil {
+				return nil, err
+			}
+			if len(b.Entries) == 0 {
+				continue
+			}
+			key := "house"
+			if target != "house" {
+				key = ownBookID(id)
+			}
+			book, ok := books[key]
+			if !ok {
+				book = provision.OwnBook(nil)
+			}
+			have := map[string]bool{}
+			for _, c := range book.Contacts {
+				for _, n := range c.Numbers {
+					have[n.Dial] = true
+				}
+			}
+			for _, e := range b.Entries {
+				dial := provision.DialString(e.E164)
+				if !have[dial] {
+					book.Contacts = append(book.Contacts, provision.Contact{Name: e.Name, Numbers: []provision.Number{{Kind: "cell", Dial: dial}}})
+					have[dial] = true
+				}
+			}
+			books[key] = book
+		}
+	}
 	return books, nil
 }
 
@@ -68,6 +131,10 @@ func renderBooks(h policy.Handset, m provision.Model, books provision.Books) ([]
 	chosen, err := provision.Select(h, books)
 	if err != nil {
 		return nil, err
+	}
+	// What this phone added itself needs no opting into.
+	if own, ok := books[ownBookID(h.ID)]; ok && len(own.Contacts) > 0 {
+		chosen = append(chosen, own)
 	}
 	return provision.RenderPhonebook(m, chosen)
 }
@@ -86,7 +153,17 @@ func (c *bookCache) current() (provision.Books, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	stamp := ""
-	for _, p := range []string{c.paths.handsets, c.paths.policy, c.paths.contacts} {
+	watched := []string{c.paths.handsets, c.paths.policy, c.paths.contacts}
+	if c.paths.own != "" {
+		// The own books change on their own schedule — a minute after
+		// somebody dials *88 — so they are watched like the three files.
+		shared := filepath.Join(filepath.Dir(c.paths.own), "shared")
+		for _, dir := range []string{c.paths.own, shared, filepath.Join(shared, "handsets")} {
+			files, _ := filepath.Glob(filepath.Join(dir, "*.vcf"))
+			watched = append(watched, files...)
+		}
+	}
+	for _, p := range watched {
 		if info, err := os.Stat(p); err == nil {
 			stamp += fmt.Sprintf("%s:%d:%d;", p, info.Size(), info.ModTime().UnixNano())
 		}

@@ -3,6 +3,7 @@ package policy
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -27,7 +28,49 @@ type File struct {
 	Schedules  []Schedule  `toml:"schedules"`
 	People     []Person    `toml:"people"`
 	Extensions []Extension `toml:"extensions"`
+	// Actions are the things a word, a lobby digit or a passkey can make
+	// the house do (s13). One registry; every transport names an id.
+	Actions []Action `toml:"actions"`
 }
+
+// Action is one thing the house can do: what it does (a Home Assistant
+// webhook — HA decides what a garage is and may refuse), who may do it, what
+// it says back, and whether it must be confirmed before it happens.
+type Action struct {
+	ID    string `toml:"id"`
+	Label string `toml:"label"`
+	// Webhook is POSTed to when the action is performed. Home Assistant's,
+	// typically. The body is JSON — action, person id, transport, message
+	// id — never a text and never a number.
+	Webhook string `toml:"webhook"`
+	// Reply is what the house says back, when the transport can carry one.
+	// The boring rule applies: ASCII, one segment, no digits, no links, no
+	// exclamation marks.
+	Reply string `toml:"reply"`
+	// People are the [[people]] ids who may perform it, or ["*"] for
+	// everyone on the allow-list. A transport may narrow this, never widen.
+	People []string `toml:"people"`
+	// Confirm is "none" (default) or "passkey": the request is intent, not
+	// authority, and waits for a passkey (s19) before the webhook fires.
+	Confirm string `toml:"confirm"`
+	// State is the Home Assistant entity whose state answers the question
+	// form of the word — `garage?` — read live from HA by `doorman inbox`
+	// with HA_URL and HA_TOKEN, never remembered here: state you remember
+	// is state you get wrong. Optional; without it a trailing "?" is
+	// punctuation.
+	State string `toml:"state"`
+	// DoneWhen is the state in which performing the action would change
+	// nothing — "open" for an action that opens. With it, a request to a
+	// door already open answers "It was already open" and the webhook is
+	// never called. Needs State.
+	DoneWhen string `toml:"done_when"`
+}
+
+// Confirm values.
+const (
+	ConfirmNone    = "none"
+	ConfirmPasskey = "passkey"
+)
 
 // Schedule is a named time window, defined once and referenced by id from
 // extensions (afterhours = "school-night"). Turning a schedule off for the
@@ -65,9 +108,19 @@ type Handset struct {
 	Number int `toml:"number"`
 	// Page marks the handset a member of the page-all group (dial 500).
 	Page bool `toml:"page"`
-	// Mailbox lights this phone's MWI lamp from voicemail.conf's
-	// [household] section.
+	// PageOverride marks a phone whose pages are not subject to a room's
+	// do-not-disturb (s12): the kitchen, the parents' room. Inventory, not
+	// policy — which phones override is a fact about where they sit — and
+	// the thing that makes DND safe to hand to a child.
+	PageOverride bool `toml:"page_override"`
+	// Mailbox is this phone's own voicemail box: `doorman render` makes it
+	// (voicemail_handsets.conf, when VOICEMAIL_<BOX>_PIN is in .env), a room
+	// call that rings out lands in it, the phone's voicemail key opens it,
+	// and its MWI lamp follows it. Two phones may name one box.
 	Mailbox string `toml:"mailbox"`
+	// Email, optional, is where that box's messages are mailed — the
+	// mailbox line's address in the generated voicemail config.
+	Email string `toml:"email"`
 	// PasswordEnv names the .env variable holding this handset's SIP
 	// password. The secret itself never appears in this file.
 	PasswordEnv string `toml:"password_env"`
@@ -89,6 +142,15 @@ type Handset struct {
 	// source id. Absent means house and people. A child's phone might be
 	// just ["house"].
 	Phonebook []string `toml:"phonebook"`
+	// Curfew names [[schedules]] (ids, in this line's policy) during which
+	// this handset is asleep: doorman rings it for nothing, the generated
+	// dialplan refuses its calls out (911 excepted) and leaves it out of
+	// pages and ring-all, and the daemon drops a call in progress at the
+	// hour. Several ids because "22:45 on school nights, 23:30 at weekends"
+	// is two windows; the phone is asleep while ANY is active. Inventory,
+	// not policy, because the thing that sleeps is the phone in the room,
+	// whatever rings it.
+	Curfew []string `toml:"curfew"`
 }
 
 // PhonebookSelection is what a handset shows when it says nothing: the
@@ -116,6 +178,10 @@ type Person struct {
 	Name    string   `toml:"name"`
 	Numbers []string `toml:"numbers"`
 	Notes   string   `toml:"notes"`
+	// ID is an optional short handle — "gabi" — for other files to name this
+	// person by: messages.toml says who may text which word. Never a number
+	// retyped, never an index that shifts when the list is edited.
+	ID string `toml:"id"`
 }
 
 type Extension struct {
@@ -185,10 +251,14 @@ const DefaultCallerIDFormat = "{name} <{number}>"
 
 var (
 	handsetIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
-	endpointPattern  = regexp.MustCompile(`^[A-Za-z0-9]+/\S+$`)
-	pinPattern       = regexp.MustCompile(`^\d+$`)
-	mailboxPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
-	clockPattern     = regexp.MustCompile(`^(\d{1,2}):(\d{2})$`)
+	// entityIDPattern is a Home Assistant entity id — domain, dot, object
+	// id, all lowercase, digits and underscores — what [[actions]] state
+	// names.
+	entityIDPattern = regexp.MustCompile(`^[a-z_]+\.[a-z0-9_]+$`)
+	endpointPattern = regexp.MustCompile(`^[A-Za-z0-9]+/\S+$`)
+	pinPattern      = regexp.MustCompile(`^\d+$`)
+	mailboxPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+	clockPattern    = regexp.MustCompile(`^(\d{1,2}):(\d{2})$`)
 )
 
 var dayIndex = map[string]int{"SU": 0, "MO": 1, "TU": 2, "WE": 3, "TH": 4, "FR": 5, "SA": 6}
@@ -200,6 +270,8 @@ type KnownCaller struct {
 	Name  string
 	E164  string
 	Notes string
+	// ID is the [[people]] id, or "" when the entry has none.
+	ID string
 }
 
 // RingStep is one stage of a ring plan with handset ids resolved to
@@ -269,6 +341,15 @@ func (a *Afterhours) Describe() string {
 	return fmt.Sprintf("%s–%s %s", clock(a.StartMin), clock(a.EndMin), days)
 }
 
+// CurfewWindow is one schedule a handset's curfew names, kept with its id so
+// `doorman check` can say which window put the phone to sleep. Window is nil
+// when the schedule carries enabled = false: present, inert, and shown as
+// such rather than silently dropped.
+type CurfewWindow struct {
+	ScheduleID string
+	Window     *Afterhours
+}
+
 // ResolvedExtension is an extension compiled into a runnable plan.
 type ResolvedExtension struct {
 	PIN        string
@@ -288,6 +369,8 @@ type ResolvedExtension struct {
 
 // Policy is a validated policy file compiled into lookups.
 type Policy struct {
+	actions        map[string]Action
+	actionOrder    []string
 	allow          map[string]KnownCaller
 	exts           map[string]ResolvedExtension
 	house          RingPlan
@@ -299,11 +382,18 @@ type Policy struct {
 	handsets    map[string]Handset
 	groups      map[string][]string
 	scheduleIDs map[string]bool
+	// curfews is each curfewed handset's windows, resolved. Read on the
+	// call path (is this phone asleep right now?) and by render.
+	curfews map[string][]CurfewWindow
 
 	// PinLength is the uniform PIN length, or 0 if extensions have mixed
 	// lengths. When uniform, the collector can fire the moment the last digit
 	// lands instead of waiting out the inter-digit timer.
 	PinLength int
+	// MinPinLength and MaxPinLength bound the mixed case: `#` or a pause
+	// after at least MinPinLength digits ends the PIN, and MaxPinLength
+	// digits end it on their own. Both 0 when there are no extensions.
+	MinPinLength, MaxPinLength int
 }
 
 // FromTOML parses, validates, and compiles a policy. Any structural problem —
@@ -582,6 +672,17 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 			fail("handset %q mailbox %q must be lowercase alphanumeric/dash/underscore", h.ID, h.Mailbox)
 		}
 	}
+	for _, h := range f.Handsets {
+		if h.Email == "" {
+			continue
+		}
+		if h.Mailbox == "" {
+			fail("handset %q has an email but no mailbox — the address belongs to a voicemail box", h.ID)
+		}
+		if at := strings.IndexByte(h.Email, '@'); at < 1 || at == len(h.Email)-1 || strings.ContainsAny(h.Email, " \t,") {
+			fail("handset %q email %q is not an address", h.ID, h.Email)
+		}
+	}
 
 	// Provisioning identity. mac and model travel together: a MAC with no
 	// model has no template to render and a model with no MAC has no phone
@@ -644,6 +745,28 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 			continue
 		}
 		schedules[sc.ID] = compileWindow("schedule "+sc.ID, sc.Start, sc.End, sc.Days, fail)
+	}
+
+	// A handset's curfew is a cross-file reference — handsets.toml naming
+	// schedules in policy.toml — and is caught here, at load, like a policy
+	// extension naming a handset that does not exist. A disabled schedule
+	// resolves to a nil window: the holiday switch works for bedtime too.
+	curfews := make(map[string][]CurfewWindow)
+	for _, h := range f.Handsets {
+		seen := make(map[string]bool, len(h.Curfew))
+		for _, id := range h.Curfew {
+			if seen[id] {
+				fail("handset %q names curfew schedule %q twice", h.ID, id)
+				continue
+			}
+			seen[id] = true
+			window, known := schedules[id]
+			if !known {
+				fail("handset %q curfew references unknown schedule %q — define it in [[schedules]]", h.ID, id)
+				continue
+			}
+			curfews[h.ID] = append(curfews[h.ID], CurfewWindow{ScheduleID: id, Window: window})
+		}
 	}
 
 	groups := make(map[string][]string, len(f.Groups))
@@ -738,6 +861,7 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 	line := compileLine(f.Line, f.House.Voicemail, expandIDs, o.Trunks, fail)
 
 	allow := make(map[string]KnownCaller)
+	personIDs := map[string]string{}
 	for _, p := range f.People {
 		if p.Name == "" {
 			fail("a [[people]] entry is missing a name")
@@ -746,14 +870,82 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		if len(p.Numbers) == 0 {
 			fail("person %q has no numbers", p.Name)
 		}
+		if p.ID != "" {
+			switch {
+			case !handsetIDPattern.MatchString(p.ID):
+				fail("person %q: id %q must be lowercase alphanumeric/dash/underscore", p.Name, p.ID)
+			case personIDs[p.ID] != "":
+				fail("person %q: id %q is already %s's", p.Name, p.ID, personIDs[p.ID])
+			default:
+				personIDs[p.ID] = p.Name
+			}
+		}
 		for _, raw := range p.Numbers {
 			n := NormaliseCallerID(raw, "1")
 			if n.Kind != KindE164 {
 				fail("number %q for %q is not a valid phone number", raw, p.Name)
 				continue
 			}
-			allow[n.Value] = KnownCaller{Name: p.Name, E164: n.Value, Notes: p.Notes}
+			allow[n.Value] = KnownCaller{Name: p.Name, E164: n.Value, Notes: p.Notes, ID: p.ID}
 		}
+	}
+
+	actions := make(map[string]Action)
+	var actionOrder []string
+	for _, a := range f.Actions {
+		where := fmt.Sprintf("action %q", a.ID)
+		if !handsetIDPattern.MatchString(a.ID) {
+			fail("action id %q must be lowercase alphanumeric/dash/underscore", a.ID)
+			continue
+		}
+		if _, dup := actions[a.ID]; dup {
+			fail("duplicate %s", where)
+			continue
+		}
+		if a.Webhook == "" && a.Reply == "" {
+			fail("%s does nothing — give it a webhook, a reply, or both", where)
+		}
+		if a.Webhook != "" {
+			if u, err := url.Parse(a.Webhook); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				fail("%s: webhook must be an http or https URL", where)
+			}
+		}
+		if a.Reply != "" {
+			if why := ReplyProblem(a.Reply); why != "" {
+				fail("%s: reply %s", where, why)
+			}
+		}
+		if len(a.People) == 0 {
+			fail("%s names nobody — list [[people]] ids, or [\"*\"] for everyone on the allow-list", where)
+		}
+		for _, id := range a.People {
+			if id == "*" {
+				continue
+			}
+			if !handsetIDPattern.MatchString(id) {
+				fail("%s: %q is not a [[people]] id or \"*\"", where, id)
+			} else if personIDs[id] == "" {
+				fail("%s names %q, which no [[people]] entry carries as its id", where, id)
+			}
+		}
+		switch a.Confirm {
+		case "":
+			a.Confirm = ConfirmNone
+		case ConfirmNone, ConfirmPasskey:
+		default:
+			fail("%s: confirm %q must be %q or %q", where, a.Confirm, ConfirmNone, ConfirmPasskey)
+		}
+		if a.State != "" && !entityIDPattern.MatchString(a.State) {
+			fail("%s: state %q is not a Home Assistant entity id (domain.object, like cover.garage_door)", where, a.State)
+		}
+		if a.DoneWhen != "" && a.State == "" {
+			fail("%s: done_when needs a state entity to read", where)
+		}
+		if a.Label == "" {
+			a.Label = a.ID
+		}
+		actions[a.ID] = a
+		actionOrder = append(actionOrder, a.ID)
 	}
 
 	exts := make(map[string]ResolvedExtension)
@@ -894,6 +1086,18 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 			pinLength = l
 		}
 	}
+	// With mixed lengths the lobby cannot fire on a count; it needs the
+	// shortest (a pause after that many digits may be the whole PIN) and
+	// the longest (past which there is nothing left to wait for).
+	minPin, maxPin := 0, 0
+	for l := range lengths {
+		if minPin == 0 || l < minPin {
+			minPin = l
+		}
+		if l > maxPin {
+			maxPin = l
+		}
+	}
 
 	scheduleIDs := make(map[string]bool, len(schedules))
 	for id := range schedules {
@@ -901,15 +1105,17 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 	}
 
 	return &Policy{
-		allow:          allow,
+		actions: actions, actionOrder: actionOrder, allow: allow,
 		exts:           exts,
 		house:          house,
 		callerIDFormat: format,
 		line:           line,
 		PinLength:      pinLength,
-		handsets:       handsets,
-		groups:         groups,
-		scheduleIDs:    scheduleIDs,
+		MinPinLength:   minPin, MaxPinLength: maxPin,
+		handsets:    handsets,
+		groups:      groups,
+		scheduleIDs: scheduleIDs,
+		curfews:     curfews,
 	}, nil
 }
 
@@ -1063,6 +1269,38 @@ func (p *Policy) Extensions() []ResolvedExtension {
 
 func (p *Policy) AllowListCount() int { return len(p.allow) }
 
+// Actions is the registry, in declaration order.
+func (p *Policy) Actions() []Action {
+	out := make([]Action, 0, len(p.actionOrder))
+	for _, id := range p.actionOrder {
+		out = append(out, p.actions[id])
+	}
+	return out
+}
+
+// LookupAction finds an action by id.
+func (p *Policy) LookupAction(id string) (Action, bool) {
+	a, ok := p.actions[id]
+	return a, ok
+}
+
+// PersonIDs is every [[people]] id that is set, sorted — what another file
+// may reference.
+func (p *Policy) PersonIDs() []string {
+	seen := map[string]bool{}
+	for _, c := range p.allow {
+		if c.ID != "" {
+			seen[c.ID] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Callers is the allow-list as people: every [[people]] number with its
 // name, sorted by name then number, for a phone's directory. Caller data —
 // it goes into a phonebook file, never a log line.
@@ -1148,6 +1386,40 @@ func (p *Policy) ScheduleIDs() map[string]bool {
 	for id := range p.scheduleIDs {
 		out[id] = true
 	}
+	return out
+}
+
+// Curfew is the windows a handset's curfew names, in the order written, or
+// nil for a handset with none. A window is nil when its schedule is
+// switched off.
+func (p *Policy) Curfew(handsetID string) []CurfewWindow {
+	src := p.curfews[handsetID]
+	if src == nil {
+		return nil
+	}
+	return append([]CurfewWindow(nil), src...)
+}
+
+// Asleep reports whether a handset's curfew is active at t: true while ANY
+// of its windows is. A handset with no curfew is never asleep. This is the
+// one question the call path asks; it never sees the schedules themselves.
+func (p *Policy) Asleep(handsetID string, t time.Time) bool {
+	for _, c := range p.curfews[handsetID] {
+		if c.Window.Active(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// CurfewedHandsets lists the ids that name at least one curfew schedule,
+// sorted, for `check` and `render`.
+func (p *Policy) CurfewedHandsets() []string {
+	out := make([]string, 0, len(p.curfews))
+	for id := range p.curfews {
+		out = append(out, id)
+	}
+	sort.Strings(out)
 	return out
 }
 

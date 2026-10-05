@@ -242,9 +242,10 @@ rsync -av prompts/build/ pi@raspberrypi:/tmp/cmm-prompts/
 Then on the Pi:
 
 ```bash
-sudo mkdir -p /var/lib/asterisk/sounds/call-me-maybe
-sudo cp /tmp/cmm-prompts/* /var/lib/asterisk/sounds/call-me-maybe/
-sudo chown -R asterisk:asterisk /var/lib/asterisk/sounds/call-me-maybe
+ASTDATA=$(sudo asterisk -rx 'core show settings' | awk -F': *' '/Data directory/ {print $2}')
+sudo mkdir -p "$ASTDATA/sounds/call-me-maybe"        # /var/lib/asterisk on the Pi, /usr/share/asterisk on Ubuntu
+sudo cp -R /tmp/cmm-prompts/* "$ASTDATA/sounds/call-me-maybe/"   # -R: the system/ phrases ride along
+sudo chown -R asterisk:asterisk "$ASTDATA/sounds/call-me-maybe"
 ```
 
 ### 4. doorman
@@ -277,8 +278,10 @@ it and the check belongs wherever your alerting already runs.
 
 There is an optional fifth, **`contacts.toml`**, and not having it is likewise
 the normal state. It names vCard exports to read — your contacts, your
-spouse's, and one marked `kind = "block"` for the nuisance list — so the phone
-can see the address book your household already curates. Every number is
+spouse's, and one marked `kind = "block"` for the nuisance list — as files on
+the box or as URLs the daemon fetches every few hours into a cache it keeps
+serving when the fetch fails, so the phone can see the address book your
+household already curates. Every number is
 classified from the card alone, with no lookups, on one rule: **if a stranger
 can look the number up, it must not be automatic admission.** An `ORG` or a
 work number or an 800 number reads as published and hears the lobby; a named
@@ -321,7 +324,7 @@ placeholder that merely looks wrong — `4242` — works silently forever. This 
 can only fail, loudly, until it is replaced with values from `crypto/rand`.
 PINs print to stdout once and are never logged.
 
-Then `sudo cp scripts/doorman.service /etc/systemd/system/` and enable it.
+Then `sudo doorman init services` installs the units from inside the binary and enables the ones your config calls for.
 
 Or skip the build and take a release binary:
 
@@ -446,6 +449,9 @@ cent.</sub>
 
 `CLAUDE.md` is loaded automatically by Claude Code and carries the invariants —
 the things that, if broken, fail in ways that look like working software.
+[`docs/HUNT.md`](docs/HUNT.md) is the verification ladder as a scavenger hunt
+a child runs with a cordless handset — every feature exercised by Saturday
+dinner, prize: extra rice.
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md) has provisioning, a bottom-up verification
 ladder, a symptom-to-cause troubleshooting table, and the raw ARI calls for
 probing by hand. [`docs/TASKS.md`](docs/TASKS.md) is the backlog with acceptance

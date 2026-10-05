@@ -247,6 +247,12 @@ func farEnd(r calls.Record) string {
 // whoever answered at the other end, which doorman never finds out.
 func who(r calls.Record) string {
 	if w := r.Known; w != "" {
+		// A name from an address book says which one, because that is the
+		// question a reader has when the phone rang for someone they never
+		// wrote down. A [[people]] match is the reader's own doing.
+		if strings.HasPrefix(r.Via, calls.ViaContacts) {
+			return w + " (" + r.Via + ")"
+		}
 		return w
 	}
 	if w := r.Extension; w != "" {

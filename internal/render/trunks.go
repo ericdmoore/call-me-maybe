@@ -18,6 +18,7 @@ package render
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -93,6 +94,12 @@ func LineContext(name string) string { return "cmm-line-" + name }
 // the interface between the two files and not an internal detail.
 const EmergencyContext = "cmm-emergency"
 
+// FailoverContext is the dialplan context that carries a call on one trunk
+// after the trunk before it could not. One per trunk, generated, reached by
+// name from the hand-written [cmm-outbound] ladder; the channel ends in it,
+// so the CEL journal records which trunk actually carried the call.
+func FailoverContext(trunkID string) string { return "cmm-failover-" + trunkID }
+
 // registrationBinding emits the two settings that make a registration-based
 // trunk work, with the reason attached.
 //
@@ -124,12 +131,13 @@ const inboundNote = `; The DID routes come from every policy file's [line] numbe
 
 `
 
-const noIdentifyNote = `; No identify blocks are generated, and that is the design rather than an
-; omission. Inbound is bound to its endpoint by line=yes + endpoint= on each
-; registration below, so matching a provider's source address is redundant —
-; and an IP allow-list is a list that goes stale silently the day a provider
-; adds a media server. A provider that can only do IP authentication needs a
-; hand-written block and is out of scope here; see docs/RUNBOOK.md.
+const identifyNote = `; Every trunk is identified twice, and neither way is an IP address.
+; line=yes + endpoint= on each registration binds inbound calls on that
+; registration to its endpoint. Some providers (VoIP.ms) do not echo the
+; ;line= tag back, so beside it two identify blocks match the request URI
+; and the To header against the trunk's own identity: the sub-account name
+; and every DID a line routes to it. An IP allow-list (match=) is never
+; generated: it goes stale silently the day a provider adds a media server.
 
 `
 
@@ -180,7 +188,7 @@ func BuildTrunks(trunks []policy.Trunk, lines []TrunkLine, handsetIDs []string, 
 
 	var pjsip, plan strings.Builder
 	pjsip.WriteString(header("trunks.toml", true))
-	pjsip.WriteString(noIdentifyNote)
+	pjsip.WriteString(identifyNote)
 	plan.WriteString(header("trunks.toml", false))
 	plan.WriteString(inboundNote)
 
@@ -221,7 +229,7 @@ func BuildTrunks(trunks []policy.Trunk, lines []TrunkLine, handsetIDs []string, 
 			continue
 		}
 
-		writeTrunkPJSIP(&pjsip, tr, secret)
+		writeTrunkPJSIP(&pjsip, tr, secret, routes[tr.ID])
 		routeCount += writeTrunkContext(&plan, tr, routes[tr.ID])
 		generated++
 	}
@@ -231,6 +239,7 @@ func BuildTrunks(trunks []policy.Trunk, lines []TrunkLine, handsetIDs []string, 
 	}
 
 	writeLineContexts(&plan, lines)
+	writeFailoverContexts(&plan, trunks, lines)
 	order := EmergencyOrder(trunks, em.Trunk)
 	writeEmergencyContext(&plan, order, em)
 
@@ -248,7 +257,7 @@ func BuildTrunks(trunks []policy.Trunk, lines []TrunkLine, handsetIDs []string, 
 	}, nil
 }
 
-func writeTrunkPJSIP(b *strings.Builder, tr policy.Trunk, secret string) {
+func writeTrunkPJSIP(b *strings.Builder, tr policy.Trunk, secret string, routes []TrunkLine) {
 	title := tr.ID
 	if tr.Provider != "" {
 		title = tr.Provider + " — " + tr.ID
@@ -279,13 +288,47 @@ func writeTrunkPJSIP(b *strings.Builder, tr policy.Trunk, secret string) {
 		fmt.Fprintf(b, "allow=%s\n", c)
 	}
 	fmt.Fprintf(b, "outbound_auth=%s_auth\naors=%s_aor\n", tr.ID, tr.ID)
-	fmt.Fprintf(b, "from_user=%s\nfrom_domain=%s\n", tr.FromUser, tr.FromDomain)
+	// from_user only when trunks.toml said so. Defaulted to the sub-account
+	// it makes VoIP.ms answer 503 on every outbound call: the provider wants
+	// the DID in From, which CALLERID(num) supplies when this is left alone.
+	if tr.FromUser != "" && tr.FromUser != tr.Username {
+		fmt.Fprintf(b, "from_user=%s\n", tr.FromUser)
+	}
+	fmt.Fprintf(b, "from_domain=%s\n", tr.FromDomain)
 	// Transcoding is wasted CPU on a Pi, but media stays on the box so calls
 	// can be bridged and recorded.
 	b.WriteString("direct_media=no\nrtp_symmetric=yes\nforce_rport=yes\nrewrite_contact=yes\n")
 	// Invariant 9. Without it the lobby is deaf, every stranger is dismissed,
 	// and there is no runtime symptom other than "nobody can ever get in".
 	b.WriteString("dtmf_mode=rfc4733\n\n")
+
+	// Invariant 9b, second half: identify the trunk by what we own. The
+	// pattern is the sub-account name and every DID routed here, in the
+	// shortest form the provider could send (ten digits for NANP), matched
+	// as a substring so eleven digits and +E.164 match too.
+	pattern := identifyPattern(tr, routes)
+	b.WriteString("; Inbound calls VoIP.ms and others send without the ;line= tag: matched\n; by our own identity, never by the provider's addresses.\n")
+	fmt.Fprintf(b, "[%s-identify-uri]\ntype=identify\nendpoint=%s\nmatch_request_uri=%s\n\n", tr.ID, tr.ID, pattern)
+	fmt.Fprintf(b, "[%s-identify-to]\ntype=identify\nendpoint=%s\nmatch_header=To: %s\n\n", tr.ID, tr.ID, pattern)
+}
+
+// identifyPattern is the regex the identify blocks match: /(user|did|did)/.
+func identifyPattern(tr policy.Trunk, routes []TrunkLine) string {
+	alts := []string{regexp.QuoteMeta(tr.Username)}
+	seen := map[string]bool{tr.Username: true}
+	for _, l := range routes {
+		if l.Number == "" {
+			continue
+		}
+		forms := didForms(l.Number)
+		short := forms[len(forms)-1]
+		if seen[short] {
+			continue
+		}
+		seen[short] = true
+		alts = append(alts, regexp.QuoteMeta(short))
+	}
+	return "/(" + strings.Join(alts, "|") + ")/"
 }
 
 // writeTrunkContext emits one trunk's inbound context and returns how many DID
@@ -349,6 +392,65 @@ func writeLineContexts(b *strings.Builder, lines []TrunkLine) {
 		// the greeting starts.
 		b.WriteString(" same => n,Answer()\n")
 		fmt.Fprintf(b, " same => n,Stasis(${DOORMAN_APP}%s)\n", stasisArgs(l.Name))
+		b.WriteString(" same => n,Hangup()\n\n")
+	}
+}
+
+// ── Outbound failover ────────────────────────────────────────────────────
+
+// FailoverCallerID is what a call presents when it falls over to trunkID:
+// the number of the first line, primary first, that lives at that trunk. A
+// DID a line answers there is a number the account certainly owns, and a
+// provider will not carry one it does not — it rejects the call or silently
+// rewrites it. Empty when no line declares a number there, in which case the
+// caller ID is cleared and the trunk sends whatever it sends.
+//
+// Never the failing line's own number: that is the number the *first* trunk
+// owns, and presenting it down the second is exactly the rejected call this
+// ladder exists to route around. The customer sees a different number and
+// `doorman check` says which one, per line, because "why did they see the
+// wrong number" needs an answer that is not a guess.
+func FailoverCallerID(trunkID string, lines []TrunkLine) string {
+	for _, l := range lines {
+		if l.Trunk == trunkID && l.Number != "" {
+			return l.Number
+		}
+	}
+	return ""
+}
+
+// writeFailoverContexts emits [cmm-failover-<id>] for every trunk. The
+// hand-written [cmm-outbound] ladder reaches them by name from
+// OUTBOUND_FAILOVER; a trunk nobody lists costs a few lines nobody reads.
+//
+// The call ENDS here, whichever way it ends — the Dial connecting and the far
+// end hanging up, or the caller hanging up mid-call — and only a further
+// failure leaves, back to the ladder. That is deliberate: CEL records the
+// channel's context at hangup, so a call that fell over to telnyx is one whose
+// channel ended in cmm-failover-telnyx, and the journal answers "which trunk
+// carried it" without doorman having been anywhere near the call.
+func writeFailoverContexts(b *strings.Builder, trunks []policy.Trunk, lines []TrunkLine) {
+	b.WriteString("; ── Outbound failover ────────────────────────────────────────\n")
+	b.WriteString("; One context per trunk, reached from the ladder in [cmm-outbound] when the\n")
+	b.WriteString("; trunk before it answered CHANUNAVAIL or CONGESTION — which is what a lost\n")
+	b.WriteString("; registration, a provider outage, an exhausted balance and a dead network\n")
+	b.WriteString("; all look like from here, and they are not distinguished because they need\n")
+	b.WriteString("; not be. Each presents ITS OWN trunk's number: a provider will not carry a\n")
+	b.WriteString("; number its account does not own, so the line's caller ID stays behind and\n")
+	b.WriteString("; the person called sees this trunk's. A call that connects here ends here,\n")
+	b.WriteString("; so the CEL journal records which trunk carried it.\n\n")
+	for _, tr := range trunks {
+		cid := FailoverCallerID(tr.ID, lines)
+		fmt.Fprintf(b, "[%s]\n", FailoverContext(tr.ID))
+		fmt.Fprintf(b, "exten => _X.,1,NoOp(FALLING OVER to %s: the trunk before it could not carry this call)\n", tr.ID)
+		if cid != "" {
+			fmt.Fprintf(b, " same => n,Set(CALLERID(num)=%s)\n", cid)
+		} else {
+			b.WriteString(" same => n,Set(CALLERID(num)=)\n")
+			b.WriteString(" same => n,NoOp(no line declares a number at this trunk, so it presents its own default)\n")
+		}
+		fmt.Fprintf(b, " same => n,Dial(PJSIP/${EXTEN}@%s,60)\n", tr.ID)
+		b.WriteString(" same => n,GotoIf($[\"${DIALSTATUS}\"=\"CHANUNAVAIL\" | \"${DIALSTATUS}\"=\"CONGESTION\"]?cmm-outbound,${EXTEN},more)\n")
 		b.WriteString(" same => n,Hangup()\n\n")
 	}
 }

@@ -57,6 +57,14 @@ type Plan struct {
 	EnvPath      string
 	PolicyPath   string
 	HandsetsPath string
+
+	// JournalPath and CELSpoolPath, when set, turn the journal and the
+	// Asterisk-wide capture on in the rendered .env. cmd/doorman fills them
+	// in only where the installer left the places for them — the private
+	// journal directory, the initialised spool — so a workstation init
+	// writes the same commented-out lines it always did.
+	JournalPath  string
+	CELSpoolPath string
 }
 
 // Paths locates the files init manages.
@@ -87,6 +95,12 @@ func Slug(name string) string {
 		}
 	}
 	return s
+}
+
+// VoicemailPINEnvVarFor is the .env variable holding a mailbox's PIN —
+// VOICEMAIL_<BOX>_PIN, the same shape internal/render reads it by.
+func VoicemailPINEnvVarFor(box string) string {
+	return "VOICEMAIL_" + strings.ToUpper(strings.ReplaceAll(box, "-", "_")) + "_PIN"
 }
 
 // EnvVarFor is the .env variable name holding a handset's SIP password.
@@ -148,11 +162,15 @@ func BuildPlan(rooms []string, paths Paths) (*Plan, error) {
 		}
 		seen[id] = true
 
+		// Every room its own box (s21): the phone's voicemail key opens
+		// it, a room call that rings out lands in it, and its PIN goes to
+		// .env like the phone's passwords. The house box (p.Mailbox) stays
+		// for calls to the whole house.
 		p.Handsets = append(p.Handsets, Handset{
 			ID:      id,
 			Label:   strings.TrimSpace(room),
 			Number:  number,
-			Mailbox: p.Mailbox,
+			Mailbox: id,
 		})
 		p.House = append(p.House, id)
 		number++
@@ -184,6 +202,11 @@ func BuildPlan(rooms []string, paths Paths) (*Plan, error) {
 	}
 	if p.VoicemailPINs[p.Mailbox], err = PIN(6, map[string]bool{}); err != nil {
 		return nil, err
+	}
+	for _, h := range p.Handsets {
+		if p.VoicemailPINs[h.Mailbox], err = PIN(6, map[string]bool{}); err != nil {
+			return nil, err
+		}
 	}
 	return p, nil
 }
@@ -334,6 +357,11 @@ func (p *Plan) PolicyTOML() string {
 	for _, h := range p.Handsets {
 		fmt.Fprintf(&b, "\n[[extensions]]\npin = %q\nlabel = %q\nhandsets = [%q]\n",
 			p.ExtensionPINs[h.ID], h.Label, h.ID)
+		if h.Mailbox != "" {
+			// A friend with this room's PIN who rings out leaves the message
+			// on this room's phone, not the family's.
+			fmt.Fprintf(&b, "voicemail = %q\n", h.Mailbox)
+		}
 	}
 	return b.String()
 }
@@ -361,9 +389,34 @@ func (p *Plan) EnvFile(base string) string {
 	for id, pw := range p.HandsetProvisionPasswords {
 		set(ProvisionEnvVarFor(id), pw)
 	}
+	// The rooms' own mailbox PINs, beside the phones' passwords. The house
+	// box is not here: it is hand-written in voicemail.conf and its PIN is
+	// printed once, as it always was.
+	for _, h := range p.Handsets {
+		if h.Mailbox != "" && h.Mailbox != p.Mailbox {
+			set(VoicemailPINEnvVarFor(h.Mailbox), p.VoicemailPINs[h.Mailbox])
+		}
+	}
 	// Any handset variables the example shipped that this install has no
 	// handset for would otherwise sit empty and confuse `render`.
 	out = regexp.MustCompile(`(?m)^HANDSET_[A-Z0-9_]+_(ADMIN_|PROVISION_)?PASSWORD=$\n?`).ReplaceAllString(out, "")
+	// The journal and the CEL spool ship commented out in the example; on a
+	// prepared host they are uncommented in place, so the comment above each
+	// stays beside the value it explains.
+	uncomment := func(key, value string) {
+		re := regexp.MustCompile(`(?m)^#\s*` + regexp.QuoteMeta(key) + `=.*$`)
+		if re.MatchString(out) {
+			out = re.ReplaceAllLiteralString(out, key+"="+value)
+			return
+		}
+		set(key, value)
+	}
+	if p.JournalPath != "" {
+		uncomment("EVENT_JOURNAL_PATH", p.JournalPath)
+	}
+	if p.CELSpoolPath != "" {
+		uncomment("CEL_SPOOL_PATH", p.CELSpoolPath)
+	}
 	return out
 }
 

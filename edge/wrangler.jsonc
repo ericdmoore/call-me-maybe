@@ -1,0 +1,21 @@
+{
+  // The house's edge inbox: the public face of the house number's texting.
+  // VoIP.ms calls it back with each text; the house's `doorman inbox` pulls
+  // from it; replies go out through it, because this Worker — not the box —
+  // holds the carrier's API key. See .plans/s19-edge-inbox/.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "callmemaybe-edge",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-29",
+  "workers_dev": true,
+  "routes": [{ "pattern": "edge.callmemaybe.cc", "custom_domain": true }],
+  "observability": { "enabled": true },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "callmemaybe-edge", "database_id": "c27238ac-a4e0-4f59-bbf1-f216306a591b" }
+  ]
+  // Secrets (wrangler secret put), per house id in HOUSES below:
+  //   HOUSE_MIDBURY_CALLBACK_TOKEN  the path segment VoIP.ms is given
+  //   HOUSE_MIDBURY_INBOX_TOKEN     what the box presents to pull and send
+  //   HOUSE_MIDBURY_DID             the house number, digits only
+  //   VOIPMS_API_USERNAME / VOIPMS_API_PASSWORD  the carrier key, here and nowhere else
+}

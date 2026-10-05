@@ -139,6 +139,11 @@ doorman schema          # the whole config surface, as JSON Schema
 the authority, and `doorman check` is the authority on whether a given file is
 valid.
 
+The services come after the config is written (§5), because which of them to
+enable depends on it: `sudo doorman init services` installs the units from
+inside the binary, creates the directories, and enables what `.env` and the
+inventory call for. `--dry-run` shows the plan first.
+
 ---
 
 ## 5 · Configure
@@ -215,7 +220,7 @@ For each handset that has `mac` and `model` in `handsets.toml`:
 ## 7 · Prompts
 
 The bundled pack ships with the repo — six WAVs, free, CC BY-SA. Copy it to
-`/var/lib/asterisk/sounds/call-me-maybe/` and you are done.
+`<astdatadir>/sounds/call-me-maybe/` — `/var/lib/asterisk` on the Pi, `/usr/share/asterisk` on Ubuntu; `asterisk -rx 'core show settings'` says which — and you are done.
 
 Rendering your own is a workstation job, never the Pi:
 
@@ -250,6 +255,9 @@ The order that finds problems soonest:
 If inbound rings nothing, the usual cause is DTMF: **`dtmf_mode=rfc4733` on the
 trunk *and* every handset.** Without it the lobby is deaf and every stranger is
 dismissed, with no other symptom.
+
+Or play it: `docs/HUNT.md` turns this same list into a scavenger hunt a child
+runs with a cordless handset, and the prize is extra rice.
 
 ---
 

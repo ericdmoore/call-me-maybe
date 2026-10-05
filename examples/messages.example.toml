@@ -1,0 +1,69 @@
+# ─────────────────────────────────────────────────────────────
+# Call Me Maybe — texts the house answers.
+#   cp messages.example.toml messages.toml
+#   ./bin/doorman check
+#
+# THIS FILE IS OPTIONAL, and not having it is the normal state: with no
+# messages.toml the house answers no texts, and `doorman inbox` says so and
+# exits. Rollback is deleting the file.
+#
+# ONE NUMBER, ONE PURPOSE. A text to the house number is control plane and
+# archive, never conversation. The carrier forwards every text and MMS photo
+# to the house's mailbox — that is the archive and needs no code. A known word
+# from a listed person does one thing and gets one boring reply. Everything
+# else — a stranger, a listed person saying a word they may not, a word nobody
+# taught the house — is archived and NEVER ANSWERED: a reply tells a stranger
+# the number is live, and silence is the right answer. Nothing typed on a
+# handset leaves through the house number; conversational texting would be a
+# second number and a line of its own.
+#
+# WORDS NAME ACTIONS. `action` is an [[actions]] id from policy.toml, which
+# owns the webhook, the reply, the people who may and the confirmation rule.
+# `people` here lists [[people]] ids — give an entry `id = "gabi"` — or ["*"]
+# for everyone on the allow-list, and may only narrow the action's own list.
+# Never a number retyped here.
+#
+# A QUESTION MARK ASKS. When a word's action names a `state` entity in
+# policy.toml, "garage?" reads it from Home Assistant and answers with what
+# it says — "Large Door Door is closed" — and moves nothing. On a word whose
+# action has no state, the ? is punctuation: "ping?" is still pong.
+#
+# REPLIES ARE BORING ON PURPOSE. Plain ASCII, at most 160 characters: one
+# segment on the bill, and no emoji, which halves it. `doorman check` refuses
+# a reply the transport cannot carry, and warns — only warns — about a phone
+# number, the one shape a carrier has dropped from this house's number.
+# ─────────────────────────────────────────────────────────────
+
+# Each word names an action from policy.toml's [[actions]]: what it does,
+# who may, what it says back and whether it confirms all live there, once,
+# for every transport. A word's `people` may only narrow the action's.
+[[words]]
+word = "garage"
+people = ["*"]
+action = "garage"
+
+[[words]]
+word = "close"
+people = ["*"]
+action = "close"
+
+# A word that only replies — the smoke test for the whole path.
+[[words]]
+word = "ping"
+people = ["*"]
+action = "ping"
+
+# Share a vCard with caption "Add to: House, Kitchen" (one or more words).
+# Case and spaces around commas do not matter. Every word must allow you.
+# A bare word such as "house" still works for one destination.
+# Enable deliberately: replace the example person id with an actual household
+# member's [[people]] id. Directory only: this does not admit callers.
+# [[words]]
+# word = "house"
+# people = ["gabi"]
+# phonebook = "house"
+#
+# [[words]]
+# word = "kitchen"
+# people = ["gabi"]
+# phonebook = "handset:kitchen"

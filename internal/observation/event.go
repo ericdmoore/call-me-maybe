@@ -35,18 +35,44 @@ const (
 	ConfigReloadFailed    Type = "config.reload_failed"
 	ContactsRefreshed     Type = "contacts.refreshed"
 	ContactsRefreshFailed Type = "contacts.refresh_failed"
-	ARIConnected          Type = "ari.connected"
-	ARIDisconnected       Type = "ari.disconnected"
-	DaemonStarted         Type = "daemon.started"
-	DaemonStopping        Type = "daemon.stopping"
-	CoverageGap           Type = "journal.coverage_gap"
+	// MessageReceived is a text to the house number reaching the inbox;
+	// Reason says what became of it: acted, unlisted, unknown-word,
+	// duplicate, refused. Never the sender, never the body.
+	MessageReceived Type = "message.received"
+	// MessageActed is a word doing its thing on its own — a reply or the
+	// stopgap webhook on the word itself, no registry action named; Reason
+	// is the word. A word that names an action produces action.* instead.
+	MessageActed Type = "message.acted"
+	// ActionPerformed is a registry action carried out (s13): the webhook
+	// answered, or the reply-only action replied. Payload.Action says which,
+	// for whom and by which transport; Reason is the outcome word.
+	ActionPerformed Type = "action.performed"
+	// ActionRefused is a registry action that moved nothing: the person may
+	// not, it waits for a passkey, the actuator refused or was unreachable,
+	// or the thing was already in the state asked for. Reason says which.
+	ActionRefused Type = "action.refused"
+	// PhonebookAdded is a number filed from a handset with *88 (s24);
+	// Reason is the handset id. PhonebookNamed is its name arriving from
+	// transcription. Never the number, never the transcript.
+	PhonebookAdded Type = "phonebook.added"
+	PhonebookNamed Type = "phonebook.named"
+	// BackupCompleted / BackupFailed are the nightly bundle delivered to a
+	// destination, or not (s27); Reason is the destination's name — never
+	// a path, which may carry a bucket or a token.
+	BackupCompleted Type = "backup.completed"
+	BackupFailed    Type = "backup.failed"
+	ARIConnected    Type = "ari.connected"
+	ARIDisconnected Type = "ari.disconnected"
+	DaemonStarted   Type = "daemon.started"
+	DaemonStopping  Type = "daemon.stopping"
+	CoverageGap     Type = "journal.coverage_gap"
 )
 
 func Types() []Type {
 	return append([]Type(nil), eventTypes[:]...)
 }
 
-var eventTypes = [...]Type{JournalNote, ChannelStarted, ChannelAnswered, ChannelHungup, ChannelEnded, ChannelBridgeEntered, ChannelBridgeExited, ChannelTransfer, ChannelLinkedEnded, ChannelDialStarted, ChannelApplication, CallFinished, CallObserved, AdmissionDecided, RingStarted, RingStageFinished, CallAnswered, CallHandedOff, SessionFinished, ConfigReloaded, ConfigReloadFailed, ContactsRefreshed, ContactsRefreshFailed, ARIConnected, ARIDisconnected, DaemonStarted, DaemonStopping, CoverageGap}
+var eventTypes = [...]Type{JournalNote, ChannelStarted, ChannelAnswered, ChannelHungup, ChannelEnded, ChannelBridgeEntered, ChannelBridgeExited, ChannelTransfer, ChannelLinkedEnded, ChannelDialStarted, ChannelApplication, CallFinished, CallObserved, AdmissionDecided, RingStarted, RingStageFinished, CallAnswered, CallHandedOff, SessionFinished, ConfigReloaded, ConfigReloadFailed, ContactsRefreshed, ContactsRefreshFailed, MessageReceived, MessageActed, ActionPerformed, ActionRefused, PhonebookAdded, PhonebookNamed, BackupCompleted, BackupFailed, ARIConnected, ARIDisconnected, DaemonStarted, DaemonStopping, CoverageGap}
 
 func ValidType(t Type) bool {
 	for _, v := range eventTypes {
@@ -62,8 +88,24 @@ func ValidType(t Type) bool {
 type Payload struct {
 	Channel *ChannelObservation `json:"channel,omitempty"`
 	Record  *calls.Record       `json:"record,omitempty"`
+	Action  *ActionObservation  `json:"action,omitempty"`
 	Reason  string              `json:"reason,omitempty"`
 	Count   int64               `json:"count,omitempty"`
+}
+
+// ActionObservation is one request to do something in the house (s13):
+// which registry action, who asked, and by which transport. Never the text
+// that carried it and never a phone number — the person is a [[people]] id
+// and the message id is the edge's, which can be traced without either.
+type ActionObservation struct {
+	Action  string `json:"action,omitempty"`
+	Person  string `json:"person,omitempty"`
+	Via     string `json:"via,omitempty"` // sms | lobby | passkey
+	Word    string `json:"word,omitempty"`
+	Message string `json:"message_id,omitempty"`
+	// State is what the actuator reported when it was asked — the answer
+	// to "garage?", or why nothing moved ("open" when open was asked for).
+	State string `json:"state,omitempty"`
 }
 type Event struct {
 	Sequence   int64     `json:"sequence,string"`

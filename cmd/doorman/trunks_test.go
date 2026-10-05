@@ -241,7 +241,7 @@ func TestRenderWithoutATrunkInventoryWritesOnlyTheHandsetFiles(t *testing.T) {
 	}
 
 	got := generatedFiles(t, out)
-	want := "extensions_handsets.conf pjsip_handsets.conf"
+	want := "extensions_handsets.conf pjsip_handsets.conf voicemail_handsets.conf"
 	if got != want {
 		t.Errorf("generated %q, want %q — no trunks.toml must generate no trunk files", got, want)
 	}
@@ -271,7 +271,7 @@ func TestRenderWritesTheTrunkFilesWhenThereIsAnInventory(t *testing.T) {
 	}
 
 	got := generatedFiles(t, out)
-	want := "extensions_handsets.conf extensions_trunks.conf pjsip_handsets.conf pjsip_trunks.conf"
+	want := "extensions_handsets.conf extensions_trunks.conf pjsip_handsets.conf pjsip_trunks.conf voicemail_handsets.conf"
 	if got != want {
 		t.Errorf("generated %q, want %q", got, want)
 	}

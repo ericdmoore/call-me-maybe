@@ -35,6 +35,13 @@ rung() { printf '\n%s%s%s\n' "$B" "$1" "$N"; }
 if [ "$(id -u)" = 0 ]; then SUDO=""; elif command -v sudo >/dev/null; then SUDO=sudo; else SUDO=""; fi
 ast() { $SUDO asterisk -rx "$1" 2>/dev/null; }
 svc_active() { systemctl is-active --quiet "$1" 2>/dev/null; }
+# Run one shell command as the service account, whether we are root already
+# (the documented `sudo bash scripts/smoke.sh`) or an operator with sudo.
+as_doorman() {
+  if [ "$(id -u)" = 0 ]; then su -s /bin/sh doorman -c "$1" 2>/dev/null
+  elif [ -n "$SUDO" ]; then $SUDO -u doorman sh -c "$1" 2>/dev/null
+  else return 1; fi
+}
 
 # Pull ARI settings out of .env without sourcing it (it may contain anything).
 envval() {
@@ -62,6 +69,17 @@ if svc_active asterisk; then
   pass "asterisk service active"
 else
   fail "asterisk not running" "sudo systemctl start asterisk"
+fi
+
+# The voicemail applications can vanish while the module shows Running: the
+# ODBC-built variant fails to load and unregisters them on its way out. Every
+# caller sent to voicemail is then hung up on, and nothing on a handset says so.
+# Case-insensitive: Asterisk prints "Info about Application", in colour.
+if sudo asterisk -rx 'core show application VoiceMail' 2>/dev/null | grep -qi 'info about application'; then
+  pass "VoiceMail() is registered"
+else
+  fail "VoiceMail() is not registered — the ODBC variant unloaded it" \
+    "add 'noload => app_voicemail_odbc.so' and 'noload => app_voicemail_imap.so' to modules.conf, then restart asterisk"
 fi
 
 # ── Rung 2: trunk registration ───────────────────────────────
@@ -105,7 +123,9 @@ fi
 rung "3. Handsets"
 
 CONTACTS="$(ast 'pjsip show contacts')"
-AVAIL=$(grep -ci 'Avail' <<<"$CONTACTS" || true)
+# Handsets only: a trunk's AOR has a qualified contact too, and counting it
+# reported one phone on a box with none (first re-provision, 2026-09-23).
+AVAIL=$(grep -i 'Avail' <<<"$CONTACTS" | grep -vc '_aor/' || true)
 if [ "${AVAIL:-0}" -gt 0 ]; then
   pass "$AVAIL handset contact(s) available"
 else
@@ -238,11 +258,41 @@ printf '    this script does not dial 911 and never will. Test it deliberately,\
 printf '    and keep a mobile in the house: a hobbyist phone on a consumer\n'
 printf '    connection is a supplementary phone, never the only way to call for help.\n'
 
+# ── Rung 5c: call capture ────────────────────────────────────
+# Optional, and reported as such: without it the journal holds only what
+# doorman itself saw, and a handset dialling out leaves no record.
+rung "5c. Call capture (CEL)"
+
+if ast 'cel show status' | grep -q 'CEL Logging: Enabled'; then
+  pass "CEL logging enabled"
+  if ast 'module show like cel_sqlite3_custom' | grep -q 'Running'; then
+    pass "cel_sqlite3_custom is running"
+  else
+    fail "cel_sqlite3_custom is not running" "sudo asterisk -rx 'module load cel_sqlite3_custom.so'; check /etc/asterisk/cel_sqlite3_custom.conf"
+  fi
+  if [ -n "$(envval CEL_SPOOL_PATH)" ]; then
+    SPOOL=$(envval CEL_SPOOL_PATH)
+    if as_doorman "test -r '$SPOOL'"; then
+      pass "doorman can read $SPOOL"
+    else
+      fail "doorman cannot read $SPOOL" "sudo setfacl -m u:doorman:rx,d:u:doorman:rX $(dirname "$SPOOL") && sudo setfacl -m u:doorman:r $SPOOL"
+    fi
+  else
+    warn "CEL_SPOOL_PATH is not set — Asterisk records, doorman does not read it" "CEL_SPOOL_PATH=/var/log/asterisk/master.db in .env, then restart doorman"
+  fi
+else
+  warn "CEL logging is off — the journal sees only doorman's own calls" "install asterisk/cel.conf (the installer does on Linux); see docs/events.md"
+fi
+
 # ── Rung 6: prompts ──────────────────────────────────────────
 rung "6. Prompts"
 
 PREFIX="$(envval PROMPT_MEDIA_PREFIX || echo call-me-maybe)"
-SOUNDS="/var/lib/asterisk/sounds/$PREFIX"
+# Asterisk's data directory is /var/lib/asterisk on the Pi and /usr/share/asterisk
+# on Ubuntu and Debian; the dialplan plays call-me-maybe/<name> relative to
+# <astdatadir>/sounds, so that is where the prompts must be.
+ASTDATA="$(asterisk -rx 'core show settings' 2>/dev/null | awk -F': *' '/Data directory/ {print $2}')"
+SOUNDS="${ASTDATA:-/var/lib/asterisk}/sounds/$PREFIX"
 REQUIRED=(welcome-known lobby-greeting invalid-extension good-day no-answer connecting)
 
 if [ -d "$SOUNDS" ]; then

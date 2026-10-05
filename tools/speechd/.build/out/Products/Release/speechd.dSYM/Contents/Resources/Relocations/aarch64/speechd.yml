@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/ericmoore/Web/call-me-maybe/.claude/worktrees/pr-code-review-8152d4/tools/speechd/.build/out/Products/Release/speechd'
+relocations:     []
+...

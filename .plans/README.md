@@ -10,31 +10,55 @@ otherwise have to be reconstructed from a commit log.
 
 ## Streams
 
+**Order, set 2026-09-25:** s11 (M3, the rehearsal — the box readied from
+here, the Saturday is the family's) → s02 (M3 and M4 shipped the same day;
+M5 waits) → s03 (M2 and M3 shipped in v0.8.0; archived) → s01 (Phase 3
+shipped in v0.9.0). All four done the same day; s13 and s19 are next. s13 and s19 follow; s20 is cancelled.
+
 | | Stream | Status | Depends on |
 |---|---|---|---|
-| **s01** | [Multiple lines](s01-multiple-DIDs/) — several numbers, then several providers | **Phase 1 done; Phase 2 all but M2.4** | — |
-| **s02** | [Home and office config examples](s02-home-and-office-config-examples/) — worked, tested, published starting points | M1 + M2 shipped (`examples/scenarios/`) | s01 for two of five |
-| **s03** | [Provider balance checking](s03-provider-balalnce-checking/) — know the trunk is dying before the phone stops | planned | s01 Phase 2 for per-trunk |
 | **s04** | [Network helpers](s04-standarddize-network-helpers/) — TTS, STT and LLM addressed by URL, wherever they run | planned | — |
 | **s05** | [System alerts](s05-system-alerts/) — the house phone tells you about the house phone | planned | composite prompts |
 | **s06** | [Speakers as page targets](s06-speaker-page-targets/) — Sonos and Cast carry a page; they are not handsets | planned | TASKS §6 (HA webhook) |
-| **s07** | [The contacts ladder](s07-contacts-ladder/) — your address book admits people; published numbers still dial in | planned | — |
 | **s09** | [One binary that installs itself](s09-distro-software-release-channel/) — `sudo doorman init` prepares the host; brew, deb/rpm, AUR, `go install` | planned | s08 for the release notice |
-| **s11** | [The hunt](s11-the-hunt/) — the verification ladder as a scavenger hunt: envelopes, `*6` + an answer plays a parent's recorded clue, `500` announces the winner; zero mechanism in doorman | planned | — |
-| **s12** | [Do not disturb](s12-do-not-disturb/) — `*78NN` quiets a handset for 15/30/45 min; rings and pages skip it, except a page from an override handset; state is Asterisk's, time-boxed, read by doorman never written | planned | per-handset voicemail; the `100` ring-all group; s10 for line keys |
+| **s12** | [Do not disturb](s12-do-not-disturb/) — `*78NN` quiets a handset for 15/30/45 min; rings and pages skip it, except a page from an override handset; state is Asterisk's, time-boxed, read by doorman never written | M1 + M2 shipped in v0.12.0 (2026-09-25); M3 the red line key waits on s10 line keys | s10 for line keys |
 | **s14** | [411 — the phone explains itself](s14-411-feature-discovery/) — one registry of everything you can dial; a generated, checkable IVR at `411`; the runbook table, a wall card and the soft keys from the same source | planned | the graph-provenance primitive; composite prompts |
-| **s15** | [Messages — the house answers texts](s15-messages/) — SMS on the house number: email as the archive, a URL callback through Tailscale Funnel as the trigger; words per person open the garage via HA; `menu` types the `411` tree; handsets text each other over SIP MESSAGE; nothing on the hub | planned | s13 for the journal event; s14 for `menu` |
 | **s16** | [The family voice pack](s16-family-voice-pack/) — the bundled voice is the floor; a `family/` overlay one layer deep, recorded from any handset with `*99` (menu) or `*99*N` (straight to one); `#` inside the call drops back to the default; the studio's own lines are an optional second clip set | planned | — |
 
-s01 has an [`arch.md`](s01-multiple-DIDs/arch.md); s03's reasoning is short
-enough to live in its plan.
+s01 has an [`arch.md`](_archives/s01-multiple-DIDs/arch.md); s03's reasoning
+is short enough to live in its plan.
+
+| **s13** | [Actions](s13-actions/) — one `[[actions]]` registry (what it does, who may, what it says back, whether it confirms) that a text word, a lobby digit and a passkey all point at; HA acts and may refuse; the garage is the first door | M1 (v0.7.2), M3 `garage?`, M5 the journal's second writer, M6 RUNBOOK "Actions" shipped (v0.13.0, 2026-09-27); M2 wired on jepsen, waiting on the HA paste and token; M4 waits on s14 | s15 (the text), s14 (the leaf), s19 (the confirm); the ratgdo in HA |
+| **s19** | [The edge inbox](s19-edge-inbox/) — the house's public front door: the carrier's SMS callback and, later, passkey-signed commands land in one queue at the edge; the hub pulls; the edge holds the carrier key; `login.callmemaybe.cc` as verifier, not authorizer | M1 shipped 2026-09-24 | s15 M2 consumes it; s13 gives the words a door |
+| **s23** | [Curfew](s23-handset-curfew/) — a handset goes dark at bedtime: no ring in, no call out but 911, in-progress call dropped at the hour; the hours are `[[schedules]]`, the handset names a list of them | M1–M4 live on jepsen 2026-10-02; the two clips wait on a piper build | s12 (the DND gate it reuses) |
+| **s24** | [*88 — add a number](s24-add-a-number/) — key a number, say the name; filed into the phone's own book at once, named by off-call transcription minutes later; directory-only, never admission | M1–M4 built 2026-10-02; M5 (jepsen) next | s10 (the directory), s04 (STT by URL) |
+| **s25** | [Handset Ez Join](s25-handset-ez-join/) — a new phone is a question, not a procedure: `provision --adopt` turns an unknown MAC in the window into five answers and does the rest; the box pointing the phone (an HTTP push) is the direction it is shaped for | planned 2026-10-03 | s10 (the window), s09/#28 (services), a spare WP826 for the M2 rehearsal |
+| **s26** | [The family network](s26-family-network/) — two houses, one dial plan: an account-operated overlay, a hundred numbers per house, and what two boxes can do that POTS cannot (rooms with state, standing calls, drop-in, a help key, the absence signal, stories by the real grandma) | planned 2026-10-03 | the dialdoorman account; s23/s12 for room state; s16 for the voice; s24 for books |
+| **s27** | [Backup](s27-backup/) — the house as one sealed file (age to a public key the box holds alone; `.env`, TOMLs, state, voicemail; manifest first), nightly to a directory, an S3-compatible bucket or the account; `restore` turns a fresh install into that box | M1–M3 built 2026-10-03; s3 and the jepsen rehearsal next | s09 (init services owns the timer), the account for `cloud` |
 
 ### Archived
 
 | | Stream | Closed |
 |---|---|---|
 | **s08** | [Durable event journal](_archives/s08-durable-event-journal/) — SQLite history, doorbells, CEL capture, consumer-owned replay | 2026-09-23 — verified live on jepsen; replicas and the HTTP endpoint dropped with reasons |
+| **s15** | [Messages — the house answers texts](_archives/s15-messages/) — SMS on the house number as control plane and archive, never conversation: the edge inbox, `doorman inbox`, `messages.toml`, boring replies; handsets text each other on the LAN | 2026-09-24 — `ping` → `pong` live; the archive call waits on the mailbox; the door and the menu handed to s13 and s14 |
 | **s10** | [Zero-touch handsets](_archives/s10-zero-touch-handsets/) — `render` writes the phone's own file; `doorman provision` is the window, the instructions and the watch; `rotate --phones` re-provisions; the directory unit is the phone book | 2026-09-23 — shipped in v0.6.0 under test; the live rehearsal rides with the jepsen re-provision |
+| **s21** | [A phone's own voicemail](_archives/s21-a-phones-own-voicemail/) — `mailbox` on a handset is a box render makes; a room call rings out into it; the voicemail key opens it without a PIN; `*98` is any box; init gives every room one | 2026-09-26 — shipped in v0.11.0; the rehearsal is daily use |
+| **s22** | [The house mailbox](_archives/s22-the-house-mailbox/) — midbury@bullmoose.cc hears voicemail (externnotify → mail hook → the bullmoose CLI), the house's replies, and a morning digest over the journal; doorman never sends mail itself | 2026-09-26 — M1–M3 live on jepsen; the carrier's text forwarding is the user's portal switch; the phone book deferred to that decision |
+| **s11** | [The hunt](_archives/s11-the-hunt/) — the verification ladder as a scavenger hunt: envelopes, `*6` + an answer plays a parent's recorded clue, `500` announces the winner; zero mechanism in doorman | 2026-09-26 — M1–M2 shipped in v0.6.2; the rehearsal is the family's Saturday |
+| **s02** | [Home and office config examples](_archives/s02-home-and-office-config-examples/) — worked, tested, published starting points: four scenarios at callmemaybe.cc/examples/ | 2026-09-26 — M1–M4 shipped; the answering-service scenario dropped until its primitives exist |
+| **s01** | [Multiple lines](_archives/s01-multiple-DIDs/) — several numbers, then several providers: the routing spine, line identity, outbound identity by trunk, per-line observability, `trunks.toml` and the generated inbound/emergency/failover contexts | 2026-09-25 — Phase 3 (outbound failover) shipped in v0.9.0; inbound failover stays the provider's failover DID, by design |
+| **s03** | [Provider balance checking](_archives/s03-provider-balalnce-checking/) — `doorman balance` per trunk with an exit code for cron; `--ring` has the house say the balance aloud over an internal call, once a day per trunk; `--prom` is the gauge; `doorman-balance.timer` every morning | 2026-09-25 — M2 + M3 shipped in v0.8.0; the daemon never checks a balance and never holds the key |
+| **s07** | [The contacts ladder](_archives/s07-contacts-ladder/) — address books as admission: vCards parsed and classified, the five-rung ladder, `url` sources fetched into a last-good cache off the call path, `via` on the call record | 2026-09-23 — shipped in v0.6.1; nothing on the box to touch |
+
+### Cancelled
+
+Planned, reasoned through, and then not built. The plan stays so the
+reasoning is not redone the next time the idea comes up.
+
+| | Stream | Cancelled |
+|---|---|---|
+| **s20** | [The party line](_archives/cancelled/s20-party-line/) — a room is a PIN with a suffix: a child makes room 107 from her handset, friends type `pin * 107` in the lobby and land in it, hosts are house handsets, guests wait for one | 2026-09-25 — VoIP.ms allows two simultaneous calls and sells more only at $23/channel/month; a twenty-friend room is $460 a month. Revivable with a per-minute second trunk (s01) |
 
 ---
 
@@ -190,6 +214,8 @@ offline on upgrade, which argues for warn-then-reject over two releases.
 - Number streams `sNN`; do not renumber when one is dropped.
 - A stream moves to `_archives/` — same folder name, same number — when every
   milestone has either landed or been explicitly dropped in its status line.
+  A stream that was planned and then not built at all goes to
+  `_archives/cancelled/` with the reason in its status line.
   Partly-shipped streams stay here: a plan with one open milestone is still
   the place that milestone is reasoned about. The table above lists archived
   streams under their own heading so the numbering stays legible.

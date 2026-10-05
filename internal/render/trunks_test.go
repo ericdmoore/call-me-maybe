@@ -75,17 +75,59 @@ func TestEveryRegistrationBindsInboundToItsEndpoint(t *testing.T) {
 	}
 }
 
-// The other half of the same claim: with the binding right, an identify block
-// is redundant, and an IP allow-list is a list that goes stale silently.
-// Generating one would be a second mechanism to keep in agreement with the
-// first.
-func TestNoIdentifyBlocksAreGenerated(t *testing.T) {
+// The other half of the same claim, learned on the first customer's box:
+// VoIP.ms does not echo the ;line= tag, so every trunk is also identified by
+// its own identity — the sub-account and every DID routed to it — in the
+// request URI and the To header. Never by an IP: that list goes stale silently.
+func TestEveryTrunkIsIdentifiedByItsOwnIdentityNeverAnIP(t *testing.T) {
 	f := buildTrunks(t, trunkFixture(), trunkLines())
-	if strings.Contains(f.PJSIP, "type=identify") {
-		t.Error("an identify block was generated; line=yes + endpoint= makes it redundant")
+	if strings.Contains(f.PJSIP, "\nmatch=") {
+		t.Error("an IP allow-list was generated; identification must be by identity")
 	}
-	if !strings.Contains(f.PJSIP, "No identify blocks are generated") {
-		t.Error("the generated file should say why there is no identify block")
+	for _, want := range []struct{ trunk, user, did string }{
+		{"voipms", "123456_home", "5125550100"},
+		{"telnyx", "cmm-home", "5125550142"},
+	} {
+		for _, hdr := range []string{"[" + want.trunk + "-identify-uri]", "[" + want.trunk + "-identify-to]"} {
+			block, ok := section(f.PJSIP, hdr)
+			if !ok {
+				t.Fatalf("no %s block:\n%s", hdr, f.PJSIP)
+			}
+			if !strings.Contains(block, "endpoint="+want.trunk+"\n") {
+				t.Errorf("%s does not name endpoint %s:\n%s", hdr, want.trunk, block)
+			}
+			if !strings.Contains(block, want.user) || !strings.Contains(block, want.did) {
+				t.Errorf("%s must match the sub-account and the DID:\n%s", hdr, block)
+			}
+		}
+		if uri, _ := section(f.PJSIP, "["+want.trunk+"-identify-uri]"); !strings.Contains(uri, "match_request_uri=/(") {
+			t.Errorf("request-URI identify missing for %s:\n%s", want.trunk, uri)
+		}
+		if to, _ := section(f.PJSIP, "["+want.trunk+"-identify-to]"); !strings.Contains(to, "match_header=To: /(") {
+			t.Errorf("To-header identify missing for %s:\n%s", want.trunk, to)
+		}
+	}
+	// A DID routed to one trunk never identifies another.
+	if v, _ := section(f.PJSIP, "[voipms-identify-uri]"); strings.Contains(v, "5125550142") {
+		t.Error("telnyx's DID appears in voipms's identify pattern")
+	}
+}
+
+// from_user defaulted to the sub-account makes VoIP.ms answer 503 on every
+// outbound call, so the endpoint carries it only when trunks.toml set it to
+// something else.
+func TestFromUserIsOnlyEmittedWhenItDiffersFromTheUsername(t *testing.T) {
+	f := buildTrunks(t, trunkFixture(), trunkLines())
+	ep, _ := section(f.PJSIP, "[voipms]")
+	if strings.Contains(ep, "from_user=") {
+		t.Errorf("from_user emitted with the default value:\n%s", ep)
+	}
+	trunks := trunkFixture()
+	trunks[0].FromUser = "5125550100"
+	f = buildTrunks(t, trunks, trunkLines())
+	ep, _ = section(f.PJSIP, "[voipms]")
+	if !strings.Contains(ep, "from_user=5125550100\n") {
+		t.Errorf("an explicit from_user must be emitted:\n%s", ep)
 	}
 }
 
@@ -118,7 +160,7 @@ func TestTrunkPJSIPCarriesTheProviderFields(t *testing.T) {
 		"expiration=300",
 		"[voipms_aor]", "contact=sip:chicago.voip.ms",
 		"context=from-voipms", "allow=ulaw", "allow=g722",
-		"from_user=123456_home", "from_domain=chicago.voip.ms",
+		"from_domain=chicago.voip.ms", // and no from_user: it equals the username
 		"[telnyx]", "password=telnyx-secret", "context=from-telnyx",
 	} {
 		if !strings.Contains(f.PJSIP, want) {
@@ -448,4 +490,61 @@ func section(text, header string) (string, bool) {
 		return text[start : start+len(header)+1+next+1], true
 	}
 	return text[start:], true
+}
+
+// ── Outbound failover ────────────────────────────────────────────────────
+
+// One generated context per trunk, each presenting THAT trunk's own number.
+// The failing line's caller ID must not survive the fall: the second trunk
+// does not own it, and a provider rejects or silently rewrites a number its
+// account does not own — which is the very call this ladder routes around.
+func TestEveryTrunkGetsAFailoverContextPresentingItsOwnNumber(t *testing.T) {
+	f := buildTrunks(t, trunkFixture(), trunkLines())
+	telnyx, ok := section(f.Dialplan, "[cmm-failover-telnyx]")
+	if !ok {
+		t.Fatalf("no [cmm-failover-telnyx] in:\n%s", f.Dialplan)
+	}
+	for _, want := range []string{
+		"same => n,Set(CALLERID(num)=+15125550142)", // the biz line lives at telnyx
+		"same => n,Dial(PJSIP/${EXTEN}@telnyx,60)",
+		`same => n,GotoIf($["${DIALSTATUS}"="CHANUNAVAIL" | "${DIALSTATUS}"="CONGESTION"]?cmm-outbound,${EXTEN},more)`,
+		"same => n,Hangup()",
+	} {
+		if !strings.Contains(telnyx, want) {
+			t.Errorf("[cmm-failover-telnyx] is missing %q:\n%s", want, telnyx)
+		}
+	}
+	if strings.Contains(telnyx, "+15125550100") {
+		t.Error("the home line's number leaked into telnyx's fallback — telnyx does not own it")
+	}
+	voipms, _ := section(f.Dialplan, "[cmm-failover-voipms]")
+	if !strings.Contains(voipms, "same => n,Set(CALLERID(num)=+15125550100)") {
+		t.Errorf("[cmm-failover-voipms] does not present the home number:\n%s", voipms)
+	}
+	// And the call ends in this context, whichever way it ends: that is how
+	// the CEL journal records which trunk carried it.
+	if strings.Contains(telnyx, "Return()") || strings.Contains(telnyx, "Goto(cmm-outbound,${EXTEN},done)") {
+		t.Error("a connected fallback must end in its own context, not return to the ladder")
+	}
+}
+
+// A trunk no line declares a number at cannot be given one to present. The
+// caller ID is cleared rather than left as the failing line's, and the file
+// says why at the point somebody will read it.
+func TestAFallbackTrunkWithNoLineClearsTheCallerID(t *testing.T) {
+	lines := []TrunkLine{{Name: "default", Number: "+15125550100", Trunk: "voipms"}}
+	f := buildTrunks(t, trunkFixture(), lines)
+	telnyx, _ := section(f.Dialplan, "[cmm-failover-telnyx]")
+	if !strings.Contains(telnyx, "same => n,Set(CALLERID(num)=)") {
+		t.Errorf("[cmm-failover-telnyx] should clear the caller ID:\n%s", telnyx)
+	}
+	if !strings.Contains(telnyx, "no line declares a number at this trunk") {
+		t.Errorf("[cmm-failover-telnyx] should say why:\n%s", telnyx)
+	}
+	if got := FailoverCallerID("telnyx", lines); got != "" {
+		t.Errorf("FailoverCallerID = %q, want empty", got)
+	}
+	if got := FailoverCallerID("voipms", lines); got != "+15125550100" {
+		t.Errorf("FailoverCallerID = %q, want the home number", got)
+	}
 }

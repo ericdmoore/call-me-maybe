@@ -6,12 +6,16 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"callmemaybe/internal/ari"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/provider"
+	"callmemaybe/internal/xdg"
 )
 
 // `doorman balance` — how much credit is left, per trunk, and a non-zero exit
@@ -89,6 +93,8 @@ type balanceReport struct {
 	Low       int             `json:"low"`
 	Unchecked int             `json:"unchecked"`
 	Exit      int             `json:"exit"`
+	// Announced is the alert call, when --ring placed one this run.
+	Announced *ringReport `json:"announced,omitempty"`
 }
 
 func runBalance(args []string) int {
@@ -98,6 +104,12 @@ func runBalance(args []string) int {
 	minFlag := fs.Float64("min", 0, "threshold for trunks that declare no balance_min")
 	jsonFlag := fs.Bool("json", false, "machine-readable output for a cron job")
 	timeoutFlag := fs.Duration("timeout", 20*time.Second, "how long to wait on one provider")
+	ringFlag := fs.String("ring", "", "handset or group ids to ring when a trunk is low, in order (default $BALANCE_RING)")
+	handsetsFlag := fs.String("handsets", "", "handsets file, for --ring (default $HANDSETS_PATH or ./handsets.toml)")
+	stateFlag := fs.String("state", "", "where the last alert per trunk is remembered (default $XDG_STATE_HOME/doorman/balance.json)")
+	repeatFlag := fs.Duration("repeat", 24*time.Hour, "do not ring about the same trunk again within this long; 0 rings every run")
+	ringForFlag := fs.Duration("ring-timeout", 30*time.Second, "how long each handset rings before the next is tried")
+	promFlag := fs.String("prom", "", "write a Prometheus textfile-collector file here on every run (default $BALANCE_PROM)")
 	_ = fs.Parse(args)
 
 	trunksPath := trunksPathArg(*trunksFlag)
@@ -115,19 +127,101 @@ func runBalance(args []string) int {
 		return balanceExitUsage
 	}
 
+	secret := secretLookup(*envFlag)
 	results := checkBalances(context.Background(), balanceCheck{
 		trunks:  trunks.All(),
-		secret:  secretLookup(*envFlag),
+		secret:  secret,
 		min:     *minFlag,
 		timeout: *timeoutFlag,
 	})
 	code := balanceExit(results)
+	now := time.Now()
+
+	// The gauge, on every run: a file that stops changing is itself a
+	// signal, and "checked, nothing low" is a point worth plotting.
+	promPath := *promFlag
+	if promPath == "" {
+		promPath, _ = secret("BALANCE_PROM")
+	}
+	if promPath != "" {
+		if err := writeProm(promPath, results, now); err != nil {
+			fmt.Fprintf(os.Stderr, "✗ could not write %s: %v\n", promPath, err)
+			if code == 0 {
+				code = balanceExitUsage
+			}
+		}
+	}
+
+	// The phone call, only when something is low.
+	var announced *ringReport
+	ringIDs := *ringFlag
+	if ringIDs == "" {
+		ringIDs, _ = secret("BALANCE_RING")
+	}
+	var settings ringSettings
+	if ringIDs != "" && tallyBalances(results).low > 0 {
+		var err error
+		settings, err = resolveRing(ringIDs, handsetsPathArg(*handsetsFlag), *stateFlag, *repeatFlag, *ringForFlag)
+		if err != nil {
+			announced = &ringReport{Error: err.Error()}
+		} else {
+			client, err := balanceARIClient(secret)
+			if err != nil {
+				announced = &ringReport{Error: err.Error()}
+			} else {
+				announced = announceLow(context.Background(), client, results, settings, now)
+			}
+		}
+	}
 
 	if *jsonFlag {
-		return printBalanceJSON(results, trunks.Where(), code)
+		return printBalanceJSON(results, trunks.Where(), code, announced)
 	}
 	printBalances(results, trunks.Where(), *minFlag)
+	printRingReport(announced, settings)
 	return code
+}
+
+// resolveRing turns the flags into a plan: which endpoints, where the state
+// lives, how long to ring. It reads handsets.toml, which is the one
+// inventory a ring can be expressed in — a handset id, or a group of them.
+func resolveRing(ids, handsetsPath, statePath string, repeat, ringFor time.Duration) (ringSettings, error) {
+	handsets, groups, err := policy.LoadHandsets(handsetsPath)
+	if err != nil {
+		return ringSettings{}, fmt.Errorf("--ring needs handsets.toml to know what %q is: %w", ids, err)
+	}
+	targets, skipped, err := ringTargets(strings.Split(ids, ","), handsets, groups)
+	if err != nil {
+		return ringSettings{}, err
+	}
+	if statePath == "" {
+		statePath = filepath.Join(xdg.Dir("STATE", os.Getenv, os.UserHomeDir), "doorman", "balance.json")
+	}
+	return ringSettings{targets: targets, skipped: skipped, statePath: statePath, repeat: repeat, ringFor: ringFor}, nil
+}
+
+// balanceARIClient is the daemon's own ARI login, from the environment or
+// the secrets file, because the announcement is an internal call and ARI is
+// how internal calls are placed. Loopback only, as everywhere (invariant 2):
+// a run that rings is a run on the box.
+func balanceARIClient(secret func(string) (string, bool)) (announcer, error) {
+	user, _ := secret("ARI_USERNAME")
+	pass, _ := secret("ARI_PASSWORD")
+	if user == "" || pass == "" {
+		return nil, errors.New("ARI_USERNAME and ARI_PASSWORD are not set — the alert is an internal call over ARI, so --ring needs the daemon's own login from .env")
+	}
+	base, _ := secret("ARI_BASE_URL")
+	if base == "" {
+		base = "http://127.0.0.1:8088"
+	}
+	app, _ := secret("ARI_APP")
+	if app == "" {
+		app = "doorman"
+	}
+	return ari.New(ari.Options{
+		BaseURL: base, Username: user, Password: pass, App: app,
+		Log: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	}), nil
 }
 
 // printNoTrunksToCheck is the compatibility gate, spoken out loud. No
@@ -291,7 +385,7 @@ func balanceExit(results []balanceResult) int {
 	return 0
 }
 
-func printBalanceJSON(results []balanceResult, where string, code int) int {
+func printBalanceJSON(results []balanceResult, where string, code int, announced *ringReport) int {
 	t := tallyBalances(results)
 	out, err := json.MarshalIndent(balanceReport{
 		CheckedAt: time.Now().UTC().Format(time.RFC3339),
@@ -300,6 +394,7 @@ func printBalanceJSON(results []balanceResult, where string, code int) int {
 		Low:       t.low,
 		Unchecked: t.unchecked,
 		Exit:      code,
+		Announced: announced,
 	}, "", "  ")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)

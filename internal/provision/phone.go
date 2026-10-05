@@ -1,6 +1,8 @@
 package provision
 
 import (
+	"crypto/sha256"
+	"encoding/base32"
 	"fmt"
 	"net"
 	"sort"
@@ -73,12 +75,30 @@ func (a Address) DirectoryHostPort() string {
 }
 
 // PhonebookPath is the per-handset directory the phone polls; it appends
-// phonebook.xml itself.
-func (a Address) PhonebookPath(id string) string { return a.DirectoryHostPort() + "/prov/" + id }
+// phonebook.xml itself. The token is the phone's credential in the only
+// form its phone-book downloader can carry: the WP826 sends no HTTP
+// credential for a phone book (first rehearsal, 2026-09-24), so the path
+// itself is the secret — a capability URL, derived from the provisioning
+// password rather than being it, delivered inside the configuration file
+// over TLS, and never logged by the directory.
+func (a Address) PhonebookPath(id, token string) string {
+	return a.DirectoryHostPort() + "/prov/" + id + "/" + token
+}
 
 // PhonebookURL is the operator's view of the same thing.
-func (a Address) PhonebookURL(id string) string {
-	return "https://" + a.PhonebookPath(id) + "/phonebook.xml"
+func (a Address) PhonebookURL(id, token string) string {
+	return "https://" + a.PhonebookPath(id, token) + "/phonebook.xml"
+}
+
+// PhonebookToken derives the phone-book capability from the provisioning
+// password: 26 base32 characters of a hash, so the password itself never
+// appears in a URL and a token cannot be turned back into it.
+func PhonebookToken(provisionPassword string) string {
+	if provisionPassword == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("call-me-maybe phonebook\x00" + provisionPassword))
+	return strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(sum[:16]))
 }
 
 // Phone is everything a template needs to know about one handset: the

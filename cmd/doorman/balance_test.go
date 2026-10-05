@@ -314,7 +314,7 @@ func TestBalanceJSONCarriesEveryTrunkAndTheExitCode(t *testing.T) {
 		timeout:  5 * time.Second,
 		endpoint: srv.URL,
 	})
-	out := capture(t, func() { _ = printBalanceJSON(results, "./trunks.toml", balanceExit(results)) })
+	out := capture(t, func() { _ = printBalanceJSON(results, "./trunks.toml", balanceExit(results), nil) })
 
 	var report balanceReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {

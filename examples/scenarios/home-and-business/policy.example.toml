@@ -1,0 +1,165 @@
+# ─────────────────────────────────────────────────────────────
+# Example · Home plus business on one box — the home line
+#
+# FOR        A household whose one box answers two numbers: the family's,
+#            and the surveying business run from the office at the end of
+#            the hall. Grandma rings the house and every phone rings. A
+#            client rings the business and the office rings, with
+#            "Surveying:" on the display so whoever picks up answers as the
+#            business. The office phone dials OUT as the business without
+#            anyone pressing anything; every other phone dials out as the
+#            house. The kids never learn there is a second line.
+#
+#            This file is the HOME line and it is the bare policy.toml on
+#            purpose. The business is policy.example.biz.toml beside it —
+#            read that one second. Which file is the bare one matters: the
+#            bare file is the default line, and being the default is two
+#            jobs in one rule — it is what an unclaimed phone presents when
+#            somebody dials, AND it is the trunk 911 leaves by. Put the
+#            business in the bare file and a child dialling 911 from the
+#            playroom leaves by the number with the business's address on
+#            file. Home is the default. Always.
+#
+# NEEDS      A second number on the same provider (a second DID on the same
+#            VoIP.ms sub-account is the simplest form), and ONE dialplan
+#            edit that doorman cannot make for you, because doorman never
+#            reads the dialplan: send the business DID to its own context
+#            and name the line as the Stasis argument —
+#
+#              [inbound-trunk]
+#              exten => 5125550142,1,Goto(from-trunk-biz,${EXTEN},1)
+#
+#              [from-trunk-biz]
+#              exten => _X.,1,NoOp(Inbound to ${EXTEN} on line biz)
+#               same => n,Set(CHANNEL(hangup_handler_push)=cmm-hangup,s,1)
+#               same => n,Answer()
+#               same => n,Stasis(${DOORMAN_APP},line,biz)
+#               same => n,Hangup()
+#
+#            "biz" is the word between the dots in the filename, and it is
+#            the whole of how the dialplan and the file find each other. A
+#            call naming a line doorman has no file for gets the default
+#            line rather than a dropped call. docs/RUNBOOK.md, "Add a second
+#            line", is the full procedure; a trunks.toml makes `doorman
+#            render` write this route instead — see the multi-venture
+#            example.
+#
+#            `doorman render`, re-run after copying: the business caller ID
+#            reaches the office phone through the generated PJSIP config,
+#            so editing policy.biz.toml alone changes what `*4` offers and
+#            nothing about what the office phone presents.
+#
+#            Six mailboxes in voicemail.conf: family, kids, surveying,
+#            newwork, accounts, urgent. Voicemail is Asterisk's; doorman
+#            only names the box. docs/RUNBOOK.md.
+#
+# DOES NOT   Let the business ring the bedrooms. The business line's ladder
+#            reaches the office and then the kitchen and nowhere else, and
+#            that is written in ITS file, not this one — each line owns its
+#            own allow-list, extensions, schedules and rate-limit budget,
+#            and only the phones are shared.
+#
+#            Ask anyone which line they are on. The home line is what every
+#            phone presents unless a line claims it, and the business line
+#            claims the office. That leaves exactly one case: a parent in
+#            the kitchen returning a client's call as the business. That is
+#            `*4` — dial it, press the business line's digit (`doorman
+#            check` prints the menu), dial the number. Nobody else in the
+#            house needs to know it exists, and `*4` refuses 911 outright.
+#
+#            Move 911 off the home number. With one provider there is one
+#            trunk, so the question does not arise; the day the business
+#            moves to its own provider, the default line's trunk still
+#            carries 911 unless trunks.toml says otherwise. See the
+#            multi-venture example for that shape.
+#
+#            Close the business at weekends, or put the house on a schedule
+#            — the same limits the family-line and solo-business examples
+#            state, unchanged by having both on one box.
+#
+# CHECK IT   ./bin/doorman check --allow-placeholders \
+#                --handsets examples/scenarios/home-and-business/handsets.example.toml \
+#                examples/scenarios/home-and-business/policy.example.toml
+#
+#            Point it at the bare file and it discovers the sibling, prints
+#            "Lines: 2", then the outbound caller ID table: which phone
+#            presents which number, and the `*4` menu in order. It refuses a
+#            strict check on purpose: the PINs are the CHANGEME sentinel.
+#
+# THE .ENV   EXTENSION_LENGTH (6), FIRST_DIGIT_TIMEOUT_MS (10000),
+#            MAX_PIN_ATTEMPTS (2). One install, one value each, both lines.
+#
+# A starting point, not a supported configuration. Copy it and make it yours.
+# ─────────────────────────────────────────────────────────────
+
+# ── The number ───────────────────────────────────────────────
+# outbound_cid is what an UNCLAIMED phone presents — every phone in this
+# house but the office. There is no outbound_handsets list on the home line
+# because the default line does not need to claim anything: it is what a
+# phone presents when nobody claimed it. Writing the list here would be true
+# and redundant, and redundant lists disagree the week after a phone is
+# added.
+[line]
+label = "The house"
+number = "+15125550100"
+on_no_input = "dismiss"
+outbound_cid = "+15125550100"
+
+# ── What a known caller reaches ──────────────────────────────
+# Every phone, the office included. A surveyor's mother rings the house, not
+# the business, and a ringing office phone with "Home:" on its display is
+# the right thing for it to be.
+[house]
+handsets = ["everyone"]
+voicemail = "family"
+caller_id_format = "Home: {name} <{number}>"
+
+# ── The allow-list ───────────────────────────────────────────
+# The home line's own. A client on the business allow-list is a stranger
+# here, and Grandma is a stranger to the business — which is correct: she
+# would be dialling the wrong number.
+[[people]]
+name = "Grandma"
+numbers = ["512-555-0110"]
+
+[[people]]
+name = "School front office"
+numbers = ["(512) 555-0150"]
+notes = "attendance line — do not remove"
+
+# ── Schedules ────────────────────────────────────────────────
+[[schedules]]
+id = "school-night"
+enabled = true
+start = "20:30"
+end = "07:00"
+days = ["SU", "MO", "TU", "WE", "TH"]
+
+# ── Extensions ───────────────────────────────────────────────
+# Every PIN is the CHANGEME sentinel: not a weak PIN, an impossible one.
+# `doorman init` replaces the ones in this file; `doorman rotate -policy
+# policy.biz.toml` does the business line's, because each line's PINs are
+# its own credentials.
+
+# The kids' friends: their rooms first, the adults after, then the kids'
+# mailbox. On a school night, straight to the mailbox.
+[[extensions]]
+pin = "CHANGEME"
+label = "Kids"
+voicemail = "kids"
+afterhours = "school-night"
+
+  [[extensions.steps]]
+  handsets = ["kids"]
+  rings = 3
+
+  [[extensions.steps]]
+  handsets = ["adults"]
+  rings = 4
+
+# The one to give out when you mean it.
+[[extensions]]
+pin = "CHANGEME"
+label = "Whole house"
+handsets = ["everyone"]
+voicemail = "family"

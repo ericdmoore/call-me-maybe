@@ -1,0 +1,92 @@
+# ─────────────────────────────────────────────────────────────
+# Example · Home plus business on one box — the hardware.
+#
+# Companion to policy.example.toml AND policy.example.biz.toml in this
+# directory. Copy all three:
+#
+#   cp examples/scenarios/home-and-business/handsets.example.toml   handsets.toml
+#   cp examples/scenarios/home-and-business/policy.example.toml     policy.toml
+#   cp examples/scenarios/home-and-business/policy.example.biz.toml policy.biz.toml
+#   ./bin/doorman init                        # replaces the placeholder PINs
+#   ./bin/doorman rotate -policy policy.biz.toml   # and the business line's
+#
+# One phone plant, two numbers. There is ONE handsets.toml however many
+# lines a box answers: a phone is a fact about the house, not about a
+# number, and both lines may ring the office. What a phone presents when
+# somebody picks it up and dials is not written here — it cannot be, this
+# file is shared — it is `outbound_handsets` in the line that claims it.
+#
+# Every handset needs dtmf_mode=rfc4733, which `doorman render` writes for
+# you. Without it the lobby is deaf and every stranger is dismissed.
+# ─────────────────────────────────────────────────────────────
+
+[[handsets]]
+id = "kitchen"
+label = "Kitchen"
+endpoint = "PJSIP/kitchen"       # must be PJSIP/<id>; render enforces it
+number = 101                     # internal extension + BLF hint (100-199)
+page = true
+mailbox = "family"               # MWI lamp follows this voicemail.conf box
+password_env = "HANDSET_KITCHEN_PASSWORD"
+
+# The business phone. It does not page: "dinner is ready" in a client's ear
+# is the one thing a shared house can do to a business line, and this is
+# where it is prevented. Its MWI lamp follows the business mailbox, not the
+# family one, because that is the message the person at this desk is
+# waiting for.
+[[handsets]]
+id = "office"
+label = "Office"
+endpoint = "PJSIP/office"
+number = 102
+page = false
+mailbox = "surveying"
+password_env = "HANDSET_OFFICE_PASSWORD"
+
+[[handsets]]
+id = "playroom"
+label = "Playroom"
+endpoint = "PJSIP/playroom"
+number = 103
+page = true
+mailbox = "kids"
+password_env = "HANDSET_PLAYROOM_PASSWORD"
+
+[[handsets]]
+id = "primary-bed"
+label = "Primary bedroom"
+endpoint = "PJSIP/primary-bed"
+number = 104
+page = false
+mailbox = "family"
+password_env = "HANDSET_PRIMARY_BED_PASSWORD"
+
+[[handsets]]
+id = "bunk-room"
+label = "Bunk room"
+endpoint = "PJSIP/bunk-room"
+number = 105
+page = false
+mailbox = "kids"
+password_env = "HANDSET_BUNK_ROOM_PASSWORD"
+
+# ── Groups ───────────────────────────────────────────────────
+# A group id works anywhere a handset id does, in EITHER policy file. The
+# business line rings "office" by id; the home line rings "everyone". Groups
+# contain handsets only — no nesting — which is why `everyone` is written
+# out rather than "adults" plus "kids".
+
+[[groups]]
+id = "adults"
+label = "Adult handsets"
+handsets = ["kitchen", "office", "primary-bed"]
+
+[[groups]]
+id = "kids"
+label = "The kids' rooms"
+handsets = ["playroom", "bunk-room"]
+
+[[groups]]
+id = "everyone"
+label = "Every phone in the house"
+handsets = ["kitchen", "office", "playroom", "primary-bed", "bunk-room"]

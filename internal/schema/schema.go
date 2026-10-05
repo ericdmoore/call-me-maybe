@@ -82,7 +82,7 @@ var (
 )
 
 // Names are the selectable schema names for `doorman schema <name>`.
-var Names = []string{"policy", "handsets", "trunks", "contacts", "env", "template"}
+var Names = []string{"policy", "handsets", "trunks", "contacts", "messages", "env", "template"}
 
 // Get returns one schema by name.
 func Get(name string) (*Schema, error) {
@@ -95,6 +95,8 @@ func Get(name string) (*Schema, error) {
 		return Trunks(), nil
 	case "contacts":
 		return Contacts(), nil
+	case "messages":
+		return Messages(), nil
 	case "env":
 		return Env(), nil
 	case "template":
@@ -116,6 +118,7 @@ func All(version string) *Bundle {
 			"handsets.toml": Handsets(),
 			"trunks.toml":   Trunks(),
 			"contacts.toml": Contacts(),
+			"messages.toml": Messages(),
 			"env":           Env(),
 			"template":      TemplateFormat(),
 		},
@@ -195,11 +198,30 @@ func handsetItem() *Schema {
 				Description: "Include in the page-all group reached by dialling 500.",
 				Default:     false,
 			},
+			"page_override": {
+				Type:        "boolean",
+				Description: "A page from this phone reaches a room that has set do-not-disturb (*78NN). Mark the kitchen and the parents' room: it is what makes DND safe to hand to a child, and `doorman check` warns when no phone has it. Inventory rather than policy, because which phones override is a fact about where they sit.",
+				Default:     false,
+				CrossRefs:   []string{"asterisk/extensions.conf *78NN / *79", "the generated 500 group in extensions_handsets.conf"},
+			},
+			"curfew": {
+				Type:        "array",
+				Items:       &Schema{Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$"},
+				Description: "Bedtime for this phone: ids of [[schedules]] in policy.toml. While ANY named window is active the phone is asleep — doorman rings it for nothing (house ring, extension, ladder stage), the generated dialplan leaves it out of pages and ring-all and refuses its calls out, and the daemon hangs up a call it is on at the hour. 911 is never refused: it lives outside everything the curfew touches. Several ids because \"22:45 on school nights, 23:30 at weekends\" is two windows. Inventory rather than policy, because the thing that sleeps is the phone in the room, whatever rings it.",
+				CrossRefs:   []string{"policy.toml [[schedules]].id", "the generated curfew context in extensions_handsets.conf", "CURFEW_PROMPT (the clip the dialplan plays to a sleeping phone that dials)"},
+				Rules:       []string{"An id no [[schedules]] entry defines fails `doorman check`, which names the handset and the id.", "A schedule with enabled = false is inert here too: `doorman check` shows it as switched off.", "Changing a curfew's hours or members needs `doorman render` and a reload — the dialplan carries them; the lobby's half follows the policy reload within a second.", "`doorman check` marks a curfewed handset ASLEEP NOW while a window is active."},
+			},
 			"mailbox": {
 				Type:        "string",
-				Description: "Mailbox whose message-waiting lamp this phone follows.",
+				Description: "This phone's own voicemail box. `doorman render` writes it into voicemail_handsets.conf when VOICEMAIL_<BOX>_PIN is in .env (a box without one is assumed hand-written in voicemail.conf, which is every box from before render made them); a call to this phone's number that rings out — or finds it busy — lands in it; the phone's voicemail key (*97) opens it without asking which or for a PIN; and its message-waiting lamp follows it. Two phones may name one box and share it. A policy file's `voicemail = \"…\"` may name it too, so a stranger with this room's PIN who rings out leaves the message on this room's phone.",
 				Pattern:     "^[a-z0-9][a-z0-9_-]*$",
-				CrossRefs:   []string{"asterisk/voicemail.conf [household] context"},
+				CrossRefs:   []string{"asterisk/voicemail.conf [household] context", "VOICEMAIL_<BOX>_PIN in .env", "policy.toml [house].voicemail and [[extensions]].voicemail"},
+				Rules:       []string{"`doorman rotate --voicemail [box …]` sets or rotates the PINs; `doorman init` gives every room its own box.", "`doorman check` lists every box handsets name and every box policy sends callers to, and says which the tool writes."},
+			},
+			"email": {
+				Type:        "string",
+				Description: "Where this phone's mailbox mails its messages, with the recording attached (voicemail.conf's attach=yes). Optional; the address on the generated mailbox line. Needs mailbox.",
+				Rules:       []string{"Needs mailbox on the same handset.", "When several phones share a box, the first address given is the box's."},
 			},
 			"password_env": {
 				Type:        "string",
@@ -259,7 +281,8 @@ func Trunks() *Schema {
 		Description: "The providers this box registers with. Optional, and its absence is the compatibility gate: with no trunks.toml `doorman render` generates only the handset config and a hand-written pjsip.conf keeps working exactly as it does today. Adding it makes a second provider a TOML block rather than a page of copied PJSIP. Changes when you buy a number somewhere new.",
 		Rules: []string{
 			"`doorman render` generates pjsip_trunks.conf and extensions_trunks.conf from this file. Both are OUTPUTS: never hand-edit them, and never commit the PJSIP one — it holds real registration passwords.",
-			"Every generated registration carries line=yes and endpoint=<id>. That pair is what binds inbound calls arriving on a registration to its endpoint, which is why no identify block and no provider IP allow-list is needed. Get it wrong and inbound calls hit the anonymous endpoint and vanish with no error anywhere.",
+			"Every generated registration carries line=yes and endpoint=<id>, the pair that binds inbound calls arriving on a registration to its endpoint (without it they hit the anonymous endpoint and vanish with no error anywhere) — and beside it two identify blocks that match the request URI and the To header against the trunk's own identity: username and every DID routed to it. Some providers (VoIP.ms) do not echo the ;line= tag, and without the identify blocks their inbound calls are dropped as \"No matching endpoint found\" with nothing rung. Never a provider IP allow-list: that goes stale silently the day a provider adds a media server.",
+			"from_user is emitted only when it differs from username. Defaulted to the sub-account it makes VoIP.ms answer 503 on every outbound call; left alone, the DID from [line] outbound_cid rides in From.",
 			"One inbound dialplan context per trunk, because each registration binds to its own endpoint with its own context=. Inside it, one route per DID, generated from [line] number and [line] trunk across every policy file.",
 			"A trunk id may not collide with a handset id: both become a PJSIP endpoint named after the id.",
 			"Secrets are named here, never written here. password_env and api_password_env hold the NAME of a .env variable; the loader refuses anything that is not shaped like one, so a pasted password fails loudly instead of being committed.",
@@ -430,8 +453,24 @@ func Contacts() *Schema {
 			"A number that will not normalise to E.164 is skipped and counted, and `doorman check` reports the count per source.",
 			"doorman parses the vCard subset real exporters emit — iCloud, Google Contacts, CardDAV, and 2.1 files with quoted-printable and folded lines — and counts whatever it does not understand rather than guessing at it.",
 			"Secrets are named here, never written here. token_env holds the NAME of a .env variable, and the token it names travels in an Authorization header rather than a query string, so a URL stays safe to log and to print.",
+			"A url source is fetched by the daemon at startup and every refresh, in a goroutine that is never on a call path, into a per-source cache under cache_dir (0600). A fetch that fails keeps the last good copy for that source and the others are unaffected; a source that has never succeeded contributes nothing and stops nobody. `doorman check` reports what the cache holds and how old it is; `doorman check --fetch` fetches now.",
 		},
 		Properties: map[string]*Schema{
+			"cache_dir": {
+				Type:        "string",
+				Description: "Where each url source's last good copy is kept, one file per source, mode 0600. Optional: absent means a contacts-cache directory beside this file. A relative path is relative to contacts.toml.",
+				Rules: []string{
+					"The cache is an optimisation, never a source of truth. Delete it and the phone still works: url sources contribute nothing until the next fetch, [[people]] is untouched.",
+					"It holds several people's entire address books — more personal data than anything else this project stores. Keep it out of any repository and off any backup that leaves the house.",
+				},
+			},
+			"refresh": {
+				Type:        "string",
+				Default:     "6h",
+				Pattern:     "^[0-9]+(ns|us|µs|ms|s|m|h)+$",
+				Description: "How often the daemon fetches url sources, as a Go duration: \"6h\", \"30m\". Conditional requests (If-None-Match / If-Modified-Since) make an unchanged fetch nearly free.",
+				Rules:       []string{"At least 1m. Under that is a poll, not a refresh, and a source is somebody else's server."},
+			},
 			"sources": {
 				Type:        "array",
 				Description: "Every address book to read, in the order they are declared. Declaration order is the only ordering there is, and it is what settles which of two names a shared number keeps.",
@@ -469,13 +508,17 @@ func contactSourceItem() *Schema {
 			"url": {
 				Type:        "string",
 				Pattern:     "^https?://",
-				Description: "A vCard export fetched over HTTP. RESERVED — this release reads path sources only, and `doorman check` says so per source rather than letting one quietly contribute nothing. The key exists now so contacts.toml does not churn when fetching lands.",
-				Rules:       []string{"Exactly one of path and url.", "Not fetched yet. Same posture as the VOICEMAIL_* keys in .env: declared ahead of the feature so the config shape is settled."},
+				Description: "A vCard export fetched over HTTP by the daemon, at startup and every refresh, into cache_dir. Between fetches — and whenever a fetch fails — the last good copy is what the lobby consults.",
+				Rules: []string{
+					"Exactly one of path and url.",
+					"Fetched off the call path: no call ever waits on a fetch. Until the first successful fetch the source contributes nothing, and `doorman check` says so per source rather than letting one quietly contribute nothing.",
+					"A non-2xx answer, a timeout, or a missing token keeps the last good copy and is reported with the source's age. The error never carries the response body, which could echo the request and its credential.",
+				},
 			},
 			"token_env": {
 				Type:        "string",
 				Pattern:     "^[A-Z][A-Z0-9_]*$",
-				Description: "Name of the .env variable holding this source's bearer token. The secret itself never appears in this file. RESERVED with url.",
+				Description: "Name of the .env variable holding this source's bearer token, sent as `Authorization: Bearer <token>`. The secret itself never appears in this file. The convention is CONTACTS_<ID>_TOKEN.",
 				Rules: []string{
 					"Names a variable; never put the token here. The pattern is enforced so that a pasted token fails the load rather than reaching a commit.",
 					"The token goes in an Authorization header, never a query string. A token in a URL makes the URL itself a secret, and every net/http transport error wraps into a *url.Error carrying the whole URL — which the obvious log line then ships to journald.",
@@ -514,6 +557,7 @@ func Policy() *Schema {
 			"line":       line(),
 			"house":      house(),
 			"people":     {Type: "array", Description: "The allow-list. These callers hear the welcome prompt and ring the house.", Items: person()},
+			"actions":    {Type: "array", Description: "The registry of things the house can do (s13): what each does, who may, what it says back, whether it confirms. A text word (messages.toml), a lobby digit and a passkey all name an action by id; the action owns the webhook.", Items: action()},
 			"schedules":  {Type: "array", Description: "Named time windows, defined once and referenced by id from extensions.", Items: schedule()},
 			"extensions": {Type: "array", Description: "What an unknown caller may dial in the lobby.", Items: extension()},
 		},
@@ -562,6 +606,18 @@ func line() *Schema {
 					"A route is generated only for a line that has BOTH trunk and number. A line with a trunk and no number gets a context but no DID route, and calls for it fall through to the default line.",
 					"It travels with outbound_cid as one decision: a provider will not present a number its account does not own, so `doorman check` and `doorman render` refuse a caller ID this config declares at a different provider.",
 					"Reaches the plain dial path as set_var=OUTBOUND_TRUNK on the endpoint at the next `doorman render`; the *4 console picks it up at the next policy reload.",
+				},
+			},
+			"failover": {
+				Type:        "array",
+				Items:       &Schema{Type: "string"},
+				Description: "The trunks a call placed as this line falls over to, in order, when its own trunk cannot carry it — ids from trunks.toml. Off unless written. A fallback presents that trunk's own number (the number of the first line that lives there), never this line's, because a provider will not carry a number its account does not own; `doorman check` prints which number each step presents. Only CHANUNAVAIL and CONGESTION climb the ladder — a lost registration, a provider outage, an exhausted balance and a dead network all look like those — while busy, no answer and a caller hanging up are answers from the far end and are never retried down another provider. When nothing can carry the call the caller hears \"all circuits are busy now\". A call that fell over ends in the fallback trunk's own generated context, so the CEL journal records which trunk carried it.",
+				CrossRefs:   []string{"trunks.toml [[trunks]].id", "asterisk/extensions.conf [cmm-outbound] OUTBOUND_FAILOVER", "extensions_trunks.conf [cmm-failover-<id>]"},
+				Rules: []string{
+					"Needs trunk on the same line: the ladder starts from the trunk this line's calls leave by, and the dialplan's DEFAULT_TRUNK is not a name doorman knows.",
+					"May not list the line's own trunk, an id twice, or an id trunks.toml does not declare; `doorman check` refuses each.",
+					"Reaches the plain dial path as set_var=OUTBOUND_FAILOVER on every handset that calls as this line at the next `doorman render`; the *4 console sets it per call for the line chosen at the keypad. The per-trunk [cmm-failover-<id>] contexts are generated into extensions_trunks.conf, so a box without a trunks.toml has no ladder to climb.",
+					"Emergency calls are not affected: 911 has its own ladder in [cmm-emergency], ordered by which trunk has a street address on file, and never reads this key.",
 				},
 			},
 			"outbound_cid": {
@@ -655,7 +711,76 @@ func person() *Schema {
 				Rules:       []string{"An unparseable number fails the load rather than never matching."},
 			},
 			"notes": {Type: "string", Description: "Free text for whoever edits this next."},
+			"id": {
+				Type:        "string",
+				Pattern:     "^[a-z0-9][a-z0-9_-]*$",
+				Description: "Optional short handle — \"gabi\" — for other files to name this person by. messages.toml says who may text which word by these ids.",
+				Rules:       []string{"Unique across [[people]].", "A handle, never a number retyped elsewhere and never an index that shifts when the list is edited."},
+				CrossRefs:   []string{"messages.toml [[words]] people"},
+			},
 		},
+		AdditionalProperties: falsy,
+	}
+}
+
+func action() *Schema {
+	return &Schema{
+		Type:     "object",
+		Required: []string{"id", "people"},
+		Properties: map[string]*Schema{
+			"id":        {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "What every transport names: `action = \"garage\"` on a word, a lobby leaf, a passkey button.", Rules: []string{"Unique."}},
+			"label":     {Type: "string", Description: "For people. Defaults to the id."},
+			"webhook":   {Type: "string", Pattern: "^https?://", Description: "POSTed to when the action is performed — Home Assistant's webhook, which decides what a garage is and may refuse. The body is JSON: action, person id, transport (sms, lobby, passkey), message id. Never a text, never a number.", Rules: []string{"The URL is a credential: an HA webhook id is the whole secret. Logged as a host only."}},
+			"reply":     {Type: "string", Description: "What the house says back, where the transport can carry one.", Rules: []string{"Plain ASCII, at most 160 characters — one segment, and no emoji, which would halve it. `doorman check` warns about a phone number, the one shape a carrier has dropped from this number, and refuses nothing else.", "An action needs a webhook, a reply, or both."}},
+			"people":    {Type: "array", MinItems: one, Items: &Schema{Type: "string"}, Description: "[[people]] ids who may perform it, or [\"*\"] for everyone on the allow-list. A transport may narrow this list, never widen it.", CrossRefs: []string{"[[people]] id"}, Rules: []string{"Every id must be a [[people]] id in this file."}},
+			"confirm":   {Type: "string", Enum: []any{"none", "passkey"}, Default: "none", Description: "\"passkey\": the request is intent, not authority — nothing moves until a passkey confirms it (s19). Until that door exists the house says so and does nothing."},
+			"state":     {Type: "string", Pattern: "^[a-z_]+\\.[a-z0-9_]+$", Description: "The Home Assistant entity whose state answers the question form of a word — `garage?` — read live from HA by `doorman inbox` (HA_URL and HA_TOKEN in .env), never remembered on the box: state you remember is state you get wrong. Without it a trailing ? is punctuation.", Rules: []string{"A domain.object entity id, like cover.garage_door.", "`doorman inbox` refuses to start when an action names a state and HA_URL or HA_TOKEN is missing."}},
+			"done_when": {Type: "string", Description: "The state in which performing the action would change nothing — \"open\" for an action that opens. A request when the entity is already there answers \"It was already open\" and never calls the webhook.", Rules: []string{"Needs state."}},
+		},
+		AdditionalProperties: falsy,
+	}
+}
+
+// ── messages.toml ────────────────────────────────────────────────────────
+
+// Messages describes messages.toml: who may text the house which word.
+func Messages() *Schema {
+	return &Schema{
+		SchemaURI:   "https://json-schema.org/draft/2020-12/schema",
+		ID:          "https://callmemaybe.cc/schema/messages.json",
+		Title:       "messages.toml — texts the house answers",
+		Type:        "object",
+		Description: "Which words a text to the house number may carry, from whom, and what each one does. Optional, and its absence is the compatibility gate: with no messages.toml the house answers no texts. A text to the house number is control plane, never conversation (\"one number, one purpose\"): a known word from a listed person does one thing and gets one boring reply; everything else is archived by the carrier's email forwarding and never answered.",
+		Rules: []string{
+			"One number, one purpose: a text to the house number is control plane and archive, never conversation, and nothing typed on a handset leaves through it. Conversational texting would be a second number and a line of its own.",
+			"Read by `doorman inbox`, the consumer of the house's edge inbox, and by `doorman check`; never by the daemon on the call path.",
+			"People are named by their [[people]] id in policy.toml, never by a number retyped here. `doorman check` refuses an id no [[people]] entry carries.",
+			"A stricter list than the ring allow-list by design: ringing the house and opening its garage are different trusts. \"*\" means everyone on the allow-list.",
+			"A text from a number not on the allow-list, or a listed person texting a word they may not, is archived and never answered — a reply tells a stranger the number is live.",
+			"Replies are boring on purpose: plain ASCII, under 160 characters. One segment on the bill, and no emoji, which would switch the encoding and halve it. `doorman check` warns about a phone number — the one shape a carrier has dropped from this number — and refuses nothing else; links are fine, and s19 sends them. The loader refuses only what the transport cannot carry.",
+			"Nothing here waits for a reply to arrive; there are no receipts. The door's state is the truth and the text is a courtesy.",
+		},
+		Properties: map[string]*Schema{
+			"words": {
+				Type:        "array",
+				MinItems:    one,
+				Description: "Every word the house understands by text.",
+				Items: &Schema{
+					Type:     "object",
+					Required: []string{"word", "people"},
+					Properties: map[string]*Schema{
+						"phonebook": {Type: "string", Pattern: "^(house|handset:[a-z0-9][a-z0-9_-]*)$", Description: "Import attached vCards into the shared house directory, or one handset's directory. Names and numbers only; never grants admission. Caption: Add to: word,word for one or more configured destinations, case-insensitive with optional spaces around commas. A bare word still selects one destination. Requires MMS forwarding and vCard parsing at the edge; the house receives only structured names and numbers.", CrossRefs: []string{"handsets.toml [[handsets]] id (after handset:)"}, Rules: []string{"Cannot be combined with action, webhook or reply. The importer replies with its result.", "Every named destination must exist and permit the sender before saving. Repeated destinations are deduplicated. At most three vCards and 100 distinct numbers per message."}},
+						"word":      {Type: "string", Pattern: "^[a-z0-9]+$", Description: "What the sender types: lowercase letters and digits, matched exactly against the trimmed, lowercased text.", Rules: []string{"Unique."}},
+						"action":    {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "The [[actions]] id in policy.toml this word performs. What it does, who may, what it says back and whether it confirms live there, once, for every transport.", CrossRefs: []string{"policy.toml [[actions]] id"}, Rules: []string{"A word names an action or phonebook, or carries its own reply (and, as a stopgap, its own webhook) — never an action and a webhook both.", "The action's people are the people; a word's list may only narrow it."}},
+						"people":    {Type: "array", MinItems: one, Items: &Schema{Type: "string"}, Description: "[[people]] ids allowed to say it, or [\"*\"] for everyone on the allow-list.", CrossRefs: []string{"policy.toml [[people]] id"}},
+						"webhook":   {Type: "string", Pattern: "^https?://", Description: "The stopgap before [[actions]]: a webhook on the word itself. Still accepted; `doorman check` says to move it to an action; it goes in a later release."},
+						"reply":     {Type: "string", Description: "Texted back to the sender. Optional.", Rules: []string{"Plain ASCII, at most 160 characters — one segment, and no emoji, which would halve it. `doorman check` warns about a phone number, the one shape a carrier has dropped from this number, and refuses nothing else.", "A word needs an action, phonebook, webhook or reply."}},
+					},
+					AdditionalProperties: falsy,
+				},
+			},
+		},
+		Required:             []string{"words"},
 		AdditionalProperties: falsy,
 	}
 }
@@ -665,7 +790,7 @@ func schedule() *Schema {
 		Type:     "object",
 		Required: []string{"id", "start", "end"},
 		Properties: map[string]*Schema{
-			"id": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Referenced as afterhours = \"<id>\" from an extension."},
+			"id": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Referenced as afterhours = \"<id>\" from an extension, or in curfew = [\"<id>\", …] on a handset in handsets.toml."},
 			"enabled": {
 				Type:        "boolean",
 				Default:     true,
@@ -699,7 +824,7 @@ func extension() *Schema {
 				Type:        "string",
 				Pattern:     `^\d+$`,
 				Description: "Digits only, minimum 4. Choose one you will remember — a number nobody can recite is a number nobody gives out. Guessable ones are refused at load: all-same digits, runs (including in twos), repeated blocks, palindromes, the handful everyone tries, and — at six digits and up — anything one digit away from all-same or from a run, since a guessing list is the patterns plus one typo. That is 0.31% of the six-digit space; everything else, dates included, is allowed. `doorman rotate` generates one when you would rather not choose.",
-				Rules:       []string{"Must be unique across extensions.", "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer."},
+				Rules:       []string{"Must be unique across extensions.", "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer. With mixed lengths, `#` ends the PIN and so does a pause (INTER_DIGIT_TIMEOUT_MS) once at least the shortest PIN's worth of digits is in; the longest PIN's length is the only count that fires on its own."},
 			},
 			"label":   {Type: "string", Description: "Human name, used by `doorman rotate <label>` and shown in `doorman check`."},
 			"enabled": {Type: "boolean", Default: true, Description: "False disables the extension without deleting it."},
@@ -793,7 +918,7 @@ func Env() *Schema {
 
 		"DEFAULT_COUNTRY_CODE": env("Country code assumed when a caller ID arrives without one.", "string", "1"),
 
-		"EXTENSION_LENGTH":       env("Digits in an extension when PIN lengths are mixed.", "positive integer", 6),
+		"EXTENSION_LENGTH":       env("Digits in an extension when the policy has no extensions to measure. With extensions, their lengths rule: a uniform length fires on the last digit; mixed lengths end on `#`, on a pause after the shortest length, or at the longest.", "positive integer", 6),
 		"FIRST_DIGIT_TIMEOUT_MS": env("Time to dial the FIRST digit, measured from the end of the greeting. Generous on purpose: a stranger reading a PIN off a card needs longer than a stopwatch allows.", "duration (milliseconds)", 10000),
 		"INTER_DIGIT_TIMEOUT_MS": env("Time allowed between subsequent digits.", "duration (milliseconds)", 3000),
 		"RING_TIMEOUT_S":         env("How long the house rings before giving up.", "duration (seconds)", 30),
@@ -813,6 +938,21 @@ func Env() *Schema {
 		"CALL_LOG_PATH":        env("Legacy JSONL output, written only when EVENT_JOURNAL_PATH is unset. Enables the per-call record log, one JSON line per completed call and per call placed through the *4 outbound console. Empty (the default) means no call log. Unlike the operational log this file holds full caller IDs — which is what makes \"who called while I was out\" answerable — so it is created 0600 and belongs on the box. Read it with `doorman calls`, which redacts by default. One file for every line, with `line` on the record, so a whole day still reads in order; `line` is absent on the default line and `direction` is absent on an inbound call, so a box answering one number writes exactly what it always did. Written off the call path: a full buffer drops records and counts them rather than delaying a call. Nothing on the call path ever reads it back; it is an output, not state.", "string", ""),
 		"CALL_LOG_MAX_BYTES":   env("Rotate the call log at this size, keeping one previous generation. Twenty calls a day is roughly 2 MB a year, so this cap is for the case that is not twenty calls a day.", "integer", 33554432),
 
+		"PHONEBOOK_DIR":              env("Phone book storage: own/<id>.vcf for *88; shared/house.vcf and shared/handsets/<id>.vcf for vCards received by inbox. Directory only, never call admission. Under the daemon's state directory; the installer creates it.", "path", "/var/lib/doorman/phonebook"),
+		"BACKUP_RECIPIENT":           env("The age public key the nightly backup encrypts to, written by `doorman backup init`. The private half is printed once at init and never stored on the box by init: with it off the box, the box cannot read its own backups and neither can any destination (a stolen box reads nothing). An operator may keep a copy at /var/lib/doorman/backup/identity.key for nightly read-back verification, at the explicit cost that root on the box can then decrypt every bundle. Lose the private key and every bundle is a brick, by design.", "string", ""),
+		"BACKUP_PATH":                env("A directory the nightly bundle is delivered to — on the box, a mounted drive, a share. One of the destinations; s3 and the account follow. `doorman backup run` does nothing without a recipient and at least one destination, and `init services` enables doorman-backup.timer only then.", "path", ""),
+		"BACKUP_S3_ENDPOINT":         env("An S3-compatible store the nightly bundle is also delivered to — AWS S3, Cloudflare R2, Backblaze B2, MinIO — as its endpoint URL (https://<account>.r2.cloudflarestorage.com, https://s3.<region>.amazonaws.com, …). Path-style addressing; four signed requests; no SDK. Present with BUCKET, KEY_ID and SECRET means enabled.", "url", ""),
+		"BACKUP_S3_BUCKET":           env("The bucket.", "string", ""),
+		"BACKUP_S3_REGION":           env("The signing region: \"auto\" for R2, the bucket's region for AWS and B2.", "string", "auto"),
+		"BACKUP_S3_PREFIX":           env("Optional key prefix inside the bucket, e.g. \"jepsen/\" when several boxes share one.", "string", ""),
+		"BACKUP_S3_KEY_ID":           env("The access key id for the bucket — a key scoped to this bucket alone, never an account key.", "string", ""),
+		"BACKUP_S3_SECRET":           env("Its secret. Lives in .env (0600) and in the bundle the box cannot read; never logged.", "string", ""),
+		"BACKUP_KEEP_DAILY":          env("How many days of nightly bundles each destination keeps (the newest per day).", "integer", "7"),
+		"BACKUP_KEEP_WEEKLY":         env("How many weeks of weekly bundles each destination keeps beyond the daily ones (the newest per ISO week).", "integer", "8"),
+		"PHONEBOOK_SPOOL":            env("Where Asterisk records *88 spoken names for `doorman phonebook` to file and transcribe. Its own directory because the two accounts share no other: asterisk-owned, doorman group, setgid, created by the installer. The rendered dialplan carries this path, so changing it needs `doorman render` and a reload.", "path", "/var/spool/call-me-maybe"),
+		"STT_ENDPOINT":               env("Speech-to-text service, OpenAI-compatible /v1/audio/transcriptions (whisper.cpp server, faster-whisper-server, speaches). Read by `doorman phonebook` only — the daemon ignores it: transcription runs minutes after the call, never on it (invariant 7). No key; the service is on the tailnet.", "url", ""),
+		"STT_MODEL":                  env("Model name sent to STT_ENDPOINT; empty lets the server choose.", "string", ""),
+		"STT_TIMEOUT_MS":             env("How long `doorman phonebook` waits for one transcription.", "integer", "120000"),
 		"CEL_SPOOL_PATH":             env("Optional Asterisk CEL SQLite spool (AST_LOG_DIR/master.db), initialised with scripts/cel-spool.sql. Requires EVENT_JOURNAL_PATH. Reads committed lifecycle events and resumes after restart; never used for call control.", "path", ""),
 		"EVENT_JOURNAL_PATH":         env("Optional SQLite event journal in a private 0700 directory; empty disables. Access through doorman events --json and doorman calls, not a public database service. When enabled, replaces legacy CALL_LOG_PATH writes. Storage failures degrade observation without delaying calls.", "path", ""),
 		"EVENT_JOURNAL_MAX_BYTES":    env("Physical storage budget, minimum 8 MiB. Usually the binding retention limit: default permits 16 MiB of database pages (roughly 27000 mixed events, workload dependent), not guaranteed 90-day history. A quarter bounds database pages; the rest reserves WAL space for pinned history and a large transaction; a pinned WAL pauses writes rather than growing without bound.", "integer", 67108864),
@@ -844,9 +984,15 @@ func Env() *Schema {
 			"EVENT_JOURNAL_MAX_BYTES must be at least 8388608; database pages receive one quarter of this budget, which may expire history well before the count or age ceilings.",
 			"Every problem is reported at once — doorman does not make you fix env vars one restart at a time.",
 			"HANDSET_<NAME>_PASSWORD variables are named by password_env in handsets.toml and read by `doorman render`, not by the daemon.",
+			"CONTACTS_<ID>_TOKEN variables are named by token_env in contacts.toml and read by the daemon's contacts refresher and by `doorman check --fetch`: the bearer token a url source is fetched with, sent in an Authorization header and never in the URL.",
 			"HANDSET_<NAME>_ADMIN_PASSWORD and HANDSET_<NAME>_PROVISION_PASSWORD are generated by `doorman init` for every handset and read only by `doorman render` and `doorman provision`: the phone's own web-admin password (so no phone keeps its factory login) and the credential a provisioned phone presents to fetch its configuration after first contact. Never typed, never in handsets.toml.",
+			"INBOX_URL and INBOX_TOKEN are read only by `doorman inbox`, never by the daemon: the house's edge inbox (the URL the edge worker serves this house at) and the token scoped to pulling its texts and sending its replies. The carrier API key is never on this box; the edge holds it.",
+			"HA_URL and HA_TOKEN are read only by `doorman inbox`, never by the daemon: Home Assistant's base URL and a long-lived access token, used to read the state of the entity an [[actions]] entry names (`garage?`, and `done_when`). LAN infrastructure like the ARI password, not a provider key; sent as a bearer header, never in a URL. Both or neither; required once any action names a state.",
+			"VOICEMAIL_<BOX>_PIN variables hold the PIN of each mailbox a handset names, read by `doorman render` into voicemail_handsets.conf exactly as HANDSET_<ID>_PASSWORD is read into pjsip_handsets.conf; `doorman init` writes one per room and `doorman rotate --voicemail` sets or rotates them. A box with no variable is left to the hand-written voicemail.conf.",
+			"MAIL_HOOK and MAIL_TO are read only by `doorman inbox` and `doorman digest`, never by the daemon and never on a call: the executable that sends one mail (subject as its argument, Markdown body on stdin, MAIL_TO in its environment; the shipped scripts/mail-hook-bullmoose runs the bullmoose CLI) and the house mailbox address. Both or neither. Asterisk's voicemail hook reads the same names from /etc/asterisk/cmm-mail.env.",
+			"BALANCE_RING and BALANCE_PROM are read only by `doorman balance` (and so by doorman-balance.timer), never by the daemon: the handset or group ids to ring when a trunk is below its threshold — an internal call over ARI, so it works when the account is empty, once a day per trunk — and the Prometheus textfile to write on every run. The daemon never checks a balance and never holds the provider API key.",
 			"PROVISION_ADDRESS is read only by `doorman render` and `doorman provision`, never by the daemon: the address phones reach this box at — its LAN IP, optionally :port (default 8443) — required once any handset carries mac and model. Never localhost (on the phone, that is the phone), never a .local name (SIP phones resolve through unicast DNS), and not a Tailscale address unless a phone is on the tailnet.",
-			"The VOICEMAIL_*, STT_*, and SMTP_* keys in examples/.env.example are reserved for the unshipped voicemail feature. They are deliberately not read yet, so .env will not churn when it lands.",
+			"The VOICEMAIL_* and SMTP_* keys in examples/.env.example are reserved for the unshipped voicemail feature and deliberately not read yet, so .env will not churn when it lands. STT_* is now read by `doorman phonebook` (the *88 spoken names, off the call path); the daemon parses and ignores it.",
 		},
 		Properties: props,
 		Required:   []string{"ARI_USERNAME", "ARI_PASSWORD"},

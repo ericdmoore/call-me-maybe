@@ -1,0 +1,45 @@
+# The house's texts: `doorman inbox` long-polls the house's edge inbox for
+# texts to the house number, acts on the words messages.toml allows, and
+# replies through the edge. No listener, no carrier credential on this box.
+#
+# Installed and enabled by `sudo doorman init services`; a rerun is the upgrade.
+#
+# Exits 0 and stays quiet when INBOX_URL is not set in .env, or there is no
+# messages.toml: a house that answers no texts has nothing to consume.
+[Unit]
+Description=Call Me Maybe — texts to the house
+Documentation=https://callmemaybe.cc
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=doorman
+Group=doorman
+WorkingDirectory=/opt/call-me-maybe
+EnvironmentFile=/opt/call-me-maybe/.env
+# The reply feed runs MAIL_HOOK, whose shipped form is the bullmoose CLI,
+# which keeps its login under $HOME/.bullmoose — so HOME is the state
+# directory this sandbox lets the service account write to.
+Environment=HOME=/var/lib/doorman
+ExecStart=/opt/call-me-maybe/bin/doorman inbox -state /var/lib/doorman/inbox
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/opt/call-me-maybe
+StateDirectory=doorman
+StateDirectoryMode=0700
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=64M
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

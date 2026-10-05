@@ -1,0 +1,14 @@
+# Once a morning, with a little jitter so a fleet of boxes does not ask one
+# provider at the same second. Persistent=true runs a missed check on the
+# next boot rather than skipping the day: a box that was off overnight is
+# exactly the box whose balance nobody looked at.
+[Unit]
+Description=Call Me Maybe — check the calling credit every morning
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

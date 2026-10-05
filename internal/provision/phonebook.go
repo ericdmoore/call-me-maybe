@@ -71,7 +71,29 @@ var houseFeatures = []struct{ name, dial string }{
 	{"Page everyone", "500"},
 	{"Family conference", "600"},
 	{"Voicemail", VoicemailCode},
+	{"Call back today at (*80)", "*80"},
+	{"Call back in (*81)", "*81"},
+	{"Wake up call (*82)", "*82"},
+	{"Add a number to this phone", AddNumberCode},
 }
+
+// AddNumberCode is *88: key a number, say the name, and it is in this
+// phone's own book (s24).
+const AddNumberCode = "*88"
+
+// OwnBook is a phone's own additions, served to that phone only. ID "own"
+// is reserved: not a contacts.toml source, never admission.
+func OwnBook(entries []OwnEntry) Book {
+	b := Book{ID: "own", Name: "Added here"}
+	for _, e := range entries {
+		b.Contacts = append(b.Contacts, Contact{Name: e.Name, Numbers: []Number{{Kind: "cell", Dial: DialString(e.E164)}}})
+	}
+	return b
+}
+
+// OwnEntry is what the own book needs of an entry; the ownbook package owns
+// the file, this package owns the phone's view of it.
+type OwnEntry struct{ Name, E164 string }
 
 // PeopleBook is the allow-list, one contact per name with every number.
 func PeopleBook(callers []policy.KnownCaller) Book {

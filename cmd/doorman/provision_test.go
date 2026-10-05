@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"go/parser"
 	"go/token"
 	"net/http"
@@ -332,6 +333,7 @@ func TestNothingUnderInternalImportsTheServingPackage(t *testing.T) {
 // is named, and a phone that fetches afterwards counts as done.
 func TestNotifySessionSendsCheckSyncThenWatchesTheFetch(t *testing.T) {
 	h := newSession(t, []string{"kitchen"}, 3*time.Second)
+	h.feed.set("kitchen", true) // registered before the notify, as a live phone is
 	var notified []string
 	h.session.notify = func(id string) (string, error) {
 		notified = append(notified, id)
@@ -343,12 +345,19 @@ func TestNotifySessionSendsCheckSyncThenWatchesTheFetch(t *testing.T) {
 			if err == nil {
 				resp.Body.Close()
 			}
+			// The phone reboots to apply: gone, then back.
+			time.Sleep(40 * time.Millisecond)
+			h.feed.set("kitchen", false)
+			time.Sleep(60 * time.Millisecond)
 			h.feed.set("kitchen", true)
 		}()
 		return "Sending NOTIFY of type 'check-sync' to endpoint kitchen", nil
 	}
 	if code := h.session.run(context.Background()); code != 0 {
 		t.Fatalf("exit = %d\n%s", code, h.out.String())
+	}
+	if out := h.out.String(); !strings.Contains(out, "restarting") || strings.Index(out, "restarting") > strings.Index(out, "registered  PJSIP/kitchen") {
+		t.Fatalf("a notified phone must be seen restarting before it counts as registered:\n%s", out)
 	}
 	if len(notified) != 1 || notified[0] != "kitchen" {
 		t.Fatalf("notified = %v", notified)
@@ -366,5 +375,68 @@ func TestNotifyFailureIsReportedAndTheWindowStaysOpen(t *testing.T) {
 	}
 	if !strings.Contains(h.out.String(), "notify failed") {
 		t.Fatalf("the failure must be visible:\n%s", h.out.String())
+	}
+}
+
+// `doorman provision kitchen --window 45m` is how a person types it; the
+// flag must not be mistaken for a handset id.
+func TestProvisionFlagsMayFollowTheIds(t *testing.T) {
+	fs := flag.NewFlagSet("provision", flag.ContinueOnError)
+	window := fs.Duration("window", 0, "")
+	all := fs.Bool("all", false, "")
+	ids := parseInterleaved(fs, []string{"kitchen", "--window", "45m", "theater", "-all"})
+	if len(ids) != 2 || ids[0] != "kitchen" || ids[1] != "theater" {
+		t.Fatalf("ids = %v", ids)
+	}
+	if *window != 45*time.Minute || !*all {
+		t.Fatalf("flags after ids were not parsed: window=%v all=%v", *window, *all)
+	}
+}
+
+// After a factory reset, or when the credential on the phone is wrong, the
+// operator reopens first contact for that phone and nothing else.
+func TestResetReopensFirstContactForTheNamedPhoneOnly(t *testing.T) {
+	dir, phones := sessionPhones(t)
+	state := t.TempDir()
+	srv, err := provserve.New(provserve.Options{Dir: dir, StateDir: state, Phones: phones, Address: phones[0].Address})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	fetch(t, ts.URL+"/prov/cfgec74d788a254.xml") // kitchen: first contact
+	fetch(t, ts.URL+"/prov/cfgec74d788bd5a.xml") // theater: first contact
+	srv2, _ := provserve.New(provserve.Options{Dir: dir, StateDir: state, Phones: phones, Address: phones[0].Address})
+	srv2.Forget(phones[0].MAC)
+	ts2 := httptest.NewServer(srv2.Handler())
+	defer ts2.Close()
+	if got := fetch(t, ts2.URL+"/prov/cfgec74d788a254.xml"); got != 200 {
+		t.Fatalf("kitchen after reset should be served without a credential, got %d", got)
+	}
+	if got := fetch(t, ts2.URL+"/prov/cfgec74d788bd5a.xml"); got != 401 {
+		t.Fatalf("theater was not reset and must still need its credential, got %d", got)
+	}
+}
+
+// A text is never read on the call path: internal/inbox is reachable from
+// `doorman inbox` and nothing else, the same guard the provider and the
+// LAN listener have. Its own test file is the one other allowed name.
+func TestOnlyTheInboxCommandNamesTheInboxPackage(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".go") || name == "inbox.go" || name == "inbox_test.go" || name == "provision_test.go" {
+			continue
+		}
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(src), "internal/inbox") {
+			t.Errorf("%s mentions internal/inbox — texts are consumed by `doorman inbox` and nothing else", name)
+		}
 	}
 }

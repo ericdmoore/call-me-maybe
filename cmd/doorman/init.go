@@ -19,6 +19,9 @@ import (
 // crypto/rand; PINs are printed to stdout exactly once and never logged, which
 // is the rule `doorman rotate` already follows.
 func runInit(args []string) int {
+	if len(args) > 0 && args[0] == "services" {
+		return runInitServices(args[1:])
+	}
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	rooms := fs.String("rooms", "", "comma-separated room names, e.g. \"Kitchen,Office,Kids Room\" (skips the interview)")
 	force := fs.Bool("force", false, "overwrite existing config, backing it up first")
@@ -83,6 +86,16 @@ func runInit(args []string) int {
 		fmt.Fprintf(os.Stderr, "✗ cannot read %s/.env.example: %v\n", *examplesDir, err)
 		fmt.Fprintf(os.Stderr, "  Run init from the repository root, or pass --examples.\n")
 		return 1
+	}
+	// A prepared Linux host has a private journal directory and an
+	// initialised CEL spool (install-scripts/); point .env at whichever
+	// exists, so the journal is on from the first boot and a workstation
+	// init writes exactly what it always did.
+	if info, err := os.Stat("/var/lib/doorman/journal"); err == nil && info.IsDir() {
+		plan.JournalPath = "/var/lib/doorman/journal/events.db"
+		if _, err := os.Stat("/var/log/asterisk/master.db"); err == nil {
+			plan.CELSpoolPath = "/var/log/asterisk/master.db"
+		}
 	}
 	envOut := plan.EnvFile(string(envBase))
 
@@ -183,6 +196,8 @@ func printSecrets(plan *setup.Plan) {
 	for _, h := range plan.Handsets {
 		fmt.Printf("  %-22s %s\n", h.Label, plan.ExtensionPINs[h.ID])
 	}
+	fmt.Println("  (each room's own voicemail PIN is in .env as VOICEMAIL_<ROOM>_PIN; the")
+	fmt.Println("   room's phone opens its box without one, *98 from another phone asks)")
 	if pin, ok := plan.VoicemailPINs[plan.Mailbox]; ok {
 		fmt.Println()
 		fmt.Printf("  %-22s %s   (set this in voicemail.conf)\n", "Voicemail "+plan.Mailbox, pin)

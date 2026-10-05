@@ -65,17 +65,33 @@ func TestFirstContactIsOpenThenTheCredentialIsRequired(t *testing.T) {
 	if at, ok := s.SeenAt("ec:74:d7:88:a2:54"); !ok || at.IsZero() {
 		t.Fatal("first contact should be recorded with its time")
 	}
-	if rec := get(h, "/prov/cfgec74d788a254.xml", "", ""); rec.Code != 401 {
-		t.Fatalf("second fetch without the credential must be 401, got %d", rec.Code)
+	// The same phone, applying what it fetched, fetches again from the same
+	// address inside the window: served. It cannot have the credential yet.
+	if rec := get(h, "/prov/cfgec74d788a254.xml", "", ""); rec.Code != 200 {
+		t.Fatalf("a re-fetch from the first-contact address inside the window must be served, got %d", rec.Code)
 	}
-	if rec := get(h, "/prov/cfgec74d788a254.xml", "kitchen", "wrong"); rec.Code != 401 {
+	// Anybody else, without the credential: not.
+	other := httptest.NewRequest(http.MethodGet, "/prov/cfgec74d788a254.xml", nil)
+	other.RemoteAddr = "192.168.7.99:40000"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, other)
+	if rec.Code != 401 {
+		t.Fatalf("a fetch from another address without the credential must be 401, got %d", rec.Code)
+	}
+	other.SetBasicAuth("kitchen", "wrong")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, other)
+	if rec.Code != 401 {
 		t.Fatalf("wrong credential must be 401, got %d", rec.Code)
 	}
-	if rec := get(h, "/prov/cfgec74d788a254.xml", "kitchen", "prov-k"); rec.Code != 200 {
-		t.Fatalf("the phone's own credential must be accepted, got %d", rec.Code)
+	other.SetBasicAuth("kitchen", "prov-k")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, other)
+	if rec.Code != 200 {
+		t.Fatalf("the phone's own credential must be accepted from anywhere, got %d", rec.Code)
 	}
 	got := kinds(*events)
-	want := []string{"connected", "fetched", "connected", "unauthorized", "connected", "unauthorized", "connected", "fetched"}
+	want := []string{"connected", "fetched", "connected", "fetched", "connected", "unauthorized", "connected", "unauthorized", "connected", "fetched"}
 	if len(got) != len(want) {
 		t.Fatalf("events %v", got)
 	}
@@ -84,10 +100,14 @@ func TestFirstContactIsOpenThenTheCredentialIsRequired(t *testing.T) {
 			t.Fatalf("events %v, want %v", got, want)
 		}
 	}
-	// First contact survives a new window: it is on disk.
+	// First contact survives a new window: it is on disk — and the address
+	// grace does not: a new window asks for the credential again.
 	s2, err := New(s.opts)
 	if err != nil || !s2.Seen("ec:74:d7:88:a2:54") {
 		t.Fatal("first contact must persist across windows")
+	}
+	if rec := get(s2.Handler(), "/prov/cfgec74d788a254.xml", "", ""); rec.Code != 401 {
+		t.Fatalf("in a new window the credential is required again, got %d", rec.Code)
 	}
 	s2.Forget("ec:74:d7:88:a2:54")
 	if s2.Seen("ec:74:d7:88:a2:54") {
@@ -110,7 +130,7 @@ func TestAnUnlistedPhoneIsRefusedAndNamed(t *testing.T) {
 }
 
 func TestNothingIsListableAndThePhonebookNeedsTheCredential(t *testing.T) {
-	s, _ := window(t)
+	s, events := window(t)
 	h := s.Handler()
 	for _, path := range []string{"/prov/", "/prov", "/", "/prov/kitchen/", "/prov/kitchen-phonebook.xml", "/prov/../etc/passwd"} {
 		if rec := get(h, path, "", ""); rec.Code == 200 {
@@ -120,11 +140,25 @@ func TestNothingIsListableAndThePhonebookNeedsTheCredential(t *testing.T) {
 	if rec := get(h, "/prov/kitchen/phonebook.xml", "", ""); rec.Code != 401 {
 		t.Errorf("phonebook without credential must be 401, got %d", rec.Code)
 	}
+	if last := (*events)[len(*events)-1]; last.Kind != "unauthorized" || last.Handset != "kitchen" || !strings.Contains(last.Detail, "phonebook") {
+		t.Errorf("a phonebook fetch without a credential must be reported, got %+v", last)
+	}
 	if rec := get(h, "/prov/kitchen/phonebook.xml", "kitchen", "prov-k"); rec.Code != 200 || rec.Body.String() != "<AddressBook/>" {
 		t.Errorf("phonebook with credential must be served, got %d", rec.Code)
 	}
 	if rec := get(h, "/prov/nobody/phonebook.xml", "nobody", "x"); rec.Code != 404 {
 		t.Errorf("unknown handset's phonebook must be 404, got %d", rec.Code)
+	}
+	// The token form: the phone's credential in the path, no header needed.
+	tok := provision.PhonebookToken("prov-k")
+	if rec := get(h, "/prov/kitchen/"+tok+"/phonebook.xml", "", ""); rec.Code != 200 || rec.Body.String() != "<AddressBook/>" {
+		t.Errorf("phonebook by token must be served, got %d", rec.Code)
+	}
+	if rec := get(h, "/prov/kitchen/"+provision.PhonebookToken("wrong")+"/phonebook.xml", "", ""); rec.Code != 404 {
+		t.Errorf("a wrong token must be 404, got %d", rec.Code)
+	}
+	if rec := get(h, "/prov/kitchen/"+tok+"/cfgec74d788a254.xml", "", ""); rec.Code != 404 {
+		t.Errorf("the token path serves phone books only, got %d", rec.Code)
 	}
 	// The operator alias: same bytes, never without the credential — a room
 	// name is guessable, a MAC is not, and only the MAC path is open at all.

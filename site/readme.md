@@ -153,3 +153,17 @@ oxblood via the same `data-state` the keypad drives. `not_found_handling:
   same orientation file the repo ships. If you change one, change both.
 - `src/data/hardware.ts` duplicates the README's hardware table. See the note
   at the top of that file — it should be generated, and is not yet.
+
+## Provider comparison maintenance
+
+`src/data/providers.ts` owns the dated rate-card snapshot and source links.
+Update the checked date, prices, units and sources together; the `/providers/`
+page also contains explicit usage arithmetic to update when its inputs change.
+SIP registration documentation is separate from a live Call Me Maybe test.
+All editorial provider links use `track()` (`utm_source=callmemaybe.cc`,
+`utm_medium=referral`, `utm_campaign=providers`, placement in `utm_content`).
+UTMs attribute referrals to the destination; they do not measure our clicks
+or conversions. No provider commissions or first-party click tracking.
+
+The [communication audit and unpublished drafts](../docs/positioning/README.md)
+record the October 2026 source review and proposed product follow-ups.

@@ -318,7 +318,7 @@ path = "`+filepath.Join(dir, "not-there.vcf")+`"
 // url sources are reserved, and reserved has to be visible. A source that
 // quietly contributed nothing would be the silence this milestone exists to
 // avoid.
-func TestURLSourcesAreReportedAsNotFetchedYet(t *testing.T) {
+func TestAURLSourceNeverFetchedIsReportedNotFailed(t *testing.T) {
 	dir := t.TempDir()
 	c := writeContacts(t, dir, `
 [[sources]]

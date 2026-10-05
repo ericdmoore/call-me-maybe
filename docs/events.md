@@ -31,8 +31,8 @@ to JSONL when journal storage fails.
 
 ## Upgrade and validation
 
-Reinstall `scripts/doorman.service` and run `systemctl daemon-reload` when
-upgrading an older unit: `StateDirectory=doorman` grants journal writes under
+Rerun `sudo doorman init services` when
+upgrading an older unit (it replaces the units it wrote and reloads): `StateDirectory=doorman` grants journal writes under
 `ProtectSystem=strict`. systemd reapplies `StateDirectoryMode=0700` on each start;
 other programs writing under `/var/lib/doorman` must use compatible ownership or
 a separate directory. Run `sudo -u doorman doorman check` from the configured
@@ -200,6 +200,27 @@ The vocabulary includes `call.observed`, `admission.decided`, `ring.started`,
 `contacts.refresh_failed`, `ari.connected`, `ari.disconnected`, `daemon.started`,
 `daemon.stopping`, and `journal.coverage_gap`.
 
+Texts to the house and the actions they perform (s13, s15) are written by
+`doorman inbox`, a second process, with `source: doorman-inbox`:
+`message.received` for every text (`reason` is the outcome — acted, replied,
+asked, unchanged, unlisted, unknown-word, not-allowed, needs-confirmation,
+duplicate, failed), then `message.acted` for a word that replied on its own,
+or `action.performed` / `action.refused` when the word named a registry
+action. `payload.action` carries the action id, the person's `[[people]]`
+id, the transport (`sms`), the word, the edge's message id and, when Home
+Assistant was asked, the state it reported — never the text and never a
+number. `doorman phonebook`, another sibling (`source: doorman-phonebook`), writes
+`phonebook.added` when a number keyed with `*88` is filed into a handset's own
+book and `phonebook.named` when its spoken name has been transcribed; `doorman backup`
+(`source: doorman-backup`) writes `backup.completed` / `backup.failed` per
+destination (`reason` is the destination's name, never a path);
+`reason` is the handset id, never the number or the name. The inbox is a *sibling* writer: it appends committed rows with the
+same store and the same budget, holds no owner lock, never creates or
+migrates the journal, and does none of the daemon's bookkeeping (the clean
+flag, coverage gaps, CEL, pruning on a timer). Its rows ring no doorbell of
+their own; they are visible to the next read and announced by the daemon's
+next commit.
+
 A `call.answered` event means an originated handset leg answered, not a guarantee
 that bridging succeeded. Ring-stage durations and outcomes are recorded as stages
 finish. Admission events report the reason and credential verdict, never digits.
@@ -231,6 +252,16 @@ writes `master.db` under Asterisk's `astlogdir` (usually
 ```sh
 sudo asterisk -rx 'module show like cel_sqlite3_custom'
 ```
+
+**On a host prepared by `install-scripts/`, all of this is done:** the two
+configuration files are installed (the distro samples kept as `.distro`), the
+spool is initialised once as the asterisk user, the service account is granted
+read access, a running Asterisk is asked to `core reload` so `cel show status`
+turns to Enabled, and `doorman init` writes `CEL_SPOOL_PATH` and
+`EVENT_JOURNAL_PATH` into `.env` because the places exist. A rerun is
+idempotent and repairs a host prepared before 2026-09-25. `scripts/smoke.sh`
+reports the capture state as its own rung. What follows is the same procedure
+by hand, for a host prepared some other way.
 
 During a maintenance window, stop Asterisk, initialise the spool, then install
 the configuration files. Substitute the actual `astlogdir` and service user.

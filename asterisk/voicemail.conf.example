@@ -3,8 +3,13 @@
 ;
 ; attach=yes is the load-bearing line: every message is emailed with the
 ; recording attached, which is most of the project's voicemail roadmap
-; implemented by Asterisk itself. Point mailcmd at msmtp/sendmail relaying
-; through your provider (e.g. SES) — see RUNBOOK.
+; implemented by Asterisk itself. Two ways out of the box, pick one:
+;   mailcmd       — an SMTP relay (msmtp/sendmail) that takes Asterisk's own
+;                   email as-is.
+;   externnotify  — the house mailbox: a script that runs after each message
+;                   is saved and hands it to a mail hook (the shipped one
+;                   uses the bullmoose CLI with a send-only token). See
+;                   RUNBOOK, "The house mailbox".
 ;
 ; CHANGE THE PASSWORDS. 4242 below is a placeholder, and voicemail
 ; passwords are dialable from any handset via *97.
@@ -16,12 +21,39 @@ attach = yes
 maxmsg = 100
 maxsecs = 180
 minsecs = 2
+; A PIN changed from a phone's own menu is written here rather than back
+; into the file that declared it — which for a generated box would be undone
+; by the next `doorman render`.
+passwordlocation = spooldir
 serveremail = lobby@example.com
 emailsubject = [Home phone] Voicemail for ${VM_NAME} from ${VM_CALLERID}
 ; mailcmd = /usr/bin/msmtp -t
+; The house mailbox route. Runs as the asterisk user, off the call, after the
+; message is saved; reads MAIL_TO from /etc/asterisk/cmm-mail.env. A failed
+; send leaves the message in the box and the lamp lit.
+; externnotify = /opt/call-me-maybe/scripts/voicemail-notify
 
 [household]
 ; mailbox => password,Display Name,email
 kids   => 4242,Kids Room,kids@example.com
 adults => 4242,Adults,adults@example.com
 family => 4242,Family,family@example.com
+
+; ── The hunt (optional) ──────────────────────────────────────
+; One mailbox per clue, NAMED FOR ITS ANSWER: a child who counts six chairs
+; dials *66 and hears this greeting. Record each greeting through *98 (the
+; mailbox, its PIN, then 0 and 1). The PINs are for recording and are the
+; parents' alone — children never hold a credential, and a hunt never uses a
+; lobby PIN, a mailbox PIN or an admin password as an answer or a reward.
+; Pick your own random PINs; these are examples. No email: the clue is the
+; greeting, and nobody leaves messages here. See docs/HUNT.md.
+;6  => 7391,Hunt: chairs
+;14 => 2685,Hunt: stairs
+
+; ── The phones' own boxes ────────────────────────────────────
+; `doorman render` writes voicemail_handsets.conf: one box per `mailbox` a
+; handset names, PIN from VOICEMAIL_<BOX>_PIN in .env, appended to [household]
+; with (+) so everything above stays. A box named there without a PIN in .env
+; is left to this file. tryinclude, not include: absent before the first
+; render, and a missing #include rejects the whole file.
+#tryinclude "voicemail_handsets.conf"

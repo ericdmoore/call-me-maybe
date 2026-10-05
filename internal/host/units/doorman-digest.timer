@@ -1,0 +1,12 @@
+# Every morning after the balance check, with a little jitter; a missed
+# morning runs on the next boot rather than being skipped.
+[Unit]
+Description=Call Me Maybe — the morning digest
+
+[Timer]
+OnCalendar=*-*-* 07:30:00
+RandomizedDelaySec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

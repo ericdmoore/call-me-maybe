@@ -19,6 +19,7 @@ import (
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/provision"
 	provserve "callmemaybe/internal/provision/serve"
+	"callmemaybe/internal/render"
 	"callmemaybe/internal/xdg"
 )
 
@@ -69,7 +70,11 @@ func runProvision(args []string) int {
 	all := fs.Bool("all", false, "every handset with a mac and model")
 	models := fs.Bool("models", false, "list the model ids handsets.toml accepts")
 	exportCert := fs.Bool("export-cert", false, "print the window's certificate (PEM) for a phone that validates servers")
-	_ = fs.Parse(args)
+	reset := fs.Bool("reset", false, "treat the named phones as making first contact again: after a factory reset, or when a fetch was refused as unauthorized")
+	// Flags and ids in any order: `doorman provision kitchen --window 45m`
+	// reads naturally, and the stdlib parser would otherwise take --window
+	// as a handset id. The first rehearsal typed it that way.
+	ids := parseInterleaved(fs, args)
 
 	if *models {
 		printModels(os.Stdout)
@@ -109,7 +114,7 @@ func runProvision(args []string) int {
 	reader := provisionARIReader(ctx, env)
 
 	// The inventory view.
-	if fs.NArg() == 0 && !*all && !*exportCert && !notify {
+	if len(ids) == 0 && !*all && !*exportCert && !notify {
 		srv, err := provserve.New(provserve.Options{Dir: provDir, StateDir: stateDir, Phones: built.Phones, Address: address})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
@@ -128,7 +133,7 @@ func runProvision(args []string) int {
 		for _, p := range built.Phones {
 			byID[p.ID] = p
 		}
-		for _, id := range fs.Args() {
+		for _, id := range ids {
 			p, ok := byID[id]
 			if !ok {
 				fmt.Fprintf(os.Stderr, "✗ %q is not a handset with a mac and model in %s\n", id, handsetsPath)
@@ -170,6 +175,12 @@ func runProvision(args []string) int {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return provisionExitUsage
 	}
+	if *reset {
+		for _, p := range named {
+			srv.Forget(p.MAC)
+			fmt.Printf("→ %s: first contact reopened — the next fetch needs no credential\n", p.ID)
+		}
+	}
 	if *exportCert {
 		pemBytes, err := srv.CertificatePEM()
 		if err != nil {
@@ -200,23 +211,56 @@ func runProvision(args []string) int {
 	return session.run(ctx)
 }
 
+// notifyScript is where the installer puts scripts/notify-check-sync and
+// what /etc/sudoers.d/doorman-notify allows the service account to run.
+const notifyScript = "/opt/call-me-maybe/scripts/notify-check-sync"
+
 // asteriskNotify tells a registered phone to fetch its configuration again,
 // through the Asterisk console — there is no ARI call for a NOTIFY, and the
 // console is already how the runbook reloads. Needs the pjsip_notify.conf
 // this repo ships, which defines check-sync.
 func asteriskNotify(id string) (string, error) {
-	out, err := exec.Command("asterisk", "-rx", "pjsip send notify check-sync endpoint "+id).CombinedOutput()
+	// The console needs asterisk.conf and the control socket, both owned by
+	// asterisk. The service account is given exactly this command through
+	// /etc/sudoers.d/doorman-notify (the installer writes it); root runs it
+	// directly.
+	// check-sync;reboot=true, not plain check-sync: the WP826 answers the
+	// plain one 200 OK and then does nothing; with reboot=true it reboots,
+	// fetches, and registers inside a minute (first re-provision, 2026-09-23).
+	args := []string{"asterisk", "-rx", "pjsip send notify check-sync-reboot endpoint " + id}
+	if os.Geteuid() != 0 {
+		// Not root: through the one script sudoers allows. The console wants
+		// its command as one argument with spaces, which a sudoers rule
+		// cannot match word by word; the script takes the id and nothing else.
+		args = []string{"sudo", "-n", notifyScript, id}
+	}
+	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil {
 		if text == "" {
 			text = err.Error()
 		}
-		return text, fmt.Errorf("asterisk -rx failed — run as a user in the asterisk group, or with sudo: %s", text)
+		return text, fmt.Errorf("check-sync failed — needs %s and /etc/sudoers.d/doorman-notify from the installer, or run as root: %s", notifyScript, text)
 	}
 	if strings.Contains(text, "Unable to find") || strings.Contains(text, "not found") {
 		return text, errors.New(text)
 	}
 	return text, nil
+}
+
+// parseInterleaved parses flags wherever they appear, returning the
+// positional arguments in order.
+func parseInterleaved(fs *flag.FlagSet, args []string) []string {
+	var positional []string
+	for {
+		_ = fs.Parse(args)
+		rest := fs.Args()
+		if len(rest) == 0 {
+			return positional
+		}
+		positional = append(positional, rest[0])
+		args = rest[1:]
+	}
 }
 
 // provisionStateDir is where the certificate and first-contact records
@@ -380,6 +424,10 @@ type provisionSession struct {
 type phoneProgress struct {
 	fetched    bool
 	registered bool
+	// offline is set once the endpoint has been seen offline after the
+	// fetch — a notify session's phone reboots to apply, and it has not
+	// re-registered until it has been gone and come back.
+	offline bool
 }
 
 func (s *provisionSession) run(ctx context.Context) int {
@@ -411,7 +459,7 @@ func (s *provisionSession) run(ctx context.Context) int {
 				fmt.Fprintf(s.out, "  %s  %-10s notify failed: %v\n", time.Now().Format("15:04:05"), p.ID, err)
 				continue
 			}
-			fmt.Fprintf(s.out, "  %s  %-10s sent check-sync — the phone should fetch within seconds\n", time.Now().Format("15:04:05"), p.ID)
+			fmt.Fprintf(s.out, "  %s  %-10s sent check-sync (reboot) — the phone restarts and fetches within a minute\n", time.Now().Format("15:04:05"), p.ID)
 		}
 	}
 
@@ -486,7 +534,17 @@ func (s *provisionSession) run(ctx context.Context) int {
 				if !pr.fetched || pr.registered || s.reader == nil {
 					continue
 				}
-				if readRegistration(ctx, s.reader, p.ID).online {
+				reg := readRegistration(ctx, s.reader, p.ID)
+				// After a notify the phone reboots to apply: it is only
+				// re-registered once it has gone away and come back.
+				if s.notify != nil && !pr.offline {
+					if reg.known && !reg.online {
+						pr.offline = true
+						fmt.Fprintf(s.out, "  %s  %-10s restarting\n", stamp(), p.ID)
+					}
+					continue
+				}
+				if reg.online {
 					pr.registered = true
 					fmt.Fprintf(s.out, "  %s  %-10s registered  PJSIP/%s\n", stamp(), p.ID, p.ID)
 				}
@@ -507,7 +565,7 @@ func (s *provisionSession) printEvent(at string, e provserve.Event) {
 	case "refused":
 		fmt.Fprintf(s.out, "  %s  !          %s\n", at, e.Detail)
 	case "unauthorized":
-		fmt.Fprintf(s.out, "  %s  %-10s refused: %s\n", at, e.Handset, e.Detail)
+		fmt.Fprintf(s.out, "  %s  %-10s %s\n", at, e.Handset, e.Detail)
 	case "error":
 		fmt.Fprintf(s.out, "  %s  %-10s error: %s\n", at, e.Handset, e.Detail)
 	case "phonebook":
@@ -525,14 +583,16 @@ func printInstructions(w io.Writer, p provision.Phone) {
 	switch p.Model.Family {
 	case "grandstream-xml":
 		if strings.HasPrefix(p.Model.ID, "grandstream-wp") {
-			fmt.Fprintf(w, "    on the phone:  Menu → Settings → Advanced Settings → Provisioning\n")
+			// The WP8xx handset menu has no config-server entry (Settings →
+			// Zero Config is Grandstream's cloud, not this); the web UI is
+			// the path. The handset shows its IP under Settings → Status.
+			fmt.Fprintf(w, "    on the phone:  (Wi-Fi first: Settings → Quick Network Configuration; then Settings → Status for its IP)\n")
 		} else {
-			fmt.Fprintf(w, "    on the phone:  Menu → System → Provisioning\n")
+			fmt.Fprintf(w, "    on the phone:  Menu → System → Provisioning → Config Server Path: %s   Upgrade via: HTTPS\n", p.Address.ConfigServerPath())
 		}
-		fmt.Fprintf(w, "                   Config Server Path: %s      Upgrade via: HTTPS\n", p.Address.ConfigServerPath())
-		fmt.Fprintf(w, "                   then Provision Now (or reboot)\n")
-		fmt.Fprintf(w, "    on the web:    https://<phone-ip> → Maintenance → Upgrade and Provisioning → Config File\n")
-		fmt.Fprintf(w, "                   Config Upgrade Via: HTTPS   Config Server Path: %s   → Save and Apply, then reboot\n", p.Address.ConfigServerPath())
+		fmt.Fprintf(w, "    on the web:    https://<phone-ip> (admin, the password on the sticker) → Maintenance → Upgrade and Provisioning → Config File\n")
+		fmt.Fprintf(w, "                   Config Upgrade Via: HTTPS   Config Server Path: %s\n", p.Address.ConfigServerPath())
+		fmt.Fprintf(w, "                   Save and Apply, then Provision Now (or reboot)\n")
 	default:
 		fmt.Fprintf(w, "    point the phone's provisioning server at %s (HTTPS)\n", p.Address.BaseURL())
 	}
@@ -572,7 +632,8 @@ func runProvisionDirectory(args []string) int {
 		return 0
 	}
 	paths := bookPaths{handsets: handsetsPathArg(*handsetsFlag), policy: policyPathArg(*policyFlag),
-		contacts: contactsPathArg(*contactsFlag), countryCode: defaultCountryCode()}
+		contacts: contactsPathArg(*contactsFlag), countryCode: defaultCountryCode(),
+		own: filepath.Join(render.PhonebookDir(render.Env(env)), "own")}
 	handsets, _, err := policy.LoadHandsets(paths.handsets)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
@@ -616,8 +677,8 @@ func runProvisionDirectory(args []string) int {
 			switch e.Kind {
 			case "phonebook":
 				fmt.Printf("%s phonebook %s from %s\n", e.Time.Format(time.RFC3339), e.Handset, e.Remote)
-			case "refused", "error":
-				fmt.Printf("%s %s %s\n", e.Time.Format(time.RFC3339), e.Kind, e.Detail)
+			case "refused", "error", "unauthorized":
+				fmt.Printf("%s %s %s %s\n", e.Time.Format(time.RFC3339), e.Kind, e.Handset, e.Detail)
 			}
 		},
 	})

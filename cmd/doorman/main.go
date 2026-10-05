@@ -21,9 +21,12 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -34,6 +37,7 @@ import (
 	"callmemaybe/internal/config"
 	"callmemaybe/internal/contacts"
 	"callmemaybe/internal/events"
+	"callmemaybe/internal/host"
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/lsp"
 	"callmemaybe/internal/notify"
@@ -83,6 +87,20 @@ func runCommand() int {
 			return runBalance(os.Args[2:])
 		case "provision":
 			return runProvision(os.Args[2:])
+		case "backup":
+			os.Exit(runBackup(os.Args[2:]))
+		case "restore":
+			os.Exit(runRestore(os.Args[2:]))
+		case "stt":
+			os.Exit(runSTT(os.Args[2:]))
+		case "phonebook":
+			os.Exit(runPhonebook(os.Args[2:]))
+		case "reminders":
+			return runReminders(os.Args[2:])
+		case "inbox":
+			return runInbox(os.Args[2:])
+		case "digest":
+			return runDigest(os.Args[2:])
 		case "pack":
 			return runPack(os.Args[2:])
 		case "version", "-v", "--version":
@@ -111,6 +129,16 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -rooms "A,B,C"            skip the interview
       -dry-run                  show what would be written
       -force                    replace existing config, backing it up first
+  doorman init services         the units from inside the binary onto the host,
+                                the directories each process owns, and
+                                "enable --now" for exactly the units the config
+                                calls for (directory with PROVISION_ADDRESS and
+                                a provisionable phone; inbox with INBOX_URL and
+                                messages.toml; digest with MAIL_HOOK + MAIL_TO;
+                                balance with trunks.toml; the daemon and the
+                                *88 timer always). Idempotent: a rerun is the
+                                upgrade. Units it did not write are left alone
+      -dry-run                  print the plan and change nothing
   doorman check [flags] [path]  validate policy.toml and handsets.toml, and
                                 report what they add up to — every extension
                                 with every setting, including the defaults it
@@ -133,6 +161,9 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -trunks path              provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)
       -contacts path            address-book inventory, optional (default $CONTACTS_PATH or ./contacts.toml)
       -allow-placeholders       accept the example sentinels; for CI, not operators
+      -fetch                    fetch contacts.toml url sources now; otherwise report what the daemon last cached
+      -messages path            texts the house answers, optional (default $MESSAGES_PATH or ./messages.toml)
+      -env path                 secrets file, for the tokens url sources name (with -fetch; default ./.env)
   doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
                                 "build" renders audio through piper, ElevenLabs,
                                 OpenAI or Polly, "voices" lists what a backend
@@ -166,6 +197,13 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 daemon deliberately never reads it
       -trunks path              provider inventory (default $TRUNKS_PATH or ./trunks.toml)
       -env path                 secrets file holding the API passwords (default ./.env)
+      -ring ids                 handset or group ids to ring when a trunk is
+                                low, in order — an internal call, so it works
+                                when the account is empty; needs the daemon
+                                on this box; once per trunk per -repeat (24h),
+                                remembered in -state (default $BALANCE_RING)
+      -prom file                write a Prometheus textfile-collector file on
+                                every run (default $BALANCE_PROM)
       -min n                    threshold for trunks that declare no balance_min
       -json                     machine-readable, for a cron job on another box
       -timeout d                how long to wait on one provider (default 20s)
@@ -182,6 +220,9 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
   doorman rotate [flags] [label ...]
                                 rotate extension PINs; all extensions when no labels given
       -policy path              policy file (default $POLICY_PATH or ./policy.toml)
+      -voicemail [box ...]      set or rotate the PINs of the mailboxes handsets
+                                name, in .env (VOICEMAIL_<BOX>_PIN); render then
+                                writes them into voicemail_handsets.conf
       -phones [id ...]          rotate handset SIP passwords in .env instead — never
                                 printed; render, install, then "doorman provision
                                 notify" hands each phone its new one
@@ -225,12 +266,76 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -all                      every handset that has a mac and model
       -models                   list the model ids handsets.toml accepts
       -export-cert              print the window's certificate for phones that validate
+      -reset                    the named phones make first contact again (after a
+                                factory reset, or when a fetch was refused as unauthorized)
   doorman provision notify [id ...]
                                 ask registered phones to fetch their configuration again
   doorman provision directory   the phones' directory — house, people, opted-in
                                 sources — served always, read-only, one port above
                                 the window, with each phone's own credential; the
                                 doorman-directory.service unit runs this
+  doorman inbox [flags]         texts to the house number: long-poll the house's
+                                edge inbox (INBOX_URL, INBOX_TOKEN), act on the
+                                words messages.toml allows from the people it
+                                names, reply through the edge. No listener and
+                                no carrier credential on this box; the edge
+                                holds that. Runs in a tab, or under
+                                doorman-inbox.service. Exits 0 with nothing to
+                                do when INBOX_URL or messages.toml is absent.
+                                With MAIL_HOOK and MAIL_TO set, every reply the
+                                house sends is copied to the house mailbox.
+                                With HA_URL and HA_TOKEN set, "garage?" reads
+                                the entity an action names from Home Assistant,
+                                and a door already open is left alone. With
+                                EVENT_JOURNAL_PATH set, every text and action
+                                is written to the journal beside the daemon's
+                                events (message.*, action.*)
+  doorman reminders prune       remove finished reminder recordings (Asterisk user);
+                                --spool overrides /var/spool/asterisk. The
+                                *80/*81/*82 menus run through Asterisk AGI.
+  doorman phonebook [flags]     numbers added from handsets with *88: file each
+                                recording's number into that phone's own book
+                                at once (PHONEBOOK_DIR/own/<id>.vcf, served by
+                                the directory), then ask STT_ENDPOINT for the
+                                spoken name and rename the entry when it
+                                answers; doorman-phonebook.timer runs it every
+                                minute. Never on a call; no STT means the
+                                number keeps its number for a name
+  doorman backup init|run|list|verify
+                                the house as one sealed file: init makes the
+                                keypair (public half into .env, private printed
+                                once, never stored); run collects .env, the TOMLs,
+                                the state directory (journal snapshotted),
+                                voicemail, the *88 spool and the hand-written
+                                Asterisk files into one age-encrypted bundle and
+                                delivers it to every destination (BACKUP_PATH;
+                                s3 and the account later), pruning by
+                                BACKUP_KEEP_DAILY/WEEKLY; doorman-backup.timer
+                                runs it nightly; verify opens the newest with
+                                the private key (BACKUP_IDENTITY_FILE or typed)
+  doorman restore <bundle>|--latest
+                                a box from a bundle: --dry-run shows the
+                                manifest and what would be written; refuses a
+                                box with a .env unless --force (backs it up);
+                                --root DIR for a rehearsal elsewhere. Then
+                                check, render, init services, start doorman
+  doorman stt [url|none]        where *88 names are transcribed: show what is set
+                                and whether it answers; a URL (OpenAI-compatible
+                                /v1/audio/transcriptions — tools/speechd on a Mac,
+                                or whisper-server anywhere) sets STT_ENDPOINT in
+                                .env; "none" clears it. No restart: only the
+                                phonebook job reads it
+  doorman digest [flags]        yesterday as one mail: calls from the journal,
+                                texts from the inbox's outcome log, as Markdown
+                                on stdout (redacted) or --mail through MAIL_HOOK
+                                to MAIL_TO (--full for whole numbers);
+                                doorman-digest.timer runs it every morning
+      -messages path            words file (default $MESSAGES_PATH or ./messages.toml)
+      -policy path              policy file, for [[people]] ids (default $POLICY_PATH or ./policy.toml)
+      -env path                 secrets file (default ./.env)
+      -state dir                handled message ids (default $XDG_STATE_HOME/doorman/inbox)
+      -once                     pull once, handle what is there, exit
+      -wait d                   how long each pull waits at the edge (default 20s)
   doorman e164 <number>         show how a raw caller ID normalises
   doorman lsp                   language server (stdio) for policy.toml and
                                 handsets.toml — diagnostics from the same
@@ -314,11 +419,14 @@ func runCheck(args []string) (code int) {
 	handsetsFlag := fs.String("handsets", "", "handsets file (default $HANDSETS_PATH or ./handsets.toml)")
 	trunksFlag := fs.String("trunks", "", "provider inventory, optional (default $TRUNKS_PATH or ./trunks.toml)")
 	contactsFlag := fs.String("contacts", "", "address-book inventory, optional (default $CONTACTS_PATH or ./contacts.toml)")
+	messagesFlag := fs.String("messages", "", "texts the house answers, optional (default $MESSAGES_PATH or ./messages.toml)")
 	// Structural validation of the shipped examples, whose PINs are the
 	// placeholder sentinel. CI uses this; an operator never should, which is
 	// what makes a freshly copied config fail loudly until `doorman init` runs.
 	policyOnly := fs.Bool("policy-only", false, "validate policy/inventory without local service environment or storage")
 	allowPlaceholders := fs.Bool("allow-placeholders", false, "accept example placeholder PINs (for CI, not operators)")
+	fetchFlag := fs.Bool("fetch", false, "fetch url sources in contacts.toml now, instead of reporting what the daemon last cached")
+	envFlag := fs.String("env", "./.env", "secrets file, for the tokens url sources name (with -fetch)")
 	_ = fs.Parse(args)
 
 	if !*policyOnly {
@@ -421,6 +529,8 @@ func runCheck(args []string) (code int) {
 	if !printOutbound(results, trunks) {
 		rc = 1
 	}
+	printMailboxes(results, secretLookup(*envFlag))
+	printPageOverrides(results)
 	// Both silent without a trunks.toml: a box with one provider has nothing
 	// to choose between and should never have to read the word "trunk".
 	printTrunks(trunks, results)
@@ -436,10 +546,122 @@ func runCheck(args []string) (code int) {
 			lists = append(lists, allowList{r.Path, r.pol})
 		}
 	}
-	if !printContacts(contacts.Load(contactSources, defaultCountryCode()), lists) {
+	var set *contacts.Set
+	if *fetchFlag {
+		fetchCtx, cancelFetch := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancelFetch()
+		set, _ = contacts.Fetch(fetchCtx, contactSources, defaultCountryCode(), &contacts.Fetcher{Secret: secretLookup(*envFlag)})
+	} else {
+		set = contacts.Load(contactSources, defaultCountryCode())
+	}
+	if !printContacts(set, lists) {
 		rc = 1
 	}
+	// The words, when there are any. Absent is the state every install is in
+	// and prints nothing; present, every id a word names must be a [[people]]
+	// id on some line, or the word could never be said.
+	if !printMessages(messagesPathArg(*messagesFlag), lists, secretLookup(*envFlag)) {
+		rc = 1
+	}
+	// The host's services are not the policy's business: --policy-only
+	// validates files on any machine, including CI's, where no unit exists.
+	if !*policyOnly {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		env := secretLookup(*envFlag)
+		base := filepath.Dir(*envFlag)
+		wants := decideWants(env, handsetsPath, servicePath(*trunksFlag, "TRUNKS_PATH", "trunks.toml", env, base), servicePath(*messagesFlag, "MESSAGES_PATH", "messages.toml", env, base))
+		if !printServices(ctx, host.System{}, host.DefaultLayout(), wants) {
+			rc = 1
+		}
+		cancel()
+	}
 	return rc
+}
+
+// printMessages reports messages.toml: each word, who may say it, and what
+// it does — and fails the check for an id no [[people]] entry carries, or
+// for an action that names a state entity with no HA_URL and HA_TOKEN to
+// read it by.
+func printMessages(path string, lists []allowList, env func(string) (string, bool)) bool {
+	msgs, err := policy.LoadMessages(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %s is not valid\n\n%v\n", path, err)
+		return false
+	}
+	if !msgs.Present() {
+		return true
+	}
+	have := map[string]bool{}
+	for _, l := range lists {
+		for _, id := range l.pol.PersonIDs() {
+			have[id] = true
+		}
+	}
+	actions := map[string]policy.Action{}
+	for _, l := range lists {
+		for _, a := range l.pol.Actions() {
+			actions[a.ID] = a
+		}
+	}
+	haURL, _ := env("HA_URL")
+	haToken, _ := env("HA_TOKEN")
+	haReady := strings.TrimSpace(haURL) != "" && strings.TrimSpace(haToken) != ""
+	fmt.Printf("\nTexts: %d %s   (%s)\n", len(msgs.Words()), plural(len(msgs.Words()), "word"), msgs.Where())
+	ok := true
+	for _, w := range msgs.Words() {
+		does := []string{}
+		if w.Action != "" {
+			does = append(does, "action "+w.Action)
+			if a, found := actions[w.Action]; found && a.State != "" {
+				does = append(does, w.Word+"? asks "+a.State)
+			}
+		}
+		if w.Phonebook != "" {
+			does = append(does, "vCards to "+w.Phonebook)
+			if strings.HasPrefix(w.Phonebook, "handset:") {
+				found := false
+				for _, l := range lists {
+					if l.pol.HandsetEndpoint(strings.TrimPrefix(w.Phonebook, "handset:")) != "" {
+						found = true
+					}
+				}
+				if !found {
+					fmt.Printf("    ✗ phonebook %q names no handset\n", w.Phonebook)
+					ok = false
+				}
+			}
+		}
+		if w.Webhook != "" {
+			does = append(does, "webhook (move it to an [[actions]] entry)")
+		}
+		if w.Reply != "" {
+			does = append(does, "replies")
+		}
+		fmt.Printf("  %-12s from %-24s → %s\n", w.Word, strings.Join(w.People, ", "), strings.Join(does, " + "))
+		if warn := policy.ReplyWarning(w.Reply); warn != "" {
+			fmt.Printf("    ! reply %s\n", warn)
+		}
+		for _, id := range w.People {
+			if id != "*" && !have[id] {
+				fmt.Printf("    ✗ %q is not a [[people]] id in any policy file — add `id = %q` to that person\n", id, id)
+				ok = false
+			}
+		}
+		if w.Action != "" {
+			a, found := actions[w.Action]
+			if !found {
+				fmt.Printf("    ✗ action %q is not an [[actions]] entry in any policy file\n", w.Action)
+				ok = false
+			} else if a.State != "" && !haReady {
+				fmt.Printf("    ✗ action %q names state %s but HA_URL and HA_TOKEN are not set in .env — `doorman inbox` will refuse to start (RUNBOOK, \"Actions\")\n", a.ID, a.State)
+				ok = false
+			}
+		}
+	}
+	if len(lists) > 0 && len(have) == 0 && len(msgs.PeopleReferenced()) > 0 {
+		fmt.Println("    (no [[people]] entry has an id yet)")
+	}
+	return ok
 }
 
 func checkEnvironment() int {
@@ -454,6 +676,13 @@ func checkEnvironment() int {
 		fmt.Fprintln(os.Stderr, envErr)
 		return 1
 	}
+	warnProvisionAddress(func(key string) (string, bool) {
+		if v, ok := os.LookupEnv(key); ok && v != "" {
+			return v, true
+		}
+		v, ok := dotenv[key]
+		return v, ok && v != ""
+	}, localAddresses())
 	if envCfg.EventJournalPath != "" {
 		if err := events.CheckPath(envCfg.EventJournalPath, events.Options{MaxBytes: envCfg.EventJournalMaxBytes}); err != nil {
 			fmt.Fprintln(os.Stderr, "event journal:", err)
@@ -475,6 +704,29 @@ func checkEnvironment() int {
 			return 1
 		}
 		fmt.Println("CEL spool: readable; verify Asterisk backend with cel show status")
+	}
+	bad := false
+	fmt.Println(describeSTT(func(k string) (string, bool) {
+		if v, ok := os.LookupEnv(k); ok {
+			return v, true
+		}
+		v, ok := dotenv[k]
+		return v, ok
+	}, 3*time.Second))
+	if line, ok := describeBackup("/var/lib/doorman", time.Now(), func(k string) (string, bool) {
+		if v, ok := os.LookupEnv(k); ok {
+			return v, true
+		}
+		v, ok := dotenv[k]
+		return v, ok
+	}); true {
+		fmt.Println(line)
+		if !ok {
+			bad = true
+		}
+	}
+	if bad {
+		return 1
 	}
 	return 0
 }
@@ -692,7 +944,9 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 		p.CallerIDFormat(), p.CallerIDFormat() == policy.DefaultCallerIDFormat))
 	fmt.Printf("  house ring group     : %s\n", strings.Join(p.HouseEndpoints(), ", "))
 	fmt.Printf("  provisioning         : %s\n", provisioningSummary(p.HandsetList()))
+	fmt.Printf("  actions              : %s\n", actionsSummary(p.Actions()))
 	fmt.Printf("  house voicemail      : %s\n", orDefault(p.HousePlan().Mailbox, noMailbox))
+	describeCurfews(p, time.Now())
 
 	// Every extension, every setting — including the ones nobody wrote down.
 	// A default rendered as "(none — ...)" is what catches the mistake the
@@ -809,6 +1063,37 @@ func describeAfterhours(e policy.ResolvedExtension, now time.Time) string {
 	return fmt.Sprintf("%s — %s%s", e.AfterhoursID, e.Afterhours.Describe(), state)
 }
 
+// describeCurfews prints each sleeping-capable handset with every window it
+// names and whether one is active right now — the same "is it on or not"
+// answer describeAfterhours gives, because a bedtime that silently stopped
+// working is the failure this output exists to catch.
+func describeCurfews(p *policy.Policy, now time.Time) {
+	ids := p.CurfewedHandsets()
+	if len(ids) == 0 {
+		return
+	}
+	fmt.Println("\n  Curfews (the phone is asleep while any window is active):")
+	for _, id := range ids {
+		parts := make([]string, 0, 2)
+		asleep := false
+		for _, c := range p.Curfew(id) {
+			if c.Window == nil {
+				parts = append(parts, c.ScheduleID+" (switched off)")
+				continue
+			}
+			if c.Window.Active(now) {
+				asleep = true
+			}
+			parts = append(parts, c.ScheduleID+" "+c.Window.Describe())
+		}
+		state := ""
+		if asleep {
+			state = "  ← ASLEEP NOW"
+		}
+		fmt.Printf("      %-12s %s%s\n", id, strings.Join(parts, "; "), state)
+	}
+}
+
 func describeAfterhoursPlan(e policy.ResolvedExtension) string {
 	if len(e.AfterhoursPlan.Steps) == 0 {
 		return "(no afterhours_ring — callers in the window go straight to " +
@@ -824,10 +1109,14 @@ func runRotate(args []string) int {
 	pathFlag := fs.String("policy", "", "policy file (default $POLICY_PATH or ./policy.toml)")
 	handsetsFlag := fs.String("handsets", "", "handsets file (default $HANDSETS_PATH or ./handsets.toml)")
 	phones := fs.Bool("phones", false, "rotate handset SIP passwords in .env instead of PINs; ids narrow it")
-	envFlag := fs.String("env", "./.env", "secrets file, for --phones")
+	voicemail := fs.Bool("voicemail", false, "rotate (or first set) the PINs of the mailboxes handsets name, in .env; box ids narrow it")
+	envFlag := fs.String("env", "./.env", "secrets file, for --phones and --voicemail")
 	_ = fs.Parse(args)
 	if *phones {
 		return runRotatePhones(handsetsPathArg(*handsetsFlag), *envFlag, fs.Args())
+	}
+	if *voicemail {
+		return runRotateVoicemail(handsetsPathArg(*handsetsFlag), *envFlag, fs.Args())
 	}
 	path := policyPathArg(*pathFlag)
 	labels := fs.Args()
@@ -943,7 +1232,7 @@ func runRender(args []string) int {
 	// and dials never reaches doorman — which is precisely why outbound calling
 	// survives doorman being down. The trunk half needs [line] number and
 	// [line] trunk from the same read.
-	lineIDs, err := renderLines(policyPathArg(*policyFlag), handsetsPath, trunks)
+	lineIDs, curfews, err := renderLines(policyPathArg(*policyFlag), handsetsPath, trunks)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return 1
@@ -977,7 +1266,7 @@ func runRender(args []string) int {
 	for _, h := range handsets {
 		ids = append(ids, h.ID)
 	}
-	frags, err := render.Build(handsets, env, plan.identities(ids))
+	frags, err := render.Build(handsets, env, plan.identities(ids), curfews)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return 1
@@ -1010,7 +1299,8 @@ func runRender(args []string) int {
 		written = append(written, path)
 		return true
 	}
-	if !write("pjsip_handsets.conf", frags.PJSIP) || !write("extensions_handsets.conf", frags.Dialplan) {
+	if !write("pjsip_handsets.conf", frags.PJSIP) || !write("extensions_handsets.conf", frags.Dialplan) ||
+		!write("voicemail_handsets.conf", frags.Voicemail) {
 		return 1
 	}
 
@@ -1029,7 +1319,8 @@ func runRender(args []string) int {
 	// failure the inventory exists to prevent.
 	if len(prov.Phones) > 0 {
 		books, err := loadBooks(bookPaths{handsets: handsetsPath, policy: policyPathArg(*policyFlag),
-			contacts: contactsPathArg(*contactsFlag), countryCode: defaultCountryCode()})
+			contacts: contactsPathArg(*contactsFlag), countryCode: defaultCountryCode(),
+			own: filepath.Join(render.PhonebookDir(env), "own")})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "✗ phone books: %v\n", err)
 			return 1
@@ -1069,6 +1360,7 @@ func runRender(args []string) int {
 	}
 
 	fmt.Printf("✓ rendered %d handset(s) from %s\n", frags.Generated, handsetsPath)
+	printRenderedMailboxes(frags.Mailboxes)
 	if len(prov.Phones) > 0 {
 		fmt.Printf("✓ rendered %d phone configuration(s) into %s\n", len(prov.Phones), provDir)
 		for _, ph := range prov.Phones {
@@ -1087,15 +1379,26 @@ func runRender(args []string) int {
 	for _, p := range written {
 		fmt.Printf("  %s\n", p)
 	}
+	// Only the Asterisk files go to /etc/asterisk. The phones' own files under
+	// provisioning/ are served by `doorman provision` from where they are.
+	var confs []string
+	for _, p := range written {
+		if strings.HasSuffix(p, ".conf") {
+			confs = append(confs, p)
+		}
+	}
 	fmt.Println("\nInstall on the Pi:")
-	fmt.Println("  sudo cp " + strings.Join(written, " ") + " /etc/asterisk/")
+	fmt.Println("  sudo cp " + strings.Join(confs, " ") + " /etc/asterisk/")
 	fmt.Println("  sudo chown asterisk:asterisk /etc/asterisk/*_handsets.conf")
 	fmt.Println("  sudo chmod 640 /etc/asterisk/*_handsets.conf")
 	if trunkFrags != nil {
 		fmt.Println("  sudo chown asterisk:asterisk /etc/asterisk/*_trunks.conf")
 		fmt.Println("  sudo chmod 640 /etc/asterisk/*_trunks.conf")
 	}
-	fmt.Println("  sudo asterisk -rx 'pjsip reload' && sudo asterisk -rx 'dialplan reload'")
+	fmt.Println("  sudo asterisk -rx 'pjsip reload' && sudo asterisk -rx 'dialplan reload' && sudo asterisk -rx 'voicemail reload'")
+	fmt.Println("\nvoicemail_handsets.conf is read once voicemail.conf ends with")
+	fmt.Println("  #tryinclude \"voicemail_handsets.conf\"")
+	fmt.Println("(the shipped example does). It appends to [household]; hand-written boxes there stay.")
 	if trunkFrags != nil {
 		fmt.Println("\nThe trunk files are only read once pjsip.conf and extensions.conf")
 		fmt.Println("#include them — see RUNBOOK \"Add a second provider\". Delete the")
@@ -1345,10 +1648,43 @@ func serve() error {
 		lists = append(lists, allowList{o.name, o.store.Current()})
 	}
 	book := openContacts(cfg.ContactsPath, cfg.DefaultCountryCode, lists, log, journal)
+	// The interface value the lobby sees: untyped nil when there is no
+	// inventory, so the state machine's one nil check keeps meaning "no
+	// address books" rather than "a book with nothing in it".
+	var contactsDep lobby.Contacts
+	if book != nil {
+		contactsDep = book
+		refreshCtx, stopRefresh := context.WithCancel(context.Background())
+		defer stopRefresh()
+		go (&contactsRefresher{
+			path: cfg.ContactsPath, countryCode: cfg.DefaultCountryCode,
+			secret: func(name string) (string, bool) { v, ok := os.LookupEnv(name); return v, ok && v != "" },
+			book:   book, lists: lists, log: log, journal: journal,
+		}).run(refreshCtx)
+	}
 
 	// Everything a line does not own is shared: one ARI client, one prompt
 	// pack, one registry, one call log, one webhook, one concurrency cap, one
 	// address book. What a line owns is its policy and its rate-limit budget.
+	// Bedtime's third effect — the call already up at the hour — belongs to
+	// nobody on the call path, so the daemon keeps it: once a minute, any
+	// handset that has just fallen asleep has its channels dropped.
+	curfewCtx, stopCurfew := context.WithCancel(context.Background())
+	defer stopCurfew()
+	go (&curfewKeeper{
+		policies: func() []*policy.Policy {
+			ps := make([]*policy.Policy, 0, len(opened))
+			for _, o := range opened {
+				ps = append(ps, o.store.Current())
+			}
+			return ps
+		},
+		channels: client.Channels,
+		hangup:   client.Hangup,
+		now:      time.Now,
+		log:      log,
+	}).run(curfewCtx, time.Minute)
+
 	lines := newLineSet()
 	var limiters []*lobby.RateLimiter
 	for _, o := range opened {
@@ -1365,7 +1701,7 @@ func serve() error {
 			// Nil without a contacts.toml, which is what makes the ladder
 			// collapse to [[people]] and the lobby. openContacts returns an
 			// untyped nil for exactly this assignment.
-			Contacts: book,
+			Contacts: contactsDep,
 			Cfg: lobby.Config{
 				DefaultCountryCode: cfg.DefaultCountryCode,
 				ExtensionLength:    cfg.ExtensionLength,
@@ -1377,6 +1713,7 @@ func serve() error {
 				RedactCallerID:     cfg.RedactCallerID,
 				MaxConcurrentCalls: cfg.MaxConcurrentCalls,
 			},
+			Quiet:        quietThroughARI(client, o.log),
 			OnLegCreated: reg.addLeg,
 			OnFinished:   reg.remove,
 		}
@@ -1499,6 +1836,39 @@ func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log 
 			return
 		}
 
+		// The house talking to itself: `doorman balance` originated a handset
+		// with announce,<kind>,<value> and the handset just answered. Say it
+		// and hang up. Outside the concurrent-call ceiling for the console's
+		// reason, and never the lobby: a handset that answered an internal
+		// call must not be asked for a PIN by the phone it is holding.
+		if len(ev.Args) > 0 && ev.Args[0] == lobby.AnnounceArg {
+			kind, value := "", ""
+			if len(ev.Args) > 1 {
+				kind = ev.Args[1]
+			}
+			if len(ev.Args) > 2 {
+				value = ev.Args[2]
+			}
+			media, ok := lobby.AnnounceMedia(kind, value)
+			if !ok {
+				log.Warn("no such announcement, hanging up", "kind", kind, "channel", ev.Channel.ID)
+				go func(id string) {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					_ = client.Hangup(ctx, id)
+				}(ev.Channel.ID)
+				return
+			}
+			a := lobby.NewAnnouncement(ev.Channel.ID, media, lobby.AnnounceDeps{
+				ARI:        ariAdapter{client},
+				Log:        log,
+				OnFinished: reg.removeAnnouncement,
+			})
+			reg.addAnnouncement(a)
+			go a.Run()
+			return
+		}
+
 		deps := lines.forCall(ev.Args, log)
 		s := lobby.NewSession(ev.Channel.ID, ev.Channel.Caller.Number, deps)
 		if !reg.admit(s, deps.Cfg.MaxConcurrentCalls) {
@@ -1545,6 +1915,10 @@ func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log 
 		}
 		if c := reg.console(channelID); c != nil {
 			c.PlaybackFinished(ev.Playback.ID)
+			return
+		}
+		if a := reg.announcement(channelID); a != nil {
+			a.PlaybackFinished(ev.Playback.ID)
 		}
 
 	case "StasisEnd", "ChannelDestroyed":
@@ -1578,6 +1952,12 @@ func route(ev ari.Event, reg *registry, lines *lineSet, client *ari.Client, log 
 			} else {
 				c.CallerGone()
 			}
+			return
+		}
+		// An announcement never detaches — leaving the app alive is not an
+		// ending it can have — so for once the two events mean one thing.
+		if a := reg.announcement(ev.Channel.ID); a != nil {
+			a.CallerGone()
 		}
 	}
 }
@@ -1594,13 +1974,17 @@ type registry struct {
 	channels map[string]*lobby.Session
 	callers  map[string]*lobby.Session
 	consoles map[string]*lobby.Console
+	// announcements are handsets the house rang to tell them something —
+	// the same separate-map reasoning as consoles, one level simpler.
+	announcements map[string]*lobby.Announcement
 }
 
 func newRegistry() *registry {
 	return &registry{
-		channels: make(map[string]*lobby.Session),
-		callers:  make(map[string]*lobby.Session),
-		consoles: make(map[string]*lobby.Console),
+		channels:      make(map[string]*lobby.Session),
+		callers:       make(map[string]*lobby.Session),
+		consoles:      make(map[string]*lobby.Console),
+		announcements: make(map[string]*lobby.Announcement),
 	}
 }
 
@@ -1669,6 +2053,24 @@ func (r *registry) console(id string) *lobby.Console {
 	return r.consoles[id]
 }
 
+func (r *registry) addAnnouncement(a *lobby.Announcement) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.announcements[a.ChannelID] = a
+}
+
+func (r *registry) announcement(id string) *lobby.Announcement {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.announcements[id]
+}
+
+func (r *registry) removeAnnouncement(a *lobby.Announcement) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.announcements, a.ChannelID)
+}
+
 func (r *registry) removeConsole(c *lobby.Console) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1697,6 +2099,72 @@ func (a ariAdapter) Originate(ctx context.Context, p lobby.OriginateParams) (str
 		Timeout:    p.Timeout,
 		Originator: p.Originator,
 	})
+}
+
+// warnProvisionAddress says so when PROVISION_ADDRESS is not an address of
+// the box running check. The phones fetch their configuration from that
+// address and nothing else, so a box whose lease moved has phones pointed
+// at the wrong place with no symptom until the next window. A warning and
+// never a failure: check runs on workstation copies too, where the address
+// is rightly not ours.
+func warnProvisionAddress(env func(string) (string, bool), local []string) {
+	raw, ok := env("PROVISION_ADDRESS")
+	if !ok {
+		return
+	}
+	addr, err := provision.ParseAddress(raw)
+	if err != nil {
+		fmt.Printf("  ! PROVISION_ADDRESS: %v\n", err)
+		return
+	}
+	if net.ParseIP(addr.Host) == nil || len(local) == 0 {
+		return
+	}
+	for _, a := range local {
+		if a == addr.Host {
+			return
+		}
+	}
+	fmt.Printf("  ! PROVISION_ADDRESS is %s, but this box's addresses are %s. The phones fetch\n", addr.Host, strings.Join(local, ", "))
+	fmt.Println("    their configuration from that address and nothing else: pin the box's address")
+	fmt.Println("    with a DHCP reservation, or correct .env, re-render, and re-point the phones.")
+}
+
+// localAddresses is every non-loopback IPv4 this box has.
+func localAddresses() []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok || ipn.IP.IsLoopback() || ipn.IP.To4() == nil {
+			continue
+		}
+		out = append(out, ipn.IP.String())
+	}
+	return out
+}
+
+// actionsSummary is check's one line on the registry: what the house can be
+// asked to do, and by whom.
+func actionsSummary(actions []policy.Action) string {
+	if len(actions) == 0 {
+		return "(none — [[actions]] in policy.toml)"
+	}
+	parts := make([]string, 0, len(actions))
+	for _, a := range actions {
+		who := strings.Join(a.People, ",")
+		if a.Confirm == policy.ConfirmPasskey {
+			who += " +passkey"
+		}
+		if a.State != "" {
+			who += " +state"
+		}
+		parts = append(parts, fmt.Sprintf("%s (%s)", a.ID, who))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // provisioningSummary is check's one line on the phone side of the
@@ -1753,4 +2221,227 @@ func hostTimezone() string {
 		}
 	}
 	return ""
+}
+
+// printRenderedMailboxes says which boxes render wrote and which it left to
+// the hand-written file — the difference between "this phone's voicemail
+// works" and "somebody has to add a line to voicemail.conf".
+func printRenderedMailboxes(boxes []render.Mailbox) {
+	if len(boxes) == 0 {
+		return
+	}
+	made, assumed := 0, 0
+	for _, m := range boxes {
+		if m.Generated {
+			made++
+		} else {
+			assumed++
+		}
+	}
+	fmt.Printf("✓ %d mailbox(es): %d written to voicemail_handsets.conf", len(boxes), made)
+	if assumed > 0 {
+		fmt.Printf(", %d assumed hand-written in voicemail.conf", assumed)
+	}
+	fmt.Println()
+	for _, m := range boxes {
+		state := "written"
+		if !m.Generated {
+			state = "not written — " + m.EnvVar + " is not in .env (`doorman rotate --voicemail " + m.ID + "` sets one)"
+		}
+		fmt.Printf("    %-14s %-24s %s\n", m.ID, strings.Join(m.Handsets, ", "), state)
+	}
+}
+
+// printMailboxes is `doorman check`'s view: every box a handset names and
+// every box a policy file sends a caller to, and whether each one exists
+// as far as the tool can see. A mailbox named nowhere the tool writes is a
+// caller who hears "the person at extension … is unavailable" and is hung
+// up on, with nothing on a handset to say why — this is where that becomes
+// visible before a call.
+func printMailboxes(results []checkedLine, env func(string) (string, bool)) {
+	if len(results) == 0 || results[0].pol == nil {
+		return
+	}
+	handsets := results[0].pol.HandsetList()
+	boxes := render.Mailboxes(handsets, env)
+	byID := map[string]render.Mailbox{}
+	for _, m := range boxes {
+		byID[m.ID] = m
+	}
+	// Where policy sends callers.
+	type use struct{ line, where string }
+	uses := map[string][]use{}
+	var order []string
+	note := func(box, line, where string) {
+		if box == "" {
+			return
+		}
+		if _, seen := uses[box]; !seen {
+			order = append(order, box)
+		}
+		uses[box] = append(uses[box], use{line, where})
+	}
+	for _, r := range results {
+		if r.err != nil {
+			continue
+		}
+		note(r.pol.HousePlan().Mailbox, r.Name, "[house]")
+		for _, e := range r.pol.Extensions() {
+			note(e.Plan.Mailbox, r.Name, "extension "+e.Label)
+		}
+	}
+	for _, m := range boxes {
+		if _, seen := uses[m.ID]; !seen {
+			order = append(order, m.ID)
+		}
+	}
+	if len(order) == 0 {
+		return
+	}
+	sort.Strings(order)
+	multi := len(results) > 1
+	fmt.Printf("\nMailboxes: %d\n\n", len(order))
+	for _, id := range order {
+		m, named := byID[id]
+		var owner string
+		switch {
+		case named && len(m.Handsets) == 1:
+			owner = m.Handsets[0] + "'s own"
+		case named:
+			owner = "shared by " + strings.Join(m.Handsets, ", ")
+		default:
+			owner = "no handset names it"
+		}
+		var state string
+		switch {
+		case named && m.Generated:
+			state = "written by render"
+		case named:
+			state = "hand-written in voicemail.conf, or missing — " + m.EnvVar + " is not in .env"
+		default:
+			state = "must exist in voicemail.conf (the tool cannot see it)"
+		}
+		var where []string
+		for _, u := range uses[id] {
+			if multi {
+				where = append(where, u.line+": "+u.where)
+			} else {
+				where = append(where, u.where)
+			}
+		}
+		fmt.Printf("  %-14s %-32s %s\n", id, owner, state)
+		if len(where) > 0 {
+			fmt.Printf("  %-14s callers land here from %s\n", "", strings.Join(where, ", "))
+		}
+	}
+	fmt.Println("\n  A phone's voicemail key opens its own box; *98 reaches any box with its PIN.")
+}
+
+// runRotateVoicemail sets a new PIN for each mailbox the handsets name —
+// or for the first time, which is how a box provisioned before render made
+// mailboxes gets them: set the PIN, render, install, reload. The phone that
+// owns a box never types its PIN; *98 from another phone does.
+func runRotateVoicemail(handsetsPath, envPath string, ids []string) int {
+	handsets, _, err := policy.LoadHandsets(handsetsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 1
+	}
+	want := map[string]bool{}
+	for _, id := range ids {
+		want[id] = true
+	}
+	narrowed := len(want) > 0
+	var keys, chosen []string
+	for _, m := range render.Mailboxes(handsets, func(string) (string, bool) { return "", false }) {
+		if narrowed && !want[m.ID] {
+			continue
+		}
+		keys = append(keys, m.EnvVar)
+		chosen = append(chosen, m.ID)
+		delete(want, m.ID)
+	}
+	for id := range want {
+		fmt.Fprintf(os.Stderr, "✗ no handset in %s names mailbox %q\n", handsetsPath, id)
+		return 1
+	}
+	if len(keys) == 0 {
+		fmt.Fprintf(os.Stderr, "✗ no handset in %s names a mailbox\n", handsetsPath)
+		return 1
+	}
+	pins := map[string]string{}
+	if err := setup.RotateSecrets(envPath, keys, func() (string, error) { return setup.PIN(6, map[string]bool{}) }); err != nil {
+		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+		return 1
+	}
+	// Read back what was written, so the PINs shown are the ones in force.
+	env := secretLookup(envPath)
+	for i, k := range keys {
+		pins[chosen[i]], _ = env(k)
+	}
+	fmt.Printf("✓ set %d mailbox PIN(s) in %s — shown once:\n\n", len(keys), envPath)
+	for _, id := range chosen {
+		fmt.Printf("  %-14s  →  %s\n", id, pins[id])
+	}
+	fmt.Println("\nThe phone that owns a box opens it without the PIN; *98 from any other")
+	fmt.Println("phone asks for it. They take effect at the next render:")
+	fmt.Println()
+	fmt.Println("  doorman render                      # voicemail_handsets.conf")
+	fmt.Println("  (install as render prints, then `voicemail reload`)")
+	return 0
+}
+
+// quietThroughARI asks Asterisk whether a handset has set do-not-disturb:
+// the global DND_<id> holds an expiry the phone wrote with *78NN. A read that
+// fails, or a value that is not a time, is "not quiet" — a phone must ring
+// rather than be silenced by a hiccup, which is the safe direction for a
+// house phone to fail in. Bounded tightly: this runs on the ring path.
+func quietThroughARI(client *ari.Client, log *slog.Logger) func(string) bool {
+	return func(id string) bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		v, err := client.Variable(ctx, render.DNDVar(id))
+		if err != nil {
+			log.Warn("could not read do-not-disturb, ringing anyway", "handset", id, "err", err)
+			return false
+		}
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return false
+		}
+		until, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return false
+		}
+		return time.Now().Unix() < until
+	}
+}
+
+// printPageOverrides says which phones' pages reach a quiet room, and warns
+// when none do: do-not-disturb is one keypress on every phone, and a house
+// where no page can cut through it is a house where a child's thirty
+// minutes can outlast a parent's need to reach them.
+func printPageOverrides(results []checkedLine) {
+	if len(results) == 0 || results[0].pol == nil {
+		return
+	}
+	var over, paged []string
+	for _, h := range results[0].pol.HandsetList() {
+		if h.PageOverride {
+			over = append(over, h.ID)
+		}
+		if h.Page {
+			paged = append(paged, h.ID)
+		}
+	}
+	if len(paged) == 0 && len(over) == 0 {
+		return
+	}
+	fmt.Println()
+	if len(over) > 0 {
+		fmt.Printf("Do not disturb: a page from %s reaches a quiet room (page_override)\n", strings.Join(over, ", "))
+		return
+	}
+	fmt.Println("! Do not disturb: no handset has page_override, so no page can reach a room")
+	fmt.Println("  that dialled *78. Mark the kitchen or a parent's room in handsets.toml.")
 }

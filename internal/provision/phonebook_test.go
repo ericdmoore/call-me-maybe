@@ -78,6 +78,17 @@ func TestDefaultBooksAreTheHouseAndThePeopleAndNothingElse(t *testing.T) {
 			t.Errorf("missing %q in %s", want, joined)
 		}
 	}
+	for _, code := range []string{"80", "81", "82"} {
+		found := false
+		for _, c := range ab.Contacts {
+			if strings.Contains(c.First+" "+c.Last, "(*"+code+")") && len(c.Phones) == 1 && c.Phones[0].Number == "*"+code {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("missing discoverable and dialable *%s app", code)
+		}
+	}
 	if strings.Contains(string(out), "<FirstName>Front</FirstName>") || strings.Contains(string(out), "Bridge") {
 		t.Errorf("an unselected source or a pseudo-handset leaked in:\n%s", out)
 	}
@@ -124,5 +135,22 @@ func TestNamesAndNumbersAreEscapedAndSplit(t *testing.T) {
 	}
 	if _, err := RenderPhonebook(Model{ID: "yealink-t31p", Family: "yealink-cfg"}, nil); err == nil {
 		t.Error("a family without a phonebook template must say so")
+	}
+}
+
+func TestTheOwnBookIsAThirdBookAndTheHouseListsStar88(t *testing.T) {
+	own := OwnBook([]OwnEntry{{Name: "(972) 555-0142", E164: "+19725550142"}, {Name: "Maddie", E164: "+19725550199"}})
+	if own.ID != "own" || len(own.Contacts) != 2 || own.Contacts[1].Numbers[0].Dial != "19725550199" || own.Contacts[1].Numbers[0].Kind != "cell" {
+		t.Errorf("OwnBook = %+v", own)
+	}
+	house := HouseBook(bookHandsets)
+	found := false
+	for _, c := range house.Contacts {
+		if c.Numbers[0].Dial == AddNumberCode {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the house book must list *88 so a phone's directory says how to add a number")
 	}
 }

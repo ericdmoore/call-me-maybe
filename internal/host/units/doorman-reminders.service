@@ -1,0 +1,22 @@
+# Call files schedule and retry without this service. This only removes
+# recordings after exhausted calls and drafts left by a crashed AGI process.
+[Unit]
+Description=Call Me Maybe — remove finished reminder recordings
+Documentation=https://callmemaybe.cc
+After=asterisk.service
+ConditionPathIsDirectory=/var/spool/asterisk/cmm-reminders
+
+[Service]
+Type=oneshot
+User=asterisk
+Group=asterisk
+ExecStart=/opt/call-me-maybe/bin/doorman reminders prune
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/spool/asterisk
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=64M
+StandardOutput=journal
+StandardError=journal

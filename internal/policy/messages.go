@@ -1,0 +1,286 @@
+package policy
+
+import (
+	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+)
+
+// messages.toml — who may text the house which word, and what the word does.
+//
+// A text to the house number is control plane, never conversation (s15,
+// "one number, one purpose"): a known word from a listed person does one
+// thing and gets one boring reply; everything else is archived by the
+// carrier's email forwarding and never answered. This file is the list of
+// words. People are named by their [[people]] id in policy.toml, never by a
+// number retyped here, and never by an index.
+
+// MessageFile is messages.toml as written.
+type MessageFile struct {
+	Words []Word `toml:"words"`
+}
+
+// Word is one thing the house understands by text.
+type Word struct {
+	// Word is what the sender types: lowercase, letters and digits, no
+	// spaces. Matched exactly against the trimmed, lowercased text.
+	Word string `toml:"word"`
+	// People are the [[people]] ids allowed to say it, or ["*"] for
+	// everyone on the allow-list. A stricter list than the ring allow-list
+	// by design: ringing the house and opening its garage are different
+	// trusts.
+	People []string `toml:"people"`
+	// Action is the [[actions]] id in policy.toml this word performs — what
+	// it does, who may, what it says back and whether it confirms all live
+	// there, once, for every transport (s13).
+	Action string `toml:"action"`
+	// Phonebook imports attached vCards into the shared house book or one
+	// handset's book. This never changes the call admission policy.
+	Phonebook string `toml:"phonebook"`
+	// Webhook is POSTed to when the word arrives from a listed sender —
+	// Home Assistant's webhook, typically. The stopgap that shipped before
+	// [[actions]]: still accepted, reported by `doorman check`, and going.
+	Webhook string `toml:"webhook"`
+	// Reply is texted back. Optional, and boring on purpose: plain ASCII,
+	// under 160 characters, no digits, no links, no exclamation marks —
+	// one segment on the bill and past the carrier's spam filter.
+	Reply string `toml:"reply"`
+}
+
+// Messages is a validated messages.toml.
+type Messages struct {
+	Path string
+
+	present bool
+	words   []Word
+}
+
+func (m *Messages) Present() bool { return m != nil && m.present }
+
+func (m *Messages) Where() string {
+	if m == nil || m.Path == "" {
+		return "messages.toml"
+	}
+	return m.Path
+}
+
+// Words are the words in declaration order.
+func (m *Messages) Words() []Word {
+	if m == nil {
+		return nil
+	}
+	return m.words
+}
+
+// Lookup finds a word.
+func (m *Messages) Lookup(word string) (Word, bool) {
+	for _, w := range m.Words() {
+		if w.Word == word {
+			return w, true
+		}
+	}
+	return Word{}, false
+}
+
+// ActionsReferenced is every [[actions]] id any word names, sorted.
+func (m *Messages) ActionsReferenced() []string {
+	seen := map[string]bool{}
+	for _, w := range m.Words() {
+		if w.Action != "" {
+			seen[w.Action] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// PeopleReferenced is every [[people]] id any word names, sorted, for
+// `doorman check` to cross-reference against policy.toml.
+func (m *Messages) PeopleReferenced() []string {
+	seen := map[string]bool{}
+	for _, w := range m.Words() {
+		for _, id := range w.People {
+			if id != "*" {
+				seen[id] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+var wordPattern = regexp.MustCompile(`^[a-z0-9]+$`)
+
+// LoadMessages reads messages.toml; absent is a usable, empty inventory.
+func LoadMessages(path string) (*Messages, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return &Messages{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	m, merr := MessagesFromTOML(data)
+	if merr != nil {
+		return nil, merr
+	}
+	m.Path = path
+	return m, nil
+}
+
+// MessagesFromTOML parses and validates.
+func MessagesFromTOML(data []byte) (*Messages, error) {
+	var f MessageFile
+	md, err := toml.Decode(string(data), &f)
+	if err != nil {
+		return nil, err
+	}
+	var problems []string
+	for _, u := range md.Undecoded() {
+		problems = append(problems, fmt.Sprintf("unknown key %q", u.String()))
+	}
+	fail := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
+
+	m := &Messages{present: true}
+	if len(f.Words) == 0 {
+		fail("at least one [[words]] entry is required — delete messages.toml entirely to answer no texts")
+	}
+	seen := map[string]bool{}
+	for _, w := range f.Words {
+		where := fmt.Sprintf("word %q", w.Word)
+		if !wordPattern.MatchString(w.Word) {
+			fail("%s must be lowercase letters and digits, no spaces", where)
+			continue
+		}
+		if seen[w.Word] {
+			fail("duplicate %s", where)
+			continue
+		}
+		seen[w.Word] = true
+		if len(w.People) == 0 {
+			fail("%s names nobody — list [[people]] ids, or [\"*\"] for everyone on the allow-list", where)
+		}
+		for _, id := range w.People {
+			if id != "*" && !handsetIDPattern.MatchString(id) {
+				fail("%s: %q is not a [[people]] id (lowercase alphanumeric/dash/underscore) or \"*\"", where, id)
+			}
+		}
+		if w.Action != "" && !handsetIDPattern.MatchString(w.Action) {
+			fail("%s: action %q is not an [[actions]] id", where, w.Action)
+		}
+		if w.Action != "" && w.Webhook != "" {
+			fail("%s names an action and carries its own webhook — the action owns the webhook", where)
+		}
+		if w.Phonebook != "" {
+			if w.Phonebook != "house" && (!strings.HasPrefix(w.Phonebook, "handset:") || !handsetIDPattern.MatchString(strings.TrimPrefix(w.Phonebook, "handset:"))) {
+				fail("%s: phonebook must be house or handset:<id>", where)
+			}
+			if w.Action != "" || w.Webhook != "" || w.Reply != "" {
+				fail("%s: phonebook cannot be combined with action, webhook or reply; the import reports its result", where)
+			}
+		}
+		if w.Action == "" && w.Webhook == "" && w.Reply == "" && w.Phonebook == "" {
+			fail("%s does nothing — name an action, phonebook, or give it a reply", where)
+		}
+		if w.Webhook != "" {
+			if u, err := url.Parse(w.Webhook); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				fail("%s: webhook must be an http or https URL", where)
+			}
+		}
+		if w.Reply != "" {
+			if why := ReplyProblem(w.Reply); why != "" {
+				fail("%s: reply %s", where, why)
+			}
+		}
+		m.words = append(m.words, w)
+	}
+	if len(problems) > 0 {
+		return nil, errors.New(strings.Join(problems, "\n"))
+	}
+	return m, nil
+}
+
+// ReplyProblem says why a reply may not be sent, or "" when it may. Plain
+// Plain ASCII and one segment. Those two are transport facts: a single
+// non-ASCII character (an emoji, a curly quote) switches the carrier's
+// encoding and halves the segment, and a second segment is a second charge
+// and a second chance to arrive out of order. Everything else this rule once
+// refused — exclamation marks, links, any digit, then phone numbers — was
+// carrier folklore generalised from one dropped text (2026-09-22) and was
+// taken out on 2026-09-26 at the first customer's word: links are what s19
+// will send, and "emojis are the issue". ReplyWarning keeps the one shape
+// that text had as advice `doorman check` prints, never a refusal.
+func ReplyProblem(reply string) string {
+	switch {
+	case strings.TrimSpace(reply) == "":
+		return "is empty"
+	case len(reply) > 160:
+		return fmt.Sprintf("is %d characters; one segment is 160", len(reply))
+	}
+	for _, r := range reply {
+		if r > 126 || (r < 32 && r != '\n') {
+			return fmt.Sprintf("has a non-ASCII character %q — that alone halves the segment to seventy characters", r)
+		}
+	}
+	return ""
+}
+
+// ReplyWarning is advice, not a rule: the one shape of text this house has
+// seen a carrier drop. Printed by `doorman check` beside the reply; never
+// refused, because a human who typed it knows what they are sending.
+func ReplyWarning(reply string) string {
+	if looksLikePhoneNumber(reply) {
+		return "carries a phone number — the one shape a carrier has dropped from this number (2026-09-22)"
+	}
+	return ""
+}
+
+// looksLikePhoneNumber reports a run of seven or more digits, allowing the
+// separators people put in numbers — spaces, dots, dashes, brackets, a
+// leading plus. Six digits in a row is a PIN, a year and a zip code, and is
+// not this.
+func looksLikePhoneNumber(s string) bool {
+	digits := 0
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+			digits++
+			if digits >= 7 {
+				return true
+			}
+		case r == ' ' || r == '.' || r == '-' || r == '(' || r == ')' || r == '+':
+			// a separator keeps the run alive only if digits already began
+			if digits == 0 {
+				continue
+			}
+		default:
+			digits = 0
+		}
+	}
+	return false
+}
+
+// MissingPhonebooks checks the handset references before the inbox starts.
+func (m *Messages) MissingPhonebooks(p *Policy) []string {
+	var missing []string
+	for _, w := range m.Words() {
+		if strings.HasPrefix(w.Phonebook, "handset:") && p.HandsetEndpoint(strings.TrimPrefix(w.Phonebook, "handset:")) == "" {
+			missing = append(missing, w.Phonebook)
+		}
+	}
+	return missing
+}

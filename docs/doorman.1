@@ -45,6 +45,64 @@ the call also leaves by that line's
 .BR "[line] trunk" ,
 because a provider will not present a number its account does not own; the
 caller ID and the trunk are one decision and travel together on both paths.
+.B *78NN
+quiets the phone that dialled it for 15, 30 or 45 minutes and
+.B *79
+ends it: room calls say how long and offer its box, the ring\-all and the
+page skip it, except a page from a handset with
+.B page_override
+in
+.IR handsets.toml .
+The state is Asterisk's own, time\-boxed, read by doorman and never written.
+.B curfew
+on a handset in
+.I handsets.toml
+names
+.B [[schedules]]
+ids from
+.IR policy.toml ;
+while any is active the phone is asleep: doorman rings it for nothing, the
+generated dialplan leaves it out of the ring\-all and the page (a
+.B page_override
+does not pierce it) and refuses its calls out, 911 and the reminder apps
+excepted, and the daemon drops ordinary calls at the hour. Several ids make
+a per\-day bedtime. A dangling id fails
+.BR "doorman check" ;
+the hours ride in the dialplan, so a change needs
+.B doorman render
+and a reload.
+.B *80
+schedules a call today at an AM/PM time;
+.B *81
+schedules a call in 0\(en9 hours and 0\(en99 minutes (minutes carry into hours);
+.B *82
+schedules a one\-shot wake\-up call tomorrow. Times use the appliance timezone.
+Each menu lists this handset's pending calls and offers cancellation, then
+accepts a time and an optional recorded message. Callbacks ring this handset
+for 30 seconds, with two retries three minutes apart. Asterisk's durable call
+files survive restarts. They bypass server quiet/curfew rules but respect
+handset DND and never auto\-answer. Standard prompts are bundled and free.
+.B doorman reminders prune
+removes finished recordings as the Asterisk user, hourly through
+.BR doorman-reminders.timer ;
+.B --spool
+selects a non\-default Asterisk spool directory (default /var/spool/asterisk).
+The menu/deliver AGI modes are invoked by the generated dialplan, not operators.
+.B *88
+adds a number to the phone that dialled it: the digits, then the spoken
+name; the number is in that phone's directory within a minute and named
+once
+.B doorman phonebook
+has had the recording transcribed at
+.BR STT_ENDPOINT .
+A directory, never the allow\-list.
+.B [line] failover
+is the ordered list of other trunks a call as that line tries when its own
+answers CHANUNAVAIL or CONGESTION \(em off unless written, because each rung
+presents that trunk's own number rather than the line's, and the call ends
+in that trunk's generated context so the journal records which one carried
+it. Busy, no answer and a hangup are answers, not failures, and never climb
+it.
 .PP
 That console refuses emergency numbers outright: E911 is registered per DID
 against a street address, so
@@ -68,7 +126,7 @@ below and
 Exits non\-zero if ARI is unreachable at startup, which is deliberate: a
 lobby daemon that cannot answer calls should fail loudly.
 .TP
-.BI "doorman check [\-handsets " path "] [\-trunks " path "] [\-contacts " path "] [" path ]
+.BI "doorman check [\-handsets " path "] [\-trunks " path "] [\-contacts " path "] [\-fetch] [" path ]
 Validate
 .IR policy.toml ,
 .I handsets.toml
@@ -124,8 +182,8 @@ word trunk.
 .IP
 With a
 .I contacts.toml
-it reports what the address books add up to: per source, how many vCards were
-read and how many numbers came out
+it reports what the address books add up to: per source, how old the copy is
+and how many vCards were read and how many numbers came out
 .BR personal ,
 .BR published ,
 .B blocked
@@ -192,6 +250,16 @@ given, or only the named ones. A running daemon picks the change up within a
 second. New PINs are printed to stdout \(em the one place they are ever
 shown \(em and are never written to the logs.
 .IP
+.BI "doorman rotate \-voicemail [\-env " path "] [" box ...]
+Set, or rotate, the PIN of each mailbox the handsets name \(em
+.BI VOICEMAIL_ <BOX> _PIN
+in
+.IR .env ,
+shown once. The phone that owns a box never types it;
+.B *98
+from another phone does. Takes effect at the next
+.BR "doorman render" .
+.TP
 .BI "doorman rotate \-phones [\-env " path "] [" id ...]
 rotates handset SIP passwords instead, rewriting
 .I .env
@@ -236,10 +304,12 @@ or a
 .I contacts.toml
 source id \(em and defaults to house and people.
 .IP
-Each endpoint also carries the outbound caller ID that phone presents and the
-trunk its calls leave by, read from every line's
+Each endpoint also carries the outbound caller ID that phone presents, the
+trunk its calls leave by and the failover ladder it climbs, read from every
+line's
 .BR "[line] outbound_cid" ,
-.B [line] trunk
+.BR "[line] trunk" ,
+.B [line] failover
 and
 .BR "outbound_handsets" .
 It is generated rather than configured because a handset that picks up and
@@ -284,6 +354,50 @@ Everything written here is an
 .BR output :
 never hand\-edit it, and never commit the PJSIP files, which hold real
 passwords.
+.TP
+.B doorman init services
+Install the systemd units from inside the binary, create the directories
+each process owns, and
+.B enable \-\-now
+exactly the units the configuration calls for: the daemon and the
+*88/reminder housekeeping timers always; the directory with
+.B PROVISION_ADDRESS
+and a provisionable handset; the inbox with
+.B INBOX_URL
+and messages.toml; the digest with
+.B MAIL_HOOK
+and
+.BR MAIL_TO ;
+the balance timer with trunks.toml. Idempotent: a rerun is the upgrade;
+a unit doorman did not write is left alone.
+.B \-\-dry\-run
+prints the plan. Needs root for the real thing.
+.TP
+.B doorman stt \fR[\fIurl\fR|\fBnone\fR]
+Where the *88 spoken names are transcribed. Alone, says what is set and
+whether it answers; a URL (an OpenAI\-compatible /v1/audio/transcriptions)
+sets
+.B STT_ENDPOINT
+in .env; \fBnone\fR clears it. Only the phonebook job reads it, on its next
+run, so no restart.
+.TP
+.B doorman backup \fBinit\fR|\fBrun\fR|\fBlist\fR|\fBverify\fR
+The house as one sealed file. \fBinit\fR makes the keypair: the public half
+into .env as
+.BR BACKUP_RECIPIENT ,
+the private half printed once and never stored. \fBrun\fR bundles .env, the
+TOMLs, the state directory (the journal snapshotted), voicemail, the *88
+spool and the hand-written Asterisk files, age\-encrypted, and delivers it
+to every destination (\fBBACKUP_PATH\fR), pruning by
+.BR BACKUP_KEEP_DAILY / WEEKLY ;
+doorman\-backup.timer runs it nightly. \fBverify\fR opens the newest with
+the private key (\fBBACKUP_IDENTITY_FILE\fR, or typed).
+.TP
+.B doorman restore \fIbundle\fR|\fB\-\-latest\fR
+A box from a bundle. \fB\-\-dry\-run\fR shows the manifest and what would
+be written; a box with a .env is refused unless \fB\-\-force\fR (it is
+backed up first); \fB\-\-root\fR \fIdir\fR rehearses elsewhere. Then check,
+render, init services, start doorman.
 .TP
 .B doorman lsp
 Run a language server over stdio for
@@ -371,6 +485,81 @@ It never serves a configuration.
 .B doorman\-directory.service
 runs it.
 .TP
+.BI "doorman inbox [\-messages " path "] [\-env " path "] [\-state " dir "] [\-once] [\-wait " d ]
+Texts to the house number. Long\-polls the house's edge inbox \(em the
+Cloudflare Worker in
+.I edge/
+that the carrier calls back, named by
+.B INBOX_URL
+and
+.B INBOX_TOKEN
+\(em acts on the words
+.I messages.toml
+allows from the
+.B [[people]]
+ids it names, and replies through the edge, which holds the carrier API key
+so this box never does. One number, one purpose: control plane and archive,
+never conversation; strangers and unknown words are never answered. Prints
+each outcome with the sender redacted and never the text. Exits 0 with
+nothing to do when
+.B INBOX_URL
+or
+.I messages.toml
+is absent;
+.B doorman\-inbox.service
+runs it for good. With
+.BR MAIL_HOOK " and " MAIL_TO
+set, every reply the house sends is copied to the house mailbox, and its own
+outcome log (in the state directory) records what each text did. With
+.BR HA_URL " and " HA_TOKEN
+set, the question form of a word (\fIgarage?\fR) reads the entity the
+action's
+.B state
+names from Home Assistant and answers with it, and an action whose
+.B done_when
+state already holds is left alone ("It was already open"); an action that
+names a state with neither key set is refused at startup. With
+.B EVENT_JOURNAL_PATH
+set, every text and action is written to the journal beside the daemon's
+events (message.received, message.acted, action.performed, action.refused)
+as a second writer that holds no owner lock.
+.PP
+A messages.toml word may set
+.B phonebook = "house"
+or
+.B phonebook = "handset:<id>"
+to import attached vCards into the house directory or one handset's own
+book. Use an attachment caption such as \fBAdd to: house,kitchen\fR to name
+one or more configured words, ignoring case and spaces around commas.
+A bare word still selects one book. Every destination must exist and permit
+the sender before anything is saved. The Worker downloads and parses the
+attachments; the house pulls only bounded name/number pairs, validates them
+again, and never receives the original file or its URL. Only those words'
+permitted people may import. Names and numbers are saved, duplicates skipped,
+and the sender receives a count. No call admission changes. At most three
+attachments, 1300 KiB each, and 100 distinct numbers. This cannot be combined
+with action, webhook or reply. Requires edge MMS forwarding and a live carrier
+contact-card delivery test; see RUNBOOK.
+.TP
+.BI "doorman digest [\-since " d "] [\-full] [\-mail] [\-subject " s "] [\-env " path "] [\-inbox\-state " dir ]
+Yesterday as one mail: the day's calls from the journal (or the legacy log)
+and its texts from the inbox's outcome log, rendered as Markdown. Printed to
+stdout redacted, as
+.B doorman calls
+is;
+.B \-\-full
+shows whole numbers;
+.B \-\-mail
+hands it to
+.B MAIL_HOOK
+for
+.BR MAIL_TO .
+A query over the journal, never an input to anything, never on a call.
+.B doorman\-digest.timer
+runs it every morning with
+.BR "\-\-mail \-\-full" ,
+because the house mailbox is the audit log and already holds whole numbers.
+.TP
 .B doorman balance
 What is left on each prepaid trunk, per trunk, with a non\-zero exit when any
 of it is below its threshold \(em so a cron entry needs no wrapper script. A
@@ -406,8 +595,39 @@ needs a copy of
 .I trunks.toml
 and the API password, and no daemon at all.
 .PP
+.BI "\-\-ring " ids
+rings a handset when a trunk is low \(em a handset or group id from
+.IR handsets.toml ,
+several in order, the first to answer hears it \(em and the daemon says
+"the calling credit is running low, it is down to about" and the lowest low
+balance as a whole number. An internal call never touches a trunk, so a dead
+account can still ring the kitchen to say it is dead. It needs the daemon on
+this box (the call is placed over ARI, on loopback, with
+.BR ARI_USERNAME " and " ARI_PASSWORD
+from
+.IR .env ),
+and it rings once per trunk per
+.B \-\-repeat
+(default 24h), remembered in
+.B \-\-state
+(default
+.IR $XDG_STATE_HOME/doorman/balance.json ).
+.B BALANCE_RING
+in the environment is the same as the flag.
+.PP
+.BI "\-\-prom " file
+writes the Prometheus text format for node_exporter's textfile collector on
+every run, atomically: balance, threshold and whether the last check read a
+number, per trunk, labelled by trunk id and provider and never by an
+account. The daemon never serves a balance because it never checks one.
+.B BALANCE_PROM
+in the environment is the same as the flag.
+.B doorman\-balance.timer
+runs the command every morning.
+.PP
 Flags:
-.BR \-\-trunks ", " \-\-env ", " \-\-min ", " \-\-json ", " \-\-timeout .
+.BR \-\-trunks ", " \-\-env ", " \-\-min ", " \-\-json ", " \-\-timeout ", "
+.BR \-\-ring ", " \-\-handsets ", " \-\-repeat ", " \-\-ring\-timeout ", " \-\-state ", " \-\-prom .
 .PP
 .BI "doorman e164 " number
 Show how a raw caller ID normalises to E.164. Use this when a known caller
@@ -556,7 +776,45 @@ Default
 The prompt pack every line speaks from unless it names its own with
 .BR "[line] prompts" ,
 which overrides this per line and is read from the policy file, so swapping a
-pack reloads like any other policy edit.
+pack reloads like any other policy edit. The house's own phrases \(em the
+low\-balance call \(em always come from the bundled pack's
+.I system/
+directory, whatever this says: a pack supplies the six lobby prompts and
+cannot silence an alert.
+.TP
+.BI VOICEMAIL_ <BOX> _PIN
+The PIN of each mailbox a handset names, read by
+.B doorman render
+into
+.I voicemail_handsets.conf
+exactly as
+.BI HANDSET_ <ID> _PASSWORD
+is read into the PJSIP file.
+.B doorman init
+writes one per room;
+.B doorman rotate \-\-voicemail
+sets or rotates them. A box with no variable is left to the hand\-written
+.IR voicemail.conf .
+.TP
+.BR MAIL_HOOK ", " MAIL_TO
+Read by
+.BR "doorman inbox" " and " "doorman digest"
+and never by the daemon: the executable that sends one mail \(em subject as
+its argument, Markdown body on stdin,
+.B MAIL_TO
+in its environment, non\-zero exit when it did not send \(em and the house
+mailbox address. The shipped
+.I scripts/mail\-hook\-bullmoose
+runs the bullmoose CLI with a token scoped to draft and send. Both or
+neither. Asterisk's own voicemail hook reads the same two names from
+.IR /etc/asterisk/cmm\-mail.env .
+.TP
+.BR BALANCE_RING ", " BALANCE_PROM
+Read by
+.B doorman balance
+and never by the daemon: the handset or group ids to ring when a trunk is
+low, and the Prometheus textfile to write. Empty means neither. See
+.BR "doorman balance" .
 .TP
 .B FIRST_DIGIT_TIMEOUT_MS
 Default 10000. Time to dial the

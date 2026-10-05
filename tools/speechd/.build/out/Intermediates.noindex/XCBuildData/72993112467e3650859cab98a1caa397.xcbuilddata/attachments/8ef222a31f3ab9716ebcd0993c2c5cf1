@@ -1,0 +1,16 @@
+{
+  "" : {
+    "const-values" : "/Users/ericmoore/Web/call-me-maybe/.claude/worktrees/pr-code-review-8152d4/tools/speechd/.build/out/Intermediates.noindex/speechd.build/Release/speechd-p.build/Objects-normal/arm64/speechd-primary.swiftconstvalues",
+    "dependencies" : "/Users/ericmoore/Web/call-me-maybe/.claude/worktrees/pr-code-review-8152d4/tools/speechd/.build/out/Intermediates.noindex/speechd.build/Release/speechd-p.build/Objects-normal/arm64/speechd-primary.d",
+    "diagnostics" : "/Users/ericmoore/Web/call-me-maybe/.claude/worktrees/pr-code-review-8152d4/tools/speechd/.build/out/Intermediates.noindex/speechd.build/Release/speechd-p.build/Objects-normal/arm64/speechd-primary.dia",
+    "emit-module-dependencies" : "/Users/ericmoore/Web/call-me-maybe/.claude/worktrees/pr-code-review-8152d4/tools/speechd/.build/out/Intermediates.noindex/speechd.build/Release/speechd-p.build/Objects-normal/arm64/speechd-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/ericmoore/Web/call-me-maybe/.claude/worktrees/pr-code-review-8152d4/tools/speechd/.build/out/Intermediates.noindex/speechd.build/Release/speechd-p.build/Objects-normal/arm64/speechd-primary-emit-module.dia",
+    "pch" : "/Users/ericmoore/Web/call-me-maybe/.claude/worktrees/pr-code-review-8152d4/tools/speechd/.build/out/Intermediates.noindex/speechd.build/Release/speechd-p.build/Objects-normal/arm64/speechd-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/ericmoore/Web/call-me-maybe/.claude/worktrees/pr-code-review-8152d4/tools/speechd/.build/out/Intermediates.noindex/speechd.build/Release/speechd-p.build/Objects-normal/arm64/speechd-primary.swiftdeps"
+  },
+  "/Users/ericmoore/Web/call-me-maybe/.claude/worktrees/pr-code-review-8152d4/tools/speechd/Sources/speechd/main.swift" : {
+    "index-unit-output-path" : "/speechd.build/Release/speechd-p.build/Objects-normal/arm64/main.o",
+    "llvm-bc" : "/Users/ericmoore/Web/call-me-maybe/.claude/worktrees/pr-code-review-8152d4/tools/speechd/.build/out/Intermediates.noindex/speechd.build/Release/speechd-p.build/Objects-normal/arm64/main.bc",
+    "object" : "/Users/ericmoore/Web/call-me-maybe/.claude/worktrees/pr-code-review-8152d4/tools/speechd/.build/out/Intermediates.noindex/speechd.build/Release/speechd-p.build/Objects-normal/arm64/main.o"
+  }
+}

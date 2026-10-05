@@ -31,6 +31,237 @@ type Fragments struct {
 	// Generated counts the PJSIP handsets rendered; pseudo-handsets
 	// (Local/... endpoints) are listed in the map but not generated.
 	Generated int
+	// Voicemail is the [household](+) mailbox lines — voicemail_handsets.conf
+	// — one per box a handset names whose PIN is in .env, and a comment for
+	// each box that is not, which is assumed to be written by hand.
+	Voicemail string
+	// Mailboxes is what Voicemail was built from, for `doorman check` and
+	// `doorman render` to report.
+	Mailboxes []Mailbox
+	// PageOverrides are the handsets whose pages reach a quiet room, in id
+	// order — empty is a house where nobody can, which `check` warns about.
+	PageOverrides []string
+}
+
+// A phone's own voicemail (s21): `mailbox` on a handset is a box the tool
+// makes. render writes the mailbox line, with the PIN from
+// VOICEMAIL_<BOX>_PIN in .env exactly as handset passwords come from
+// HANDSET_<ID>_PASSWORD; gives the endpoint CMM_MAILBOX so `*97` opens that
+// box without asking; and lets a room call that rings out fall into it. A
+// box whose PIN is not in .env is left alone and named in a comment — that
+// is every install from before this existed, where `family` lives in the
+// hand-written voicemail.conf and must go on working untouched.
+
+// Mailbox is one voicemail box as the inventory describes it.
+type Mailbox struct {
+	ID string
+	// Handsets name it, in inventory order. One handset makes it that
+	// phone's own box; several make it a shared one.
+	Handsets []string
+	// Label is the display name written to Asterisk: the one handset's
+	// label, or the id made readable when the box is shared.
+	Label string
+	// Email is the first address any of its handsets gives, or "".
+	Email string
+	// EnvVar names the .env variable holding its PIN, and Generated says
+	// whether that variable was set — that is, whether render wrote it.
+	EnvVar    string
+	Generated bool
+	pin       string
+}
+
+// VoicemailPINEnv is the .env variable holding a mailbox's PIN.
+func VoicemailPINEnv(box string) string {
+	return "VOICEMAIL_" + strings.ToUpper(strings.ReplaceAll(box, "-", "_")) + "_PIN"
+}
+
+// Mailboxes lists every box the handsets name, in id order, with what
+// render knows about each.
+func Mailboxes(handsets []policy.Handset, env Env) []Mailbox {
+	byID := map[string]*Mailbox{}
+	var order []string
+	for _, h := range handsets {
+		if h.Mailbox == "" {
+			continue
+		}
+		m, ok := byID[h.Mailbox]
+		if !ok {
+			m = &Mailbox{ID: h.Mailbox, EnvVar: VoicemailPINEnv(h.Mailbox)}
+			byID[h.Mailbox] = m
+			order = append(order, h.Mailbox)
+		}
+		m.Handsets = append(m.Handsets, h.ID)
+		if m.Email == "" {
+			m.Email = h.Email
+		}
+	}
+	sort.Strings(order)
+	out := make([]Mailbox, 0, len(order))
+	for _, id := range order {
+		m := byID[id]
+		if len(m.Handsets) == 1 {
+			for _, h := range handsets {
+				if h.ID == m.Handsets[0] {
+					m.Label = h.Label
+				}
+			}
+		}
+		if m.Label == "" {
+			m.Label = humanise(id)
+		}
+		if v, ok := env(m.EnvVar); ok && v != "" {
+			m.Generated, m.pin = true, v
+		}
+		out = append(out, *m)
+	}
+	return out
+}
+
+// humanise turns "whole-house" into "Whole house" for a display name.
+func humanise(id string) string {
+	s := strings.NewReplacer("-", " ", "_", " ").Replace(id)
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// Do not disturb (s12) is a time-boxed value Asterisk owns: the global
+// variable DND_<handset> holds an expiry, set by *78NN on the phone itself
+// and cleared by *79, by time, or by an Asterisk restart. Everything below
+// only reads it. A global rather than the AstDB because ARI cannot read
+// DB() without asterisk.conf opening every "dangerous" function to every
+// ARI user. dndExpiry is the expression that reads it safely — unset is 0,
+// never an empty operand that makes the expression parser warn and answer
+// false by accident.
+func DNDVar(id string) string { return "DND_" + strings.ReplaceAll(id, "-", "_") }
+
+func dndExpiry(id string) string {
+	v := DNDVar(id)
+	return "${IF($[\"${" + v + "}\"!=\"\"]?${" + v + "}:0)}"
+}
+
+// DefaultPhonebookDir is where a handset's own additions and the *88 spool
+// live when PHONEBOOK_DIR is not set; the installer creates it.
+const DefaultPhonebookDir = "/var/lib/doorman/phonebook"
+
+// PhonebookDir is PHONEBOOK_DIR or the default.
+func PhonebookDir(env Env) string {
+	if v, ok := env("PHONEBOOK_DIR"); ok && strings.TrimSpace(v) != "" {
+		return strings.TrimRight(strings.TrimSpace(v), "/")
+	}
+	return DefaultPhonebookDir
+}
+
+// DefaultPhonebookSpool is where *88 recordings land when PHONEBOOK_SPOOL
+// is not set. Its own top-level directory, not under PHONEBOOK_DIR: the
+// daemon's state directory is 0700 to the doorman user (every unit pins it
+// so) and Asterisk's spool is closed to doorman, so the one place both
+// accounts can meet is a directory of their own — asterisk-owned, doorman
+// group, setgid — which the installer creates.
+const DefaultPhonebookSpool = "/var/spool/call-me-maybe"
+
+// PhonebookSpool is PHONEBOOK_SPOOL or the default.
+func PhonebookSpool(env Env) string {
+	if v, ok := env("PHONEBOOK_SPOOL"); ok && strings.TrimSpace(v) != "" {
+		return strings.TrimRight(strings.TrimSpace(v), "/")
+	}
+	return DefaultPhonebookSpool
+}
+
+// curfewContext names the dialplan context a curfewed handset's calls enter.
+func curfewContext(id string) string { return "curfew-" + id }
+
+// curfewExpr is a dialplan expression that is true while any of the windows
+// is active, or "" for a handset with none worth rendering. It is built from
+// IFTIME so it can sit inside $[…] beside the do-not-disturb test, and each
+// window is written the way Afterhours.Active reads it: a window that
+// crosses midnight is its evening on the days it starts and its morning on
+// the days after, because Asterisk tests the weekday and the clock
+// separately and would otherwise end Thursday's bedtime at midnight.
+func curfewExpr(windows []policy.CurfewWindow) string {
+	var specs []string
+	for _, w := range windows {
+		if w.Window == nil { // enabled = false: inert here as everywhere
+			continue
+		}
+		specs = append(specs, timeSpecs(w.Window)...)
+	}
+	if len(specs) == 0 {
+		return ""
+	}
+	terms := make([]string, len(specs))
+	for i, spec := range specs {
+		terms[i] = "${IFTIME(" + spec + ",*,*?1:0)}"
+	}
+	return "(" + strings.Join(terms, " | ") + ")"
+}
+
+// timeSpecs is a window as Asterisk time specifications: "HH:MM-HH:MM,days".
+// Asterisk's ranges are inclusive to the minute, so the end is one minute
+// before the window's exclusive end.
+func timeSpecs(w *policy.Afterhours) []string {
+	clock := func(m int) string { return fmt.Sprintf("%02d:%02d", m/60, m%60) }
+	if w.StartMin < w.EndMin {
+		return []string{clock(w.StartMin) + "-" + clock(w.EndMin-1) + "," + dayList(w.Days)}
+	}
+	// Crosses midnight: the evening on the start days, the morning on the next.
+	var next [7]bool
+	for d, on := range w.Days {
+		next[(d+1)%7] = on
+	}
+	out := []string{clock(w.StartMin) + "-23:59," + dayList(w.Days)}
+	if w.EndMin > 0 {
+		out = append(out, "00:00-"+clock(w.EndMin-1)+","+dayList(next))
+	}
+	return out
+}
+
+// dayList is Asterisk's weekday list for a set of days, "*" for all seven.
+func dayList(days [7]bool) string {
+	names := []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
+	var on []string
+	for d, ok := range days {
+		if ok {
+			on = append(on, names[d])
+		}
+	}
+	if len(on) == 7 {
+		return "*"
+	}
+	return strings.Join(on, "&")
+}
+
+// systemMedia is where the house's own phrases live (the bundled pack's
+// system/ directory), the same prefix internal/lobby plays announcements
+// from; a test in cmd/doorman keeps the two agreeing.
+const systemMedia = "call-me-maybe/system"
+
+// buildVoicemail renders voicemail_handsets.conf from the boxes.
+func buildVoicemail(boxes []Mailbox) string {
+	var b strings.Builder
+	b.WriteString(header("handsets.toml", false))
+	b.WriteString("; THIS FILE CONTAINS VOICEMAIL PINS. Install it root-owned and mode 0640,\n")
+	b.WriteString("; and never commit it. voicemail.conf reaches it with\n")
+	b.WriteString(";   #tryinclude \"voicemail_handsets.conf\"\n")
+	b.WriteString("; and [household](+) below appends to the hand-written context there, so\n")
+	b.WriteString("; a box written by hand (family, the hunt's) keeps working beside these.\n")
+	b.WriteString("; A box named here without VOICEMAIL_<BOX>_PIN in .env is not written: it\n")
+	b.WriteString("; is assumed to be one of the hand-written ones.\n\n")
+	b.WriteString("[household](+)\n")
+	for _, m := range boxes {
+		if !m.Generated {
+			fmt.Fprintf(&b, "; %s: %s is not set in .env — assumed hand-written in voicemail.conf (%s)\n",
+				m.ID, m.EnvVar, strings.Join(m.Handsets, ", "))
+			continue
+		}
+		line := fmt.Sprintf("%s => %s,%s", m.ID, m.pin, strings.ReplaceAll(m.Label, ",", " "))
+		if m.Email != "" {
+			line += "," + m.Email
+		}
+		fmt.Fprintf(&b, "%s\n", line)
+	}
+	return b.String()
 }
 
 // header is the banner every generated file carries. from names the source of
@@ -60,6 +291,11 @@ func header(from string, secrets bool) string {
 const (
 	outboundCIDVar   = "OUTBOUND_CID"
 	outboundTrunkVar = "OUTBOUND_TRUNK"
+	// outboundFailoverVar is the ladder: trunk ids, comma-separated, in the
+	// order [cmm-outbound] tries them after OUTBOUND_TRUNK fails. Each step
+	// is a generated [cmm-failover-<id>] context (trunks.go), so the dialplan
+	// holds the dial strings and this variable holds only names.
+	outboundFailoverVar = "OUTBOUND_FAILOVER"
 )
 
 // OutboundIdentity is what one handset presents and where its calls leave by.
@@ -77,10 +313,14 @@ type OutboundIdentity struct {
 	// means the dialplan's DEFAULT_TRUNK decides, which is every install with
 	// one provider and no trunks.toml at all.
 	Trunk string
+	// Failover is the ladder of trunk ids, comma-joined, a call from this
+	// handset falls over to when Trunk cannot carry it. Empty is no ladder,
+	// which is every line that did not write [line] failover.
+	Failover string
 }
 
 // set reports whether this handset has any outbound identity to write.
-func (o OutboundIdentity) set() bool { return o.CID != "" || o.Trunk != "" }
+func (o OutboundIdentity) set() bool { return o.CID != "" || o.Trunk != "" || o.Failover != "" }
 
 // Build renders both fragments. Secrets come exclusively through env — the
 // generated PJSIP file contains real passwords and must be treated like
@@ -95,7 +335,9 @@ func (o OutboundIdentity) set() bool { return o.CID != "" || o.Trunk != "" }
 // calling working when doorman is down. A handset with no entry gets no
 // set_var, and its endpoint is byte-identical to what it was before per-line
 // identity existed.
-func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdentity) (*Fragments, error) {
+// curfews is each sleeping-capable handset's windows (policy.Curfew); nil
+// renders byte for byte what render produced before curfews existed.
+func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdentity, curfews map[string][]policy.CurfewWindow) (*Fragments, error) {
 	var problems []string
 	fail := func(format string, args ...any) {
 		problems = append(problems, fmt.Sprintf(format, args...))
@@ -106,7 +348,8 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 	plan.WriteString(header("handsets.toml", false))
 	plan.WriteString("[handsets-internal]\n")
 
-	var all, pageMembers []string
+	var all, pageMembers, overrides, sleepers []string
+	var messageRoutes []messageRoute
 	generated := 0
 
 	for _, h := range handsets {
@@ -138,9 +381,29 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 		}
 
 		fmt.Fprintf(&pjsip, "; ── %s ──\n[%s]\n", label, h.ID)
-		pjsip.WriteString("type=endpoint\ncontext=internal\ndisallow=all\nallow=ulaw\nallow=g722\n")
-		fmt.Fprintf(&pjsip, "auth=%s-auth\naors=%s\n", h.ID, h.ID)
+		// A curfewed phone's calls enter through its own context, which
+		// is [internal] behind a clock (see the [curfew-<id>] contexts).
+		asleep := curfewExpr(curfews[h.ID])
+		callContext := "internal"
+		if asleep != "" {
+			callContext = curfewContext(h.ID)
+		}
+		fmt.Fprintf(&pjsip, "type=endpoint\ncontext=%s\ndisallow=all\nallow=ulaw\nallow=g722\n", callContext)
+		// outbound_auth as well as auth: a Grandstream challenges every NOTIFY
+		// the box sends it (401, digest, the phone's own SIP credentials), and
+		// without this Asterisk never answers the challenge, so a check-sync
+		// is politely refused and `doorman provision notify` does nothing.
+		// The same auth object serves both directions.
+		fmt.Fprintf(&pjsip, "auth=%s-auth\noutbound_auth=%s-auth\naors=%s\n", h.ID, h.ID, h.ID)
 		pjsip.WriteString("direct_media=no\nforce_rport=yes\nrewrite_contact=yes\nrtp_symmetric=yes\ndtmf_mode=rfc4733\n")
+		// A text typed on a handset arrives as a SIP MESSAGE. Without its own
+		// context it runs the call dialplan, where Dial() rings the other
+		// phone as an anonymous call and delivers nothing (first re-provision,
+		// 2026-09-24). [cmm-messages] below hands it to the phone as a message.
+		pjsip.WriteString("message_context=cmm-messages\n")
+		// An endpoint marker, not caller ID: only a rendered local handset
+		// can create or hear its own reminders through the AGI menus.
+		fmt.Fprintf(&pjsip, "set_var=CMM_REMINDER_HANDSET=%s\n", h.ID)
 		if h.Number > 0 {
 			fmt.Fprintf(&pjsip, "callerid=%s <%d>\n", label, h.Number)
 		} else {
@@ -148,6 +411,10 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 		}
 		if h.Mailbox != "" {
 			fmt.Fprintf(&pjsip, "mailboxes=%s@household\n", h.Mailbox)
+			// The phone's own box, for *97: VoiceMailMain(${CMM_MAILBOX}@household,s)
+			// opens it without asking which, or for a PIN — a handset on the
+			// LAN is already trusted to call as the house and page every room.
+			fmt.Fprintf(&pjsip, "set_var=CMM_MAILBOX=%s\n", h.Mailbox)
 		}
 		if out := outbound[h.ID]; out.set() {
 			// Read by [cmm-outbound], the one context both outbound paths go
@@ -161,18 +428,75 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 			if out.Trunk != "" {
 				fmt.Fprintf(&pjsip, "set_var=%s=%s\n", outboundTrunkVar, out.Trunk)
 			}
+			if out.Failover != "" {
+				fmt.Fprintf(&pjsip, "set_var=%s=%s\n", outboundFailoverVar, out.Failover)
+			}
 		}
 		fmt.Fprintf(&pjsip, "\n[%s-auth]\ntype=auth\nauth_type=userpass\nusername=%s\npassword=%s\n\n", h.ID, h.ID, secret)
 		fmt.Fprintf(&pjsip, "[%s]\ntype=aor\nmax_contacts=2\nremove_existing=yes\nqualify_frequency=60\n\n", h.ID)
 		generated++
 
 		if h.Number > 0 {
-			fmt.Fprintf(&plan, "exten => %d,1,Dial(%s,30)\n", h.Number, h.Endpoint)
+			// A quiet room is told about, inside the house: how many minutes
+			// remain, exactly, then its mailbox if it has one. Outside
+			// callers never reach this — the lobby's ladders are doorman's,
+			// and a child's DND is not a stranger's information.
+			if asleep != "" {
+				// Asleep is checked before quiet: a curfew is the house's
+				// rule and a bedtime does not count down in minutes.
+				fmt.Fprintf(&plan, "exten => %d,1,GotoIf($[%s]?asleep)\n", h.Number, asleep)
+				fmt.Fprintf(&plan, " same => n,GotoIf($[%s > ${EPOCH}]?quiet)\n", dndExpiry(h.ID))
+			} else {
+				fmt.Fprintf(&plan, "exten => %d,1,GotoIf($[%s > ${EPOCH}]?quiet)\n", h.Number, dndExpiry(h.ID))
+			}
+			fmt.Fprintf(&plan, " same => n,Dial(%s,30)\n", h.Endpoint)
+			if h.Mailbox != "" {
+				// A room call that rings out lands in the room's own box —
+				// busy gets the busy greeting — and a call that was answered
+				// ends when the far end hangs up, without a detour through
+				// voicemail on its way out.
+				plan.WriteString(" same => n,GotoIf($[\"${DIALSTATUS}\"=\"ANSWER\"]?done)\n")
+				plan.WriteString(" same => n,GotoIf($[\"${DIALSTATUS}\"=\"BUSY\"]?busy)\n")
+				fmt.Fprintf(&plan, " same => n,VoiceMail(%s@household,u)\n", h.Mailbox)
+				plan.WriteString(" same => n(done),Hangup()\n")
+				fmt.Fprintf(&plan, " same => n(busy),VoiceMail(%s@household,b)\n", h.Mailbox)
+				plan.WriteString(" same => n,Hangup()\n")
+			} else {
+				plan.WriteString(" same => n,Hangup()\n")
+			}
+			fmt.Fprintf(&plan, " same => n(quiet),Playback(%s/quiet-room)\n", systemMedia)
+			// Two steps, because $[…] divides in floating point (SayNumber
+			// read "15.000000") and MATH takes exactly one operation, so the
+			// sum is $[…]'s and the rounding division is MATH's (first box,
+			// 2026-09-25, both ways).
+			fmt.Fprintf(&plan, " same => n,Set(LEFT=$[%s - ${EPOCH} + 59])\n", dndExpiry(h.ID))
+			plan.WriteString(" same => n,SayNumber(${MATH(${LEFT}/60,int)})\n")
+			fmt.Fprintf(&plan, " same => n,Playback(%s/quiet-minutes)\n", systemMedia)
+			if h.Mailbox != "" {
+				fmt.Fprintf(&plan, " same => n,VoiceMail(%s@household,u)\n", h.Mailbox)
+			}
+			plan.WriteString(" same => n,Hangup()\n")
+			if asleep != "" {
+				// The clip is the bundled pack's; a pack built before it
+				// existed plays nothing here and goes on to the mailbox.
+				fmt.Fprintf(&plan, " same => n(asleep),Playback(%s/curfew-room)\n", systemMedia)
+				if h.Mailbox != "" {
+					fmt.Fprintf(&plan, " same => n,VoiceMail(%s@household,u)\n", h.Mailbox)
+				}
+				plan.WriteString(" same => n,Hangup()\n")
+			}
 			fmt.Fprintf(&plan, "exten => %d,hint,%s\n", h.Number, h.Endpoint)
+			messageRoutes = append(messageRoutes, messageRoute{number: h.Number, id: h.ID, label: label})
 		}
 		all = append(all, h.Endpoint)
 		if h.Page {
 			pageMembers = append(pageMembers, h.Endpoint)
+		}
+		if asleep != "" {
+			sleepers = append(sleepers, h.ID)
+		}
+		if h.PageOverride {
+			overrides = append(overrides, h.ID)
 		}
 	}
 
@@ -185,14 +509,154 @@ func Build(handsets []policy.Handset, env Env, outbound map[string]OutboundIdent
 
 	sort.Strings(all)
 	sort.Strings(pageMembers)
+	boxes := Mailboxes(handsets, env)
 
-	plan.WriteString("\n; Ring every handset.\n")
-	fmt.Fprintf(&plan, "exten => 100,1,Dial(%s,30)\n", strings.Join(all, "&"))
+	sort.Strings(overrides)
+	plan.WriteString("\n; Ring every handset — every handset that is not quiet (*78NN).\n")
+	plan.WriteString("exten => 100,1,Set(MEMBERS=)\n")
+	for _, ep := range all {
+		id := strings.TrimPrefix(ep, "PJSIP/")
+		if asleep := curfewExpr(curfews[id]); asleep != "" {
+			fmt.Fprintf(&plan, " same => n,ExecIf($[%s <= ${EPOCH} & !%s]?Set(MEMBERS=${MEMBERS}&%s))\n", dndExpiry(id), asleep, ep)
+			continue
+		}
+		fmt.Fprintf(&plan, " same => n,ExecIf($[%s <= ${EPOCH}]?Set(MEMBERS=${MEMBERS}&%s))\n", dndExpiry(id), ep)
+	}
+	plan.WriteString(" same => n,GotoIf($[\"${MEMBERS}\"=\"\"]?none)\n")
+	plan.WriteString(" same => n,Dial(${MEMBERS:1},30)\n")
+	plan.WriteString(" same => n,Hangup()\n")
+	fmt.Fprintf(&plan, " same => n(none),Playback(%s/quiet-page)\n", systemMedia)
+	plan.WriteString(" same => n,Hangup()\n")
 	if len(pageMembers) > 0 {
 		plan.WriteString("\n; Page: members auto-answer on speaker (page = true in handsets.toml).\n")
-		fmt.Fprintf(&plan, "exten => 500,1,Page(%s,ib(page-autoanswer^s^1),60)\n",
-			strings.Join(pageMembers, "&"))
+		plan.WriteString("; A quiet room is skipped, and the pager is told — unless the pager is a\n")
+		plan.WriteString("; page_override phone, whose page reaches every room regardless: a\n")
+		plan.WriteString("; parent's page is what makes do-not-disturb safe to hand to a child.\n")
+		plan.WriteString("exten => 500,1,Set(MEMBERS=)\n")
+		plan.WriteString(" same => n,Set(QUIET=0)\n")
+		if len(overrides) > 0 {
+			var conds []string
+			for _, id := range overrides {
+				conds = append(conds, "\"${CHANNEL(endpoint)}\"=\""+id+"\"")
+			}
+			fmt.Fprintf(&plan, " same => n,Set(OVERRIDE=$[%s])\n", strings.Join(conds, " | "))
+		} else {
+			plan.WriteString(" same => n,Set(OVERRIDE=0)\n")
+		}
+		for _, ep := range pageMembers {
+			id := strings.TrimPrefix(ep, "PJSIP/")
+			if asleep := curfewExpr(curfews[id]); asleep != "" {
+				// A parent's page pierces a child's do-not-disturb; it does
+				// not pierce the parent's own bedtime rule for that room.
+				fmt.Fprintf(&plan, " same => n,ExecIf($[(${OVERRIDE} | %s <= ${EPOCH}) & !%s]?Set(MEMBERS=${MEMBERS}&%s):Set(QUIET=1))\n", dndExpiry(id), asleep, ep)
+				continue
+			}
+			fmt.Fprintf(&plan, " same => n,ExecIf($[${OVERRIDE} | %s <= ${EPOCH}]?Set(MEMBERS=${MEMBERS}&%s):Set(QUIET=1))\n", dndExpiry(id), ep)
+		}
+		fmt.Fprintf(&plan, " same => n,ExecIf($[${QUIET}]?Playback(%s/quiet-page))\n", systemMedia)
+		plan.WriteString(" same => n,GotoIf($[\"${MEMBERS}\"=\"\"]?none)\n")
+		plan.WriteString(" same => n,Page(${MEMBERS:1},ib(page-autoanswer^s^1),60)\n")
+		plan.WriteString(" same => n,Hangup()\n")
+		plan.WriteString(" same => n(none),Hangup()\n")
 	}
 
-	return &Fragments{PJSIP: pjsip.String(), Dialplan: plan.String(), Generated: generated}, nil
+	// Durable timers are Asterisk call files. The AGI subcommand only owns
+	// the handset dialogue and private metadata, not SIP or a daemon clock.
+	for _, code := range []string{"80", "81", "82"} {
+		fmt.Fprintf(&plan, "\n; *%s: one-shot reminder on this handset.\nexten => *%s,1,Answer()\n", code, code)
+		plan.WriteString(" same => n,Set(CHANNEL(accountcode)=cmm-reminder)\n")
+		plan.WriteString(" same => n,Set(AGISIGHUP=no)\n same => n,Set(TIMEOUT(absolute)=600)\n")
+		fmt.Fprintf(&plan, " same => n,Set(CMM_REMINDER_MEDIA=%s)\n", systemMedia)
+		fmt.Fprintf(&plan, " same => n,AGI(/opt/call-me-maybe/bin/doorman,reminders,menu,%s)\n", code)
+		plan.WriteString(" same => n,Hangup()\n")
+	}
+
+	// *88 — add a number to this phone's own book (s24): key it, then say
+	// the name after the beep. Three Asterisk applications and nothing of
+	// doorman's; the recording lands in the spool as <handset>-<time>-<digits>
+	// and `doorman phonebook` files the number at once and the name once a
+	// transcription service has heard it. Generated rather than hand-written
+	// in [features-internal] because the path is configuration. The prompts
+	// are separate Playbacks so a pack without the clips degrades to the
+	// beep, which Record always gives.
+	plan.WriteString("\n; *88: add a number to this phone's own book — key it, #, say the name.\n")
+	plan.WriteString("exten => *88,1,Answer()\n")
+	plan.WriteString(" same => n,Set(ADD_ID=${CHANNEL(endpoint)})\n")
+	fmt.Fprintf(&plan, " same => n,Playback(%s/add-number)\n", systemMedia)
+	plan.WriteString(" same => n,Read(ADD_NUMBER,,15,,2,10)\n")
+	plan.WriteString(" same => n,GotoIf($[\"${ADD_NUMBER}\"=\"\"]?bye)\n")
+	fmt.Fprintf(&plan, " same => n,Playback(%s/add-name)\n", systemMedia)
+	fmt.Fprintf(&plan, " same => n,Record(%s/${ADD_ID}-${EPOCH}-${ADD_NUMBER}.wav,3,15,k)\n", PhonebookSpool(env))
+	fmt.Fprintf(&plan, " same => n,Playback(%s/add-done)\n", systemMedia)
+	plan.WriteString(" same => n(bye),Hangup()\n")
+
+	// No include from [internal] or an inbound trunk. Only the private spool
+	// enters here after the named handset answers; AGI verifies its identity.
+	plan.WriteString("\n[cmm-reminder-deliver]\nexten => _[0-9a-f].,1,Set(AGISIGHUP=no)\n")
+	plan.WriteString(" same => n,Set(TIMEOUT(absolute)=90)\n")
+	plan.WriteString(" same => n,AGI(/opt/call-me-maybe/bin/doorman,reminders,deliver,${EXTEN})\n same => n,Hangup()\n")
+
+	// Texts between handsets. Every endpoint above names this context for
+	// SIP MESSAGE, so a message to a room number reaches that phone as a
+	// message, and 100 reaches every phone.
+	sort.Slice(messageRoutes, func(i, j int) bool { return messageRoutes[i].number < messageRoutes[j].number })
+	plan.WriteString("\n; Texts between handsets (SIP MESSAGE): a room number, or 100 for everyone.\n[cmm-messages]\n")
+	for _, r := range messageRoutes {
+		fmt.Fprintf(&plan, "exten => %d,1,Gosub(cmm-message-from,s,1)\n same => n,MessageSend(pjsip:%s,${MSG_FROM})\n", r.number, r.id)
+		// A phone replies to the From it was given. Before the rewrite below
+		// that was the sender's endpoint id, so the reply must route too.
+		fmt.Fprintf(&plan, "exten => %s,1,Goto(%d,1)\n", r.id, r.number)
+	}
+	if len(messageRoutes) > 0 {
+		plan.WriteString("exten => 100,1,Gosub(cmm-message-from,s,1)\n")
+		for _, r := range messageRoutes {
+			fmt.Fprintf(&plan, " same => n,MessageSend(pjsip:%s,${MSG_FROM})\n", r.id)
+		}
+	}
+	// No catch-all on purpose. Asterisk answers a MESSAGE to an extension
+	// this context does not have with 404, and the handset shows an error —
+	// which is the truth about an outside number typed into the messages
+	// app: the house number does not text from handsets (s15). A NoOp here
+	// would accept the message and drop it in silence.
+
+	// The From a text carries is the sender's endpoint id; the phone shows
+	// it and replies to it. Rewritten to the sender's room number and label,
+	// so the receiving phone names the room from its phone book and a reply
+	// to it routes like any other text.
+	plan.WriteString("\n[cmm-message-from]\nexten => s,1,Set(MSGFROM=${MESSAGE(from)})\n")
+	plan.WriteString(" same => n,Set(SENDER=${CUT(MSGFROM,@,1)})\n same => n,Set(SENDER=${CUT(SENDER,:,2)})\n")
+	plan.WriteString(" same => n,Set(FROMDOM=${CUT(MSGFROM,@,2)})\n same => n,Set(FROMDOM=${CUT(FROMDOM,>,1)})\n")
+	plan.WriteString(" same => n,Set(MSG_FROM=${MSGFROM})\n")
+	for _, r := range messageRoutes {
+		fmt.Fprintf(&plan, " same => n,ExecIf($[\"${SENDER}\" = \"%s\"]?Set(MSG_FROM=\"%s\" <sip:%d@${FROMDOM}>))\n", r.id, r.label, r.number)
+	}
+	plan.WriteString(" same => n,Return()\n")
+
+	// One context per sleeping-capable phone: [internal] behind a clock.
+	// Emergency calls and the explicitly requested reminder apps go through
+	// unconditionally; ordinary calls stay behind the bedtime gate.
+	for _, id := range sleepers {
+		fmt.Fprintf(&plan, "\n; %s is asleep while any of its curfew windows is active (handsets.toml).\n", id)
+		fmt.Fprintf(&plan, "[%s]\n", curfewContext(id))
+		plan.WriteString("exten => 911,1,Goto(internal,${EXTEN},1)\n")
+		for _, code := range []string{"80", "81", "82"} {
+			fmt.Fprintf(&plan, "exten => *%s,1,Goto(internal,${EXTEN},1)\n", code)
+		}
+		fmt.Fprintf(&plan, "exten => _[0-9*#+].,1,GotoIf($[%s]?asleep)\n", curfewExpr(curfews[id]))
+		plan.WriteString(" same => n,Goto(internal,${EXTEN},1)\n")
+		plan.WriteString(" same => n(asleep),Answer()\n")
+		fmt.Fprintf(&plan, " same => n,Playback(%s/curfew-out)\n", systemMedia)
+		plan.WriteString(" same => n,Busy(3)\n")
+		plan.WriteString(" same => n,Hangup()\n")
+	}
+
+	return &Fragments{PJSIP: pjsip.String(), Dialplan: plan.String(), Generated: generated,
+		Voicemail: buildVoicemail(boxes), Mailboxes: boxes, PageOverrides: overrides}, nil
+}
+
+// messageRoute is one handset's number → endpoint for [cmm-messages].
+type messageRoute struct {
+	number int
+	id     string
+	label  string
 }
