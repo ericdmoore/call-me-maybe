@@ -14,6 +14,7 @@ import (
 	"callmemaybe/internal/events"
 	"callmemaybe/internal/inbox"
 	"callmemaybe/internal/policy"
+	"callmemaybe/internal/render"
 	"callmemaybe/internal/textlog"
 	"callmemaybe/internal/xdg"
 )
@@ -75,6 +76,10 @@ func runInbox(args []string) int {
 		fmt.Fprintf(os.Stderr, "✗ %s names people policy.toml does not: %s — give each [[people]] entry an id\n", messagesPath, strings.Join(missing, ", "))
 		return 2
 	}
+	if missing := msgs.MissingPhonebooks(pol); len(missing) > 0 {
+		fmt.Fprintln(os.Stderr, "✗ messages.toml names unknown phone books:", strings.Join(missing, ", "))
+		return 2
+	}
 	stateDir := *stateFlag
 	if stateDir == "" {
 		stateDir = filepath.Join(xdg.Dir("STATE", os.Getenv, os.UserHomeDir), "doorman", "inbox")
@@ -123,6 +128,7 @@ func runInbox(args []string) int {
 		Policy: pol, Messages: msgs, Seen: seen,
 		Edge:        &inbox.Edge{URL: inboxURL, Token: token},
 		CountryCode: defaultCountryCode(),
+		Phonebooks:  filepath.Join(render.PhonebookDir(render.Env(env)), "shared"),
 		State:       ha,
 	})
 

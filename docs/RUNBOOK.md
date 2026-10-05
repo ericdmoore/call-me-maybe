@@ -901,6 +901,76 @@ lobby. To admit someone, add them to `[[people]]`. The three clips
 (`add-number`, `add-name`, `add-done`) are the bundled pack's; without them
 the phone hears the beep and silence, and still works.
 
+### Share a contact to a phone book
+
+Share one or more contacts as `.vcf` (vCard) attachments to the house number.
+Add a caption such as `Add to: House, Kitchen` in the **same message** to
+choose one or more destinations. Put these entries in `messages.toml`, replacing `gabi` with a
+household member's `[[people]] id` and `kitchen` with the handset id:
+
+```toml
+[[words]]
+word = "house"
+people = ["gabi"]
+phonebook = "house"
+
+[[words]]
+word = "kitchen"
+people = ["gabi"]
+phonebook = "handset:kitchen"
+```
+
+`house` puts the cards in the House directory on every phone that selects
+`house` in its `phonebook` list (the default). `kitchen` adds them to that
+handset's "Added here" directory only. A handset literally named `house`
+is addressed with `phonebook = "handset:house"`. The caption words are yours
+to choose; each has its own sender permissions. Captions ignore case and spaces
+around commas: `Add to: house,kitchen` works too. Each name is a configured
+word, so `Add to: Norah` requires a `norah` word pointing at her handset.
+Repeated names or aliases for the same book import only once. A bare word such
+as `house` still works for one destination. Unknown or empty names reject the
+whole request before saving, and the sender must be allowed to use every
+named word. `phonebook` cannot be combined
+with `action`, `webhook` or `reply`: the importer sends the result itself.
+
+The reply says how many new numbers were saved and how many already existed.
+Names and every valid phone number are kept; photos, email addresses and other
+fields are not. Existing names are preserved on duplicate numbers. The Worker
+downloads and parses the vCards in its own memory before queuing the message. The house pulls only structured names and numbers, validates
+them again, and saves them after checking sender and destination permissions.
+The original attachment and its URL never reach the house. Photos, emails
+and other vCard properties are discarded at the edge.
+
+All cards in a message must parse before any contacts are queued. Limits:
+three attachments, 1300 KiB per attachment, 100 distinct number strings per
+message, 200 characters per name. National numbers use the house's country
+code when imported. Permanent parsing failures queue a short error code with
+no partial contacts; temporary download failures make the carrier retry the
+callback. A missing or malformed card gets an explanation from the house;
+a stranger or a person not allowed to use that word gets no response and
+nothing is saved. The Worker parses before these local permission checks.
+Structured contacts are reused for all selected books. If a disk
+write fails after some books were saved, the reply reports how many completed;
+resending the same card and caption completes the remaining books without
+duplicating entries in the ones already updated.
+
+Cards live under `PHONEBOOK_DIR/shared/house.vcf` or
+`PHONEBOOK_DIR/shared/handsets/<id>.vcf`, separate from `*88`'s own files. The
+phone-directory service notices changes automatically; each phone shows them
+on its next directory refresh. The normal state-directory backup includes
+these files. These are **directory additions only**: importing a contact
+changes neither `[[people]]`, `contacts.toml`, nor call-screening permissions.
+
+Deploy the edge migration and Worker from `edge/README.md`, and include
+`&media={MEDIA}` in the carrier callback, with callback retries enabled.
+Upgrade and restart the inbox and directory services after running
+`doorman check`. Carrier delivery of `.vcf`
+attachments still needs a live test: VoIP.ms documents MMS media callbacks,
+but does not promise incoming contact-card support. Test a fictional card
+from the sending phone and check the queued structured contact data and the
+house's import reply before relying on it. The carrier Message Center may not
+show the original file even when it records an MMS.
+
 ### Backup and restore
 
 The house is small — `.env`, the TOMLs, `/var/lib/doorman` (the journal, the

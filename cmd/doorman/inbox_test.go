@@ -143,3 +143,27 @@ func TestCheckRefusesAStateWithoutHomeAssistantKeys(t *testing.T) {
 		t.Fatalf("ok=%v\n%s", ok, out)
 	}
 }
+
+func TestPhonebookTargetsMustExistForCheckAndInbox(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "messages.toml")
+	lists := allowLists(t, houseWithAStatefulAction)
+	for _, target := range []string{"house", "handset:kitchen", "handset:missing"} {
+		body := []byte("[[words]]\nword='contacts'\npeople=['gabi']\nphonebook='" + target + "'\n")
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		msgs, err := policy.MessagesFromTOML(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := target != "handset:missing"
+		if got := len(msgs.MissingPhonebooks(lists[0].pol)) == 0; got != want {
+			t.Fatalf("inbox accepted %s = %v", target, got)
+		}
+		var ok bool
+		out := capture(t, func() { ok = printMessages(path, lists, noSecrets) })
+		if ok != want || !strings.Contains(out, "vCards to "+target) {
+			t.Fatalf("check accepted %s = %v\n%s", target, ok, out)
+		}
+	}
+}

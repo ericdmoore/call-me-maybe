@@ -31,11 +31,24 @@ import (
 
 // Message is one text as the edge hands it over.
 type Message struct {
-	ID         string    `json:"id"`
-	From       string    `json:"from"`
-	To         string    `json:"to"`
-	Body       string    `json:"body"`
-	ReceivedAt time.Time `json:"received_at"`
+	ID           string    `json:"id"`
+	From         string    `json:"from"`
+	To           string    `json:"to"`
+	Body         string    `json:"body"`
+	ReceivedAt   time.Time `json:"received_at"`
+	MediaCount   int       `json:"media_count,omitempty"`
+	Contacts     []Contact `json:"contacts,omitempty"`
+	ContactError string    `json:"contact_error,omitempty"`
+}
+
+// Contact is structured data extracted by the Worker, never a raw attachment.
+type Contact struct {
+	Name   string `json:"name"`
+	Number string `json:"number"`
+}
+
+func (m Message) hasContacts() bool {
+	return m.MediaCount != 0 || len(m.Contacts) != 0 || m.ContactError != ""
 }
 
 // Edge is the house's inbox at the edge.
@@ -73,7 +86,9 @@ func (e *Edge) do(ctx context.Context, method, path string, body any, out any) e
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := e.client().Do(req)
+	client := *e.client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
 	if err != nil {
 		return safeErr(err)
 	}
@@ -157,6 +172,14 @@ func OpenSeen(dir string) (*Seen, error) {
 		}
 	}
 	return s, nil
+}
+
+// Has checks for a completed import without consuming it before the file
+// is saved. Contact imports are idempotent, so a crash can safely retry.
+func (s *Seen) Has(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ids[id]
 }
 
 // Mark records an id; it reports whether it was new.
@@ -277,7 +300,10 @@ type Deps struct {
 	State func(ctx context.Context, entity string) (State, error)
 	// CountryCode normalises the sender's number.
 	CountryCode string
-	Now         func() time.Time
+	// Phonebooks is the directory for received vCards, separate from *88.
+	// Empty disables imports (the CLI supplies PHONEBOOK_DIR/shared).
+	Phonebooks string
+	Now        func() time.Time
 }
 
 // Reader is the loop.
@@ -322,9 +348,17 @@ func postJSON(ctx context.Context, target string, payload map[string]string) err
 // "acted"/"replied" touch anything.
 func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 	out := Outcome{ID: m.ID, Via: "sms"}
-	if r.d.Seen != nil && !r.d.Seen.Mark(m.ID) {
-		out.Result = "duplicate"
-		return out
+	if r.d.Seen != nil {
+		if m.hasContacts() {
+			if r.d.Seen.Has(m.ID) {
+				out.Result = "duplicate"
+				return out
+			}
+			defer func() { r.d.Seen.Mark(m.ID) }()
+		} else if !r.d.Seen.Mark(m.ID) {
+			out.Result = "duplicate"
+			return out
+		}
 	}
 	n := policy.NormaliseCallerID(m.From, r.d.CountryCode)
 	if n.Kind != policy.KindE164 {
@@ -345,6 +379,9 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 		out.Person = caller.Name
 	}
 	text := strings.ToLower(strings.TrimSpace(m.Body))
+	if prefix, destinations, ok := strings.Cut(text, ":"); ok && strings.Join(strings.Fields(prefix), " ") == "add to" {
+		return r.routeContacts(ctx, m, out, destinations, caller)
+	}
 	// "garage?" is a question when the action can be asked; the "?" is
 	// read before the punctuation is stripped, and is punctuation again on
 	// a word that has no state to report — "ping?" still answers pong.
@@ -366,6 +403,15 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 	out.Word = word.Word
 	if !allowed(word.People, caller) {
 		out.Result = "not-allowed"
+		return out
+	}
+	if word.Phonebook != "" {
+		return r.importContacts(ctx, m, out, word)
+	}
+	// An attachment caption must not accidentally operate a door.
+	if m.hasContacts() {
+		out.Result = "failed"
+		r.reply(ctx, &out, n.Value, "That word does not accept attachments. Use a phone book word with your contact card.")
 		return out
 	}
 	// What the word does: its action's webhook and reply (s13), or — the

@@ -40,6 +40,9 @@ type Word struct {
 	// it does, who may, what it says back and whether it confirms all live
 	// there, once, for every transport (s13).
 	Action string `toml:"action"`
+	// Phonebook imports attached vCards into the shared house book or one
+	// handset's book. This never changes the call admission policy.
+	Phonebook string `toml:"phonebook"`
 	// Webhook is POSTed to when the word arrives from a listed sender —
 	// Home Assistant's webhook, typically. The stopgap that shipped before
 	// [[actions]]: still accepted, reported by `doorman check`, and going.
@@ -182,8 +185,16 @@ func MessagesFromTOML(data []byte) (*Messages, error) {
 		if w.Action != "" && w.Webhook != "" {
 			fail("%s names an action and carries its own webhook — the action owns the webhook", where)
 		}
-		if w.Action == "" && w.Webhook == "" && w.Reply == "" {
-			fail("%s does nothing — name an action, or give it a reply", where)
+		if w.Phonebook != "" {
+			if w.Phonebook != "house" && (!strings.HasPrefix(w.Phonebook, "handset:") || !handsetIDPattern.MatchString(strings.TrimPrefix(w.Phonebook, "handset:"))) {
+				fail("%s: phonebook must be house or handset:<id>", where)
+			}
+			if w.Action != "" || w.Webhook != "" || w.Reply != "" {
+				fail("%s: phonebook cannot be combined with action, webhook or reply; the import reports its result", where)
+			}
+		}
+		if w.Action == "" && w.Webhook == "" && w.Reply == "" && w.Phonebook == "" {
+			fail("%s does nothing — name an action, phonebook, or give it a reply", where)
 		}
 		if w.Webhook != "" {
 			if u, err := url.Parse(w.Webhook); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -261,4 +272,15 @@ func looksLikePhoneNumber(s string) bool {
 		}
 	}
 	return false
+}
+
+// MissingPhonebooks checks the handset references before the inbox starts.
+func (m *Messages) MissingPhonebooks(p *Policy) []string {
+	var missing []string
+	for _, w := range m.Words() {
+		if strings.HasPrefix(w.Phonebook, "handset:") && p.HandsetEndpoint(strings.TrimPrefix(w.Phonebook, "handset:")) == "" {
+			missing = append(missing, w.Phonebook)
+		}
+	}
+	return missing
 }

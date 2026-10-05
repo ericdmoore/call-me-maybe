@@ -85,6 +85,43 @@ func loadBooks(paths bookPaths) (provision.Books, error) {
 			}
 			books[ownBookID(id)] = provision.OwnBook(entries)
 		}
+		shared := filepath.Join(filepath.Dir(paths.own), "shared")
+		targets := []string{"house"}
+		for _, h := range handsets {
+			targets = append(targets, "handset:"+h.ID)
+		}
+		for _, target := range targets {
+			dir, id, _ := ownbook.SharedLocation(shared, target)
+			b, err := ownbook.Load(dir, id)
+			if err != nil {
+				return nil, err
+			}
+			if len(b.Entries) == 0 {
+				continue
+			}
+			key := "house"
+			if target != "house" {
+				key = ownBookID(id)
+			}
+			book, ok := books[key]
+			if !ok {
+				book = provision.OwnBook(nil)
+			}
+			have := map[string]bool{}
+			for _, c := range book.Contacts {
+				for _, n := range c.Numbers {
+					have[n.Dial] = true
+				}
+			}
+			for _, e := range b.Entries {
+				dial := provision.DialString(e.E164)
+				if !have[dial] {
+					book.Contacts = append(book.Contacts, provision.Contact{Name: e.Name, Numbers: []provision.Number{{Kind: "cell", Dial: dial}}})
+					have[dial] = true
+				}
+			}
+			books[key] = book
+		}
 	}
 	return books, nil
 }
@@ -120,8 +157,10 @@ func (c *bookCache) current() (provision.Books, error) {
 	if c.paths.own != "" {
 		// The own books change on their own schedule — a minute after
 		// somebody dials *88 — so they are watched like the three files.
-		if own, _ := filepath.Glob(filepath.Join(c.paths.own, "*.vcf")); len(own) > 0 {
-			watched = append(watched, own...)
+		shared := filepath.Join(filepath.Dir(c.paths.own), "shared")
+		for _, dir := range []string{c.paths.own, shared, filepath.Join(shared, "handsets")} {
+			files, _ := filepath.Glob(filepath.Join(dir, "*.vcf"))
+			watched = append(watched, files...)
 		}
 	}
 	for _, p := range watched {
