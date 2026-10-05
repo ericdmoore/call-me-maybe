@@ -12,6 +12,13 @@ test("only bounded carrier media lists are accepted", () => {
   assert.throws(() => mediaList(Array(4).fill("https://voip.ms/a").join(",")));
 });
 
+test("a media URL longer than 4096 characters is refused at the boundary", () => {
+  const atLimit = "https://voip.ms/media.php?" + "a".repeat(4070);
+  assert.equal(atLimit.length, 4096);
+  assert.equal(mediaList(atLimit).length, 1);
+  assert.throws(() => mediaList(atLimit + "a"), /invalid media list/);
+});
+
 test("media redirects cannot escape the carrier and do not carry inbox credentials", async (t) => {
   const calls = [];
   t.mock.method(globalThis, "fetch", async (url, opts) => {
