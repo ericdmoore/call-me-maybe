@@ -159,8 +159,7 @@ jobs:
               return;
             }
             const sha = fs.readFileSync(file, 'utf8').trim();
-            const {data: pr} = await github.rest.pulls.get({...context.repo, pull_number: Number(process.env.PR_NUMBER)});
-            if (pr.head.sha !== sha) throw new Error('Head changed after repair push; no claim of CI coverage');
+            const pr = await require(`${process.env.AI_POLICY}/repair-handoff.cjs`)({github, context, core, sha});
             await github.rest.actions.createWorkflowDispatch({...context.repo, workflow_id: 'ci.yml', ref: pr.head.ref, inputs: {expected_head: sha}});
             await github.rest.actions.createWorkflowDispatch({...context.repo, workflow_id: 'ocr-review.yml', ref: context.payload.repository.default_branch,
               inputs: {pr: String(pr.number), head: sha, cheap: 'true'}});

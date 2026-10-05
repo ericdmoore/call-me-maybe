@@ -292,12 +292,20 @@ queues `ci.yml` with `expected_head=NEW_SHA` and OCR with the same head and a ch
 low-effort review (local: clock only; paid: 150K tokens by default). Every CI job
 checks out that exact SHA. Dispatch
 may require human approval or fail; the repair run is never proof that CI passed.
+The handoff checks both the PR head and its branch ref. If either API still
+reports the pre-repair commit, it waits up to five two-second intervals for
+both to report the pushed SHA. An unrelated head, a changed branch, or a PR
+that is no longer open, ready and in this repository stops the handoff. A
+timeout reports that the push succeeded but follow-up validation was not queued.
 Inspect Actions and verify that all CI jobs for the reported SHA succeeded before
 merging. Workflow-dispatch CI may not satisfy a branch-protection PR check; use the
 normal approval path, or separately configure an approved repository-scoped GitHub
 App for event-generating pushes. No App integration is claimed here.
 
-If dispatch fails after a successful push, explicitly queue:
+If dispatch fails after a successful push, inspect the PR head and existing
+checks first: a red repair run does not mean its commit was lost. Do not run
+another model repair just to recover missing checks. Explicitly queue any
+missing follow-up for the verified pushed SHA:
 
 ```bash
 gh workflow run ci.yml --ref PR_BRANCH -f expected_head=NEW_SHA -R ericdmoore/call-me-maybe
