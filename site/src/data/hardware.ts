@@ -33,6 +33,13 @@ export const kindLabels: Record<Kind, string> = {
 export const hardware: Item[] = [
   // ── PhoneBrain ────────────────────────────────────────────────────────────
   {
+    name: 'MiniPC',
+    kind: 'brain',
+    type: 'Mini PC',
+    note: 'An alternative to a Raspberry Pi for hosting Asterisk and doorman. Install a supported Linux distribution and use wired Ethernet.',
+    url: 'https://amzn.to/4dmUIu0',
+  },
+  {
     name: 'Raspberry Pi 5',
     kind: 'brain',
     type: 'Pi',
@@ -52,14 +59,6 @@ export const hardware: Item[] = [
     type: 'Pi',
     note: 'The cheapest that still has wired Ethernet — which matters more than the model.',
     url: 'https://amzn.to/4xghXxv',
-  },
-
-  {
-    name: 'MiniPC',
-    kind: 'brain',
-    type: 'Mini PC',
-    note: 'An alternative to a Raspberry Pi for hosting Asterisk and doorman. Install a supported Linux distribution and use wired Ethernet.',
-    url: 'https://amzn.to/4dmUIu0',
   },
 
   // ── Wi-Fi handsets ───────────────────────────────────────────────────
