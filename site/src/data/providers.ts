@@ -3,13 +3,17 @@
 // Update prices, checked date and sources together; registration is not a live test.
 export const checkedAt = 'October 5, 2026';
 
+export type Billing = 'prepaid' | 'postpaid' | 'both' | 'unverified';
+
 export interface Provider {
   name: string;
   url: string;
   pricingUrl: string;
   summary: string;
   registration: 'yes' | 'unverified';
-  billing: string;
+  billing: Billing;
+  /** Account-specific caveats, separate from the billing classification. */
+  billingNote?: string;
   pros: string[];
   cons: string[];
   weUseThis?: boolean;
@@ -46,7 +50,7 @@ export const providers: Provider[] = [
   {
     name: 'Telnyx', url: 'https://telnyx.com/', pricingUrl: 'https://telnyx.com/pricing/elastic-sip',
     summary: 'Worth evaluating if you want carrier APIs alongside your phone system. Registration is documented; this is not a Call Me Maybe certification.',
-    registration: 'yes', billing: 'confirm account terms',
+    registration: 'yes', billing: 'unverified', billingNote: 'Confirm account terms',
     number: 'From $1.00/month', incoming: 'From $0.0032/min', outgoing: 'From $0.005/min',
     emergency: '$1.50/month per enabled number', setup: 'Confirm number, verification and funding requirements',
     pros: ['Credential-based SIP registration is documented.', 'Secure trunking and T.38 fax support are listed without an extra feature charge.'],
@@ -56,7 +60,7 @@ export const providers: Provider[] = [
   {
     name: 'Flowroute', url: 'https://flowroute.com/', pricingUrl: 'https://flowroute.com/pricing-details/',
     summary: 'A metered carrier option for people comfortable configuring a SIP trunk. Check account funding and emergency fees together.',
-    registration: 'unverified', billing: 'prepaid accounts documented',
+    registration: 'unverified', billing: 'prepaid', billingNote: 'Prepaid accounts documented',
     number: 'From $1.00/number (confirm monthly charge)', incoming: 'From $0.005/min', outgoing: 'From $0.00833/min (US lower 48 / Canada)',
     emergency: '$1.39 association + $1.50 mandatory US E911 fee/month per enabled number',
     setup: 'Confirm number setup and initial funding in the portal',
@@ -67,7 +71,7 @@ export const providers: Provider[] = [
   {
     name: 'Callcentric', url: 'https://www.callcentric.com/', pricingUrl: 'https://www.callcentric.com/compare_rate_plans/',
     summary: 'Worth evaluating for a household that prefers a small outgoing-minute bundle. Choose incoming and outgoing plans separately.',
-    registration: 'yes', billing: 'separate incoming / outgoing plans',
+    registration: 'yes', billing: 'unverified', billingNote: 'Choose incoming and outgoing plans separately; confirm payment terms',
     number: '$1.95/month Pay Per Minute DID', incoming: '$0.015/min on that DID',
     outgoing: '$1.95/month North America Basic: 120 minutes; then $0.0198/min to US / Canada',
     emergency: 'Included in North America Basic for US / Canada addresses',

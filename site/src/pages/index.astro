@@ -112,7 +112,7 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
         Your phones, your provider, your house rules.
       </p>
 
-      <p class="tagline" style="font-size:var(--t-sm);">Open-source software you run at home on a Raspberry Pi or another Asterisk host.</p>
+      <p class="tagline tagline-detail">Open-source software you run at home on a Raspberry Pi or another Asterisk host.</p>
       <p><a href="#family-fit">Is this for our family?</a> · <a href="/providers/">Compare running costs</a></p>
       <Keypad />
     </div>
@@ -389,6 +389,10 @@ const kinds: Kind[] = ['pi', 'wifi', 'ata', 'dect', 'desk'];
 </Base>
 
 <style>
+  .tagline-detail {
+    font-size: var(--t-sm);
+  }
+
   .step-link {
     margin-top: 0.6rem;
     font-family: var(--display);

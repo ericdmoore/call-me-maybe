@@ -77,7 +77,7 @@ import { providers, track, checkedAt } from '../data/providers';
             <th scope="row">{p.name}</th>
             <td>{p.registration === 'yes' ? 'Documented' : 'Verify with provider'}</td>
             <td>{p.weUseThis ? 'Project’s worked setup' : 'Live validation needed'}</td>
-            <td>{p.billing}</td>
+            <td>{p.billing}{p.billingNote && <p>{p.billingNote}</p>}</td>
             <td><ul>{p.pros.map(pro => <li>{pro}</li>)}</ul></td>
           </tr>)}</tbody>
         </table>
@@ -125,12 +125,7 @@ import { providers, track, checkedAt } from '../data/providers';
 
               <p class="prov-summary">{p.summary}</p>
 
-              <p><strong>Call Me Maybe validation:</strong> {p.weUseThis ? 'Project’s documented setup' : 'Not live-tested in this review'}</p>
               <div class="prov-cols">
-                <div>
-                  <h4>Useful features</h4>
-                  <ul>{p.pros.map((x) => <li>{x}</li>)}</ul>
-                </div>
                 <div>
                   <h4>Check before choosing</h4>
                   <ul>{p.cons.map((x) => <li>{x}</li>)}</ul>
