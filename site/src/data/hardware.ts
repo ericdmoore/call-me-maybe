@@ -10,7 +10,7 @@
 // Amazon links are affiliate links. That is disclosed on the page and in the
 // README; do not remove the disclosure.
 
-export type Kind = 'pi' | 'wifi' | 'ata' | 'dect' | 'desk';
+export type Kind = 'brain' | 'wifi' | 'ata' | 'dect' | 'desk';
 
 export interface Item {
   name: string;
@@ -23,7 +23,7 @@ export interface Item {
 }
 
 export const kindLabels: Record<Kind, string> = {
-  pi: 'The Pi',
+  brain: 'The PhoneBrain',
   wifi: 'Wi-Fi handsets',
   ata: 'Reuse the phones you own',
   dect: 'Cordless, done properly',
@@ -31,27 +31,35 @@ export const kindLabels: Record<Kind, string> = {
 };
 
 export const hardware: Item[] = [
-  // ── The Pi ────────────────────────────────────────────────────────────
+  // ── PhoneBrain ────────────────────────────────────────────────────────────
   {
     name: 'Raspberry Pi 5',
-    kind: 'pi',
+    kind: 'brain',
     type: 'Pi',
-    note: 'The most headroom. Wants active cooling and the 5 V/5 A supply.',
+    note: 'More headroom than the Pi 4. Wants active cooling and the 5 V/5 A supply.',
     url: 'https://amzn.to/3S3E5vV',
   },
   {
     name: 'Raspberry Pi 4',
-    kind: 'pi',
+    kind: 'brain',
     type: 'Pi',
     note: 'The sweet spot. 2 GB is ample, and a PoE HAT fits so one cable does power and network.',
     url: 'https://amzn.to/3RYUgdU',
   },
   {
     name: 'Raspberry Pi 3',
-    kind: 'pi',
+    kind: 'brain',
     type: 'Pi',
     note: 'The cheapest that still has wired Ethernet — which matters more than the model.',
     url: 'https://amzn.to/4xghXxv',
+  },
+
+  {
+    name: 'MiniPC',
+    kind: 'brain',
+    type: 'Mini PC',
+    note: 'An alternative to a Raspberry Pi for hosting Asterisk and doorman. Install a supported Linux distribution and use wired Ethernet.',
+    url: 'https://amzn.to/4dmUIu0',
   },
 
   // ── Wi-Fi handsets ───────────────────────────────────────────────────
