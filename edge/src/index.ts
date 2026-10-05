@@ -1,7 +1,10 @@
+import { mediaList } from "./media.ts";
+import { captureContacts, type Contact } from "./contacts.ts";
+
 // The house's edge inbox.
 //
-// Three doors, each behind its own credential:
-//   GET  /h/:house/sms/:callbackToken?from=&to=&message=&id=   VoIP.ms calls this
+// The carrier callback and the authenticated box routes:
+//   GET  /h/:house/sms/:callbackToken?from=&to=&message=&id=&media=   VoIP.ms calls this
 //   GET  /h/:house/inbox/pull?wait=20      Bearer inbox token: long-poll for texts
 //   POST /h/:house/inbox/ack   {ids}       Bearer inbox token: handled, do not repeat
 //   POST /h/:house/inbox/send  {to,message} Bearer inbox token: reply from the house number
@@ -97,11 +100,25 @@ export default {
       const from = q.get("from") ?? "";
       const to = q.get("to") ?? "";
       const body = q.get("message") ?? "";
-      if (!id || !from) return new Response("bad request", { status: 400 });
+      let media: string[];
+      try { media = mediaList(q.get("media")); }
+      catch { return new Response("invalid media", { status: 400 }); }
+      // Together with ten-message pulls and bounded contact fields this
+      // keeps every queue response below the house client's 1 MiB limit.
+      if (!id || id.length > 128 || !from || from.length > 64 || to.length > 64 || body.length > 2048) {
+        return new Response("bad request", { status: 400 });
+      }
+      // Retries must not re-fetch expiring URLs after a successful capture.
+      if (await env.DB.prepare("SELECT id FROM messages WHERE house = ? AND id = ?").bind(house, id).first()) {
+        return new Response("ok");
+      }
+      let captured;
+      try { captured = await captureContacts(media); }
+      catch { return new Response("media unavailable", { status: 503 }); }
       // Idempotent by (house, id): VoIP.ms retries.
       await env.DB.prepare(
-        "INSERT OR IGNORE INTO messages (house, id, received_at, sender, recipient, body) VALUES (?, ?, ?, ?, ?, ?)",
-      ).bind(house, id, new Date().toISOString(), from, to, body).run();
+        "INSERT OR IGNORE INTO messages (house, id, received_at, sender, recipient, body, media_count, contacts, contact_error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).bind(house, id, new Date().toISOString(), from, to, body, media.length, JSON.stringify(captured.contacts), captured.error).run();
       return new Response("ok");
     }
 
@@ -114,11 +131,11 @@ export default {
       const deadline = Date.now() + wait * 1000;
       for (;;) {
         const rows = await env.DB.prepare(
-          "SELECT id, received_at, sender, recipient, body FROM messages WHERE house = ? AND acked_at IS NULL ORDER BY received_at LIMIT 50",
-        ).bind(house).all<{ id: string; received_at: string; sender: string; recipient: string; body: string }>();
+          "SELECT id, received_at, sender, recipient, body, media_count, contacts, contact_error FROM messages WHERE house = ? AND acked_at IS NULL ORDER BY received_at LIMIT 10",
+        ).bind(house).all<{ id: string; received_at: string; sender: string; recipient: string; body: string; media_count: number; contacts: string; contact_error: string }>();
         if (rows.results.length > 0 || Date.now() >= deadline) {
           return json({
-            messages: rows.results.map((r) => ({ id: r.id, from: r.sender, to: r.recipient, body: r.body, received_at: r.received_at })),
+            messages: rows.results.map((r) => ({ id: r.id, from: r.sender, to: r.recipient, body: r.body, received_at: r.received_at, media_count: r.media_count, contacts: JSON.parse(r.contacts) as Contact[], contact_error: r.contact_error })),
           });
         }
         await new Promise((res) => setTimeout(res, 1000));

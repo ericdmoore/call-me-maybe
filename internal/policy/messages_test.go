@@ -158,3 +158,17 @@ func TestReplyRuleIsASCIIAndOneSegmentOnly(t *testing.T) {
 		t.Errorf("a PIN and a time should not be warned about, got %q", w)
 	}
 }
+
+func TestPhonebookWordsValidateTargetsAndRejectMixedActions(t *testing.T) {
+	for _, target := range []string{"house", "handset:kitchen", "handset:house"} {
+		m, err := MessagesFromTOML([]byte("[[words]]\nword='contacts'\npeople=['*']\nphonebook='" + target + "'\n"))
+		if err != nil || m.Words()[0].Phonebook != target {
+			t.Fatalf("target %s: %v", target, err)
+		}
+	}
+	for _, extra := range []string{"phonebook='../bad'", "phonebook='handset:../bad'", "phonebook='handset:'", "phonebook='house'\nreply='ok'", "phonebook='house'\naction='garage'", "phonebook='house'\nwebhook='https://example.invalid'"} {
+		if _, err := MessagesFromTOML([]byte("[[words]]\nword='contacts'\npeople=['*']\n" + extra)); err == nil {
+			t.Fatalf("accepted %s", extra)
+		}
+	}
+}

@@ -17,13 +17,14 @@ const testToken = "not-a-real-inbox-token-0123456789"
 
 // fakeEdge is the Worker: a queue, an ack list, and what was sent.
 type fakeEdge struct {
-	mu     sync.Mutex
-	queue  []Message
-	acked  []string
-	sent   []map[string]string
-	auths  []string
-	pulls  int
-	server *httptest.Server
+	mu         sync.Mutex
+	queue      []Message
+	acked      []string
+	sent       []map[string]string
+	auths      []string
+	pulls      int
+	unexpected int
+	server     *httptest.Server
 }
 
 func newFakeEdge(t *testing.T) *fakeEdge {
@@ -53,6 +54,7 @@ func newFakeEdge(t *testing.T) *fakeEdge {
 			f.sent = append(f.sent, body)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"accepted": true})
 		default:
+			f.unexpected++
 			http.NotFound(w, r)
 		}
 	}))

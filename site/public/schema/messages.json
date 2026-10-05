@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://callmemaybe.cc/schema/messages.json",
+  "title": "messages.toml — texts the house answers",
+  "description": "Which words a text to the house number may carry, from whom, and what each one does. Optional, and its absence is the compatibility gate: with no messages.toml the house answers no texts. A text to the house number is control plane, never conversation (\"one number, one purpose\"): a known word from a listed person does one thing and gets one boring reply; everything else is archived by the carrier's email forwarding and never answered.",
+  "type": "object",
+  "properties": {
+    "words": {
+      "description": "Every word the house understands by text.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "description": "The [[actions]] id in policy.toml this word performs. What it does, who may, what it says back and whether it confirms live there, once, for every transport.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-cross-references": [
+              "policy.toml [[actions]] id"
+            ],
+            "x-rules": [
+              "A word names an action or phonebook, or carries its own reply (and, as a stopgap, its own webhook) — never an action and a webhook both.",
+              "The action's people are the people; a word's list may only narrow it."
+            ]
+          },
+          "people": {
+            "description": "[[people]] ids allowed to say it, or [\"*\"] for everyone on the allow-list.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "x-cross-references": [
+              "policy.toml [[people]] id"
+            ]
+          },
+          "phonebook": {
+            "description": "Import attached vCards into the shared house directory, or one handset's directory. Names and numbers only; never grants admission. Caption: Add to: word,word for one or more configured destinations, case-insensitive with optional spaces around commas. A bare word still selects one destination. Requires MMS forwarding and vCard parsing at the edge; the house receives only structured names and numbers.",
+            "type": "string",
+            "pattern": "^(house|handset:[a-z0-9][a-z0-9_-]*)$",
+            "x-cross-references": [
+              "handsets.toml [[handsets]] id (after handset:)"
+            ],
+            "x-rules": [
+              "Cannot be combined with action, webhook or reply. The importer replies with its result.",
+              "Every named destination must exist and permit the sender before saving. Repeated destinations are deduplicated. At most three vCards and 100 distinct numbers per message."
+            ]
+          },
+          "reply": {
+            "description": "Texted back to the sender. Optional.",
+            "type": "string",
+            "x-rules": [
+              "Plain ASCII, at most 160 characters — one segment, and no emoji, which would halve it. `doorman check` warns about a phone number, the one shape a carrier has dropped from this number, and refuses nothing else.",
+              "A word needs an action, phonebook, webhook or reply."
+            ]
+          },
+          "webhook": {
+            "description": "The stopgap before [[actions]]: a webhook on the word itself. Still accepted; `doorman check` says to move it to an action; it goes in a later release.",
+            "type": "string",
+            "pattern": "^https?://"
+          },
+          "word": {
+            "description": "What the sender types: lowercase letters and digits, matched exactly against the trimmed, lowercased text.",
+            "type": "string",
+            "pattern": "^[a-z0-9]+$",
+            "x-rules": [
+              "Unique."
+            ]
+          }
+        },
+        "required": [
+          "word",
+          "people"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "words"
+  ],
+  "additionalProperties": false,
+  "x-rules": [
+    "One number, one purpose: a text to the house number is control plane and archive, never conversation, and nothing typed on a handset leaves through it. Conversational texting would be a second number and a line of its own.",
+    "Read by `doorman inbox`, the consumer of the house's edge inbox, and by `doorman check`; never by the daemon on the call path.",
+    "People are named by their [[people]] id in policy.toml, never by a number retyped here. `doorman check` refuses an id no [[people]] entry carries.",
+    "A stricter list than the ring allow-list by design: ringing the house and opening its garage are different trusts. \"*\" means everyone on the allow-list.",
+    "A text from a number not on the allow-list, or a listed person texting a word they may not, is archived and never answered — a reply tells a stranger the number is live.",
+    "Replies are boring on purpose: plain ASCII, under 160 characters. One segment on the bill, and no emoji, which would switch the encoding and halve it. `doorman check` warns about a phone number — the one shape a carrier has dropped from this number — and refuses nothing else; links are fine, and s19 sends them. The loader refuses only what the transport cannot carry.",
+    "Nothing here waits for a reply to arrive; there are no receipts. The door's state is the truth and the text is a courtesy."
+  ]
+}

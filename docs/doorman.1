@@ -523,6 +523,23 @@ names a state with neither key set is refused at startup. With
 set, every text and action is written to the journal beside the daemon's
 events (message.received, message.acted, action.performed, action.refused)
 as a second writer that holds no owner lock.
+.PP
+A messages.toml word may set
+.B phonebook = "house"
+or
+.B phonebook = "handset:<id>"
+to import attached vCards into the house directory or one handset's own
+book. Use an attachment caption such as \fBAdd to: house,kitchen\fR to name
+one or more configured words, ignoring case and spaces around commas.
+A bare word still selects one book. Every destination must exist and permit
+the sender before anything is saved. The Worker downloads and parses the
+attachments; the house pulls only bounded name/number pairs, validates them
+again, and never receives the original file or its URL. Only those words'
+permitted people may import. Names and numbers are saved, duplicates skipped,
+and the sender receives a count. No call admission changes. At most three
+attachments, 1300 KiB each, and 100 distinct numbers. This cannot be combined
+with action, webhook or reply. Requires edge MMS forwarding and a live carrier
+contact-card delivery test; see RUNBOOK.
 .TP
 .BI "doorman digest [\-since " d "] [\-full] [\-mail] [\-subject " s "] [\-env " path "] [\-inbox\-state " dir ]
 Yesterday as one mail: the day's calls from the journal (or the legacy log)

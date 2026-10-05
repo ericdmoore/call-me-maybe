@@ -616,6 +616,21 @@ func printMessages(path string, lists []allowList, env func(string) (string, boo
 				does = append(does, w.Word+"? asks "+a.State)
 			}
 		}
+		if w.Phonebook != "" {
+			does = append(does, "vCards to "+w.Phonebook)
+			if strings.HasPrefix(w.Phonebook, "handset:") {
+				found := false
+				for _, l := range lists {
+					if l.pol.HandsetEndpoint(strings.TrimPrefix(w.Phonebook, "handset:")) != "" {
+						found = true
+					}
+				}
+				if !found {
+					fmt.Printf("    ✗ phonebook %q names no handset\n", w.Phonebook)
+					ok = false
+				}
+			}
+		}
 		if w.Webhook != "" {
 			does = append(does, "webhook (move it to an [[actions]] entry)")
 		}

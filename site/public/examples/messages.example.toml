@@ -52,3 +52,18 @@ action = "close"
 word = "ping"
 people = ["*"]
 action = "ping"
+
+# Share a vCard with caption "Add to: House, Kitchen" (one or more words).
+# Case and spaces around commas do not matter. Every word must allow you.
+# A bare word such as "house" still works for one destination.
+# Enable deliberately: replace the example person id with an actual household
+# member's [[people]] id. Directory only: this does not admit callers.
+# [[words]]
+# word = "house"
+# people = ["gabi"]
+# phonebook = "house"
+#
+# [[words]]
+# word = "kitchen"
+# people = ["gabi"]
+# phonebook = "handset:kitchen"
