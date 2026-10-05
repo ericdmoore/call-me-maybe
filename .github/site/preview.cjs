@@ -1,11 +1,17 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const {execFileSync} = require('node:child_process');
 
 const marker = '<!-- cmm-site-preview -->';
 const worker = 'callmemaybe';
 const account = 'cf473a1c1e6f51585477ccf5216ae636';
-const wrangler = '/Users/alpaca/.local/share/cmm-site-preview/node_modules/.bin/wrangler';
+function wranglerPath(env = process.env, home = os.homedir()) {
+  // A host-managed link, never PATH resolution through a repository's node_modules.
+  const binary = env.WRANGLER_BIN || path.join(home, '.local/bin/wrangler');
+  if (!path.isAbsolute(binary)) throw new Error('WRANGLER_BIN must be an absolute host-managed path');
+  return binary;
+}
 
 function eligible(pr, repo, head, closing) {
   return pr.base.ref === 'main' && pr.head.repo?.full_name === repo &&
@@ -31,7 +37,12 @@ function config(directory) {
     assets: {directory, not_found_handling: '404-page'}};
 }
 function previewURL(output) {
-  const url = new URL(output.preview.urls[0]);
+  const urls = output?.preview?.urls;
+  if (!Array.isArray(urls) || typeof urls[0] !== 'string' || !urls[0].trim())
+    throw new Error('Cloudflare returned no preview URL');
+  let url;
+  try { url = new URL(urls[0]); }
+  catch { throw new Error('Cloudflare returned an invalid preview URL'); }
   if (url.protocol !== 'https:' || !url.hostname.endsWith('.workers.dev') || url.username || url.password)
     throw new Error('Unexpected Cloudflare preview URL');
   return url.href;
@@ -54,7 +65,7 @@ async function deploy({github, context, core}) {
   if (!closing) args.push('--json', '--ignore-base-config');
   const outputFile = path.join(directory, 'wrangler-output.jsonl');
   try {
-    execFileSync(wrangler, args, {cwd: directory, encoding: 'utf8',
+    execFileSync(wranglerPath(), args, {cwd: directory, encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 180000, maxBuffer: 8 * 1024 * 1024,
     env: {...process.env, CI: 'true', WRANGLER_SEND_METRICS: 'false', WRANGLER_OUTPUT_FILE_PATH: outputFile}});
@@ -79,8 +90,18 @@ async function comment({github, context}, result, url) {
   const sha = context.payload.pull_request.head.sha;
   const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
   let status = `Preview failed for \`${sha}\`. See the [workflow run](${run}).`;
-  if (result === 'success') status = closing ? 'Preview removed because this PR is closed.' :
-    `**[Open site preview](${previewURL({preview: {urls: [url]}})})**\n\nCommit: \`${sha}\`\n\nThis URL updates with this PR. [Workflow run](${run}).`;
+  if (result === 'success') {
+    if (closing) status = 'Preview removed because this PR is closed.';
+    else {
+      // A missing/malformed output must not suppress the failure notification.
+      try {
+        const link = previewURL({preview: {urls: [url]}});
+        status = `**[Open site preview](${link})**\n\nCommit: \`${sha}\`\n\nThis URL updates with this PR. [Workflow run](${run}).`;
+      } catch {
+        status += ' The deployment did not provide a valid preview URL.';
+      }
+    }
+  }
   const body = `${marker}\n${status}`;
   const params = {...context.repo, issue_number: context.payload.number};
   const comments = await github.paginate(github.rest.issues.listComments, {...params, per_page: 100});
@@ -88,4 +109,4 @@ async function comment({github, context}, result, url) {
   if (existing) await github.rest.issues.updateComment({...context.repo, comment_id: existing.id, body});
   else if (!closing) await github.rest.issues.createComment({...params, body});
 }
-module.exports = {eligible, current, config, validateAssets, previewURL, deploy, comment};
+module.exports = {wranglerPath, eligible, current, config, validateAssets, previewURL, deploy, comment};

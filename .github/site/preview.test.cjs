@@ -49,3 +49,32 @@ test('updates only its bot-owned comment and skips stale results', async () => {
   await comment({github, context}, 'success', 'https://pr-1-test.example.workers.dev');
   assert.equal(writes.length, 2);
 });
+
+test('Wrangler resolves a standalone host link or an explicit absolute override', () => {
+  const {wranglerPath} = require('./preview.cjs');
+  assert.equal(wranglerPath({}, '/home/runner'), '/home/runner/.local/bin/wrangler');
+  assert.equal(wranglerPath({WRANGLER_BIN: '/opt/tools/wrangler'}), '/opt/tools/wrangler');
+  assert.throws(() => wranglerPath({WRANGLER_BIN: './node_modules/.bin/wrangler'}), /absolute host-managed/);
+});
+test('missing and malformed deployment URLs fail with actionable errors', () => {
+  for (const output of [undefined, {}, {preview: {}}, {preview: {urls: []}},
+    {preview: {urls: ['']}}, {preview: {urls: [null]}}, {preview: {urls: 'https://x.workers.dev'}}])
+    assert.throws(() => previewURL(output), /Cloudflare returned no preview URL/);
+  assert.throws(() => previewURL({preview: {urls: ['broken']}}), /invalid preview URL/);
+});
+test('successful jobs without usable URLs still publish a failure comment', async () => {
+  const writes = [];
+  const github = {rest: {pulls: {get: async () => ({data: pr})}, issues: {
+    listComments: {}, createComment: async x => writes.push(x),
+  }}, paginate: async () => []};
+  const context = {repo: {owner: 'owner', repo: 'repo'}, payload: {number: 1,
+    action: 'synchronize', pull_request: {...pr, number: 1}},
+    serverUrl: 'https://github.com', runId: 9};
+  for (const url of [undefined, '', 'broken', 'https://evil.test/']) {
+    await comment({github, context}, 'success', url);
+    assert.match(writes.at(-1).body, /Preview failed.*\n?/);
+    assert.match(writes.at(-1).body, /did not provide a valid preview URL/);
+    assert.doesNotMatch(writes.at(-1).body, /Open site preview/);
+  }
+  assert.equal(writes.length, 4);
+});

@@ -9,6 +9,9 @@ on:
       - '.github/workflows/site-preview.yml'
 permissions:
   contents: read
+defaults:
+  run:
+    shell: bash
 concurrency:
   group: site-preview-${{ github.event.pull_request.number }}
   # Finish uploads before a newer run or close removes/replaces the preview.
@@ -29,7 +32,7 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
-      - run: npm ci && npm run build
+      - run: npm ci --ignore-scripts && npm --ignore-scripts run build
         working-directory: site
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -45,6 +48,10 @@ jobs:
       (needs.build.result == 'success' || github.event.action == 'closed')
     runs-on: [self-hosted, macOS, ARM64, call-me-maybe-ai]
     timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      WRANGLER_BIN: ${{ vars.WRANGLER_BIN }}
     outputs:
       url: ${{ steps.preview.outputs.url }}
       stale: ${{ steps.preview.outputs.stale }}

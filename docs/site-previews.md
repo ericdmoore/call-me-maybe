@@ -24,8 +24,15 @@ The computer must be awake and the runner online, or uploads remain queued.
 Install the pinned upload CLI outside all checkouts:
 
 ```sh
-npm install --prefix "$HOME/.local/share/cmm-site-preview" --save-exact wrangler@4.147.0
+npm install --prefix "$HOME/.local/share/wrangler/4.147.0" --save-exact wrangler@4.147.0
+mkdir -p "$HOME/.local/bin"
+ln -s "$HOME/.local/share/wrangler/4.147.0/node_modules/.bin/wrangler" "$HOME/.local/bin/wrangler"
 ```
+
+The helper uses the standalone `~/.local/bin/wrangler` link. An optional
+`WRANGLER_BIN` repository variable can name another absolute host-managed path;
+it must not point into a PR checkout. Keep an existing link if already installed,
+or deliberately repoint it when upgrading the pinned CLI.
 
 The host job-start guard must include the new workflow before activation. After
 reviewing `.github/ai/runner-guard.py`, copy it to
@@ -37,7 +44,10 @@ preview access. Do not move the guard into a runner checkout.
 
 `pull_request_target` runs workflow policy from the trusted base, not the PR.
 The hosted build checks out the exact PR head with a read-only token and no
-persisted Git credentials. It uses no shared dependency cache. Fork PRs never
+persisted Git credentials. `npm ci --ignore-scripts` disables dependency install
+hooks; `npm --ignore-scripts run build` runs the requested build without pre/post
+hooks. The build and Astro config still execute PR code on the disposable hosted
+runner. These flags are not a sandbox. It uses no shared dependency cache. Fork PRs never
 schedule Alpaca. The self-hosted job checks out only `github.workflow_sha`,
 rechecks the current PR state and SHA, and downloads this run's artifact into a
 fresh temporary directory. It never executes PR scripts or reads a PR Wrangler
@@ -63,6 +73,6 @@ and the exact-head checks. This pattern assumes `output: 'static'`; an SSR site
 requires a separate review of executable Worker code and bindings.
 
 Run `node --test .github/ai/*.test.cjs .github/site/*.test.cjs`, `actionlint`, and
-`npm ci && npm run build` in `site` when changing this automation.
+`npm ci --ignore-scripts && npm --ignore-scripts run build` in `site` when changing this automation.
 
 Cloudflare reference: https://developers.cloudflare.com/workers/previews/examples/
