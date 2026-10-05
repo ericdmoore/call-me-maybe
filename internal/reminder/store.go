@@ -148,6 +148,11 @@ func (s *Store) read(id string) (Job, error) {
 		return Job{}, ErrMissing
 	}
 	b, err := os.ReadFile(s.meta(id))
+	if errors.Is(err, fs.ErrNotExist) {
+		// A menu can outlive the job it announced: the housekeeping process
+		// removes completed jobs without holding up an interactive prompt.
+		return Job{}, ErrMissing
+	}
 	if err != nil {
 		return Job{}, err
 	}

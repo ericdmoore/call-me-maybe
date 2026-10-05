@@ -25,6 +25,7 @@ type phone struct {
 	status                 int
 	recordEnd              int
 	afterRecord            func()
+	beforeOption           func(string)
 	failQueue              bool
 }
 
@@ -68,6 +69,9 @@ func (p *phone) Write(b []byte) (int, error) {
 		p.keys = p.keys[1:]
 		if !strings.Contains(cmd, "/reminder-"+k.prompt+`"`) {
 			p.t.Fatalf("question %s, want %s", cmd, k.prompt)
+		}
+		if p.beforeOption != nil {
+			p.beforeOption(k.prompt)
 		}
 		if k.keys != "" {
 			result = int(k.keys[0])
@@ -221,6 +225,42 @@ func TestPendingAcrossAllAppsAnnouncedAndCancelledByThisPhoneOnly(t *testing.T) 
 	jobs, _ = s.Pending("office")
 	if len(jobs) != 1 || jobs[0].ID != other.ID {
 		t.Fatal("other phone changed")
+	}
+}
+
+func TestCancellationAfterHousekeepingContinuesPendingMenu(t *testing.T) {
+	s := testStore(t)
+	now := time.Now().Truncate(time.Second)
+	expired := testJob(t, "kitchen", now.Add(-2*time.Hour))
+	mustCommit(t, s, expired, now.Add(-2*time.Hour))
+	next := testJob(t, "kitchen", now)
+	mustCommit(t, s, next, now)
+	a, p := newPhone(t, s.Spool, scriptedKey{"cancel", "1"}, scriptedKey{"cancel", "#"}, scriptedKey{"new", "#"})
+	pruned := false
+	p.beforeOption = func(prompt string) {
+		if prompt != "cancel" || pruned {
+			return
+		}
+		// The list is a snapshot. Asterisk can exhaust the call and the
+		// hourly worker can prune it while the caller hears its time.
+		if err := os.Rename(s.queue("outgoing", expired.ID), s.queue("outgoing_done", expired.ID)); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Prune(now); err != nil {
+			t.Fatal(err)
+		}
+		pruned = true
+	}
+	if err := Run(a, "menu", "80", func() time.Time { return now }); err != nil {
+		t.Fatalf("finished reminder aborted the menu: %v", err)
+	}
+	p.finished()
+	if !p.saw("reminder-changed") || p.saw("reminder-unavailable") || p.saw("reminder-cancelled") {
+		t.Fatal("finished reminder was not explained accurately")
+	}
+	jobs, err := s.Pending("kitchen")
+	if err != nil || len(jobs) != 1 || jobs[0].ID != next.ID {
+		t.Fatalf("unrelated reminder changed: %v %v", jobs, err)
 	}
 }
 
