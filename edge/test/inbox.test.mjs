@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import worker from "../src/index.ts";
 
@@ -12,7 +12,10 @@ function fixture(t) {
   t.after(() => db.close());
   db.exec(readFileSync(new URL("../schema.sql", import.meta.url), "utf8"));
   db.exec("INSERT INTO messages VALUES ('test', 'old', '2026-10-04', '15125550101', '15125550100', 'ping', NULL)");
-  db.exec(readFileSync(new URL("../migrations/0001_mms_media.sql", import.meta.url), "utf8"));
+  const migrations = new URL("../migrations/", import.meta.url);
+  for (const name of readdirSync(migrations).filter(name => name.endsWith(".sql")).sort()) {
+    db.exec(readFileSync(new URL(name, migrations), "utf8"));
+  }
   const env = {
     HOUSE_TEST_CALLBACK_TOKEN: "callback-example",
     HOUSE_TEST_INBOX_TOKEN: "inbox-example",
@@ -27,7 +30,7 @@ function fixture(t) {
     } }; } },
   };
   const request = (path, opts = {}) => worker.fetch(new Request("https://edge.example" + path, opts), env);
-  const callback = (id, media = mediaURL) => request("/h/test/sms/callback-example?" + new URLSearchParams({ id, from: "15125550101", to: "15125550100", message: "Add to: house", media }));
+  const callback = (id, media = mediaURL, extra = {}) => request("/h/test/sms/callback-example?" + new URLSearchParams({ id, from: "15125550101", to: "15125550100", message: "Add to: house", media, ...extra }));
   const pull = async () => (await (await request("/h/test/inbox/pull", { headers: auth })).json()).messages;
   return { db, request, callback, pull };
 }
@@ -46,6 +49,7 @@ test("queue stores structured contacts, never the original attachment or its URL
   assert.equal(messages.find(m => m.id === "old").media_count, 0);
   assert.deepEqual(messages.find(m => m.id === "old").contacts, []);
   const captured = messages.find(m => m.id === "card");
+  assert.equal(captured.provider_timestamp, "");
   assert.equal(captured.media_count, 1);
   assert.equal(captured.contact_error, "");
   assert.deepEqual(captured.contacts, [{ name: "Jane Smith", number: "+15125550123" }]);
@@ -55,6 +59,38 @@ test("queue stores structured contacts, never the original attachment or its URL
   assert.equal((await request("/h/test/inbox/media?id=card&index=0", { headers: auth })).status, 404);
   assert.equal((await request("/h/test/inbox/ack", { method: "POST", headers: auth, body: JSON.stringify({ ids: ["card"] }) })).status, 200);
   assert.deepEqual((await pull()).map(m => m.id), ["old"]);
+});
+
+test("carrier time survives storage and pull without replacing the Worker's receipt time", async (t) => {
+  const { db, callback, pull } = fixture(t);
+  // Neither a timezone nor an ISO conversion is inferred for the carrier.
+  const timestamp = "2026-10-01 09:15:30";
+  const before = Date.now();
+  assert.equal((await callback("timed", "", { timestamp })).status, 200);
+  const stored = db.prepare("SELECT * FROM messages WHERE id = 'timed'").get();
+  assert.equal(stored.provider_timestamp, timestamp);
+  assert.ok(Date.parse(stored.received_at) >= before);
+  assert.ok(Date.parse(stored.received_at) <= Date.now());
+  assert.equal((await pull()).find(m => m.id === "timed").provider_timestamp, timestamp);
+  // Retries cannot rewrite either timestamp on an already accepted message.
+  assert.equal((await callback("timed", "", { timestamp: "2026-10-02T09:15:30-05:00" })).status, 200);
+  assert.deepEqual(db.prepare("SELECT * FROM messages WHERE id = 'timed'").get(), stored);
+  const old = (await pull()).find(m => m.id === "old");
+  assert.equal(old.provider_timestamp, "");
+  assert.equal(old.received_at, "2026-10-04");
+});
+
+test("optional carrier metadata cannot block an otherwise valid message", async (t) => {
+  const { callback, pull } = fixture(t);
+  const values = [undefined, "", "{TIMESTAMP}", "x".repeat(65), "2026-10-05\nprivate", "2026-10-05\x00", "2026-10-05\x7f"];
+  for (let i = 0; i < values.length; i++) {
+    const extra = values[i] === undefined ? {} : { timestamp: values[i] };
+    assert.equal((await callback(`optional-${i}`, "", extra)).status, 200);
+  }
+  for (const message of await pull()) assert.equal(message.provider_timestamp, "");
+  const timestamp = "2026-10-05T09:15:30+05:30";
+  assert.equal((await callback("offset", "", { timestamp })).status, 200);
+  assert.equal((await pull()).find(m => m.id === "offset").provider_timestamp, timestamp);
 });
 
 test("malformed attachments queue only a safe error and no partial contact batch", async (t) => {
