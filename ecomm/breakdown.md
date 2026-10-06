@@ -12,6 +12,12 @@ Settled the same day: **Stripe Managed Payments**, with Stripe as merchant of
 record. It covers digital products and subscriptions and excludes physical
 goods and services, so the store has two checkout modes (see #64).
 
+Settled later the same day: paid or served software never lives in this
+public repo; it lives in the private `dialdoorman` repo and is served from
+dialdoorman.cc — an about page at the apex, `app.`, `login.` and `store.`
+(#63, #66, #79, #81). The `store.callmemaybe.cc` in the issue body is
+superseded.
+
 ## The map
 
 The sub-issue list on #7 is the checklist. This file is the

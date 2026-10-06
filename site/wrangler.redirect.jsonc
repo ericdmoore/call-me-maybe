@@ -1,5 +1,7 @@
 {
-  // dialdoorman.cc → callmemaybe.cc, as a standalone Worker.
+  // dialdoorman.cc → callmemaybe.cc, as a standalone Worker. Retires when the
+  // dialdoorman.cc about page ships (2026-10-06 decision: dialdoorman.cc is the
+  // service brand — app., login., store. — served from the private repo).
   //
   //   npm run deploy:redirect
   //

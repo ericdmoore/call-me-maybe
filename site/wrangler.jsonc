@@ -50,10 +50,11 @@
     { "pattern": "www.callmemaybe.cc", "custom_domain": true }
   ],
 
-  // dialdoorman.cc is left out on purpose. It is active and could serve today,
-  // but two hostnames both serving the same content contradicts the <link
-  // rel="canonical"> in Base.astro. If it is a spare rather than a mirror, give
-  // it a Redirect Rule to callmemaybe.cc instead of a second custom domain.
+  // dialdoorman.cc is left out on purpose. It is the service brand (2026-10-06):
+  // an about page at the apex plus app., login. and store., all served from the
+  // private dialdoorman repo, never from this site. Two hostnames serving the
+  // same content would also contradict the <link rel="canonical"> in Base.astro.
+  // Until the about page ships, wrangler.redirect.jsonc sends the apex here.
 
   "observability": {
     "enabled": true

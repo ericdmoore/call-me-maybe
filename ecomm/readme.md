@@ -1,7 +1,10 @@
-store.callmemaybe.cc
+The store
 ==============
 
-An eComm site
+An eComm site at `store.dialdoorman.cc` (decided 2026-10-06; this file
+once said `store.callmemaybe.cc`). Its code is **not here**: paid or served
+software lives in the private `dialdoorman` repo. This directory holds the
+documents and, later, the physical-goods catalogue.
 
 - that sells files for "archetypal bouncers" 
 - and other extension content

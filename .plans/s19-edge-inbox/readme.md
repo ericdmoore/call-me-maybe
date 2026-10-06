@@ -1,7 +1,10 @@
 # s19 · The edge inbox — the house's public front door, and who may knock
 
 **Status:** M1 shipped 2026-09-24 (`edge/`, deployed as `callmemaybe-edge`
-at `edge.callmemaybe.cc`); M2 planned. Drafted the afternoon the question
+at `edge.callmemaybe.cc`); M2 planned. Hostname decision 2026-10-06: M2's
+verifier lives at `login.dialdoorman.cc` in the private `dialdoorman` repo —
+paid or served software never lives in this repo (#63) — while the inbox
+Worker stays here, public and self-hostable. Drafted the afternoon the question
 "where does a reply to the house go" was answered with "the house number
 is a NAT".
 

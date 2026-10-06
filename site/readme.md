@@ -108,10 +108,14 @@ curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"][0]["status"])'
 ```
 
-`dialdoorman.cc` is deliberately not in `routes`. It is active and could serve
-today, but two hostnames both serving the site contradicts the `<link
-rel="canonical">` in `Base.astro`. If it is a spare rather than a mirror, give
-it a Redirect Rule to `callmemaybe.cc`.
+`dialdoorman.cc` is deliberately not in `routes`. It is the service brand
+(decided 2026-10-06, #7 and #63): an about page at the apex and
+`app.`, `login.` and `store.` subdomains, all served from the private
+`dialdoorman` repo, never from this site. Until the about page ships, the
+`dialdoorman-redirect` Worker sends the apex to `callmemaybe.cc`; it retires
+then. Two hostnames serving this site would contradict the `<link
+rel="canonical">` in `Base.astro`, which is why it is not a second custom
+domain.
 
 ### If the domain was somewhere else before
 
