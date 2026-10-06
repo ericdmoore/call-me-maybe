@@ -159,6 +159,19 @@ oxblood via the same `data-state` the keypad drives. `not_found_handling:
 `src/data/providers.ts` owns the dated rate-card snapshot and source links.
 Update the checked date, prices, units and sources together; the `/providers/`
 page also contains explicit usage arithmetic to update when its inputs change.
+`src/data/costs.ts` owns the full-setup table (three handsets, two kids at
+thirty minutes a week) and the Tin Can rate card; it reads the numeric
+`rates` on each provider and two prices from `hardware.ts` by name, and fails
+the build if either is missing. The same function renders the default case
+at build time and repaints the table from the slider in the browser, so
+there is one copy of the arithmetic. The light-use month is the same
+function at fixed inputs (one phone, 100 in and 100 out), so both tables
+move together when a rate changes.
+`src/data/compare.ts` is the feature table against Tin Can. Each Tin Can
+cell cites that product's own pages; a feature those pages do not mention is
+marked no. A Call Me Maybe row that is roadmap rather than shipped is marked
+planned, never yes. Rows that link to a feature page are checked against the content
+collection at build time, so a renamed page fails the build.
 SIP registration documentation is separate from a live Call Me Maybe test.
 All editorial provider links use `track()` (`utm_source=callmemaybe.cc`,
 `utm_medium=referral`, `utm_campaign=providers`, placement in `utm_content`).
