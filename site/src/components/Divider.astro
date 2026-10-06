@@ -1,4 +1,6 @@
 ---
+import artwork from '../../../brand/mark-threshold.svg?raw';
+
 /**
  * Section divider: the dial rosette between two lightning bolts. Source of
  * truth is brand/ornament-dial-divider.svg — change one, change both.
@@ -6,18 +8,55 @@
  * The bolts are not licence: pulse dialling works by making and breaking the
  * current, so the sparks leaving the dial are what the object actually does.
  *
- * Deliberately id-free, so it can appear as many times on a page as you like.
- * The mirrored bolt is written out rather than referenced.
+ * With `home`, the rosette gives way to the plain Threshold mark and that
+ * mark is the link to the lobby: HomeNav.astro's masthead on every page but
+ * the lobby. The plain rung of the brand's ornateness ladder, on purpose: at
+ * this size the ornate mark is a bright dot (brand/readme.md). It lights on
+ * hover, the reward the keypad gives on the home page, promised here in
+ * miniature.
+ *
+ * The plain divider is deliberately id-free, so it can appear as many times
+ * on a page as you like; the mirrored bolt is written out rather than
+ * referenced. The home variant is the exception: it inlines the mark, whose
+ * mask and clip-path carry ids, so it belongs once per page — the masthead.
  */
+interface Props {
+  home?: boolean;
+}
+const { home = false } = Astro.props;
+
+// The mark, imported so there is one drawing to maintain: its comment and
+// its own <svg> wrapper dropped, and the rays inside the opening given a
+// hook so CSS can turn the light up. In the template it is cropped to its
+// ink and sized to stand where the dial stood; the transparent rect behind
+// it is the tap target — painted but invisible, so it takes the pointer.
+const drawing = artwork
+  .replace(/<!--[\s\S]*?-->\s*/g, '')
+  .replace(/<svg\b[^>]*>/, '')
+  .replace(/<\/svg>\s*$/, '')
+  .replace(
+    '<g clip-path="url(#cmm-threshold-open)"',
+    '<g class="hl-light" clip-path="url(#cmm-threshold-open)"',
+  );
+
+// A redrawn mark that no longer carries the rays would ship a doorway that
+// never lights. Fail the build rather than lose the one piece of motion.
+if (home && !drawing.includes('class="hl-light"')) {
+  throw new Error('Divider: the doorway rays (clip-path cmm-threshold-open) are missing from brand/mark-threshold.svg');
+}
+if (home && /<svg\b|<\/svg>/.test(drawing)) {
+  throw new Error('Divider: the artwork wrapper was not stripped');
+}
 ---
 
 <svg
-  class="deco-divider"
+  class:list={['deco-divider', { 'deco-divider--home': home }]}
   viewBox="0 0 400 52"
   fill="none"
   stroke="currentColor"
   preserveAspectRatio="xMidYMid meet"
-  aria-hidden="true"
+  aria-hidden={home ? undefined : 'true'}
+  role={home ? 'presentation' : undefined}
 >
   <g stroke="none">
     <g>
@@ -61,16 +100,25 @@
     <path d="M176 20 h-6 M176 26 h-8 M176 32 h-6" />
   </g>
 
-  <g transform="translate(200 26)">
-    <circle r="21" stroke-width="2" />
-    <circle r="16.5" stroke-width="1" opacity="0.6" />
-    <g stroke-width="1.6">
-      <circle cx="0" cy="-12.5" r="2.6" /><circle cx="0" cy="12.5" r="2.6" />
-      <circle cx="-12.5" cy="0" r="2.6" /><circle cx="12.5" cy="0" r="2.6" />
-      <circle cx="-8.8" cy="-8.8" r="2.6" /><circle cx="8.8" cy="-8.8" r="2.6" />
-      <circle cx="-8.8" cy="8.8" r="2.6" /><circle cx="8.8" cy="8.8" r="2.6" />
+  {home ? (
+    <a href="/" class="home-link" aria-label="Call Me Maybe — home">
+      <rect x="172" y="-8" width="56" height="60" fill="transparent" stroke="none" />
+      <svg x="179.2" y="2" width="41.6" height="48" viewBox="4 20 92 106" fill="none" stroke="currentColor">
+        <Fragment set:html={drawing} />
+      </svg>
+    </a>
+  ) : (
+    <g transform="translate(200 26)">
+      <circle r="21" stroke-width="2" />
+      <circle r="16.5" stroke-width="1" opacity="0.6" />
+      <g stroke-width="1.6">
+        <circle cx="0" cy="-12.5" r="2.6" /><circle cx="0" cy="12.5" r="2.6" />
+        <circle cx="-12.5" cy="0" r="2.6" /><circle cx="12.5" cy="0" r="2.6" />
+        <circle cx="-8.8" cy="-8.8" r="2.6" /><circle cx="8.8" cy="-8.8" r="2.6" />
+        <circle cx="-8.8" cy="8.8" r="2.6" /><circle cx="8.8" cy="8.8" r="2.6" />
+      </g>
+      <path d="M-4 4 v-2 h1.6 v-2 h1.6 v-2 h1.6 v2 h1.6 v2 H4 v2 Z"
+            fill="currentColor" stroke="none" />
     </g>
-    <path d="M-4 4 v-2 h1.6 v-2 h1.6 v-2 h1.6 v2 h1.6 v2 H4 v2 Z"
-          fill="currentColor" stroke="none" />
-  </g>
+  )}
 </svg>

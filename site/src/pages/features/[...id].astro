@@ -1,7 +1,7 @@
 ---
 import { getCollection, render } from 'astro:content';
 import Base from '../../layouts/Base.astro';
-import Divider from '../../components/Divider.astro';
+import HomeNav from '../../components/HomeNav.astro';
 
 export async function getStaticPaths() {
   const features = await getCollection('features');
@@ -20,9 +20,9 @@ const { Content } = await render(f);
       </p>
       <h1 class="wordmark" style="font-size:clamp(1.8rem,5vw,3rem);">{f.data.title}</h1>
       <p class="tagline">{f.data.tagline}</p>
-      <Divider />
     </div>
   </header>
+  <HomeNav />
 
   <section class="panel">
     <div class="wrap">
