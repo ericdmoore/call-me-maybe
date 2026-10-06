@@ -6,6 +6,7 @@ const path = require('node:path');
 const {spawnSync} = require('node:child_process');
 const authorize = require('./authorize.cjs');
 const {route, opencode} = require('./models.cjs');
+const {LOCAL_MODEL, LOCAL_ALIAS} = require('./models.cjs');
 const {isolatedEnv} = require('./isolate.cjs');
 async function gate(options = {}) {
   const outputs = {};
@@ -39,7 +40,7 @@ test('manual repair authenticates its dispatcher and claims exactly one run on t
   const lookups = [];
   const out = await manual({lookups});
   assert.deepEqual(lookups, ['dispatcher']);
-  assert.equal(out.model, 'ollama/gpt-oss:20b');
+  assert.equal(out.model, LOCAL_MODEL);
   assert.equal(out.head, 'head');
   assert.equal(out.ref, 'refs/heads/feature');
   assert.equal(out.marker, '<!-- cmm-oc-request:manual:42 -->');
@@ -52,7 +53,7 @@ test('manual picker uses only the repair default or the explicit selected model'
   const paid = 'openrouter/anthropic/claude-sonnet-5.5';
   assert.equal((await manual({env: {DEFAULT_MODEL: paid}})).model, paid);
   assert.equal((await manual({env: {MANUAL_MODEL: paid}})).model, paid);
-  assert.equal((await manual({env: {DEFAULT_MODEL: paid, MANUAL_MODEL: 'ollama/gpt-oss:20b'}})).provider, 'ollama');
+  assert.equal((await manual({env: {DEFAULT_MODEL: paid, MANUAL_MODEL: 'ollama/gpt-oss:20b'}})).provider, 'litellm');
   assert.equal((await manual({env: {MANUAL_MODEL: 'openrouter/qwen/qwen3.8-27b:free'}})).model_id, 'qwen/qwen3.8-27b:free');
   await assert.rejects(manual({env: {MANUAL_MODEL: 'openrouter/auto'}}));
   await assert.rejects(manual({env: {MANUAL_MODEL: 'ollama/unknown'}}));
@@ -85,20 +86,28 @@ test('manual review and repair menus have identical sorted choices and every cho
   for (const model of repair.slice(1)) assert.ok(opencode(model).model);
 });
 test('writer gets local model and exact branch/head; maintain also allowed', async () => {
-  assert.equal((await gate()).model, 'ollama/gpt-oss:20b');
+  assert.equal((await gate()).model, LOCAL_MODEL);
   assert.equal((await gate({permission: 'maintain'})).ref, 'refs/heads/feature');
 });
-test('the standard local name and legacy setting use the same existing 65K GPT-OSS preset', async () => {
+test('the local name and both legacy Ollama ids route to the one LiteLLM alias', async () => {
   const current = await gate();
-  const legacy = await gate({env: {DEFAULT_MODEL: 'ollama/bullmoose-ocr:20b'}});
-  assert.equal(legacy.model, 'ollama/gpt-oss:20b');
-  assert.equal(legacy.model_id, current.model_id);
-  assert.equal(current.model_id, 'bullmoose-ocr:20b');
-  assert.deepEqual(opencode('ollama/bullmoose-ocr:20b'), opencode('ollama/gpt-oss:20b'));
+  for (const legacyId of ['ollama/gpt-oss:20b', 'ollama/bullmoose-ocr:20b']) {
+    const legacy = await gate({env: {DEFAULT_MODEL: legacyId}});
+    assert.equal(legacy.model, LOCAL_MODEL);
+    assert.equal(legacy.model_id, current.model_id);
+    assert.deepEqual(opencode(legacyId), opencode(LOCAL_MODEL));
+  }
+  assert.equal(current.provider, 'litellm');
+  assert.equal(current.model_id, LOCAL_ALIAS);
+  assert.equal(current.url, 'http://alpaca.local:4000/v1');
   const config = opencode(current.model);
-  assert.equal(config.model, 'ollama/gpt-oss:20b');
-  assert.equal(config.provider.ollama.models['gpt-oss:20b'].id, current.model_id);
-  assert.equal(config.provider.ollama.models['gpt-oss:20b'].limit.context, 65536);
+  assert.equal(config.model, LOCAL_MODEL);
+  assert.deepEqual(config.enabled_providers, ['litellm']);
+  assert.equal(config.provider.litellm.models[LOCAL_ALIAS].id, LOCAL_ALIAS);
+  assert.equal(config.provider.litellm.models[LOCAL_ALIAS].limit.context, 65536);
+  // The key reaches OpenCode from the environment when it runs; the config never holds one.
+  assert.equal(config.provider.litellm.options.apiKey, '{env:LITELLM_REVIEW_KEY}');
+  assert.ok(!JSON.stringify(config).includes('sk-'));
 });
 test('deny read/triage, bots, issue-only comments, drafts, closed PRs, forks', async () => {
   for (const o of [{permission: 'read'}, {permission: 'triage'}, {comment: {user: {type: 'Bot'}}},
@@ -131,7 +140,7 @@ test('exact OpenRouter override is opt-in; no other provider or malformed ID', a
     'openrouter/openrouter/auto', 'openrouter/openrouter/free', 'openrouter/anthropic/claude-sonnet-4.5:online',
     'openrouter/openai/gpt-oss-20b:nitro', 'openrouter/openai/gpt-oss-20b:free:online']) assert.throws(() => route(model));
   assert.equal(route('openrouter/qwen/qwen3.8-27b:free').model, 'qwen/qwen3.8-27b:free');
-  assert.deepEqual(opencode('ollama/gpt-oss:20b').enabled_providers, ['ollama']);
+  assert.deepEqual(opencode('ollama/gpt-oss:20b').enabled_providers, ['litellm']);
   assert.equal(opencode(o.model).small_model, o.model);
 });
 test('child config and authentication directories are isolated without mutating parent HOME', () => {
@@ -202,9 +211,19 @@ test('zero findings cannot hide incomplete or missing coverage', () => {
   assert.match(coverage(result), /Incomplete.*1 failed/);
   assert.match(coverage(result), /a.go \(budget\)/);
 });
-test('cloud credentials are mandatory only for an explicit cloud route', () => {
+test('the local key comes from the host file, cloud needs its explicit secret, neither falls back', () => {
   const {credential} = require('./models.cjs');
-  assert.equal(credential('ollama/gpt-oss:20b', ''), 'ollama');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmm-key-'));
+  const file = path.join(dir, 'litellm-review.key');
+  fs.writeFileSync(file, 'sk-test-placeholder\n');
+  assert.equal(credential('ollama/gpt-oss:20b', '', file), 'sk-test-placeholder');
+  assert.equal(credential(LOCAL_MODEL, 'ignored-cloud-key', file), 'sk-test-placeholder');
+  assert.throws(() => credential(LOCAL_MODEL, '', ''), /no fallback/);
+  assert.throws(() => credential(LOCAL_MODEL, '', undefined), /no fallback/);
+  assert.throws(() => credential(LOCAL_MODEL, '', 'relative.key'), /no fallback/);
+  assert.throws(() => credential(LOCAL_MODEL, '', path.join(dir, 'missing.key')), /unreadable/);
+  fs.writeFileSync(file, '\n');
+  assert.throws(() => credential(LOCAL_MODEL, '', file), /empty/);
   assert.throws(() => credential('openrouter/openai/gpt-oss-20b', ''), /no fallback/);
   assert.equal(credential('openrouter/openai/gpt-oss-20b', 'test-placeholder'), 'test-placeholder');
 });

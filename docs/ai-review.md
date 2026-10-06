@@ -1,7 +1,8 @@
 # OCR review and OpenCode repair on Alpaca
 
-Both legs default to `ollama/gpt-oss:20b` (local GPT-OSS 20B, 65,536 context)
-at `http://127.0.0.1:11434/v1`. No subscription, credits,
+Both legs default to `litellm/@local/openai/gpt-oss:20b-64k`: the local GPT-OSS
+20B weights with a 65,536 context, reached through Alpaca's LiteLLM at
+`http://alpaca.local:4000/v1`. No subscription, credits,
 purchased pack, or paid fallback is required. OCR is advisory, not a required
 check or approval. Every repair requires a new, explicit writer `/oc` request or
 manual workflow dispatch.
@@ -33,16 +34,26 @@ Use launchd/LaunchAgents, never systemctl, on this Mac.
 
 | Leg | Repository variable | Default |
 | --- | --- | --- |
-| Review | `OCR_MODEL` | `ollama/gpt-oss:20b` |
-| Repair | `OPENCODE_MODEL` | `ollama/gpt-oss:20b` |
+| Review | `OCR_MODEL` | `litellm/@local/openai/gpt-oss:20b-64k` |
+| Repair | `OPENCODE_MODEL` | `litellm/@local/openai/gpt-oss:20b-64k` |
 
-The public local model name maps to Alpaca's existing `bullmoose-ocr:20b` serving
-preset, which uses the same GPT-OSS 20B weights with `num_ctx=65536`. The stock
-`gpt-oss:20b` installation has no context override. OCR uses that preset's API ID;
-OpenCode uses its upstream model `id` mapping. No weights are downloaded and neither
-model's persistent configuration is changed. The original repository variable
-`ollama/bullmoose-ocr:20b` remains accepted and is normalized to `ollama/gpt-oss:20b`
-in job output, so existing automatic reviews keep working through the transition.
+The local model is a LiteLLM alias, not an Ollama name. `@local/openai/gpt-oss:20b-64k`
+in `~/.casa-studio/litellm_config.yaml` points at the stock `gpt-oss:20b` with
+`num_ctx 65536`. LiteLLM is where this box sets a local model's parameters and
+counts its usage, so the context lives there beside every other alias and Ollama
+keeps one model name; the `bullmoose-ocr:20b` Ollama preset is no longer used by
+this repository. OCR and OpenCode both call the alias through LiteLLM's
+OpenAI-compatible endpoint.
+
+The runner's credential is a LiteLLM key in the host file named by the repository
+variable `LITELLM_KEY_FILE` (`~/.local/share/call-me-maybe-ai/litellm-review.key`,
+mode 0600, outside any checkout). The key is scoped server-side to that one alias
+with a nominal budget, so a misrouted request cannot reach a paid provider, and it
+never enters GitHub: each job reads the file, masks the value and holds it in one
+step's environment. OpenCode receives it as `{env:LITELLM_REVIEW_KEY}`. The older
+ids `ollama/gpt-oss:20b` and `ollama/bullmoose-ocr:20b` are still accepted and
+normalized to the alias in job output, so the existing repository variables keep
+working through the transition.
 
 An explicit OpenRouter choice uses `openrouter/vendor/exact-model-id`, for example
 `openrouter/anthropic/claude-sonnet-5.5`. Verify availability and price with the provider
@@ -61,7 +72,7 @@ uses the same sorted options; an automated test keeps the two lists aligned.
 
 | Model | Exact dropdown value |
 | --- | --- |
-| Local · GPT-OSS 20B | `ollama/gpt-oss:20b` |
+| Local · GPT-OSS 20B, 64K | `litellm/@local/openai/gpt-oss:20b-64k` |
 | Claude Opus 5.5 | `openrouter/anthropic/claude-opus-5.5` |
 | Claude Sonnet 5.5 | `openrouter/anthropic/claude-sonnet-5.5` |
 | DeepSeek V4.1 Flash | `openrouter/deepseek/deepseek-v4.1-flash` |
@@ -99,7 +110,7 @@ in **Prompt for OpenCode**. For example: “Validate every review finding, fix
 confirmed bugs with regression tests, and explain any findings you reject.” Leave
 the internal inline-relay `comment` field empty. No preliminary `/oc` comment is
 needed. `default` uses `OPENCODE_MODEL`, falling back to local GPT-OSS 20B; choose
-`ollama/gpt-oss:20b` explicitly to override a hosted repository default. The choice
+`litellm/@local/openai/gpt-oss:20b-64k` explicitly to override a hosted repository default. The choice
 applies to this pass only and does not change the review model or either repository
 setting. The dispatcher must currently have write, maintain or admin access.
 
@@ -187,7 +198,7 @@ non-resetting cap if that is the intended total allowance. Configure provider-si
 limits for paid reviews too when a dollar ceiling is wanted. The current secret's
 spending settings have not been inspected or changed; paid execution remains untested.
 
-Necessary context/output limits remain: Ollama's 65,536-token context, OCR's
+Necessary context/output limits remain: the alias's 65,536-token context, OCR's
 32,768-token prompt ceiling and 16,384-token response limit, with upstream context
 compression. OCR still stops on unusable responses/compression failures and keeps
 its normal two review passes per group (one for cheap re-reviews), filtering and
@@ -270,7 +281,10 @@ subsequent runner updates. Go, Node, gh, mandoc, shellcheck and actionlint are s
 GitHub concurrency is repository-local. It cannot serialize against Bullmoose.
 Alpaca's current Ollama service has `OLLAMA_NUM_PARALLEL=1` and
 `OLLAMA_MAX_LOADED_MODELS=1`; the existing server queue serializes model requests
-from both repositories. Reviews use one subtask, 32K prompt ceiling, 20-minute
+from both repositories. Reviews pass through LiteLLM, which runs in the Colima
+Docker VM, so that VM is now in the review's path: its watchdog restarts a stalled
+VM within two minutes, and a review in flight at that moment fails and reports
+incomplete coverage rather than falling back anywhere. Reviews use one subtask, 32K prompt ceiling, 20-minute
 request timeout and clock deadlines. Only paid reviews have total token budgets.
 Jobs can interleave between requests;
 this is not exclusive whole-job scheduling. Heavy competing work can time out or

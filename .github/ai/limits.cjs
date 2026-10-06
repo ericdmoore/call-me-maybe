@@ -1,4 +1,4 @@
-const {route, credential, FREE_MODEL} = require('./models.cjs');
+const {credential, FREE_MODEL, isLocal} = require('./models.cjs');
 
 function positiveInteger(value, fallback, name, max) {
   if (value === undefined || value === '') return fallback;
@@ -9,7 +9,7 @@ function positiveInteger(value, fallback, name, max) {
 }
 
 function reviewLimits(model, cheap, env = process.env) {
-  const local = route(model).provider === 'ollama';
+  const local = isLocal(model);
   const timeKey = cheap ? 'OCR_REREVIEW_MINUTES' : 'OCR_REVIEW_MINUTES';
   const budgetKey = cheap ? 'OCR_PAID_REREVIEW_TOKENS' : 'OCR_PAID_REVIEW_TOKENS';
   const minutes = positiveInteger(env[timeKey], cheap ? 20 : 80, timeKey, 330);
@@ -24,7 +24,7 @@ function reviewLimits(model, cheap, env = process.env) {
 }
 
 async function requireRepairBudget(model, key, fetcher = fetch) {
-  if (route(model).provider === 'ollama') return; // No key or network dependency locally.
+  if (isLocal(model)) return; // No key or network dependency locally.
   credential(model, key);
   // This exact :free variant cannot route to the paid variant. Keep cloud
   // token/time limits and authentication, but do not require a spending allowance.
