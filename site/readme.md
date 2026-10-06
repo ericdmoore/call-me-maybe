@@ -62,9 +62,16 @@ through the dashboard and would live nowhere in the repo. As `routes` in
 `wrangler.jsonc` they are reviewable and reproducible, which is how the rest of
 this project treats configuration.
 
+A merge to `main` that touches `site/`, `brand/` or `.github/site/` publishes
+by itself: `.github/workflows/site-deploy.yml` builds on GitHub-hosted Ubuntu,
+uploads from the Alpaca runner with this same `wrangler.jsonc`, and fails the
+run unless `https://callmemaybe.cc/` then serves the build it uploaded. See
+[docs/site-previews.md](../docs/site-previews.md). The commands below are for
+working on the site locally and for publishing by hand when the runner is down.
+
 ```bash
 npm run cf:preview     # build, then serve through the real Workers runtime
-npm run deploy         # build, then publish
+npm run deploy         # build, then publish — the manual fallback
 npm run cf:whoami      # confirm which account the credentials resolve to
 ```
 
