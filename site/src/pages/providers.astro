@@ -3,7 +3,7 @@ import Base from '../layouts/Base.astro';
 import Divider from '../components/Divider.astro';
 import Switchboard from '../components/Switchboard.astro';
 import { providers, track, checkedAt } from '../data/providers';
-import { cells, defaults, estimate, fullSetup, hardwareCost, lightUse, limits, tinCan, usd } from '../data/costs';
+import { brains, cells, defaults, estimate, handsetModels, hardwareCost, lightUse, limits, tinCan, usd } from '../data/costs';
 import { rows as compareRows, linkedFeatures, tinCanCheckedAt, type Mark } from '../data/compare';
 import { getCollection } from 'astro:content';
 
@@ -108,9 +108,9 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
         <h2 class="prov-h">What a light-use month might cost</h2>
         <p>One number, one phone, {light.inMinutes} incoming minutes and
           {light.outMinutes} outgoing, at advertised starting rates rather than
-          destination quotes. Hardware is a {fullSetup.brain} and one
-          {fullSetup.handset}. Tin Can is one phone on Party Line, since a
-          phone that only calls other Tin Cans is a different purchase.</p>
+          destination quotes. Hardware is a {defaults.brain} and one {defaults.handset}.
+          Tin Can is one phone on Party Line, since a phone that only calls
+          other Tin Cans is a different purchase.</p>
       </div>
       <div class="prov-table" role="region" aria-label="Light-use month cost comparison" tabindex="0">
         <table>
@@ -153,10 +153,11 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
           Change any of it; the table follows.</p>
         <ul>
           <li><strong>Handsets:</strong> {defaults.handsets} by default, one in the
-            kitchen for the grown-ups and one for each of {defaults.kids} kids.
-            Each is a {fullSetup.handset} at ${hardwareCost.handset}, on a {fullSetup.brain} at
-            ${hardwareCost.brain}, from the <a href="/#hardware">hardware list</a>. Cheaper handsets exist;
-            this is the one the project is tested against.</li>
+            kitchen for the grown-ups and one for each of two kids.
+            Each is a {defaults.handset} at ${hardwareCost.handset}, on a {defaults.brain} at
+            ${hardwareCost.brain}: the pair the project is tested against, not the
+            cheapest. Pick others from the <a href="/#hardware">hardware list</a> below;
+            every brain and every standalone handset on it is offered.</li>
           <li><strong>Minutes:</strong> two kids at {30} minutes a week each is
             about {defaults.minutes} a month, which is the default; the kitchen
             phone’s calls are on top. Enter the house total or an average per
@@ -167,11 +168,12 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
         <p><strong>Tin Can is in the table</strong> because it is the other
           answer to the same question: a phone for a kid who does not have a
           smartphone. It is not a SIP provider. It is a phone with the service
-          built in, so its row counts one Tin Can per kid handset at ${tinCan.device} each;
-          a kitchen phone has no equivalent. Calls between Tin Cans are
-          free. Calling anyone else needs a Party Line plan at ${tinCan.partyLine} a month
-          for each Tin Can with its own number, first month free. That
-          makes one question decide most of the Tin Can row.</p>
+          built in, so its row counts one Tin Can per handset at ${tinCan.device} each.
+          Calls between Tin Cans are free. Calling anyone else needs a Party
+          Line plan at ${tinCan.partyLine} a month for each Tin Can with its own number,
+          first month free; Tin Cans linked to one shared number need one plan
+          between them, and all ring at once. Two questions decide most of the
+          Tin Can row.</p>
       </div>
 
       <form class="prov-calc" data-calc aria-labelledby="full-setup" onsubmit="return false">
@@ -181,8 +183,23 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
             <input type="number" name="handsets" inputmode="numeric" min={limits.handsets.min} max={limits.handsets.max} step="1" value={defaults.handsets} />
           </label>
           <label>
-            <span>Of those, for kids</span>
-            <input type="number" name="kids" inputmode="numeric" min="0" max={limits.handsets.max} step="1" value={defaults.kids} />
+            <span>PhoneBrain</span>
+            <select name="brain">
+              {brains.map((b) => <option value={b.name} selected={b.name === defaults.brain}>{b.name} · ${b.price}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Handset model</span>
+            <select name="handset">
+              {handsetModels.map((h) => <option value={h.name} selected={h.name === defaults.handset}>{h.name} · ${h.price}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Tin Can numbers</span>
+            <select name="shared">
+              <option value="own" selected={!defaults.shared}>one each</option>
+              <option value="shared" selected={defaults.shared}>one shared</option>
+            </select>
           </label>
           <label>
             <span>Minutes a month</span>
@@ -242,17 +259,18 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
           at this setting it comes to <span data-cost="tincan.perOutsideMinute">{c['tincan.perOutsideMinute']}</span>.</p>
         <p><strong>Sharing a number cuts it to one plan.</strong> Tin Can can
           link several phones to one number on a single Party Line, ${tinCan.partyLine} a
-          month. Every call then rings every Tin Can, and they share one
-          contact list and one voicemail. Each kid keeping their own number is
-          what the table shows.</p>
+          month; choose “one shared” above to price it. Every call then rings
+          every Tin Can, and they share one contact list and one voicemail,
+          which is the part a Call Me Maybe house routes with ladders and
+          extensions instead.</p>
         <p><strong>The friends who do have Tin Cans</strong> cost a Call Me Maybe
           house the same carrier minute as anyone else, and the call only
           connects if that family has Party Line: the free plan reaches other
           Tin Cans only. Move the slider to zero and the Tin Can row has no
           monthly cost, and no way to call a house like this one.</p>
         <p>Left out on both sides: tax and surcharges, a prepaid deposit, Wi-Fi,
-          electricity, a power supply, storage and case for the brain, and
-          your time. Only {costed} are costed; Flowroute’s recurring number
+          electricity, a power supply, storage and case for the brain, PoE or
+          a power adapter for a desk phone, and your time. Only {costed} are costed; Flowroute’s recurring number
           charge should be confirmed in the portal first.</p>
       </div>
 
@@ -427,7 +445,9 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
       const minutes = field('mode').value === 'each' ? entered * handsets : entered;
       return {
         handsets,
-        kids: Number(field('kids').value),
+        brain: field('brain').value,
+        handset: field('handset').value,
+        shared: field('shared').value === 'shared',
         minutes,
         outsidePct: Number(field('outsidePct').value),
       };
@@ -438,10 +458,6 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
         const v = c[el.dataset.cost ?? ''];
         if (v !== undefined) el.textContent = v;
       }
-      // A kid count above the handset count is clamped by the model; show it.
-      const kids = field('kids') as HTMLInputElement;
-      kids.max = field('handsets').value;
-      if (Number(kids.value) > Number(kids.max)) kids.value = kids.max;
     };
     form.addEventListener('input', paint);
     // A reload can restore what was typed; the HTML is the default.

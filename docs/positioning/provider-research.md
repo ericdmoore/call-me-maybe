@@ -33,15 +33,18 @@ not an additional monthly consumption charge.
 The `/providers/` page also prices a household by the year, so the carriers
 and Tin Can can be read side by side. The arithmetic is
 `site/src/data/costs.ts`; it renders the default household at build time
-and recomputes in the browser from four inputs: handsets, how many of them
-are a kid's, minutes a month (entered for the house or as an average per
-handset), and the share of the chats with people who do not have a Tin
-Can. It shows hardware, listed one-time fees, monthly service, year 1,
+and recomputes in the browser from four inputs: handsets, whether the Tin
+Cans share one number or have one each, minutes a month (entered for the
+house or as an average per handset), and the share of the chats with
+people who do not have a Tin Can. It shows hardware, listed one-time fees, monthly service, year 1,
 year 2 and a four-year total.
 
 - Default: three handsets, a kitchen phone for the adults and one for each
   of two kids. Hardware is a Raspberry Pi 5 plus one Grandstream WP826 per
-  handset at the `hardware.ts` prices, board and handsets only.
+  handset at the `hardware.ts` prices, board and handsets only; two
+  dropdowns offer every brain and every standalone (Wi-Fi or desk) handset
+  on that list, a price range costing at its upper end. Tin Can is one
+  device per handset.
 - Default minutes: two kids at 30 minutes a week is 260 minutes a month
   (52/12 weeks); the kitchen phone's calls are on top. Minutes are split
   half outgoing and half incoming. The slider divides the whole figure,
@@ -55,8 +58,9 @@ year 2 and a four-year total.
   Tin Can with its own number, first month free; Can 2 Can (other Tin Cans
   and 911) is free with every device. Several Tin Cans can be linked to one
   number on one Party Line, in which case all of them ring and share a
-  contact list and voicemail. The table counts one Tin Can per kid, each
-  with its own number, and no Tin Can for the kitchen. Sources:
+  contact list and voicemail. The table counts one Tin Can per handset,
+  each with its own number by default; a dropdown prices the shared-number
+  case at one Party Line. Sources:
   [product and plans](https://tincan.kids/products/tin-can?utm_source=callmemaybe.cc&utm_medium=referral&utm_campaign=providers&utm_content=research-tincan),
   [Can 2 Can vs Party Line](https://faq.tincan.com/t/35yp5d7/what-is-the-difference-between-can-2-can-and-the-party-line-subscription?utm_source=callmemaybe.cc&utm_medium=referral&utm_campaign=providers&utm_content=research-tincan),
   [one number per device, or shared](https://faq.tincan.com/t/x2yp5wt/will-each-device-in-my-home-have-a-separate-number?utm_source=callmemaybe.cc&utm_medium=referral&utm_campaign=providers&utm_content=research-tincan).

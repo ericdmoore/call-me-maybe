@@ -11,15 +11,18 @@
 // smartphone", a handset with the service built in — so its rate card lives
 // here, structured the way its storefront prices it.
 
-import { hardware } from './hardware';
+import { hardware, type Item, type Kind } from './hardware';
 import { providers, checkedAt } from './providers';
 
 /** What the calculator asks. */
 export interface Inputs {
-  /** Handsets in the house, kitchen included. */
+  /** Handsets in the house, kitchen included; one Tin Can each on the other side. */
   handsets: number;
-  /** How many of those are a kid's; one Tin Can each on the other side. */
-  kids: number;
+  /** The PhoneBrain and the handset model, by name in hardware.ts. */
+  brain: string;
+  handset: string;
+  /** The Tin Cans share one number and one Party Line, and all ring at once. */
+  shared: boolean;
   /** Minutes a month across every handset, both directions together. */
   minutes: number;
   /** Share of the chats with people who do not have a Tin Can. */
@@ -29,7 +32,10 @@ export interface Inputs {
 /** The standard-issue house: a kitchen phone and two kids. */
 export const defaults: Inputs = {
   handsets: 3,
-  kids: 2,
+  // What the project is built and tested against, not the cheapest.
+  brain: 'Raspberry Pi 5',
+  handset: 'Grandstream WP826',
+  shared: false,
   // Two kids at half an hour a week each, 52/12 weeks to the month.
   minutes: Math.round(2 * 30 * (52 / 12)),
   outsidePct: 50,
@@ -40,7 +46,7 @@ export const defaults: Inputs = {
  * 100 minutes in and 100 out. Expressed as calculator inputs so the same
  * function prices it; the one Tin Can is assumed to call ordinary numbers.
  */
-export const lightUse: Inputs = { handsets: 1, kids: 1, minutes: 200, outsidePct: 100 };
+export const lightUse: Inputs = { ...defaults, handsets: 1, minutes: 200, outsidePct: 100 };
 
 export const limits = {
   handsets: { min: 1, max: 12 },
@@ -50,9 +56,6 @@ export const limits = {
 export const fullSetup = {
   /** Half the chats are placed from the house, half rung in by the friend. */
   outgoingShare: 0.5,
-  /** The PhoneBrain and the handset the project is tested against. */
-  brain: 'Raspberry Pi 5',
-  handset: 'Grandstream WP826',
 };
 
 export const tinCan = {
@@ -71,20 +74,43 @@ export const tinCan = {
   ],
 };
 
-// hardware.ts prices are display strings. Parsing the two this table relies
-// on, strictly, means a renamed entry or a reformatted price fails the build
-// instead of silently costing the setup with a stale number.
-function approxPrice(name: string): number {
-  const item = hardware.find((h) => h.name === name);
-  if (!item) throw new Error(`costs.ts: hardware.ts has no entry named ${name}`);
-  const m = /^~\$(\d+)$/.exec(item.approxPrice);
-  if (!m) throw new Error(`costs.ts: cannot read a single price from "${item.approxPrice}" for ${name}`);
-  return Number(m[1]);
+/** A hardware entry the calculator can offer: one name, one price. */
+export interface Choice {
+  name: string;
+  price: number;
+}
+
+// hardware.ts prices are display strings. A price given as a range costs
+// at its upper end; anything else unreadable is left off the menu rather
+// than guessed. The defaults must be on the menu or the build fails, so a
+// renamed entry is caught here and not by a reader.
+function priceOf(item: Item): number | null {
+  const m = /^~?\$(\d+)(?:–(\d+))?$/.exec(item.approxPrice);
+  return m ? Number(m[2] ?? m[1]) : null;
+}
+
+function menu(kinds: Kind[]): Choice[] {
+  return hardware
+    .filter((h) => kinds.includes(h.kind))
+    .map((h) => ({ name: h.name, price: priceOf(h) }))
+    .filter((c): c is Choice => c.price !== null)
+    .sort((a, b) => a.price - b.price);
+}
+
+/** Every PhoneBrain in the list. */
+export const brains = menu(['brain']);
+/** Handsets that work on their own: Wi-Fi and desk. DECT needs a base, the ATA needs phones. */
+export const handsetModels = menu(['wifi', 'desk']);
+
+function pick(list: Choice[], name: string, fallback: string): Choice {
+  const found = list.find((c) => c.name === name) ?? list.find((c) => c.name === fallback);
+  if (!found) throw new Error(`costs.ts: hardware.ts has no priced entry named ${fallback}`);
+  return found;
 }
 
 export const hardwareCost = {
-  brain: approxPrice(fullSetup.brain),
-  handset: approxPrice(fullSetup.handset),
+  brain: pick(brains, defaults.brain, defaults.brain).price,
+  handset: pick(handsetModels, defaults.handset, defaults.handset).price,
 };
 
 export function usd(n: number): string {
@@ -105,10 +131,12 @@ function clamp(n: number, min: number, max: number, fallback: number): number {
 /** Whatever the browser hands over, made into something the model accepts. */
 export function sanitise(raw: Partial<Inputs>): Inputs {
   const handsets = clamp(raw.handsets ?? defaults.handsets, limits.handsets.min, limits.handsets.max, defaults.handsets);
-  const kids = clamp(raw.kids ?? defaults.kids, 0, handsets, Math.min(defaults.kids, handsets));
+  const brain = pick(brains, raw.brain ?? defaults.brain, defaults.brain).name;
+  const handset = pick(handsetModels, raw.handset ?? defaults.handset, defaults.handset).name;
+  const shared = Boolean(raw.shared ?? defaults.shared);
   const minutes = clamp(raw.minutes ?? defaults.minutes, limits.minutes.min, limits.minutes.max, defaults.minutes);
   const outsidePct = clamp(raw.outsidePct ?? defaults.outsidePct, 0, 100, defaults.outsidePct);
-  return { handsets, kids, minutes, outsidePct };
+  return { handsets, brain, handset, shared, minutes, outsidePct };
 }
 
 export interface Line {
@@ -142,28 +170,29 @@ function years(hardware: number, setup: number, monthly: number, freeMonths = 0)
 
 export function estimate(raw: Partial<Inputs>): Estimate {
   const inputs = sanitise(raw);
-  const { handsets, kids, minutes, outsidePct } = inputs;
+  const { handsets, shared, minutes, outsidePct } = inputs;
+  const brain = pick(brains, inputs.brain, defaults.brain);
+  const handset = pick(handsetModels, inputs.handset, defaults.handset);
   const outMinutes = Math.round(minutes * fullSetup.outgoingShare);
   const inMinutes = minutes - outMinutes;
   // On the Tin Can side every phone is a kid's, so all the chat is theirs.
   const outsideMinutes = Math.round((minutes * outsidePct) / 100);
   const canMinutes = minutes - outsideMinutes;
 
-  // Party Line is a flat fee per Tin Can: it is needed for the first minute
-  // of outside chat and costs the same for the last. Each kid keeps their
-  // own number here; sharing one across the phones needs one plan (notes).
-  const partyLines = outsidePct > 0 ? kids : 0;
+  // Party Line is a flat fee per Tin Can with its own number: it is needed
+  // for the first minute of outside chat and costs the same for the last.
+  // Tin Cans linked to one shared number need one plan between them.
+  const partyLines = outsidePct > 0 ? (shared ? 1 : handsets) : 0;
   const tcMonthly = partyLines * tinCan.partyLine;
-  const tcHardware = kids * tinCan.device;
+  const tcHardware = handsets * tinCan.device;
   const tc = {
     key: 'tincan',
     name: tinCan.name,
     basis:
-      kids === 0
-        ? 'no kid handsets, so no Tin Cans'
-        : partyLines > 0
-          ? `${kids} × ${usd(tinCan.device)} + ${partyLines} × ${usd(tinCan.partyLine)} Party Line`
-          : `${kids} × ${usd(tinCan.device)}; Can 2 Can only, no plan`,
+      partyLines > 0
+        ? `${handsets} × ${usd(tinCan.device)} + ${partyLines} × ${usd(tinCan.partyLine)} Party Line` +
+          (shared ? ', one shared number' : ', own numbers')
+        : `${handsets} × ${usd(tinCan.device)}; Can 2 Can only, no plan`,
     hardware: tcHardware,
     setup: 0,
     monthly: tcMonthly,
@@ -172,8 +201,8 @@ export function estimate(raw: Partial<Inputs>): Estimate {
     perOutsideMinute: outsideMinutes > 0 ? tcMonthly / outsideMinutes : null,
   };
 
-  const cmmHardware = hardwareCost.brain + hardwareCost.handset * handsets;
-  const hardwareBasis = `${usd(hardwareCost.brain)} brain + ${handsets} × ${usd(hardwareCost.handset)}`;
+  const cmmHardware = brain.price + handset.price * handsets;
+  const hardwareBasis = `${usd(brain.price)} ${brain.name} + ${handsets} × ${usd(handset.price)} ${handset.name}`;
   const carriers: Line[] = [];
   for (const p of providers) {
     const r = p.rates;
@@ -219,7 +248,6 @@ export function cells(raw: Partial<Inputs>): Record<string, string> {
   const e = estimate(raw);
   const c: Record<string, string> = {
     handsets: String(e.inputs.handsets),
-    kids: String(e.inputs.kids),
     minutes: String(e.inputs.minutes),
     inMinutes: String(e.inMinutes),
     outMinutes: String(e.outMinutes),
@@ -236,20 +264,16 @@ export function cells(raw: Partial<Inputs>): Record<string, string> {
     c[`${line.key}.fourYears`] = usd(line.fourYears);
   }
   c['tincan.perOutsideMinute'] =
-    e.inputs.kids === 0
-      ? 'nothing, because there are no Tin Cans'
-      : e.tinCan.perOutsideMinute === null
-        ? 'nothing, because there is no outside chat to spread it over'
-        : `about ${usd(e.tinCan.perOutsideMinute)} for each minute of outside chat`;
+    e.tinCan.perOutsideMinute === null
+      ? 'nothing, because there is no outside chat to spread it over'
+      : `about ${usd(e.tinCan.perOutsideMinute)} for each minute of outside chat`;
 
   // Four years is long enough for a hardware gap to close or not. Say which,
   // against the cheapest carrier shown.
   const cheapest = e.carriers.reduce((a, b) => (b.fourYears < a.fourYears ? b : a), e.carriers[0]);
   const diff = e.tinCan.fourYears - cheapest.fourYears;
   c['verdict.carrier'] = cheapest.name;
-  if (e.inputs.kids === 0) {
-    c['verdict'] = 'With no kid handsets there is no Tin Can to compare.';
-  } else if (Math.abs(diff) < 1) {
+  if (Math.abs(diff) < 1) {
     c['verdict'] = `Over four years the two come out level.`;
   } else if (diff > 0) {
     c['verdict'] = `Over four years Tin Can costs ${usd(diff)} more than ${cheapest.name} at these settings.`;
