@@ -113,6 +113,8 @@ test("receipts show saved only after a scoped result from the house; old consume
   assert.equal((await request(path)).status, 401);
   assert.equal((await request(path, { headers: { authorization: "Bearer " + secondToken } })).status, 404);
   assert.equal((await (await request(path, { headers: user })).json()).status, "queued");
+  // A Shortcut's URL action may encode the colon; the receipt still resolves.
+  assert.equal((await (await request(path.replace("upload:", "upload%3A"), { headers: user })).json()).status, "queued");
   assert.equal((await request(path + "?wait=21", { headers: user })).status, 400);
   const old = await (await request("/h/test/inbox/pull", { headers: box })).json();
   assert.deepEqual(old.messages, []);
@@ -139,8 +141,11 @@ test("malformed, oversized and excessive cards enqueue nothing, including stream
   assert.equal((await upload(card, { "content-type": "application/json" })).status, 415);
   assert.equal((await upload(card, { "idempotency-key": "bad value" })).status, 400);
   assert.equal((await upload(card, { "content-length": String(MAX_MEDIA_BYTES + 1) })).status, 413);
-  for (const data of ["", "private invalid card", "BEGIN:VCARD\nFN:no phone\nEND:VCARD", card.repeat(4), card + "BEGIN:VCARD\nFN:partial"]) {
-    assert.equal((await upload(data)).status, 422);
+  // The fourth card opens with a group prefix, which a BEGIN:VCARD line count
+  // would have missed and the house would then have trusted.
+  const grouped = card + card + card + card.replace("BEGIN:VCARD", "g.BEGIN:VCARD");
+  for (const data of ["", "private invalid card", "BEGIN:VCARD\nFN:no phone\nEND:VCARD", card.repeat(4), grouped, card + "BEGIN:VCARD\nFN:partial"]) {
+    assert.equal((await upload(data)).status, 422, data.slice(0, 40));
   }
   const stream = new ReadableStream({ start(controller) {
     controller.enqueue(new Uint8Array(MAX_MEDIA_BYTES));
@@ -161,6 +166,10 @@ test("revocation and bad configuration fail closed with no private errors", asyn
   keys[hash(token)] = { house: "test", sender: "spoof", phonebooks: ["house"] };
   env.CONTACT_UPLOAD_KEYS = JSON.stringify(keys);
   assert.equal((await upload()).status, 401);
+  // Same answer to the caller, but the operator can tell a typo in the key
+  // file from a revoked token.
+  assert.equal(logs.at(-1).outcome, "key-misconfigured");
+  assert.equal(logs.at(-2).outcome, undefined);
   keys[hash(token)].sender = "+15125550101";
   env.CONTACT_UPLOAD_KEYS = JSON.stringify(keys);
   delete env.HOUSE_TEST_DID;

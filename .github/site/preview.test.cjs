@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {eligible, config, validateAssets, previewURL, comment} = require('./preview.cjs');
+const {eligible, config, validateAssets, previewURL, childEnv, comment} = require('./preview.cjs');
 const pr = {head: {sha: 'abc', repo: {full_name: 'owner/repo'}}, base: {ref: 'main'}, state: 'open'};
 test('only the current same-repo PR can publish; close is state checked', () => {
   assert.ok(eligible(pr, 'owner/repo', 'abc', false));
@@ -12,6 +12,28 @@ test('only the current same-repo PR can publish; close is state checked', () => 
   assert.ok(!eligible(pr, 'owner/repo', 'abc', true));
   assert.ok(!eligible({...pr, base: {ref: 'other'}}, 'owner/repo', 'abc', false));
   assert.ok(eligible({...pr, state: 'closed'}, 'owner/repo', 'abc', true));
+  // A PR retargeted off main before closing still has a preview to remove.
+  assert.ok(eligible({...pr, state: 'closed', base: {ref: 'other'}}, 'owner/repo', 'abc', true));
+  assert.ok(!eligible({...pr, state: 'closed', head: {...pr.head, repo: {full_name: 'other/repo'}}}, 'owner/repo', 'abc', true));
+});
+test('deployment config inside the artifact is refused at the asset root only', () => {
+  for (const name of ['_headers', '_redirects', '_routes.json', '.assetsignore']) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmm-preview-test-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'index.html'), 'hello');
+      fs.mkdirSync(path.join(dir, 'docs'));
+      fs.writeFileSync(path.join(dir, 'docs', name), 'a page about ' + name);
+      validateAssets(dir);
+      fs.writeFileSync(path.join(dir, name), '/ https://evil.test 302');
+      assert.throws(() => validateAssets(dir), /Deployment config/);
+    } finally { fs.rmSync(dir, {recursive: true}); }
+  }
+});
+test('the uploader child sees Wrangler and Cloudflare settings, never the job token', () => {
+  const env = childEnv({HOME: '/h', PATH: '/bin', 'INPUT_GITHUB-TOKEN': 'ghs_secret', GITHUB_TOKEN: 'ghs_secret',
+    WRANGLER_BIN: '/opt/wrangler', CLOUDFLARE_ACCOUNT_ID: 'acct', ACTIONS_RUNTIME_TOKEN: 'rt'}, {CI: 'true'});
+  assert.deepEqual(env, {HOME: '/h', PATH: '/bin', WRANGLER_BIN: '/opt/wrangler', CLOUDFLARE_ACCOUNT_ID: 'acct', CI: 'true'});
+  assert.doesNotMatch(JSON.stringify(env), /secret|ACTIONS_/);
 });
 test('upload config has only static assets, no production routes or PR build hooks', () => {
   assert.deepEqual(Object.keys(config('./dist')).sort(),
@@ -45,9 +67,18 @@ test('updates only its bot-owned comment and skips stale results', async () => {
   assert.match(writes[0].body, /Open site preview/);
   await comment({github, context}, 'failure', '');
   assert.match(writes[1].body, /Preview failed/);
+  // A failed removal says the preview is still live; "failed" would read as "nothing deployed".
+  current.state = 'closed';
+  const closing = {...context, payload: {...context.payload, action: 'closed'}};
+  await comment({github, context: closing}, 'failure', '');
+  assert.match(writes[2].body, /could not be removed.*still published/);
+  assert.doesNotMatch(writes[2].body, /Preview failed/);
+  await comment({github, context: closing}, 'success', '');
+  assert.match(writes[3].body, /Preview removed/);
+  current.state = 'open';
   current.head.sha = 'new';
   await comment({github, context}, 'success', 'https://pr-1-test.example.workers.dev');
-  assert.equal(writes.length, 2);
+  assert.equal(writes.length, 4);
 });
 
 test('Wrangler resolves a standalone host link or an explicit absolute override', () => {

@@ -8,9 +8,17 @@ Cloudflare Worker `callmemaybe`, using the named preview `pr-<number>`. One
 the success message with a workflow link. Closing or merging deletes the preview
 and updates the comment. Production deployment remains `npm run deploy` in `site`.
 
-The workflow must be merged into `main` before `pull_request_target` can run it.
+Removal lives in its own workflow, `.github/workflows/site-preview-cleanup.yml`,
+which runs for every closed same-repository PR with no path or branch filter. A
+trigger's filters also gate the close event, so a PR whose final diff no longer
+touched the site, or that was retargeted off `main`, would otherwise leave its
+public preview behind. Deleting a preview that never existed is a no-op. If the
+removal itself fails, the comment says the preview is still published rather
+than reporting a failed build.
+
+Both workflows must be merged into `main` before `pull_request_target` can run them.
 After merging, push a site change or reopen an existing site PR to test the whole
-workflow. The `site/**`, `brand/**`, `.github/site/**` and preview workflow paths trigger it.
+workflow. The `site/**`, `brand/**`, `.github/site/**` and preview workflow paths trigger the build.
 Changes to Go-generated public files should include `make site-assets` outputs.
 The ordinary CI site build still runs for all PRs, including forks.
 
@@ -34,11 +42,13 @@ The helper uses the standalone `~/.local/bin/wrangler` link. An optional
 it must not point into a PR checkout. Keep an existing link if already installed,
 or deliberately repoint it when upgrading the pinned CLI.
 
-The host job-start guard must include the new workflow before activation. After
-reviewing `.github/ai/runner-guard.py`, copy it to
+The host job-start guard must include both preview workflows before activation.
+After reviewing `.github/ai/runner-guard.py`, copy it to
 `~/.local/share/call-me-maybe-ai/runner-guard.py`. The existing job-start hook loads
 that file on each job; no runner restart is needed. Roll back that copy to revoke
-preview access. Do not move the guard into a runner checkout.
+preview access. Do not move the guard into a runner checkout. An installed guard
+that predates `site-preview-cleanup.yml` refuses its jobs, which is the safe
+direction: previews then stay up until the copy is refreshed.
 
 ## Trust and deployment boundary
 
@@ -53,8 +63,13 @@ rechecks the current PR state and SHA, and downloads this run's artifact into a
 fresh temporary directory. It never executes PR scripts or reads a PR Wrangler
 config. The upload configuration contains only a fixed account, Worker name and
 static assets: no routes, bindings, custom build commands or production secrets.
-Symbolic links are refused. Wrangler runs from its host-installed location with
-an explicit configuration and ignores the dashboard Preview base config.
+Symbolic links are refused, and so are `_headers`, `_redirects`, `_routes.json`
+and `.assetsignore` at the asset root: Wrangler reads those from the asset
+directory as deployment configuration, which would let a PR set the preview
+host's redirects and response headers. The site ships none. Wrangler runs from
+its host-installed location with an explicit configuration, a minimal
+environment that carries no GitHub token, and ignores the dashboard Preview
+base config.
 
 A successful upload must pass an HTTP probe before the URL is posted. Runs for
 one PR are serialized; stale runs are skipped, and a close waits for an upload

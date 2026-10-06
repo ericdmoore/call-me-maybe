@@ -321,7 +321,11 @@ type Deps struct {
 // Reader is the loop.
 type Reader struct {
 	deferredContacts []contactOutcome
-	d                Deps
+	// saveAttempts counts phone book writes that failed, per message id, so
+	// a storage fault answers the sender after a few tries instead of holding
+	// the queue. In memory on purpose: a restart is a fresh set of tries.
+	saveAttempts map[string]int
+	d            Deps
 }
 
 func New(d Deps) *Reader {
@@ -334,7 +338,7 @@ func New(d Deps) *Reader {
 	if d.Webhook == nil {
 		d.Webhook = postJSON
 	}
-	return &Reader{d: d}
+	return &Reader{d: d, saveAttempts: map[string]int{}}
 }
 
 func postJSON(ctx context.Context, target string, payload map[string]string) error {

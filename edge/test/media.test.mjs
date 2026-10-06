@@ -10,6 +10,22 @@ test("only bounded carrier media lists are accepted", () => {
     assert.throws(() => mediaList(u));
   }
   assert.throws(() => mediaList(Array(4).fill("https://voip.ms/a").join(",")));
+  // The carrier records three slots and leaves the unused ones empty.
+  assert.equal(mediaList("https://voip.ms/a,,").length, 1);
+  assert.equal(mediaList(",https://voip.ms/a, ").length, 1);
+  assert.throws(() => mediaList("{MEDIA}"));
+});
+
+test("a final answer from the media host is told apart from a transient one", async (t) => {
+  let status = 404;
+  t.mock.method(globalThis, "fetch", async () => new Response("x", { status }));
+  for (status of [404, 403, 410]) assert.equal((await readMedia("https://voip.ms/a")).status, 410);
+  for (status of [408, 429, 500, 503]) assert.equal((await readMedia("https://voip.ms/a")).status, 502);
+});
+
+test("a redirect chain that never ends is not retried forever", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response(null, { status: 302, headers: { location: "https://voip.ms/again" } }));
+  assert.equal((await readMedia("https://voip.ms/a")).status, 422);
 });
 
 test("a media URL longer than 4096 characters is refused at the boundary", () => {

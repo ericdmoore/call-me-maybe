@@ -113,7 +113,9 @@ test('reject stale inline request, changed event and expected SHA', async () => 
   assert.equal((await gate({env: {COMMENT_KIND: 'inline'}})).head, 'head');
 });
 test('fail closed on missing config, invalid numbers and incomplete override', async () => {
-  for (const env of [{POLICY_SHA: ''}, {DEFAULT_MODEL: ''}, {PR_NUMBER: 'NaN'}, {COMMENT_ID: '0'}, {COMMENT_KIND: 'bogus'}]) await assert.rejects(gate({env}));
+  // Spellings Number() accepts but the raw-string concurrency key would not share with "12".
+  for (const env of [{POLICY_SHA: ''}, {DEFAULT_MODEL: ''}, {PR_NUMBER: 'NaN'}, {PR_NUMBER: '012'}, {PR_NUMBER: ' 12'},
+    {PR_NUMBER: '1e1'}, {PR_NUMBER: '12.0'}, {PR_NUMBER: '0x0c'}, {COMMENT_ID: '0'}, {COMMENT_KIND: 'bogus'}]) await assert.rejects(gate({env}));
   await assert.rejects(gate({comment: {body: '/oc --model'}}));
 });
 test('each bot-claimed request has one attempt, a forged user marker does not consume it', async () => {
@@ -124,7 +126,11 @@ test('each bot-claimed request has one attempt, a forged user marker does not co
 test('exact OpenRouter override is opt-in; no other provider or malformed ID', async () => {
   const o = await gate({comment: {body: '/oc --model openrouter/openai/gpt-oss-20b fix'}});
   assert.equal(o.model_id, 'openai/gpt-oss-20b');
-  for (const model of ['openrouter/openai/gpt-oss-20b/', 'auto', 'openai/gpt-4', 'ollama/unknown', 'openrouter/auto', 'openrouter/a/b\n']) assert.throws(() => route(model));
+  // OpenRouter's own routers and cost-adding variants are not exact model ids.
+  for (const model of ['openrouter/openai/gpt-oss-20b/', 'auto', 'openai/gpt-4', 'ollama/unknown', 'openrouter/auto', 'openrouter/a/b\n',
+    'openrouter/openrouter/auto', 'openrouter/openrouter/free', 'openrouter/anthropic/claude-sonnet-4.5:online',
+    'openrouter/openai/gpt-oss-20b:nitro', 'openrouter/openai/gpt-oss-20b:free:online']) assert.throws(() => route(model));
+  assert.equal(route('openrouter/qwen/qwen3.8-27b:free').model, 'qwen/qwen3.8-27b:free');
   assert.deepEqual(opencode('ollama/gpt-oss:20b').enabled_providers, ['ollama']);
   assert.equal(opencode(o.model).small_model, o.model);
 });
@@ -228,12 +234,35 @@ pr['head']['repo']['full_name'] = g.REPOSITORY
 assert g.allowed(e, {'pull_request': pr})
 e['GITHUB_WORKFLOW_REF'] = g.REPOSITORY + '/.github/workflows/site-preview.yml@refs/heads/main'
 pr['base'] = {'ref': 'main'}
-for action in ['opened', 'synchronize', 'reopened', 'closed']:
+for action in ['opened', 'synchronize', 'reopened']:
     assert g.allowed(e, {'action': action, 'pull_request': pr})
-assert not g.allowed(e, {'action': 'edited', 'pull_request': pr})
+for action in ['edited', 'closed']:
+    assert not g.allowed(e, {'action': action, 'pull_request': pr})
 assert not g.allowed(dict(e, GITHUB_EVENT_NAME='pull_request'), {'action': 'opened', 'pull_request': pr})
+assert not g.allowed(e, {'action': 'opened', 'pull_request': dict(pr, base={'ref': 'other'})})
+# Cleanup admits only the close event, whatever the PR's final base branch.
+c = dict(e, GITHUB_WORKFLOW_REF=g.REPOSITORY + '/.github/workflows/site-preview-cleanup.yml@refs/heads/main')
+assert g.allowed(c, {'action': 'closed', 'pull_request': pr})
+assert g.allowed(c, {'action': 'closed', 'pull_request': dict(pr, base={'ref': 'other'})})
+for action in ['opened', 'synchronize', 'reopened', 'edited']:
+    assert not g.allowed(c, {'action': action, 'pull_request': pr})
+assert not g.allowed(dict(c, GITHUB_EVENT_NAME='pull_request'), {'action': 'closed', 'pull_request': pr})
 pr['head']['repo']['full_name'] = 'outsider/repo'
 assert not g.allowed(e, {'action': 'opened', 'pull_request': pr})
+assert not g.allowed(c, {'action': 'closed', 'pull_request': pr})
+# The payload shapes GitHub really sends for a deleted fork or a non-PR event
+# make allowed() raise; the decision must still be a refusal, not a crash.
+import json, tempfile
+for payload in [{'action': 'opened', 'pull_request': {'head': {'repo': None}, 'base': {'ref': 'main'}}},
+                {'action': 'opened', 'pull_request': None}, []]:
+    with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
+        json.dump(payload, f)
+    assert g.decide(e, f.name) is False, payload
+assert g.decide(e, '/nonexistent/event.json') is False
+assert g.decide(dict(e, GITHUB_REPOSITORY='outsider/repo'), f.name) is False
+with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
+    json.dump({'action': 'opened', 'pull_request': {'state': 'open', 'draft': False, 'base': {'ref': 'main'}, 'head': {'repo': {'full_name': g.REPOSITORY}}}}, f)
+assert g.decide(e, f.name) is True
 `;
   const result = spawnSync('python3', ['-I', '-c', source], {encoding: 'utf8'});
   assert.equal(result.status, 0, result.stderr);

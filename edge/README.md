@@ -123,10 +123,15 @@ plus sign and digits; the house applies its own country-code normalisation.
 
 All attachments must parse before any contacts are queued. Permanent failures
 queue an empty contact list and a fixed error code (`invalid-card`,
-`too-many-contacts`, `media-too-large` or `unsupported-media`). Transient media
-fetch failures return HTTP 503 without queuing a partial message; enable the
-carrier's callback retry setting. Successful duplicate callbacks return `ok`
-without fetching expiring URLs again.
+`too-many-contacts`, `media-too-large`, `unsupported-media`, or `media-gone`
+when the carrier's media host answers that the file has expired or been
+removed). A `media` value the Worker cannot use at all (a host other than the
+carrier's, more than three entries) queues the text with `unsupported-media`
+and no attachment count, so the sender still hears from the house; an
+unexpanded `{MEDIA}` placeholder counts as no attachment. Transient media
+fetch failures (network errors, 5xx, 408, 429) return HTTP 503 without queuing
+a partial message; enable the carrier's callback retry setting. Successful
+duplicate callbacks return `ok` without fetching expiring URLs again.
 
 The local inbox receives only structured data. It checks sender permissions
 and all requested destinations, validates the names and numbers again, then

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseContacts, captureContacts } from "../src/contacts.ts";
+import { parseContacts, parseCards, captureContacts } from "../src/contacts.ts";
 import { MAX_MEDIA_BYTES } from "../src/media.ts";
 
 const parse = text => parseContacts(new TextEncoder().encode(text));
@@ -53,4 +53,33 @@ test("capture caps numbers across all attachments and returns no partial data", 
   assert.deepEqual(await captureContacts(["https://voip.ms/a", "https://voip.ms/b"]), { contacts:[], error:"too-many-contacts" });
   mocked.mock.mockImplementation(async () => new Response(new Uint8Array(MAX_MEDIA_BYTES + 1)));
   assert.deepEqual(await captureContacts(["https://voip.ms/a"]), { contacts:[], error:"media-too-large" });
+});
+
+test("an expired or removed carrier file is a fixed error, not a transient failure", async (t) => {
+  const mocked = t.mock.method(globalThis, "fetch", async () => new Response("gone", { status: 404 }));
+  assert.deepEqual(await captureContacts(["https://voip.ms/a"]), { contacts:[], error:"media-gone" });
+  mocked.mock.mockImplementation(async () => new Response("later", { status: 503 }));
+  await assert.rejects(captureContacts(["https://voip.ms/a"]));
+});
+
+test("a quoted-printable soft break keeps the continuation's leading whitespace", () => {
+  assert.deepEqual(parse(wrap("FN;ENCODING=QUOTED-PRINTABLE:Jane=\n Smith\nTEL:+15125550123")), [{ name: "Jane Smith", number: "+15125550123" }]);
+});
+
+test("the card count comes from the parser, so grouped openers count too", () => {
+  const grouped = "g.BEGIN:VCARD\nFN:A\nTEL:+15125550123\nEND:VCARD\n";
+  assert.equal(parseCards(new TextEncoder().encode(simple + grouped + grouped)).cards, 3);
+  assert.equal(parseCards(new TextEncoder().encode(simple)).cards, 1);
+});
+
+test("unfolding a card of tiny folds is linear in its size", () => {
+  // A NOTE of 99,000 short folds (1.2 MB, under the line cap) took seconds to
+  // unfold when each fold re-scanned the accumulated line; it must now stay
+  // well under a second, and one line over the cap is refused outright.
+  const text = wrap("TEL:+15125550123\nNOTE:" + (" " + "A".repeat(10) + "\n").repeat(99_000).trimEnd());
+  assert.ok(new TextEncoder().encode(text).length < MAX_MEDIA_BYTES);
+  const started = performance.now();
+  assert.deepEqual(parse(text), [{ name: "", number: "+15125550123" }]);
+  assert.ok(performance.now() - started < 1000, "unfolding took too long");
+  assert.throws(() => parse(wrap("TEL:+15125550123\nNOTE:" + " A\n".repeat(100_001).trimEnd())));
 });

@@ -10,6 +10,9 @@ import Keypad from '../components/Keypad.astro';
 import { byKind, kindLabels, priceCheckedDate, type Kind } from '../data/hardware';
 
 const repo = 'https://github.com/ericdmoore/call-me-maybe';
+// One date in hardware.ts drives both the machine-readable and the visible form.
+const priceCheckedLabel = new Date(`${priceCheckedDate}T00:00:00Z`)
+  .toLocaleDateString('en-US', { dateStyle: 'long', timeZone: 'UTC' });
 
 const features = [
   {
@@ -390,7 +393,7 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
 
       <p class="disclosure">
         <strong>Budgeting, not a live quote.</strong> Approximate new-hardware prices in USD,
-        checked <time datetime={priceCheckedDate}>October 5, 2026</time>, before tax and shipping.
+        checked <time datetime={priceCheckedDate}>{priceCheckedLabel}</time>, before tax and shipping.
         Price links show the reference listing; Amazon prices and bundles may differ.
         Pi prices cover the board only: allow for a power supply, storage, case and any cooling.
         DECT bases and extra handsets are separate unless marked as a bundle.

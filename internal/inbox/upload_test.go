@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -122,5 +123,31 @@ func TestShortcutResultAcknowledgementRecoversAfterFailure(t *testing.T) {
 	}
 	if acks != 2 || h.entries(t, "house") != 2 || h.entries(t, "handset:kitchen") != 2 {
 		t.Fatal("ack retry duplicated or lost entries")
+	}
+}
+
+// An upload whose book cannot be written is retried a few times and then
+// answered through its receipt. Left pending forever it would hold its queue
+// slot, and the texts behind it, until someone fixed the disk.
+func TestShortcutStorageFailureAnswersAfterBoundedRetries(t *testing.T) {
+	h := newShelfHarness(t)
+	m := h.card("upload:stuck")
+	m.Source, m.Phonebooks = "contact-upload", []string{"house", "kitchen"}
+	block := filepath.Join(h.reader.d.Phonebooks, "handsets")
+	if err := os.WriteFile(block, []byte("blocked"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < saveAttemptLimit; i++ {
+		if out := h.handle(m); !out.Retry {
+			t.Fatalf("attempt %d gave up early: %+v", i, out)
+		}
+	}
+	out := h.handle(m)
+	result, ok := uploadResultFor(m, out)
+	if out.Retry || out.Result != "failed" || !ok || result.Status != "failed" || !strings.Contains(result.Message, "Saved to 1 of 2") {
+		t.Fatalf("final attempt: %+v %+v", out, result)
+	}
+	if len(h.edge.sent) != 0 || len(h.reader.saveAttempts) != 0 || h.entries(t, "house") != 2 {
+		t.Fatal("upload failure sent a text, leaked its count, or lost the saved book")
 	}
 }

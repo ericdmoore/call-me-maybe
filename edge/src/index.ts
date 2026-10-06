@@ -2,7 +2,7 @@ import { diagnoseCarrier } from "./carrier-diagnostic.ts";
 import { contactAPI } from "./contact-upload.ts";
 import { fieldState, messageRef, type Diagnostic } from "./diagnostics.ts";
 import { mediaList } from "./media.ts";
-import { captureContacts, type Contact } from "./contacts.ts";
+import { captureContacts, type Contact, type ContactError } from "./contacts.ts";
 
 // The house's edge inbox.
 //
@@ -105,19 +105,30 @@ async function handle(req: Request, env: Env, diagnostic: Diagnostic): Promise<R
     diagnostic.stage = "callback-validation";
     const q = url.searchParams;
     diagnostic.media_field = fieldState(q.get("media"), "{MEDIA}");
-    diagnostic.timestamp_field = fieldState(q.get("timestamp"), "{TIMESTAMP}");
     const id = q.get("id") ?? "";
     const from = q.get("from") ?? "";
     const to = q.get("to") ?? "";
     const body = q.get("message") ?? "";
     // The carrier does not specify the timestamp's format or timezone.
-    // Retain bounded metadata verbatim; never let it change queue order or
-    // prevent message delivery when missing, unsafe or left unexpanded.
-    const timestamp = q.get("timestamp") ?? "";
-    const providerTimestamp = timestamp.length <= 64 && timestamp !== "{TIMESTAMP}" && !/[\u0000-\u001f\u007f]/.test(timestamp) ? timestamp : "";
-    let media: string[];
-    try { media = mediaList(q.get("media")); }
-    catch { diagnostic.outcome = "invalid-media"; return new Response("invalid media", { status: 400 }); }
+    // Retain bounded printable ASCII verbatim; never let it change queue order
+    // or prevent message delivery when missing, unsafe or left unexpanded. The
+    // stored value and the logged state come from one classification, so the
+    // log never says "present" for a value that was dropped.
+    const timestamp = q.get("timestamp");
+    const timestampState = fieldState(timestamp, "{TIMESTAMP}");
+    const providerTimestamp = timestampState === "present" && /^[\x20-\x7e]{1,64}$/.test(timestamp!.trim()) ? timestamp!.trim() : "";
+    diagnostic.timestamp_field = timestampState === "present" && !providerTimestamp ? "dropped" : timestampState;
+    // A media list the Worker cannot use (a host that is not the carrier's,
+    // too many entries) must not cost the sender their text: the message is
+    // queued with a fixed error and no fetch, and the house tells them no
+    // attachment arrived. The placeholder left unexpanded is the carrier's
+    // way of saying "none", exactly as for the timestamp.
+    let media: string[] = [];
+    let mediaProblem = false;
+    if (diagnostic.media_field === "present") {
+      try { media = mediaList(q.get("media")); }
+      catch { mediaProblem = true; }
+    }
     diagnostic.media_count = media.length;
     // Together with ten-message pulls and bounded contact fields this
     // keeps every queue response below the house client's 1 MiB limit.
@@ -134,9 +145,11 @@ async function handle(req: Request, env: Env, diagnostic: Diagnostic): Promise<R
       return new Response("ok");
     }
     diagnostic.stage = "media-capture";
-    let captured;
-    try { captured = await captureContacts(media); }
-    catch { diagnostic.outcome = "media-unavailable"; return new Response("media unavailable", { status: 503 }); }
+    let captured: { contacts: Contact[]; error: ContactError } = { contacts: [], error: mediaProblem ? "unsupported-media" : "" };
+    if (!mediaProblem) {
+      try { captured = await captureContacts(media); }
+      catch { diagnostic.outcome = "media-unavailable"; return new Response("media unavailable", { status: 503 }); }
+    }
     diagnostic.contact_count = captured.contacts.length;
     diagnostic.contact_error = captured.error;
     diagnostic.stage = "callback-save";

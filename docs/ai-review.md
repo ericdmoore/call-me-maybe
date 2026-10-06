@@ -47,7 +47,10 @@ in job output, so existing automatic reviews keep working through the transition
 An explicit OpenRouter choice uses `openrouter/vendor/exact-model-id`, for example
 `openrouter/anthropic/claude-sonnet-5.5`. Verify availability and price with the provider
 before selecting it; this is not a free-model promise. Unsupported providers,
-malformed identifiers and missing credentials fail rather than fall back.
+malformed identifiers and missing credentials fail rather than fall back. So do
+OpenRouter's own routers (`openrouter/openrouter/auto`, `openrouter/openrouter/free`),
+which pick a model per request, and every variant suffix other than `:free`
+(`:online`, `:nitro`, …), which adds per-request cost to the named model.
 For a manual second OCR review, use Actions → OCR review → Run workflow on
 `main`, enter the PR number and select `model` from the alphabetically sorted
 dropdown. `default` keeps the repository setting; the explicit local choice and

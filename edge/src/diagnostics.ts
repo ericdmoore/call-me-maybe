@@ -6,13 +6,14 @@ export interface Diagnostic {
   route: "other" | "callback" | "inbox.pull" | "inbox.ack" | "inbox.send" | "inbox.whoami" | "inbox.diagnose" | "contacts.upload" | "contacts.books" | "contacts.status";
   method: "GET" | "POST" | "other";
   stage: "routing" | "authorization" | "callback-validation" | "callback-lookup" | "media-capture" | "callback-save" | "inbox-pull" | "inbox-ack" | "inbox-send" | "inbox-whoami" | "inbox-diagnose" | "upload-authorization" | "upload-validation" | "upload-save" | "upload-status";
-  outcome?: "invalid-media" | "invalid-message" | "duplicate" | "duplicate-with-new-media" | "media-unavailable" | "queued" | "internal-error";
+  outcome?: "invalid-media" | "invalid-message" | "duplicate" | "duplicate-with-new-media" | "media-unavailable" | "queued" | "internal-error" | "key-misconfigured";
   message_ref?: string;
   media_field?: "missing" | "empty" | "unexpanded" | "present";
   media_count?: number;
   contact_count?: number;
-  contact_error?: "" | "invalid-card" | "too-many-contacts" | "media-too-large" | "unsupported-media";
-  timestamp_field?: "missing" | "empty" | "unexpanded" | "present";
+  contact_error?: "" | "invalid-card" | "too-many-contacts" | "media-too-large" | "unsupported-media" | "media-gone";
+  // dropped: present, but not the printable ASCII the Worker keeps.
+  timestamp_field?: "missing" | "empty" | "unexpanded" | "present" | "dropped";
 }
 
 export function fieldState(value: string | null, placeholder: string): "missing" | "empty" | "unexpanded" | "present" {

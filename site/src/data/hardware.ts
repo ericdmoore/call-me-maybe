@@ -188,4 +188,11 @@ export const hardware: Item[] = [
   },
 ];
 
-export const byKind = (kind: Kind): Item[] => hardware.filter((h) => h.kind === kind).slice(0, 4);
+// The page shows at most four per category. A fifth entry used to be dropped
+// silently by a slice; failing the build is the only way anyone notices.
+for (const kind of Object.keys(kindLabels) as Kind[]) {
+  const count = hardware.filter((h) => h.kind === kind).length;
+  if (count > 4) throw new Error(`hardware.ts: ${kind} has ${count} entries; the page shows at most four`);
+}
+
+export const byKind = (kind: Kind): Item[] => hardware.filter((h) => h.kind === kind);

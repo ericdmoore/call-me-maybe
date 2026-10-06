@@ -1,0 +1,68 @@
+name: Site preview cleanup
+# Separate from site-preview.yml on purpose. A trigger's path and branch
+# filters also gate the close event, so a PR that stopped touching the site
+# before it closed, or was retargeted off main, would leave a public preview
+# behind. This runs for every closed same-repo PR; removing a preview that
+# never existed is a no-op the uploader already tolerates.
+on:
+  pull_request_target:
+    types: [closed]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  # Shared with site-preview.yml so the removal lands after the last upload.
+  group: site-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+jobs:
+  remove:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, macOS, ARM64, call-me-maybe-ai]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      WRANGLER_BIN: ${{ vars.WRANGLER_BIN }}
+    outputs:
+      stale: ${{ steps.preview.outputs.stale }}
+    steps:
+      # Only trusted base policy is checked out on Alpaca. Never the PR revision.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Allocate temporary directory
+        run: |
+          preview_dir=$(mktemp -d "$RUNNER_TEMP/cmm-site-preview.XXXXXX")
+          echo "PREVIEW_DIR=$preview_dir" >> "$GITHUB_ENV"
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        id: preview
+        with:
+          script: await require('./.github/site/preview.cjs').deploy({github, context, core});
+      - name: Remove temporary directory
+        if: always() && env.PREVIEW_DIR != ''
+        run: rm -rf -- "$PREVIEW_DIR"
+  comment:
+    needs: remove
+    if: >-
+      always() && !cancelled() &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.remove.outputs.stale != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          RESULT: ${{ needs.remove.result }}
+        with:
+          script: |
+            await require('./.github/site/preview.cjs').comment({github, context},
+              process.env.RESULT, '');

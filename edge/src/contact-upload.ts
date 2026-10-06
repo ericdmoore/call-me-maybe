@@ -1,4 +1,4 @@
-import { parseContacts } from "./contacts.ts";
+import { parseCards } from "./contacts.ts";
 import { messageRef, type Diagnostic } from "./diagnostics.ts";
 import type { Env } from "./index.ts";
 import { MAX_MEDIA_BYTES } from "./media.ts";
@@ -17,7 +17,7 @@ async function digest(value: string | Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function identity(req: Request, env: Env): Promise<{ who: UploadIdentity; keyHash: string } | null> {
+async function identity(req: Request, env: Env, diagnostic: Diagnostic): Promise<{ who: UploadIdentity; keyHash: string } | null> {
   const token = (req.headers.get("authorization") ?? "").match(/^Bearer (ddc_[A-Za-z0-9_-]{43})$/)?.[1];
   if (!token || typeof env.CONTACT_UPLOAD_KEYS !== "string") return null;
   // Only digests live at the edge. Each entry binds a key to an existing
@@ -29,7 +29,12 @@ async function identity(req: Request, env: Env): Promise<{ who: UploadIdentity; 
   if (!who || typeof who.house !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(who.house) ||
       typeof who.sender !== "string" || !/^\+[1-9][0-9]{7,14}$/.test(who.sender) ||
       !Array.isArray(who.phonebooks) || who.phonebooks.length < 1 || who.phonebooks.length > 20 ||
-      who.phonebooks.some(book => typeof book !== "string" || !/^[a-z0-9]{1,32}$/.test(book))) return null;
+      who.phonebooks.some(book => typeof book !== "string" || !/^[a-z0-9]{1,32}$/.test(book))) {
+    // The key is real but its entry is malformed. Still a 401 to the caller,
+    // but the log must not send the operator chasing a revoked token.
+    diagnostic.outcome = "key-misconfigured";
+    return null;
+  }
   return { who, keyHash };
 }
 
@@ -55,11 +60,14 @@ async function readCard(req: Request): Promise<Uint8Array | null> {
 
 export async function contactAPI(req: Request, env: Env, diagnostic: Diagnostic): Promise<Response> {
   const url = new URL(req.url);
-  const list = url.pathname === "/api/v1/phonebooks";
-  const receipt = url.pathname.match(/^\/api\/v1\/contact-imports\/(upload:[a-f0-9]{64})$/)?.[1];
+  // A Shortcut's URL action may percent-encode the colon in the receipt.
+  let path = url.pathname;
+  try { path = decodeURIComponent(path); } catch { /* keep the raw path; it will not match a receipt */ }
+  const list = path === "/api/v1/phonebooks";
+  const receipt = path.match(/^\/api\/v1\/contact-imports\/(upload:[a-f0-9]{64})$/)?.[1];
   diagnostic.route = list ? "contacts.books" : receipt ? "contacts.status" : "contacts.upload";
   diagnostic.stage = "upload-authorization";
-  const auth = await identity(req, env);
+  const auth = await identity(req, env, diagnostic);
   if (!auth) return reply(401, "This contact-upload key is missing, invalid or revoked.");
   if (list) {
     if (req.method !== "GET") return reply(405, "Use GET to list phone books.");
@@ -86,7 +94,7 @@ export async function contactAPI(req: Request, env: Env, diagnostic: Diagnostic)
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
-  if (url.pathname !== "/api/v1/contact-imports") return reply(404, "Not found.");
+  if (path !== "/api/v1/contact-imports") return reply(404, "Not found.");
   if (req.method !== "POST") return reply(405, "Use POST to upload a vCard.");
   diagnostic.stage = "upload-validation";
   if (new URL(req.url).search) return reply(400, "Put the key in Authorization and the vCard in the request body.");
@@ -107,10 +115,12 @@ export async function contactAPI(req: Request, env: Env, diagnostic: Diagnostic)
   if (!bytes) return reply(413, "The vCard is too large. Maximum size is 1300 KiB.");
   let contacts, cards;
   try {
-    contacts = parseContacts(bytes);
-    cards = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes).replace(/\r\n?/g, "\n").match(/^BEGIN:VCARD$/gim)?.length ?? 0;
-    if (cards < 1 || cards > 3) return reply(422, "Send one to three contact cards at a time.");
+    // One walk yields both: counting BEGIN lines separately missed grouped or
+    // parameterised openers, and the house trusts this count for its own
+    // three-card rule.
+    ({ contacts, cards } = parseCards(bytes));
   } catch { return reply(422, "This file is not a supported vCard with a usable phone number. No contacts were queued."); }
+  if (cards < 1 || cards > 3) return reply(422, "Send one to three contact cards at a time.");
   const id = "upload:" + await digest(JSON.stringify([auth.keyHash, key]));
   const fingerprint = await digest(JSON.stringify([await digest(bytes), phonebooks]));
   const { house, sender } = auth.who;

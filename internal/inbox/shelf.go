@@ -133,6 +133,12 @@ func (s *ContactShelf) remove(key string) error {
 	return nil
 }
 
+// forget drops a batch from memory without touching its file, for the one
+// case where the file could not be removed after its work was done.
+func (s *ContactShelf) forget(key string) {
+	delete(s.batches, key)
+}
+
 func (s *ContactShelf) keys() []string {
 	keys := make([]string, 0, len(s.batches))
 	for k := range s.batches {
