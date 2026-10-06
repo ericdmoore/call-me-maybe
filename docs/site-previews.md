@@ -89,8 +89,9 @@ Alpaca, which runs `wrangler deploy` against the committed `site/wrangler.jsonc`
 its OAuth login, exactly as previews do. `workflow_dispatch` republishes `main`
 by hand when something outside those paths needs a rebuild.
 
-The job then fetches `https://callmemaybe.cc/` and compares the bytes to the
-`index.html` it just uploaded, retrying for propagation. A deploy that reports
+The job then fetches the first custom domain `site/wrangler.jsonc` attaches,
+today `https://callmemaybe.cc/`, and compares the bytes to the `index.html` it
+just uploaded, retrying for propagation. A deploy that reports
 success against a hostname still serving the previous build is the failure this
 workflow exists to end, so that mismatch fails the run rather than warning.
 

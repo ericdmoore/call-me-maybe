@@ -3,13 +3,56 @@ const path = require('node:path');
 const {execFileSync} = require('node:child_process');
 const {wranglerPath, validateAssets} = require('./preview.cjs');
 
-// The hostname site/wrangler.jsonc attaches. The probe at the end proves it
-// serves the build this run made, not whichever one it served before.
-const site = 'https://callmemaybe.cc/';
-
+// Wrangler's config is JSON with comments. Strip them outside strings only,
+// so a `//` inside a value survives, and leave the rest to JSON.parse: a
+// trailing comma or a typo fails loudly rather than being guessed at.
+function stripComments(text) {
+  let out = '';
+  for (let i = 0, inString = false; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      out += ch;
+      if (ch === '\\') out += text[++i] ?? '';
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') { inString = true; out += ch; }
+    else if (ch === '/' && text[i + 1] === '/') { while (i < text.length && text[i] !== '\n') i++; out += '\n'; }
+    else if (ch === '/' && text[i + 1] === '*') { const end = text.indexOf('*/', i + 2); i = end < 0 ? text.length : end + 1; }
+    else out += ch;
+  }
+  return out;
+}
+// The production hostname is whichever custom domain the committed
+// site/wrangler.jsonc attaches first. That file is the one source of the
+// routes, so reading it here means the probe can never drift from the deploy,
+// and a config that attaches no domain has no production to verify.
+function siteURL(configFile) {
+  let config;
+  try {
+    config = JSON.parse(stripComments(fs.readFileSync(configFile, 'utf8')));
+  } catch (error) {
+    throw new Error(`Cannot read the routes from ${configFile}: ${error.message}`);
+  }
+  const routes = Array.isArray(config.routes) ? config.routes : [];
+  const route = routes.find(r => r?.custom_domain === true && typeof r.pattern === 'string' && r.pattern.trim());
+  if (!route) throw new Error(`${configFile} attaches no custom domain, so there is no production hostname to verify`);
+  return `https://${route.pattern.trim()}/`;
+}
+/**
+ * Whether this run may publish production.
+ * @param {string} ref the fully qualified git ref the workflow ran for
+ * @param {string} eventName the GitHub event that started the run
+ * @returns {boolean} true only for main itself, pushed or dispatched by hand:
+ *   not a tag, not another branch, not a PR merge ref, not a PR event.
+ */
 function publishable(ref, eventName) {
-  // Production is main and nothing else: not a tag, not a branch, not a PR merge ref.
   return ref === 'refs/heads/main' && (eventName === 'push' || eventName === 'workflow_dispatch');
+}
+// The workflow passes these; a run without them should say which is missing
+// rather than fail inside path.resolve with no name attached.
+function required(name, env = process.env) {
+  const value = env[name];
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is not set; the workflow passes it to this step`);
+  return value;
 }
 function deployRecord(records) {
   const row = records.findLast(record => record?.type === 'deploy');
@@ -37,18 +80,23 @@ async function served(url, expected, {fetch = globalThis.fetch, attempts = 8, de
 }
 async function release({context, core}, options = {}) {
   if (!publishable(context.ref, context.eventName))
-    throw new Error(`Refusing to publish ${context.ref} on ${context.eventName}: only main reaches ${site}`);
-  const siteDir = path.resolve(process.env.SITE_DIR);
+    throw new Error(`Refusing to publish ${context.ref} on ${context.eventName}: only main is published`);
+  const siteDir = path.resolve(required('SITE_DIR'));
+  const tmpDir = required('RUNNER_TEMP');
+  const configFile = path.join(siteDir, 'wrangler.jsonc');
+  const site = siteURL(configFile);
   const dist = path.join(siteDir, 'dist');
+  if (!fs.statSync(dist, {throwIfNoEntry: false})?.isDirectory())
+    throw new Error(`Missing ${dist}: the build artifact was not downloaded`);
   // The artifact is static data and nothing else; a symlink in it is a leak, not a page.
   validateAssets(dist);
   const indexFile = path.join(dist, 'index.html');
-  if (!fs.statSync(indexFile).isFile()) throw new Error('Missing index.html');
+  if (!fs.statSync(indexFile, {throwIfNoEntry: false})?.isFile()) throw new Error('Missing index.html');
   const expected = fs.readFileSync(indexFile);
-  const outputFile = path.join(process.env.RUNNER_TEMP, `cmm-site-release-${process.pid}.jsonl`);
+  const outputFile = path.join(tmpDir, `cmm-site-release-${process.pid}.jsonl`);
   // The committed wrangler.jsonc is the one source of the routes, so production
   // uses it as-is; --config names it explicitly rather than trusting cwd lookup.
-  execFileSync(wranglerPath(), ['deploy', '--config', 'wrangler.jsonc'], {cwd: siteDir, encoding: 'utf8',
+  execFileSync(wranglerPath(), ['deploy', '--config', configFile], {cwd: siteDir, encoding: 'utf8',
     stdio: ['ignore', 'inherit', 'inherit'], timeout: 180000,
     env: {...process.env, CI: 'true', WRANGLER_SEND_METRICS: 'false', WRANGLER_OUTPUT_FILE_PATH: outputFile}});
   const records = fs.readFileSync(outputFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
@@ -57,4 +105,4 @@ async function release({context, core}, options = {}) {
   core.setOutput('version', version);
   core.notice(`Published version ${version} of ${context.sha} to ${targets.join(', ') || site}`);
 }
-module.exports = {site, publishable, deployRecord, served, release};
+module.exports = {stripComments, siteURL, publishable, deployRecord, served, release};

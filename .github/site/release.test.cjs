@@ -1,6 +1,56 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {publishable, deployRecord, served, release} = require('./release.cjs');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const {stripComments, siteURL, publishable, deployRecord, served, release} = require('./release.cjs');
+
+test('the production hostname is the first custom domain the committed config attaches', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmm-release-'));
+  const file = path.join(dir, 'wrangler.jsonc');
+  fs.writeFileSync(file, `{
+    // a comment with a "quote" and a url https://example.test/
+    "name": "callmemaybe", /* a block
+    comment */ "slash": "a//b",
+    "routes": [
+      { "pattern": "callmemaybe.workers.dev", "custom_domain": false },
+      { "pattern": "example.test", "custom_domain": true },
+      { "pattern": "www.example.test", "custom_domain": true }
+    ]
+  }`);
+  assert.equal(siteURL(file), 'https://example.test/');
+  assert.equal(JSON.parse(stripComments(fs.readFileSync(file, 'utf8'))).slash, 'a//b');
+  fs.writeFileSync(file, '{"routes": [{"pattern": "only.workers.dev", "custom_domain": false}]}');
+  assert.throws(() => siteURL(file), /no custom domain/);
+  fs.writeFileSync(file, '{"routes": [,]}');
+  assert.throws(() => siteURL(file), /Cannot read the routes/);
+  assert.throws(() => siteURL(path.join(dir, 'missing.jsonc')), /Cannot read the routes/);
+  // The committed file, so the hostname the docs promise is the one probed.
+  assert.equal(siteURL(path.join(__dirname, '../../site/wrangler.jsonc')), 'https://callmemaybe.cc/');
+});
+test('release names what is missing instead of crashing on it', async () => {
+  const core = {setOutput: () => assert.fail('published'), notice: () => assert.fail('published')};
+  const context = {ref: 'refs/heads/main', eventName: 'push'};
+  const saved = {SITE_DIR: process.env.SITE_DIR, RUNNER_TEMP: process.env.RUNNER_TEMP};
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmm-release-'));
+  try {
+    delete process.env.SITE_DIR;
+    delete process.env.RUNNER_TEMP;
+    await assert.rejects(release({context, core}), /SITE_DIR is not set/);
+    process.env.SITE_DIR = dir;
+    await assert.rejects(release({context, core}), /RUNNER_TEMP is not set/);
+    process.env.RUNNER_TEMP = dir;
+    await assert.rejects(release({context, core}), /Cannot read the routes/);
+    fs.writeFileSync(path.join(dir, 'wrangler.jsonc'), '{"routes": [{"pattern": "example.test", "custom_domain": true}]}');
+    await assert.rejects(release({context, core}), /build artifact was not downloaded/);
+    fs.mkdirSync(path.join(dir, 'dist'));
+    await assert.rejects(release({context, core}), /Missing index\.html/);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  }
+});
 
 test('only main itself publishes, by push or by hand', () => {
   assert.ok(publishable('refs/heads/main', 'push'));
