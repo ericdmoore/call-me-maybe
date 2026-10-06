@@ -14,6 +14,9 @@ for (const slug of linkedFeatures) {
   if (!featureIds.has(slug)) throw new Error(`providers.astro: compare.ts links /features/${slug}/ which does not exist`);
 }
 const markText: Record<Mark, string> = { yes: 'Yes', partly: 'Partly', planned: 'Planned', no: 'No' };
+// Menu labels only; the option value stays the full hardware.ts name. The
+// vendor word is what pushes "Grandstream WP826 · $110" past the field.
+const short = (name: string) => name.replace(/^(Raspberry|Grandstream) /, '');
 
 // The default household is rendered into the HTML, so the table reads
 // correctly with scripting off. The script below writes the same keys back
@@ -185,13 +188,13 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
           <label>
             <span>PhoneBrain</span>
             <select name="brain">
-              {brains.map((b) => <option value={b.name} selected={b.name === defaults.brain}>{b.name} · ${b.price}</option>)}
+              {brains.map((b) => <option value={b.name} selected={b.name === defaults.brain}>{short(b.name)} · ${b.price}</option>)}
             </select>
           </label>
           <label>
             <span>Handset model</span>
             <select name="handset">
-              {handsetModels.map((h) => <option value={h.name} selected={h.name === defaults.handset}>{h.name} · ${h.price}</option>)}
+              {handsetModels.map((h) => <option value={h.name} selected={h.name === defaults.handset}>{short(h.name)} · ${h.price}</option>)}
             </select>
           </label>
           <label>
