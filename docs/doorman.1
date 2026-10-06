@@ -529,9 +529,14 @@ A messages.toml word may set
 or
 .B phonebook = "handset:<id>"
 to import attached vCards into the house directory or one handset's own
-book. Use an attachment caption such as \fBAdd to: house,kitchen\fR to name
+book. Follow the cards promptly with instructions such as \fBAdd to: house,kitchen\fR to name
 one or more configured words, ignoring case and spaces around commas.
-A bare word still selects one book. Every destination must exist and permit
+An attachment caption also works; a bare word still selects one book.
+Uncaptioned cards wait 15 seconds, then a notice offers two minutes to replace
+the permitted House default. Timely instructions select only the named books;
+cancel discards the batch. Late instructions ask for a fresh card and never
+apply to the next one. Pending cards and explicit choices survive restarts.
+Every destination must exist and permit
 the sender before anything is saved. The Worker downloads and parses the
 attachments; the house pulls only bounded name/number pairs, validates them
 again, and never receives the original file or its URL. Only those words'

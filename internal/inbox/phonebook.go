@@ -16,9 +16,8 @@ import (
 // Resolve the whole caption before saving anything. A typo must not
 // silently file a card to just some of the requested destinations, and every
 // alias needs its own permission even if two aliases point at the same book.
-func (r *Reader) routeContacts(ctx context.Context, m Message, out Outcome, destinations string, caller policy.KnownCaller) Outcome {
+func (r *Reader) resolveContactWords(destinations string, caller policy.KnownCaller) ([]policy.Word, string) {
 	var words []policy.Word
-	var names []string
 	seen := map[string]bool{}
 	invalid, denied := false, false
 	for _, name := range strings.Split(destinations, ",") {
@@ -33,19 +32,43 @@ func (r *Reader) routeContacts(ctx context.Context, m Message, out Outcome, dest
 		if !seen[word.Phonebook] {
 			seen[word.Phonebook] = true
 			words = append(words, word)
-			names = append(names, word.Word)
 		}
 	}
 	if denied {
-		out.Result = "not-allowed"
-		return out
+		return nil, "not-allowed"
 	}
 	if invalid {
-		out.Result = "unknown-word"
-		r.reply(ctx, &out, out.To, "Use Add to: followed by configured phone book names, separated by commas. One name was empty or unknown. No contacts were saved.")
+		return nil, "unknown-word"
+	}
+	return words, ""
+}
+
+func contactWordNames(words []policy.Word) []string {
+	names := make([]string, 0, len(words))
+	for _, word := range words {
+		names = append(names, word.Word)
+	}
+	return names
+}
+
+func (r *Reader) routeContacts(ctx context.Context, m Message, out Outcome, destinations string, caller policy.KnownCaller) Outcome {
+	words, result := r.resolveContactWords(destinations, caller)
+	if result != "" {
+		// An explicit but invalid choice cancels the House default. A typo must
+		// never cause a contact to be filed somewhere the sender just excluded.
+		if err := r.stopContactDefault(m, out); err != nil {
+			return retryContacts(out, err)
+		}
+		out.Result = result
+		if result == "unknown-word" {
+			r.reply(ctx, &out, out.To, "Use Add to: followed by configured phone book names, separated by commas. One name was empty or unknown. No contacts were saved.")
+		}
 		return out
 	}
-	out.Word = strings.Join(names, ",") // configured aliases, never the raw caption
+	out.Word = strings.Join(contactWordNames(words), ",")
+	if r.d.Shelf != nil {
+		return r.selectContacts(ctx, m, out, words)
+	}
 	return r.importContacts(ctx, m, out, words...)
 }
 
@@ -63,24 +86,19 @@ func (r *Reader) importContacts(ctx context.Context, m Message, out Outcome, wor
 			return fail("unknown phone book", "That phone book is not configured. No contacts were saved.")
 		}
 	}
-	if m.MediaCount < 1 || m.MediaCount > 3 {
-		return fail("expected one to three contact cards", "Send one to three vCard attachments with the destination caption in the same message. No contacts were saved.")
-	}
-	if m.ContactError == "too-many-contacts" || len(m.Contacts) > 100 {
-		return fail("too many numbers", "Please share at most 100 phone numbers at a time. No contacts were saved.")
-	}
-	if m.ContactError != "" {
-		// The edge error is data, not a log or a reply. Never echo it.
-		return fail("edge could not read contact cards", "I need complete vCard files with phone numbers, at most 1300 KiB each. No contacts were saved.")
-	}
-	entries, err := r.contactEntries(m.Contacts)
-	if err != nil {
-		return fail(err.Error(), "The contact data was invalid or missing. Please resend the card. No contacts were saved.")
+	entries, problem := r.checkedContacts(m)
+	if problem != nil {
+		return fail(problem.detail, problem.reply)
 	}
 	added := 0
 	for i, word := range words {
 		n, err := ownbook.Import(r.d.Phonebooks, word.Phonebook, entries)
 		if err != nil {
+			// Pending selections are durable and idempotent. Keep them for retry
+			// without sending repeated failure texts while storage is unavailable.
+			if r.d.Shelf != nil || m.Source == "contact-upload" {
+				return retryContacts(out, errors.New("could not save phone book"))
+			}
 			// Multiple files cannot commit atomically. Be precise about which
 			// books finished, and let an idempotent resend complete the rest.
 			return fail("could not save phone book", fmt.Sprintf("Updated %d of %d phone books before a save failed. Please resend the same message; existing entries will be kept.", i, len(words)))
@@ -98,6 +116,31 @@ func (r *Reader) importContacts(ctx context.Context, m Message, out Outcome, wor
 	}
 	r.reply(ctx, &out, out.To, fmt.Sprintf("Saved %d new number(s) to %s; %d already present. Phones update on their next directory refresh.", added, label, len(entries)-added))
 	return out
+}
+
+type contactInputError struct{ detail, reply string }
+
+func (r *Reader) checkedContacts(m Message) ([]ownbook.Entry, *contactInputError) {
+	fail := func(detail, reply string) ([]ownbook.Entry, *contactInputError) {
+		return nil, &contactInputError{detail, reply}
+	}
+	if m.MediaCount == 0 {
+		return fail("no contact attachment received", "No contact attachment reached the house. If you sent one, the carrier may not have forwarded it. No contacts were saved.")
+	}
+	if m.MediaCount < 0 || m.MediaCount > 3 {
+		return fail("expected one to three contact cards", "Send one to three vCard attachments. Follow them with Add to: and the phone book names. No contacts were saved.")
+	}
+	if m.ContactError == "too-many-contacts" || len(m.Contacts) > 100 {
+		return fail("too many numbers", "Please share at most 100 phone numbers at a time. No contacts were saved.")
+	}
+	if m.ContactError != "" {
+		return fail("edge could not read contact cards", "I need complete vCard files with phone numbers, at most 1300 KiB each. No contacts were saved.")
+	}
+	entries, err := r.contactEntries(m.Contacts)
+	if err != nil {
+		return fail(err.Error(), "The contact data was invalid or missing. Please resend the card. No contacts were saved.")
+	}
+	return entries, nil
 }
 
 var contactNumber = regexp.MustCompile(`^\+?[0-9]{7,15}$`)

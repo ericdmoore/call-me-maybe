@@ -1005,11 +1005,72 @@ lobby. To admit someone, add them to `[[people]]`. The three clips
 (`add-number`, `add-name`, `add-done`) are the bundled pack's; without them
 the phone hears the beep and silence, and still works.
 
-### Share a contact to a phone book
+### Share a contact with an iPhone Shortcut
+
+The Shortcut sends a vCard and its explicit destinations together over HTTPS.
+It bypasses the SMS shelf entirely: no silence timer, default-book timer,
+follow-up SMS, or merging with another pending contact. Choose House, another
+book, or several books in the picker. Cancelling sends nothing. The API rejects
+an empty selection rather than guessing a destination.
+
+After the operator installs the upload-capable inbox and provisions a separate
+contact-upload key (see `edge/README.md`), create **Send to House** in Shortcuts:
+
+1. Enable **Show in Share Sheet**, accepting **Contacts** and **Files**.
+   If there is no input, select **Stop and Respond** and explain that a contact
+   must be shared. Use one shared contact file per run; a file may contain up to
+   three cards.
+2. Add **Text**, containing the dedicated upload key. Rename its output
+   `API Key`. Do not use the house inbox token or carrier credentials.
+3. **Get Contents of URL**: GET
+   `https://edge.callmemaybe.cc/api/v1/phonebooks`, with header
+   `Authorization: Bearer <API Key variable>`.
+4. **Get Dictionary Value**: `phonebooks` from that response.
+5. **Choose from List**: the phonebooks value; prompt “Add to which phone books?”;
+   **Select Multiple** on and **Select All Initially** off. Explicitly select
+   House for House-only, or select another book without House to exclude House.
+6. **Combine Text**: chosen items, custom separator `,`. Rename the output
+   `Books`. Stop without uploading if no items were chosen.
+7. **Get Contents of URL**: POST
+   `https://edge.callmemaybe.cc/api/v1/contact-imports`; **Request Body: File**,
+   **File: Shortcut Input**. Headers: `Authorization: Bearer <API Key variable>`,
+   `Content-Type: text/vcard`, and `X-Phonebooks: <Books variable>`.
+   Rename the response `Upload Response`.
+8. **Get Dictionary Value**: `receipt` from `Upload Response`. If it has a
+   value, GET `https://edge.callmemaybe.cc/api/v1/contact-imports/<receipt>?wait=20`
+   using the same Authorization header. Get `message` from the response and
+   **Show Result**. Otherwise get `message` from `Upload Response` and show it.
+
+The list comes from this key's permitted books and the house checks its own
+policy again when importing. A received upload is `queued`; only the house's
+write result produces `saved` or `failed`. If the house is unavailable, the
+Shortcut reports that it is still waiting rather than claiming success. The
+status URL can be checked again with the same key. No key is put in a URL.
+
+An initial HTTP test proves the API and house pipeline, but does not prove the
+iPhone's contact-to-file conversion. Live acceptance includes sharing a real
+contact from the iPhone, selecting Norah alone and verifying House is untouched,
+then selecting multiple books and verifying the corresponding handset directories.
+Apple requires an iCloud sign-in on the exporting Mac to sign an installable
+shortcut; entering these actions on the iPhone does not require that Mac sign-in.
+
+### Share a contact to a phone book by SMS
+
+**Open delivery issue (2026-10-05):** Live iPhone vCard tests through VoIP.ms
+have not passed. The configured callback contains `media={MEDIA}`, yet the
+callback, Message Center, `getMMS` and `getMediaMMS` all expose zero media for
+the failed received MMS. The local pending-card behavior is deployed and
+tested, but the complete phone-to-phone-book feature is **not ready** on this
+route. Carrier tracing must establish inbound vCard support or another
+supported delivery path. Do not treat a unit test or successful SMS as closure.
+Acceptance requires a real card reaching the edge, the 15-second notice,
+timely destination replacement, default House import after the window, and
+verification in the live handset directory.
 
 Share one or more contacts as `.vcf` (vCard) attachments to the house number.
-Add a caption such as `Add to: House, Kitchen` in the **same message** to
-choose one or more destinations. Put these entries in `messages.toml`, replacing `gabi` with a
+Follow the cards promptly with `Add to: House, Kitchen` to choose one or more
+destinations. A caption on the card itself also works. Put these entries in
+`messages.toml`, replacing `gabi` with a
 household member's `[[people]] id` and `kitchen` with the handset id:
 
 ```toml
@@ -1037,6 +1098,28 @@ whole request before saving, and the sender must be allowed to use every
 named word. `phonebook` cannot be combined
 with `action`, `webhook` or `reply`: the importer sends the result itself.
 
+A card without a caption waits in a private, persistent shelf keyed by sender
+and house number. After 15 seconds without another card, the house sends a
+notice: the cards will go to House in two minutes unless the sender chooses
+other books. The two minutes begin when the warning is accepted for delivery.
+`Add to: Kitchen` replaces the default completely: House receives nothing.
+A timely selection saves immediately; `cancel` discards the pending batch.
+If House is not permitted, the notice requests a selection and nothing is
+saved without one. An invalid explicit selection suppresses the House default
+and leaves two minutes to correct it. Additional cards restart the silence
+period; at most three cards and 100 numbers can wait together.
+
+Instructions with no pending card, including late instructions after saving,
+receive: "There is no vCard ready to save. Please resend one, quickly followed
+by instructions." They never become standing instructions for the next card.
+The inbox drains queued messages before applying defaults and uses the edge's
+receipt time to recognize timely instructions after a temporary disconnect.
+Pending batches survive inbox restarts under the inbox `--state` directory
+in `contacts-pending`, with 0700 directories and 0600 files. One
+inbox process holds the shelf lock. A batch that cannot deliver its notice
+expires after 15 minutes without saving. Timer outcomes and fixed failures are
+logged without contact contents.
+
 The reply says how many new numbers were saved and how many already existed.
 Names and every valid phone number are kept; photos, email addresses and other
 fields are not. Existing names are preserved on duplicate numbers. The Worker
@@ -1053,10 +1136,9 @@ no partial contacts; temporary download failures make the carrier retry the
 callback. A missing or malformed card gets an explanation from the house;
 a stranger or a person not allowed to use that word gets no response and
 nothing is saved. The Worker parses before these local permission checks.
-Structured contacts are reused for all selected books. If a disk
-write fails after some books were saved, the reply reports how many completed;
-resending the same card and caption completes the remaining books without
-duplicating entries in the ones already updated.
+Structured contacts are reused for all selected books. If a disk write fails,
+the inbox retries the pinned selection; already saved entries are not
+duplicated. Recovery never changes an explicit selection back to House.
 
 Cards live under `PHONEBOOK_DIR/shared/house.vcf` or
 `PHONEBOOK_DIR/shared/handsets/<id>.vcf`, separate from `*88`'s own files. The
@@ -1077,6 +1159,11 @@ but does not promise incoming contact-card support. Test a fictional card
 from the sending phone and check the queued structured contact data and the
 house's import reply before relying on it. The carrier Message Center may not
 show the original file even when it records an MMS.
+
+For delivery failures, see `edge/README.md`, “Diagnosing contact delivery”.
+The Worker logs parameter presence, counts, fixed outcomes and failing stages
+without contact content. A missing attachment is different from a parser
+failure; do not loosen vCard validation to compensate for missing media.
 
 ### Backup and restore
 

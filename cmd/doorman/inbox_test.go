@@ -107,6 +107,8 @@ func TestOneTextLeavesItsRowsInTheJournal(t *testing.T) {
 		{inbox.Outcome{ID: "9", Result: "unlisted", Via: "sms"}, "message.received"},
 		{inbox.Outcome{ID: "10", Result: "unknown-word", Person: "gabi", Via: "sms"}, "message.received"},
 		{inbox.Outcome{ID: "11", Result: "duplicate", Via: "sms"}, "message.received"},
+		{inbox.Outcome{ID: "13", Result: "pending", Via: "sms", Deferred: true}, ""},
+		{inbox.Outcome{ID: "14", Result: "acted", Word: "house", Via: "sms", Deferred: true}, "message.acted"},
 	} {
 		if got := join(types(c.o)); got != c.want {
 			t.Errorf("%s: rows = %q, want %q", c.o.Result, got, c.want)

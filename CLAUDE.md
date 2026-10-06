@@ -145,11 +145,19 @@ Layout:
   The curfew sweep exempts channels with accountcode `cmm-reminder`. See RUNBOOK
   “Scheduled calls” for deployment and a real handset trial.
 - Contact cards sent to the house are downloaded and parsed by the Worker.
+  Shortcut uploads additionally carry explicit phone-book selections and
+  `source=contact-upload`; they bypass the SMS shelf entirely, never merge
+  with pending SMS cards, and return save results through the edge receipt
+  API rather than SMS. Upload keys are separate from the house inbox token.
   Only bounded `{name, number}` metadata and fixed error codes enter the queue;
   no raw files, media URLs, photos or arbitrary properties reach the house.
   `internal/inbox` validates structured contacts again before writing. `messages.toml` words with `phonebook` select `house`
   or `handset:<id>` and restrict senders. `Add to: word,word` routes to all
   named destinations after checking every permission; a bare word still works.
+  Uncaptioned cards wait durably by sender and DID: 15 seconds of silence,
+  then a warning and two minutes to replace the permitted House default.
+  Late/no-card instructions never apply to a future card. The inbox drains
+  the queue before defaulting; pinned selections survive restart and retries.
   `PHONEBOOK_DIR/shared` is directory
   storage, never an admission source; it is separate from the *88 writer.
 - `internal/config` — env parsing; names match `examples/.env.example` exactly.

@@ -264,3 +264,18 @@ func TestContactCaptionReportsPartialSaveAndResendCompletesIt(t *testing.T) {
 		t.Fatalf("resend: %+v", out)
 	}
 }
+
+func TestMissingCardReplyDescribesDeliveryFailure(t *testing.T) {
+	h := contactHarness(t)
+	out := h.reader.Handle(context.Background(), Message{ID: "missing-card", From: "15125550101", Body: "Add to: house,kitchen"})
+	if out.Result != "failed" || out.Detail != "no contact attachment received" || !strings.Contains(out.Reply, "No contact attachment reached the house") || len(out.Reply) > 160 {
+		t.Fatalf("missing attachment outcome: %+v", out)
+	}
+	for _, target := range []string{"house", "handset:kitchen"} {
+		dir, id, _ := ownbook.SharedLocation(h.reader.d.Phonebooks, target)
+		book, err := ownbook.Load(dir, id)
+		if err != nil || len(book.Entries) != 0 {
+			t.Fatal("missing attachment wrote contacts")
+		}
+	}
+}
