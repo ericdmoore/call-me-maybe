@@ -279,3 +279,40 @@ func TestMissingCardReplyDescribesDeliveryFailure(t *testing.T) {
 		}
 	}
 }
+
+// Autocorrect ends a caption with a full stop. The bare word "house." has
+// always been accepted; the same name after "Add to:" must be too.
+func TestContactCaptionToleratesTrailingPunctuation(t *testing.T) {
+	h := contactHarness(t)
+	for i, caption := range []string{"Add to: House.", "add to: house!", "Add to: house, kitchen."} {
+		out := h.reader.Handle(context.Background(), Message{ID: fmt.Sprint(i), From: "15125550101", Body: caption, MediaCount: 1, Contacts: sampleContacts})
+		if out.Result != "acted" {
+			t.Fatalf("%q: %+v", caption, out)
+		}
+	}
+	for _, target := range []string{"house", "handset:kitchen"} {
+		dir, id, _ := ownbook.SharedLocation(h.reader.d.Phonebooks, target)
+		book, err := ownbook.Load(dir, id)
+		if err != nil || len(book.Entries) != 2 {
+			t.Fatalf("%s holds %d entries", target, len(book.Entries))
+		}
+	}
+}
+
+// One undiallable number in a large export fails the batch; the reply says
+// which card, by position only, so the sender can find it without the house
+// ever repeating a number.
+func TestContactReplyNamesThePositionOfABadNumberNeverTheNumber(t *testing.T) {
+	h := contactHarness(t)
+	contacts := []Contact{sampleContacts[0], {Name: "Abroad", Number: "00442079460958"}}
+	out := h.reader.Handle(context.Background(), Message{ID: "m", From: "15125550101", Body: "house", MediaCount: 1, Contacts: contacts})
+	if out.Result != "failed" || !strings.Contains(out.Reply, "Contact 2 of 2 has a number the house cannot dial") || policy.ReplyProblem(out.Reply) != "" {
+		t.Fatalf("outcome: %+v", out)
+	}
+	if strings.Contains(out.Reply+out.Detail, "0958") || strings.Contains(out.Reply+out.Detail, "Abroad") {
+		t.Fatal("reply or detail carried contact data")
+	}
+	if _, err := os.Stat(filepath.Join(h.reader.d.Phonebooks, "house.vcf")); !os.IsNotExist(err) {
+		t.Fatal("failed batch wrote contacts")
+	}
+}

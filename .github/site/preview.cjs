@@ -14,7 +14,9 @@ function wranglerPath(env = process.env, home = os.homedir()) {
 }
 
 function eligible(pr, repo, head, closing) {
-  return pr.base.ref === 'main' && pr.head.repo?.full_name === repo &&
+  // A preview is only ever created for a PR into main, but a PR retargeted
+  // before it closed still has one to remove.
+  return (closing || pr.base.ref === 'main') && pr.head.repo?.full_name === repo &&
     pr.head.sha === head && pr.state === (closing ? 'closed' : 'open');
 }
 async function current({github, context}) {
@@ -23,12 +25,18 @@ async function current({github, context}) {
   return eligible(pr, `${context.repo.owner}/${context.repo.repo}`, original.head.sha,
     context.payload.action === 'closed');
 }
-function validateAssets(directory) {
+// Files Wrangler reads from the asset root as deployment configuration. The
+// site has none; one arriving in a PR's artifact is the PR configuring the
+// preview host's redirects or response headers, which the generated config is
+// meant to rule out.
+const assetConfig = new Set(['_headers', '_redirects', '_routes.json', '.assetsignore']);
+function validateAssets(directory, root = directory) {
   // Treat the artifact only as static data, never as config or executable code.
   for (const entry of fs.readdirSync(directory, {withFileTypes: true})) {
     const file = path.join(directory, entry.name);
-    if (entry.isDirectory()) validateAssets(file);
+    if (entry.isDirectory()) validateAssets(file, root);
     else if (!entry.isFile()) throw new Error(`Non-regular asset: ${entry.name}`);
+    else if (directory === root && assetConfig.has(entry.name)) throw new Error(`Deployment config in assets: ${entry.name}`);
   }
 }
 function config(directory) {
@@ -64,11 +72,11 @@ async function deploy({github, context, core}) {
     '--config', path.join(directory, 'wrangler.json'), '--name', `pr-${context.payload.number}`];
   if (!closing) args.push('--json', '--ignore-base-config');
   const outputFile = path.join(directory, 'wrangler-output.jsonl');
+  const env = childEnv(process.env, {CI: 'true', WRANGLER_SEND_METRICS: 'false', WRANGLER_OUTPUT_FILE_PATH: outputFile});
   try {
     execFileSync(wranglerPath(), args, {cwd: directory, encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 180000, maxBuffer: 8 * 1024 * 1024,
-    env: {...process.env, CI: 'true', WRANGLER_SEND_METRICS: 'false', WRANGLER_OUTPUT_FILE_PATH: outputFile}});
+    timeout: 180000, maxBuffer: 8 * 1024 * 1024, env});
   } catch (error) {
     // A failed build may never have created a preview; close/rerun is idempotent.
     if (!closing || !String(error.stderr).includes('Preview not found. [code: 10025]')) throw error;
@@ -80,16 +88,30 @@ async function deploy({github, context, core}) {
     // Cloudflare propagation can take a few seconds.
     execFileSync('/usr/bin/curl', ['--fail', '--silent', '--show-error', '--retry', '6',
       '--retry-all-errors', '--retry-delay', '5', '--max-time', '20', '--output', '/dev/null', url],
-    {timeout: 180000});
+    {timeout: 180000, env});
     core.setOutput('url', url);
   }
+}
+// The github-script step's environment carries the job's GITHUB_TOKEN as
+// INPUT_GITHUB-TOKEN. Wrangler and curl need the OAuth login under HOME and
+// their own settings, never a GitHub credential.
+function childEnv(source, extra) {
+  const env = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (['HOME', 'PATH', 'TMPDIR', 'LANG', 'LC_ALL', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME'].includes(key) ||
+      /^(WRANGLER|CLOUDFLARE)_/.test(key)) env[key] = value;
+  }
+  return {...env, ...extra};
 }
 async function comment({github, context}, result, url) {
   if (!await current({github, context})) return;
   const closing = context.payload.action === 'closed';
   const sha = context.payload.pull_request.head.sha;
   const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-  let status = `Preview failed for \`${sha}\`. See the [workflow run](${run}).`;
+  // A failed removal must not read as "nothing deployed": the preview is live.
+  let status = closing ?
+    `Preview could not be removed after this PR closed; it is still published. See the [workflow run](${run}).` :
+    `Preview failed for \`${sha}\`. See the [workflow run](${run}).`;
   if (result === 'success') {
     if (closing) status = 'Preview removed because this PR is closed.';
     else {
@@ -109,4 +131,4 @@ async function comment({github, context}, result, url) {
   if (existing) await github.rest.issues.updateComment({...context.repo, comment_id: existing.id, body});
   else if (!closing) await github.rest.issues.createComment({...params, body});
 }
-module.exports = {wranglerPath, eligible, current, config, validateAssets, previewURL, deploy, comment};
+module.exports = {wranglerPath, eligible, current, config, validateAssets, previewURL, childEnv, deploy, comment};

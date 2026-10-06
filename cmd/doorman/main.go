@@ -582,6 +582,20 @@ func runCheck(args []string) (code int) {
 // it does — and fails the check for an id no [[people]] entry carries, or
 // for an action that names a state entity with no HA_URL and HA_TOKEN to
 // read it by.
+// handsetFetchesDirectory reports whether some inventory entry for the handset
+// has the mac and model that make a phone fetch its directory. A softphone or
+// an unprovisioned handset has an endpoint but no phone to read a book.
+func handsetFetchesDirectory(lists []allowList, id string) bool {
+	for _, l := range lists {
+		for _, h := range l.pol.HandsetList() {
+			if h.ID == id && h.MAC != "" && h.Model != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func printMessages(path string, lists []allowList, env func(string) (string, bool)) bool {
 	msgs, err := policy.LoadMessages(path)
 	if err != nil {
@@ -628,6 +642,11 @@ func printMessages(path string, lists []allowList, env func(string) (string, boo
 				if !found {
 					fmt.Printf("    ✗ phonebook %q names no handset\n", w.Phonebook)
 					ok = false
+				} else if !handsetFetchesDirectory(lists, strings.TrimPrefix(w.Phonebook, "handset:")) {
+					// A warning, not a refusal: the inventory may be filled in later,
+					// but until then every import into this book succeeds and is
+					// never read by any phone.
+					fmt.Printf("    ! phonebook %q names a handset with no mac/model; no phone fetches that book\n", w.Phonebook)
 				}
 			}
 		}

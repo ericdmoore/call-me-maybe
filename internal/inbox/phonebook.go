@@ -20,8 +20,11 @@ func (r *Reader) resolveContactWords(destinations string, caller policy.KnownCal
 	var words []policy.Word
 	seen := map[string]bool{}
 	invalid, denied := false, false
+	// An empty slot is a typo and refuses the whole caption. A phone's
+	// autocorrect may end the caption with a full stop, so "Add to: House."
+	// names House, exactly as the bare word "house." does.
 	for _, name := range strings.Split(destinations, ",") {
-		word, ok := r.d.Messages.Lookup(strings.TrimSpace(name))
+		word, ok := r.d.Messages.Lookup(strings.TrimRight(strings.TrimSpace(name), ".!? "))
 		if !ok || word.Phonebook == "" {
 			invalid = true
 			continue
@@ -73,6 +76,18 @@ func (r *Reader) routeContacts(ctx context.Context, m Message, out Outcome, dest
 }
 
 func (r *Reader) importContacts(ctx context.Context, m Message, out Outcome, words ...policy.Word) Outcome {
+	return r.saveContacts(ctx, m, out, false, words)
+}
+
+// saveAttemptLimit bounds how often one message is retried when a phone book
+// cannot be written. Shelf batches are durable and retry until storage
+// returns; everything else is only as durable as its unacknowledged edge
+// row, and an unbounded retry there blocks the texts queued behind it.
+const saveAttemptLimit = 3
+
+// saveContacts writes the entries of one message to every named book.
+// durable marks a shelf-pinned selection, which is retried without limit.
+func (r *Reader) saveContacts(ctx context.Context, m Message, out Outcome, durable bool, words []policy.Word) Outcome {
 	fail := func(detail, reply string) Outcome {
 		out.Result, out.Detail = "failed", detail
 		r.reply(ctx, &out, out.To, reply)
@@ -96,8 +111,20 @@ func (r *Reader) importContacts(ctx context.Context, m Message, out Outcome, wor
 		if err != nil {
 			// Pending selections are durable and idempotent. Keep them for retry
 			// without sending repeated failure texts while storage is unavailable.
-			if r.d.Shelf != nil || m.Source == "contact-upload" {
+			if durable {
 				return retryContacts(out, errors.New("could not save phone book"))
+			}
+			// A direct import or an upload gets a few quiet attempts for a
+			// storage blip, then an honest answer: its only durability is the
+			// unacknowledged edge row, and holding that forever starves the
+			// queue behind it.
+			if (r.d.Shelf != nil || m.Source == "contact-upload") && r.saveAttempts[m.ID]+1 < saveAttemptLimit {
+				r.saveAttempts[m.ID]++
+				return retryContacts(out, errors.New("could not save phone book"))
+			}
+			delete(r.saveAttempts, m.ID)
+			if m.Source == "contact-upload" {
+				return fail("could not save phone book", fmt.Sprintf("Saved to %d of %d phone books before the house could not write. Run the Shortcut again later; existing entries will be kept.", i, len(words)))
 			}
 			// Multiple files cannot commit atomically. Be precise about which
 			// books finished, and let an idempotent resend complete the rest.
@@ -105,6 +132,7 @@ func (r *Reader) importContacts(ctx context.Context, m Message, out Outcome, wor
 		}
 		added += n
 	}
+	delete(r.saveAttempts, m.ID)
 	out.Result = "acted"
 	if len(words) > 1 {
 		r.reply(ctx, &out, out.To, fmt.Sprintf("Saved %d new entries across %d phone books; %d already present. Phones update on their next directory refresh.", added, len(words), len(entries)*len(words)-added))
@@ -133,15 +161,33 @@ func (r *Reader) checkedContacts(m Message) ([]ownbook.Entry, *contactInputError
 	if m.ContactError == "too-many-contacts" || len(m.Contacts) > 100 {
 		return fail("too many numbers", "Please share at most 100 phone numbers at a time. No contacts were saved.")
 	}
+	if m.ContactError == "media-gone" {
+		return fail("carrier attachment expired", "The carrier's copy of the attachment had expired before the house could read it. Please resend the card. No contacts were saved.")
+	}
 	if m.ContactError != "" {
 		return fail("edge could not read contact cards", "I need complete vCard files with phone numbers, at most 1300 KiB each. No contacts were saved.")
 	}
 	entries, err := r.contactEntries(m.Contacts)
 	if err != nil {
+		// The position lets the sender find the card at fault in a large
+		// export. A name or number never goes back out, and never into a log.
+		var bad *contactDataError
+		if errors.As(err, &bad) {
+			return fail(bad.Error(), fmt.Sprintf("Contact %d of %d %s. No contacts were saved.", bad.index+1, len(m.Contacts), bad.reply))
+		}
 		return fail(err.Error(), "The contact data was invalid or missing. Please resend the card. No contacts were saved.")
 	}
 	return entries, nil
 }
+
+// contactDataError names which contact failed and why, in fixed words.
+type contactDataError struct {
+	index  int
+	detail string
+	reply  string
+}
+
+func (e *contactDataError) Error() string { return e.detail }
 
 var contactNumber = regexp.MustCompile(`^\+?[0-9]{7,15}$`)
 var contactE164 = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
@@ -154,15 +200,15 @@ func (r *Reader) contactEntries(contacts []Contact) ([]ownbook.Entry, error) {
 	}
 	var entries []ownbook.Entry
 	seen := map[string]bool{}
-	for _, c := range contacts {
+	for i, c := range contacts {
 		if !utf8.ValidString(c.Name) || utf8.RuneCountInString(c.Name) > 200 ||
 			strings.ContainsFunc(c.Name, func(ch rune) bool { return unicode.IsControl(ch) || ch == '\ufffe' || ch == '\uffff' }) ||
 			!contactNumber.MatchString(c.Number) {
-			return nil, errors.New("invalid contact data")
+			return nil, &contactDataError{i, "invalid contact data", "has an unusable name or number"}
 		}
 		n := policy.NormaliseCallerID(c.Number, r.d.CountryCode)
 		if n.Kind != policy.KindE164 || !contactE164.MatchString(n.Value) {
-			return nil, errors.New("contact number cannot be dialled")
+			return nil, &contactDataError{i, "contact number cannot be dialled", "has a number the house cannot dial"}
 		}
 		if seen[n.Value] {
 			continue

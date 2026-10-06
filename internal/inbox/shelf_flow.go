@@ -38,23 +38,23 @@ func retryContacts(out Outcome, err error) Outcome {
 	return out
 }
 
-func (r *Reader) contactKey(m Message, out Outcome) (string, string, error) {
+// contactKey is the shelf slot for one sender on one house number. A
+// recipient the carrier hands over in a form that does not normalise is
+// treated as absent rather than refused: the recipient only scopes the
+// batch, and refusing would leave the text unacknowledged and re-pulled
+// forever, blocking everything queued behind it.
+func (r *Reader) contactKey(m Message, out Outcome) (string, string) {
 	to := ""
 	if m.To != "" {
-		n := policy.NormaliseCallerID(m.To, r.d.CountryCode)
-		if n.Kind != policy.KindE164 {
-			return "", "", errors.New("invalid contact recipient")
+		if n := policy.NormaliseCallerID(m.To, r.d.CountryCode); n.Kind == policy.KindE164 {
+			to = n.Value
 		}
-		to = n.Value
 	}
-	return shelfKey(out.To, to), to, nil
+	return shelfKey(out.To, to), to
 }
 
 func (r *Reader) pendingContacts(ctx context.Context, m Message, out Outcome) (string, contactBatch, bool, error) {
-	key, _, err := r.contactKey(m, out)
-	if err != nil {
-		return "", contactBatch{}, false, err
-	}
+	key, _ := r.contactKey(m, out)
 	b, ok := r.d.Shelf.batches[key]
 	if !ok {
 		return key, b, false, nil
@@ -84,10 +84,7 @@ func (r *Reader) stopContactDefault(m Message, out Outcome) error {
 	if r.d.Shelf == nil {
 		return nil
 	}
-	key, _, err := r.contactKey(m, out)
-	if err != nil {
-		return err
-	}
+	key, _ := r.contactKey(m, out)
 	b, ok := r.d.Shelf.batches[key]
 	if !ok {
 		return nil
@@ -138,20 +135,14 @@ func (r *Reader) shelveContacts(ctx context.Context, m Message, out Outcome, cal
 			return retryContacts(out, errors.New("previous contact selection must finish first"))
 		}
 	} else {
-		_, to, _ := r.contactKey(m, out)
+		_, to := r.contactKey(m, out)
 		b = contactBatch{Message: Message{ID: m.ID, From: out.To, To: to, ReceivedAt: m.ReceivedAt}, Deadline: r.d.Now().Add(15 * time.Minute)}
 	}
-	combined := append([]Contact(nil), b.Message.Contacts...)
-	have := map[string]bool{}
-	for _, c := range combined {
-		have[c.Number] = true
-	}
+	fresh := make([]Contact, 0, len(entries))
 	for _, e := range entries {
-		if !have[e.E164] {
-			combined = append(combined, Contact{Name: e.Name, Number: e.E164})
-			have[e.E164] = true
-		}
+		fresh = append(fresh, Contact{Name: e.Name, Number: e.E164})
 	}
+	combined := mergeContacts(b.Message.Contacts, fresh)
 	if b.Message.MediaCount+m.MediaCount > 3 || len(combined) > 100 || len(b.IDs) >= 100 {
 		out.Result = "failed"
 		out.Detail = "pending contact limit"
@@ -195,29 +186,35 @@ func (r *Reader) selectContacts(ctx context.Context, m Message, out Outcome, wor
 		if !exists {
 			return r.importContacts(ctx, m, out, words...)
 		}
-		_, problem := r.checkedContacts(m)
-		if problem != nil {
-			if err := r.stopContactDefault(m, out); err != nil {
-				return retryContacts(out, err)
+		// The merge happens once per card. A storage failure after the pin
+		// leaves this caption unacknowledged, so it is pulled again; adding
+		// the same card a second time would count it twice and refuse the
+		// batch for having too many cards.
+		if !b.has(m.ID) {
+			_, problem := r.checkedContacts(m)
+			if problem != nil {
+				if err := r.stopContactDefault(m, out); err != nil {
+					return retryContacts(out, err)
+				}
+				out.Result = "failed"
+				out.Detail = problem.detail
+				r.reply(ctx, &out, out.To, problem.reply)
+				return out
 			}
-			out.Result = "failed"
-			out.Detail = problem.detail
-			r.reply(ctx, &out, out.To, problem.reply)
-			return out
-		}
-		m.Contacts = append(append([]Contact(nil), b.Message.Contacts...), m.Contacts...)
-		m.MediaCount += b.Message.MediaCount
-		if _, problem = r.checkedContacts(m); problem != nil {
-			if err := r.stopContactDefault(m, out); err != nil {
-				return retryContacts(out, err)
+			merged := Message{Contacts: mergeContacts(b.Message.Contacts, m.Contacts), MediaCount: b.Message.MediaCount + m.MediaCount}
+			if _, problem = r.checkedContacts(merged); problem != nil {
+				if err := r.stopContactDefault(m, out); err != nil {
+					return retryContacts(out, err)
+				}
+				out.Result = "failed"
+				out.Detail = problem.detail
+				r.reply(ctx, &out, out.To, problem.reply)
+				return out
 			}
-			out.Result = "failed"
-			out.Detail = problem.detail
-			r.reply(ctx, &out, out.To, problem.reply)
-			return out
+			b.Message.Contacts = merged.Contacts
+			b.Message.MediaCount = merged.MediaCount
+			b.IDs = append(append([]string(nil), b.IDs...), m.ID)
 		}
-		b.Message.Contacts = m.Contacts
-		b.Message.MediaCount = m.MediaCount
 	}
 	// A stale caption cannot select a newer card from a different exchange.
 	if !m.ReceivedAt.IsZero() && !b.Message.ReceivedAt.IsZero() && m.ReceivedAt.Before(b.Message.ReceivedAt) {
@@ -259,14 +256,49 @@ func (r *Reader) finishContacts(ctx context.Context, key string, b contactBatch,
 		return out
 	}
 	out.Word = strings.Join(b.Words, ",")
-	out = r.importContacts(ctx, b.Message, out, words...)
+	out = r.saveContacts(ctx, b.Message, out, true, words)
 	if out.Retry {
 		return out
 	}
 	if err := r.d.Shelf.remove(key); err != nil {
-		return retryContacts(out, err)
+		// The books are written and the sender has been told. Reporting a
+		// failure now would re-run the import and text "Saved" twice, so the
+		// batch is forgotten in memory and only its file remains; a restart
+		// replays that idempotently.
+		r.d.Shelf.forget(key)
+		if out.Detail != "" {
+			out.Detail += "; "
+		}
+		out.Detail += err.Error()
 	}
 	return out
+}
+
+// has reports whether a carrier message already contributed to the batch.
+func (b contactBatch) has(id string) bool {
+	for _, have := range b.IDs {
+		if have == id {
+			return true
+		}
+	}
+	return false
+}
+
+// mergeContacts appends the numbers of a new card that the batch does not
+// already hold, in order, so a resent card never inflates the count.
+func mergeContacts(have, more []Contact) []Contact {
+	combined := append([]Contact(nil), have...)
+	seen := map[string]bool{}
+	for _, c := range combined {
+		seen[c.Number] = true
+	}
+	for _, c := range more {
+		if !seen[c.Number] {
+			combined = append(combined, c)
+			seen[c.Number] = true
+		}
+	}
+	return combined
 }
 
 func (r *Reader) cancelContacts(ctx context.Context, m Message, out Outcome) (Outcome, bool) {

@@ -1,8 +1,11 @@
 name: Site preview
+# Removal on close lives in site-preview-cleanup.yml: the path filter below
+# also gates the close event, so a PR whose final diff no longer touches the
+# site would otherwise leave its public preview behind.
 on:
   pull_request_target:
     branches: [main]
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened]
     paths:
       - 'site/**'
       - 'brand/**'
@@ -19,9 +22,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build:
-    if: >-
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.action != 'closed'
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -46,7 +47,7 @@ jobs:
     if: >-
       always() && !cancelled() &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      (needs.build.result == 'success' || github.event.action == 'closed')
+      needs.build.result == 'success'
     runs-on: [self-hosted, macOS, ARM64, call-me-maybe-ai]
     timeout-minutes: 10
     permissions:
@@ -67,7 +68,6 @@ jobs:
           preview_dir=$(mktemp -d "$RUNNER_TEMP/cmm-site-preview.XXXXXX")
           echo "PREVIEW_DIR=$preview_dir" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        if: github.event.action != 'closed'
         with:
           name: site-preview
           path: ${{ env.PREVIEW_DIR }}/dist

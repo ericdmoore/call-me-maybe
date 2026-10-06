@@ -473,3 +473,82 @@ func TestEmptyCarrierMessageReportsMissingAttachmentWithoutCreatingCard(t *testi
 		t.Fatalf("stranger: %+v", out)
 	}
 }
+
+// A caption that arrives with its own card is pulled again for as long as the
+// pinned books cannot be written. Each pull must see the same batch, not one
+// that has grown by another copy of the card.
+func TestContactShelfCaptionWithCardMergesOnceAcrossStorageRetries(t *testing.T) {
+	h := newShelfHarness(t)
+	if out := h.handle(h.card("first")); out.Result != "pending" {
+		t.Fatalf("shelve: %+v", out)
+	}
+	block := filepath.Join(h.reader.d.Phonebooks, "handsets")
+	if err := os.WriteFile(block, []byte("blocked"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	second := h.card("second")
+	second.Body = "Add to: kitchen"
+	second.Contacts = []Contact{{Name: "Third", Number: "+15125550125"}}
+	for i := 0; i < 3; i++ {
+		h.now = h.now.Add(5 * time.Second)
+		if out := h.handle(second); !out.Retry || out.Reply != "" {
+			t.Fatalf("attempt %d: %+v", i, out)
+		}
+	}
+	for _, b := range h.reader.d.Shelf.batches {
+		if b.Message.MediaCount != 2 || len(b.Message.Contacts) != 3 || len(b.IDs) != 2 {
+			t.Fatalf("retries merged the card again: %+v", b.Message)
+		}
+	}
+	if err := os.Remove(block); err != nil {
+		t.Fatal(err)
+	}
+	if out := h.handle(second); out.Result != "acted" || out.Retry || !strings.Contains(out.Reply, "Saved 3 new") {
+		t.Fatalf("recovery: %+v", out)
+	}
+	if h.entries(t, "handset:kitchen") != 3 || h.entries(t, "house") != 0 || len(h.edge.sent) != 1 || len(h.reader.d.Shelf.batches) != 0 {
+		t.Fatal("recovery wrote the wrong books or texted more than once")
+	}
+}
+
+// A recipient the carrier hands over in a shape that does not normalise
+// scopes the batch to the sender alone; it must never become a text that is
+// refused and pulled again forever.
+func TestContactShelfUnparseableRecipientStillShelvesAndSaves(t *testing.T) {
+	h := newShelfHarness(t)
+	card := h.card("odd-to")
+	card.To = "house-line"
+	if out := h.handle(card); out.Result != "pending" || out.Retry {
+		t.Fatalf("shelve: %+v", out)
+	}
+	choice := h.text("odd-choice", "Add to: kitchen")
+	choice.To = "house-line"
+	if out := h.handle(choice); out.Result != "acted" || out.Retry || h.entries(t, "handset:kitchen") != 2 {
+		t.Fatalf("select: %+v", out)
+	}
+}
+
+// A card that arrives with its caption has no shelf entry to make it durable.
+// Storage trouble earns it a few quiet retries, then an answer the sender can
+// act on, so the queue behind it moves again.
+func TestContactShelfDirectCaptionAnswersAfterBoundedRetries(t *testing.T) {
+	h := newShelfHarness(t)
+	block := filepath.Join(h.reader.d.Phonebooks, "handsets")
+	if err := os.WriteFile(block, []byte("blocked"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := h.card("direct")
+	m.Body = "Add to: house,kitchen"
+	for i := 1; i < saveAttemptLimit; i++ {
+		if out := h.handle(m); !out.Retry || len(h.edge.sent) != 0 {
+			t.Fatalf("attempt %d: %+v", i, out)
+		}
+	}
+	out := h.handle(m)
+	if out.Retry || out.Result != "failed" || !strings.Contains(out.Reply, "Updated 1 of 2") || policy.ReplyProblem(out.Reply) != "" {
+		t.Fatalf("final attempt: %+v", out)
+	}
+	if len(h.edge.sent) != 1 || len(h.reader.saveAttempts) != 0 || h.entries(t, "house") != 2 {
+		t.Fatal("bounded retry texted early, leaked its count, or lost the saved book")
+	}
+}

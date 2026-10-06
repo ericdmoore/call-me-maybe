@@ -11,10 +11,14 @@ function route(model) {
     // has no num_ctx override; changing it would affect other Alpaca consumers.
     provider: 'ollama', model: 'bullmoose-ocr:20b', url: 'http://127.0.0.1:11434/v1',
   };
-  if (/^openrouter\/[A-Za-z0-9_.:-]+\/[A-Za-z0-9_.:-]+$/.test(model)) return {
+  // Exact vendor/model ids only. OpenRouter's own "openrouter/auto" and
+  // "openrouter/free" pick a model per request, and ":online", ":nitro" and
+  // similar variants add per-request cost; ":free" is a price, not a router,
+  // so it is the one suffix allowed through.
+  if (/^openrouter\/(?!openrouter\/)[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?::free)?$/.test(model)) return {
     provider: 'openrouter', model: model.slice('openrouter/'.length), url: 'https://openrouter.ai/api/v1',
   };
-  throw new Error('Use ollama/gpt-oss:20b or openrouter/vendor/exact-model-id (no trailing slash)');
+  throw new Error('Use ollama/gpt-oss:20b or openrouter/vendor/exact-model-id, optionally :free (no routers, other variants or trailing slash)');
 }
 function opencode(model) {
   model = normalize(model);

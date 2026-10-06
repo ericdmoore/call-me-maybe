@@ -95,6 +95,51 @@ test("optional carrier metadata cannot block an otherwise valid message", async 
   assert.equal((await pull()).find(m => m.id === "offset").provider_timestamp, timestamp);
 });
 
+test("the timestamp diagnostic agrees with what was stored", async (t) => {
+  const { callback, logs } = fixture(t);
+  await callback("kept", "", { timestamp: "2026-10-05 09:15:30" });
+  assert.equal(logs.at(-1).timestamp_field, "present");
+  for (const [i, timestamp] of ["x".repeat(65), "2026-10-05\x00", "2026‮10", " {TIMESTAMP} "].entries()) {
+    await callback(`dropped-${i}`, "", { timestamp });
+    assert.equal(logs.at(-1).timestamp_field, i === 3 ? "unexpanded" : "dropped", timestamp);
+  }
+});
+
+test("an unusable media list queues the text with a fixed error instead of refusing it", async (t) => {
+  const { callback, pull, logs } = fixture(t);
+  let reads = 0;
+  t.mock.method(globalThis, "fetch", async () => { reads++; throw new Error("must not fetch"); });
+  // The unexpanded placeholder means "no attachment", like {TIMESTAMP} does.
+  assert.equal((await callback("placeholder", "{MEDIA}")).status, 200);
+  assert.equal(logs.at(-1).contact_error, "");
+  for (const [id, media] of [["off-host", "https://cdn.example.net/a"], ["too-many", Array(4).fill("https://voip.ms/a").join(",")]]) {
+    assert.equal((await callback(id, media)).status, 200);
+    assert.equal(logs.at(-1).outcome, "queued");
+    assert.equal(logs.at(-1).contact_error, "unsupported-media");
+    assert.equal(logs.at(-1).media_count, 0);
+  }
+  assert.equal(reads, 0);
+  const messages = await pull();
+  assert.equal(messages.find(m => m.id === "placeholder").contact_error, "");
+  const queued = messages.filter(m => m.contact_error === "unsupported-media");
+  assert.deepEqual(queued.map(m => m.id).sort(), ["off-host", "too-many"]);
+  for (const m of queued) {
+    assert.equal(m.media_count, 0);
+    assert.equal(m.body, "Add to: house");
+  }
+});
+
+test("an expired media URL is queued with media-gone rather than refused on every retry", async (t) => {
+  const { callback, pull, logs } = fixture(t);
+  t.mock.method(globalThis, "fetch", async () => new Response("expired", { status: 404 }));
+  assert.equal((await callback("expired")).status, 200);
+  assert.equal(logs.at(-1).contact_error, "media-gone");
+  const message = (await pull()).find(m => m.id === "expired");
+  assert.equal(message.contact_error, "media-gone");
+  assert.equal(message.media_count, 1);
+  assert.deepEqual(message.contacts, []);
+});
+
 test("malformed attachments queue only a safe error and no partial contact batch", async (t) => {
   const { callback, pull } = fixture(t);
   t.mock.method(globalThis, "fetch", async url => new Response(url.toString().endsWith("bad") ? "BEGIN:VCARD\nFN:private" : card));
@@ -122,9 +167,12 @@ test("ordinary SMS performs no media requests; disallowed media is not fetched",
   let reads = 0;
   t.mock.method(globalThis, "fetch", async () => { reads++; throw new Error("unexpected fetch"); });
   assert.equal((await callback("sms", "")).status, 200);
-  assert.equal((await callback("ssrf", "https://127.0.0.1/private")).status, 400);
+  assert.equal((await callback("ssrf", "https://127.0.0.1/private")).status, 200);
   assert.equal(reads, 0);
-  assert.equal((await pull()).find(m => m.id === "sms").contact_error, "");
+  const messages = await pull();
+  assert.equal(messages.find(m => m.id === "sms").contact_error, "");
+  assert.equal(messages.find(m => m.id === "ssrf").contact_error, "unsupported-media");
+  assert.doesNotMatch(JSON.stringify(messages), /127\.0\.0\.1/);
 });
 
 test("maximum contact payloads fit a bounded pull and subsequent messages remain queued", async (t) => {
@@ -159,9 +207,10 @@ test("callback diagnostics distinguish missing, empty, unexpanded and captured m
   assert.equal(logs.at(-1).media_count, 0);
   await callback("empty", "");
   assert.equal(logs.at(-1).media_field, "empty");
-  assert.equal((await callback("unexpanded", "{MEDIA}")).status, 400);
+  assert.equal((await callback("unexpanded", "{MEDIA}")).status, 200);
   assert.equal(logs.at(-1).media_field, "unexpanded");
-  assert.equal(logs.at(-1).outcome, "invalid-media");
+  assert.equal(logs.at(-1).media_count, 0);
+  assert.equal(logs.at(-1).outcome, "queued");
   await callback("good", mediaURL, { timestamp: "{TIMESTAMP}" });
   const accepted = logs.at(-1);
   assert.equal(accepted.outcome, "queued");

@@ -13,7 +13,9 @@ export function carrierMediaURL(raw: string): URL | null {
 
 export function mediaList(value: string | null): string[] {
   if (!value?.trim()) return [];
-  const urls = value.split(",").map((v) => v.trim());
+  // The carrier's own records show three fixed slots, the unused ones empty;
+  // an empty slot in the callback is not a bad URL.
+  const urls = value.split(",").map((v) => v.trim()).filter(Boolean);
   if (urls.length > 3 || urls.some((u) => u.length > 4096 || !carrierMediaURL(u))) {
     throw new Error("invalid media list");
   }
@@ -36,7 +38,11 @@ export async function readMedia(raw: string): Promise<Response> {
       }
       if (!response.ok || !response.body) {
         await response.body?.cancel();
-        return new Response("media unavailable", { status: 502 });
+        // A 4xx from the carrier's media host is final: the signed URL has
+        // expired or the file is gone, and no retry of this callback changes
+        // that. 408 and 429 are the two 4xx that mean "try again later".
+        const gone = response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429;
+        return new Response(gone ? "media gone" : "media unavailable", { status: gone ? 410 : 502 });
       }
       const reader = response.body.getReader();
       const chunks: Uint8Array[] = [];
@@ -56,6 +62,8 @@ export async function readMedia(raw: string): Promise<Response> {
       for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.byteLength; }
       return new Response(bytes, { headers: { "content-type": "application/octet-stream", "cache-control": "no-store" } });
     }
+    // A redirect chain this long is the host's configuration, not a blip.
+    return new Response("too many redirects", { status: 422 });
   } catch { /* Never expose a signed media URL in an error. */ }
   return new Response("media unavailable", { status: 502 });
 }

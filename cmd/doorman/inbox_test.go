@@ -167,5 +167,19 @@ func TestPhonebookTargetsMustExistForCheckAndInbox(t *testing.T) {
 		if ok != want || !strings.Contains(out, "vCards to "+target) {
 			t.Fatalf("check accepted %s = %v\n%s", target, ok, out)
 		}
+		// The fixture's kitchen has an endpoint but no mac/model, so no phone
+		// will ever fetch its book: a warning, not a refusal.
+		if warned := strings.Contains(out, "no phone fetches that book"); warned != (target == "handset:kitchen") {
+			t.Fatalf("warning for %s = %v\n%s", target, warned, out)
+		}
+	}
+	provisioned := strings.Replace(houseWithAStatefulAction, "endpoint = \"PJSIP/kitchen\"", "endpoint = \"PJSIP/kitchen\"\nmac = \"00:0b:82:00:00:01\"\nmodel = \"grandstream-wp826\"", 1)
+	lists = allowLists(t, provisioned)
+	body := []byte("[[words]]\nword='contacts'\npeople=['gabi']\nphonebook='handset:kitchen'\n")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out := capture(t, func() { printMessages(path, lists, noSecrets) }); strings.Contains(out, "no phone fetches") {
+		t.Fatalf("provisioned handset warned\n%s", out)
 	}
 }

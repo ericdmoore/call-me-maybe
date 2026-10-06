@@ -2,6 +2,9 @@ const {route, normalize} = require('./models.cjs');
 module.exports = async function authorize({github, context, core, env = process.env}) {
   if (!env.POLICY_SHA || !env.DEFAULT_MODEL) throw new Error('POLICY_SHA and DEFAULT_MODEL are required');
   const repo = context.repo;
+  // The workflow's concurrency group is keyed on the raw input, so "012" or
+  // "1e1" would run beside the "12" already running. Digits only, as typed.
+  if (!/^[1-9][0-9]*$/.test(String(env.PR_NUMBER ?? ''))) throw new Error('Invalid PR number');
   const number = Number(env.PR_NUMBER);
   if (!Number.isSafeInteger(number) || number < 1) throw new Error('Invalid PR number');
   const {data: pr} = await github.rest.pulls.get({...repo, pull_number: number});

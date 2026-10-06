@@ -3,8 +3,11 @@ import { readMedia } from "./media.ts";
 // This is the entire attachment contract with the house. No URLs, blobs,
 // photos, addresses or arbitrary vCard properties cross that boundary.
 export interface Contact { name: string; number: string }
-export type ContactError = "" | "invalid-card" | "too-many-contacts" | "media-too-large" | "unsupported-media";
+export type ContactError = "" | "invalid-card" | "too-many-contacts" | "media-too-large" | "unsupported-media" | "media-gone";
 export const MAX_CONTACTS = 100;
+// Far above any real card within MAX_MEDIA_BYTES; a file of two-byte lines
+// is a denial-of-service attempt, not a contact.
+const MAX_LINES = 100_000;
 
 class InvalidCard extends Error {}
 class TooManyContacts extends Error {}
@@ -73,20 +76,45 @@ function phoneNumber(value: string): string {
   return digits;
 }
 
-// A bounded subset of vCard 2.1/3.0/4.0, matching the name/TEL forms used
-// by phone exporters. Reject incomplete or nested cards as a whole.
-export function parseContacts(bytes: Uint8Array): Contact[] {
-  const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
+// Unfold physical lines into logical ones in one pass. Appending each fold to
+// the accumulated string and testing its tail is quadratic: a 1300 KiB card
+// made of two-byte folds then costs seconds of CPU per callback, and the
+// carrier retries it.
+function unfold(text: string): string[] {
   const lines: string[] = [];
+  let parts: string[] = [];
+  let qp = false; // the current property is quoted-printable
+  let softBreak = false; // the last piece ended with "="
+  let count = 0;
+  const flush = () => { if (parts.length) lines.push(parts.join("")); parts = []; };
   for (const raw of text.replace(/\r\n?/g, "\n").split("\n")) {
     if (!raw) continue;
-    const last = lines.length - 1;
-    const previous = lines[last];
-    if (previous?.endsWith("=") && /QUOTED-PRINTABLE/i.test(previous.split(":", 1)[0])) {
-      lines[last] = previous.slice(0, -1) + raw.replace(/^[ \t]/, "");
-    } else if (/^[ \t]/.test(raw) && last >= 0) lines[last] += raw.slice(1);
-    else lines.push(raw);
+    if (++count > MAX_LINES) invalid();
+    if (softBreak && qp && parts.length) {
+      // A quoted-printable soft break: the "=" goes, and the continuation is
+      // data exactly as written, leading whitespace included (RFC 2045 6.7).
+      parts[parts.length - 1] = parts[parts.length - 1].slice(0, -1);
+      parts.push(raw);
+    } else if (/^[ \t]/.test(raw) && parts.length) {
+      parts.push(raw.slice(1));
+    } else {
+      flush();
+      parts = [raw];
+      qp = /QUOTED-PRINTABLE/i.test(raw.split(":", 1)[0]);
+    }
+    softBreak = raw.endsWith("=");
   }
+  flush();
+  return lines;
+}
+
+// A bounded subset of vCard 2.1/3.0/4.0, matching the name/TEL forms used
+// by phone exporters. Reject incomplete or nested cards as a whole. The card
+// count comes from the same walk as the contacts, so the two can never
+// disagree about what one file holds.
+export function parseCards(bytes: Uint8Array): { contacts: Contact[]; cards: number } {
+  const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
+  const lines = unfold(text);
   const contacts = new Map<string, Contact>();
   let card: { fn: string; n: string; org: string; numbers: Set<string> } | undefined;
   let cards = 0;
@@ -135,7 +163,11 @@ export function parseContacts(bytes: Uint8Array): Contact[] {
     }
   }
   if (card || cards === 0) invalid();
-  return [...contacts.values()];
+  return { contacts: [...contacts.values()], cards };
+}
+
+export function parseContacts(bytes: Uint8Array): Contact[] {
+  return parseCards(bytes).contacts;
 }
 
 // Transient fetch failures escape to the callback as a retryable failure.
@@ -144,6 +176,10 @@ export async function captureContacts(media: string[]): Promise<{ contacts: Cont
   const fetched = await Promise.all(media.map(readMedia));
   if (fetched.some(r => r.status === 502)) throw new Error("media unavailable");
   if (fetched.some(r => r.status === 413)) return { contacts: [], error: "media-too-large" };
+  // The carrier's copy has expired or been removed. Retrying the same URL
+  // cannot bring it back, so the text is queued with that fact rather than
+  // refused on every retry until the carrier gives up.
+  if (fetched.some(r => r.status === 410)) return { contacts: [], error: "media-gone" };
   if (fetched.some(r => !r.ok)) return { contacts: [], error: "unsupported-media" };
   const contacts = new Map<string, Contact>();
   try {

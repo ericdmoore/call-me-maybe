@@ -1,26 +1,49 @@
 ---
-import { randomUUID } from 'node:crypto';
 import artwork from '../../../brand/mark-threshold-ornate-scales.svg?raw';
 
 // Keep the exported artwork as the source of truth. Only adapt its presentation
 // and document IDs for inline use; white mask fills must stay white.
-const prefix = `threshold-scales-${randomUUID()}`;
+//
+// The id prefix is a prop with a default rather than a random value: a random
+// prefix made every build's HTML differ. A page that renders the mark twice
+// passes a distinct `id` to each.
+interface Props { id?: string }
+const { id: prefix = 'threshold-scales' } = Astro.props;
+
+// Both reference forms an exporter emits: href/xlink:href with either quote,
+// and url(#id) with optional quotes and spaces.
+const reference = /(?:xlink:)?href=["']#([^"']+)["']|url\(\s*["']?#([^"')\s]+)["']?\s*\)/g;
 const referencedIds = new Set(
-  [...artwork.matchAll(/(?:href="#|url\(#)([^"\)]+)/g)].map((match) => match[1]),
+  [...artwork.matchAll(reference)].map((match) => match[1] ?? match[2]),
 );
 const drawing = artwork
   .replace(/<\?xml[^>]*\?>\s*/, '')
   .replace(/<svg\b[^>]*>/, '')
   .replace(/<\/svg>\s*$/, '')
   .replace(/<title>[\s\S]*?<\/title>/, '')
-  .replace(/(fill|stroke)="#000000"/g, '$1="currentColor"')
+  .replace(/(fill|stroke)="(?:#000000|#000|black)"/gi, '$1="currentColor"')
   // The inner doorway's rays follow the existing lobby state animation.
   .replace('mask="url(#mask-4)"', 'class="th-light" mask="url(#mask-4)"')
   .replace(/\s+id="([^"]+)"/g, (_, id) =>
     referencedIds.has(id) ? ` id="${prefix}-${id}"` : '',
   )
-  .replace(/xlink:href="#([^"]+)"/g, (_, id) => `href="#${prefix}-${id}"`)
-  .replace(/url\(#([^\)]+)\)/g, (_, id) => `url(#${prefix}-${id})`);
+  .replace(/(?:xlink:)?href=["']#([^"']+)["']/g, (_, id) => `href="#${prefix}-${id}"`)
+  .replace(/url\(\s*["']?#([^"')\s]+)["']?\s*\)/g, (_, id) => `url(#${prefix}-${id})`);
+
+// A re-export from another tool may write its colours or references in a
+// form the rules above do not cover. Fail the build rather than ship a mark
+// that is invisible on the dark theme or has a broken mask.
+if (/(?:fill|stroke)="(?:#000000|#000|black)"|<style|\sstyle="/i.test(drawing)) {
+  throw new Error('Threshold-scales: the artwork carries a colour form this component does not rewrite');
+}
+if (!drawing.includes('class="th-light"')) {
+  throw new Error('Threshold-scales: the doorway-light mask (mask-4) is missing from the artwork');
+}
+for (const match of drawing.matchAll(/(?:href|url\()\s*["']?#([^"')\s]+)/g)) {
+  if (!match[1].startsWith(`${prefix}-`)) {
+    throw new Error(`Threshold-scales: reference #${match[1]} was not namespaced`);
+  }
+}
 ---
 
 <svg
