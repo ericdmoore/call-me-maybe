@@ -11,3 +11,6 @@ An eComm site
 
 The CLI easily helps integrate these file packages,
 potentially with the help of the admin-users own LLM to help drive the CLI
+
+The breakdown of issue #7 into sub-issues, with the order of work, is in
+[`breakdown.md`](breakdown.md).
