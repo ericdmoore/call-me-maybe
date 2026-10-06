@@ -69,36 +69,41 @@ Also done with nothing to file: `hold` and `ringback` mechanisms (`musiconhold.c
 
 ## Every sub-issue
 
-| # | State | | Title |
+The order below is the order of the sub-issue list on #7 (set 2026-10-06):
+done, then startable with no blocker in this list, then blocked on one of
+those, then blocked on that band, then the two that come last. Within a
+band the recommended sequence in the map breaks ties.
+
+| # | Band | State | Title |
 |---|---|---|---|
-| #29 | closed | sub-issue | backup/restore: the box's state as one encrypted archive, and a new box from it |
-| #60 | closed | sub-issue | Pack authoring: `doorman pack check\|build\|voices`, the DSP pipeline and five TTS backends |
-| #61 | closed | sub-issue | Story packs: the CC0 Markdown format and the graph interpreter library |
-| #62 | closed | sub-issue | Delayed reminders: *80/*81/*82 handset callbacks and wake-up calls |
-| #63 | open | sub-issue | Guiding principle: what is standard, what is paid, and what the store exists to fund |
-| #64 | open | sub-issue | SKU model: pack.json as the catalogue, Stripe Managed Payments as merchant of record, two checkout modes |
-| #65 | open | sub-issue | L0 · `.cmmpack`: one-file pack format, and `doorman pack lint\|install\|list\|use` |
-| #66 | open | sub-issue | Store on Cloudflare: store.callmemaybe.cc — catalogue pages, Checkout, R2 signed delivery, receipts through a real ESP |
-| #67 | open | sub-issue | L1 · Rotation: the `rotation` pack kind, a dialplan that reads its count, and a free joke/riddle sample |
-| #68 | open | sub-issue | L1 · Sound board: digits play clips into the call, the `sfx` kind, and a free sample |
-| #69 | open | sub-issue | L2 · Reach a story from a handset: the ARI Teller, a story extension in policy.toml, and a free sample story |
-| #70 | open | sub-issue | L3 · Record → play back → confirm: one helper for spoken names, greetings and game turns |
-| #71 | open | sub-issue | L3 · Multi-party session shell: ConfBridge control over ARI, the join window, and an ephemeral invite PIN |
-| #72 | open | sub-issue | L4 · Mad Gab: the engine, the `madgab` template kind, and a free template |
-| #73 | open | sub-issue | L4 · Group bedtime story / Book Buddy: chapter nights on the multi-party engine |
-| #74 | open | sub-issue | L4 · Packing for Paris: a memory-chain game on the Mad Gab primitives |
-| #75 | open | sub-issue | L4 · Daily Detective: a season format with durable seats, a daily drop and a who-dun-it poll |
-| #76 | open | sub-issue | Standing catch-up with Grandma: a recurring call the house places and bridges |
-| #77 | open | sub-issue | L5 · Daily briefing: generated overnight, delivered as a wake-up call or a call-in extension |
-| #78 | open | sub-issue | Home Assistant voice bridge: an extension that hands a handset to HA Assist |
-| #79 | open | sub-issue | Account: one identity for purchases, the backup cloud destination, the family network and the UI |
-| #80 | open | sub-issue | Backup service: the cloud destination, key escrow (BYO storage), an included quota and overage |
-| #81 | open | sub-issue | The doorman UI shell: account, boxes, purchased packs and backup status — s28 (#59) is its first feature |
-| #82 | open | sub-issue | Physical · Install media: an SD card or USB stick carrying the OS wizard (Ubuntu + doorman) |
-| #83 | open | sub-issue | Physical · Preconfigured PhoneBrain: a MiniPC that rings out of the box |
-| #84 | open | sub-issue | Service · Reselling or skinning VoIP.ms with a small markup (one day) |
-| #85 | open | sub-issue | Growth: the bundled lobby greeting names callmemaybe.cc |
-| #86 | open | standalone | Conversational handset: an optional, PIN-gated, fail-closed AI capability plane (split from #7) |
+| #29 | done | closed | backup/restore: the box's state as one encrypted archive, and a new box from it |
+| #60 | done | closed | Pack authoring: `doorman pack check\|build\|voices`, the DSP pipeline and five TTS backends |
+| #61 | done | closed | Story packs: the CC0 Markdown format and the graph interpreter library |
+| #62 | done | closed | Delayed reminders: *80/*81/*82 handset callbacks and wake-up calls |
+| #63 | startable now | open | Guiding principle: what is standard, what is paid, and what the store exists to fund |
+| #65 | startable now | open | L0 · `.cmmpack`: one-file pack format, and `doorman pack lint\|install\|list\|use` |
+| #69 | startable now | open | L2 · Reach a story from a handset: the ARI Teller, a story extension in policy.toml, and a free sample story |
+| #67 | startable now | open | L1 · Rotation: the `rotation` pack kind, a dialplan that reads its count, and a free joke/riddle sample |
+| #68 | startable now | open | L1 · Sound board: digits play clips into the call, the `sfx` kind, and a free sample |
+| #70 | startable now | open | L3 · Record → play back → confirm: one helper for spoken names, greetings and game turns |
+| #78 | startable now | open | Home Assistant voice bridge: an extension that hands a handset to HA Assist |
+| #85 | startable now | open | Growth: the bundled lobby greeting names callmemaybe.cc |
+| #64 | after one item above | open | SKU model: pack.json as the catalogue, Stripe Managed Payments as merchant of record, two checkout modes |
+| #66 | after one item above | open | Store on Cloudflare: store.callmemaybe.cc — catalogue pages, Checkout, R2 signed delivery, receipts through a real ESP |
+| #71 | after one item above | open | L3 · Multi-party session shell: ConfBridge control over ARI, the join window, and an ephemeral invite PIN |
+| #79 | after one item above | open | Account: one identity for purchases, the backup cloud destination, the family network and the UI |
+| #77 | after one item above | open | L5 · Daily briefing: generated overnight, delivered as a wake-up call or a call-in extension |
+| #76 | after one item above | open | Standing catch-up with Grandma: a recurring call the house places and bridges |
+| #82 | after one item above | open | Physical · Install media: an SD card or USB stick carrying the OS wizard (Ubuntu + doorman) |
+| #84 | after one item above | open | Service · Reselling or skinning VoIP.ms with a small markup (one day) |
+| #72 | after the band above | open | L4 · Mad Gab: the engine, the `madgab` template kind, and a free template |
+| #73 | after the band above | open | L4 · Group bedtime story / Book Buddy: chapter nights on the multi-party engine |
+| #80 | after the band above | open | Backup service: the cloud destination, key escrow (BYO storage), an included quota and overage |
+| #81 | after the band above | open | The doorman UI shell: account, boxes, purchased packs and backup status — s28 (#59) is its first feature |
+| #83 | after the band above | open | Physical · Preconfigured PhoneBrain: a MiniPC that rings out of the box |
+| #74 | last | open | L4 · Packing for Paris: a memory-chain game on the Mad Gab primitives |
+| #75 | last | open | L4 · Daily Detective: a season format with durable seats, a daily drop and a who-dun-it poll |
+| #86 | standalone | open | Conversational handset: an optional, PIN-gated, fail-closed AI capability plane (split from #7) |
 
 #86 is not a sub-issue by the thread's own decision: the conversational
 handset is a different product surface, not eComm.
