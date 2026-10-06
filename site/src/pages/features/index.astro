@@ -1,7 +1,6 @@
 ---
 import { getCollection } from 'astro:content';
 import Base from '../../layouts/Base.astro';
-import Divider from '../../components/Divider.astro';
 import Switchboard from '../../components/Switchboard.astro';
 
 const features = (await getCollection('features')).sort(
@@ -22,7 +21,6 @@ const features = (await getCollection('features')).sort(
       <p class="tagline">
         Thirty years of office phone features, now free and open for your home.
       </p>
-      <Divider />
     </div>
   </header>
 

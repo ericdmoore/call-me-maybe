@@ -149,18 +149,17 @@ oxblood via the same `data-state` the keypad drives. `not_found_handling:
 
 ## The way back
 
-On every page but the lobby, the dial rosette at the centre of the header's
-divider gives way to the plain Threshold mark, and that mark links to `/`.
-The browser's back button only retraces steps, and a visitor who arrived at
-`/providers/` from a search has none to retrace. The doorway on the threshold
-between a page's header and its body is where the site's own metaphor puts
-the exit. `src/components/Divider.astro` renders it from
-`brand/mark-threshold.svg` and decides by path, so the page templates need
-not know; a divider placed mid-page on a sub-page should pass `home={false}`.
-The plain rung of the brand's ornateness ladder is deliberate: at this size
-the ornate mark is a bright dot. The doorway's rays light on hover, the same
-reward the keypad gives. The 404 has no divider and keeps its spoken line,
-"Back to the lobby".
+Every page but the lobby opens with the divider as a masthead, the plain
+Threshold mark standing where the dial stands on the lobby, and that doorway
+links to `/`. On desktop the masthead sticks to the top of the viewport
+beneath the frame's rail and stud, so the way home is one click from anywhere
+on the page; on a phone it stays a plain masthead. The browser's back button
+only retraces steps, and a visitor who arrived at `/providers/` from a search
+has none to retrace. `src/components/HomeNav.astro` renders it and
+`Base.astro` decides by path, with a `homeNav` prop to opt out; the 404 does,
+to keep its one line. It sits in the body above the page's header because
+`position: sticky` holds only within its parent. The doorway's rays light on
+hover, the same reward the keypad gives.
 
 ## Content that lives elsewhere
 

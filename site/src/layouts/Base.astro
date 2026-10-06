@@ -1,13 +1,17 @@
 ---
 import '../styles/deco.css';
 import PageFrame from '../components/PageFrame.astro';
+import HomeNav from '../components/HomeNav.astro';
 
 interface Props {
   title: string;
   description: string;
+  /** The masthead with the way home. On by default everywhere but the
+   *  lobby, which is home; the 404 turns it off to keep its one line. */
+  homeNav?: boolean;
 }
 
-const { title, description } = Astro.props;
+const { title, description, homeNav = Astro.url.pathname !== '/' } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site ?? 'https://callmemaybe.cc');
 ---
 
@@ -42,6 +46,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? 'https://callmemaybe
 
   <body data-state-host data-state="waiting">
     <PageFrame />
+    {homeNav && <HomeNav />}
     <slot />
   </body>
 </html>

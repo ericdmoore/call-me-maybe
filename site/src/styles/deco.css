@@ -53,6 +53,10 @@
   --measure: 64ch;
   --gutter: clamp(1.25rem, 5vw, 4rem);
 
+  /* The page frame's distance from the viewport edge. On :root rather than on
+     the frame because the masthead sits just inside the same rail. */
+  --pf-inset: clamp(10px, 1.2vw, 16px);
+
   color-scheme: dark;
 }
 
@@ -368,19 +372,44 @@ samp {
   margin-block: 2.5rem;
 }
 
-/* ── Home link ─────────────────────────────────────────────────────────────
-   On every page but the lobby the divider's rosette gives way to the plain
-   Threshold mark, and that mark is the way home: the doorway standing on the
-   threshold between a page's header and its body. The link is an SVG <a>
-   inside the divider, so it is sized by the divider and needs no positioning
-   of its own; the transparent rect behind the mark is the tap target. */
+/* ── Home nav ──────────────────────────────────────────────────────────────
+   Every page but the lobby opens with the divider, the plain Threshold mark
+   standing where the dial stands on the lobby, and that doorway is the way
+   home. It is a sibling of the page's header rather than part of it, because
+   position: sticky holds only within its parent: in the body it rides the
+   whole page. On desktop it sticks beneath the frame's top rail and stud,
+   with the ground colour behind it so the words passing underneath never
+   collide with the bolts. On a phone it is a plain masthead; a bar that
+   followed the thumb would eat the screen. */
+
+.home-nav {
+  /* Positioned even in flow, so it paints above the header's sunburst. */
+  position: relative;
+  z-index: 4; /* above the page, beneath the frame */
+  display: flex;
+  justify-content: center;
+  padding: calc(var(--pf-inset) + 1rem) var(--gutter) 0.75rem;
+  /* Solid behind the drawing, then a short fade, so the bar has no hard edge. */
+  background: linear-gradient(var(--ground) calc(100% - 0.75rem), transparent);
+}
+
+.home-nav .deco-divider {
+  width: min(22rem, 100%);
+  margin: 0;
+}
+
+@media (min-width: 44rem) {
+  .home-nav {
+    position: sticky;
+    top: 0;
+    /* Clear the stud hanging from the rail. */
+    padding-top: calc(var(--pf-inset) + 1.5rem);
+  }
+}
 
 .deco-divider--home {
-  /* The tap target reaches above the drawing, and the focus ring needs room
-     below it: the divider's foot is the header's foot, and the header clips
-     its overflow for the sunburst's sake. */
+  /* The tap target reaches above the drawing. */
   overflow: visible;
-  margin-bottom: 0.5rem;
 }
 
 .home-link {
@@ -852,11 +881,10 @@ samp {
    intercepts input — pointer-events is none on the container and inherited by
    everything in it.
 
-   --pf-inset is the one number to change; everything else is derived from it. */
+   --pf-inset (on :root) is the one number to change; everything else is
+   derived from it. */
 
 .page-frame {
-  --pf-inset: clamp(10px, 1.2vw, 16px);
-
   /* How much empty margin actually exists beside the content column. Below
      74rem that is the gutter; above it, the centred column leaves far more. */
   --pf-room: max(var(--gutter), calc((100vw - 74rem) / 2));

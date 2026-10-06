@@ -8,36 +8,28 @@ import artwork from '../../../brand/mark-threshold.svg?raw';
  * The bolts are not licence: pulse dialling works by making and breaking the
  * current, so the sparks leaving the dial are what the object actually does.
  *
- * On every page but the lobby the rosette gives way to the plain Threshold
- * mark, and that mark is the way home. The browser's back button only
- * retraces steps; someone who arrived at /providers/ from a search has none
- * to retrace. The doorway on the threshold between a page's header and its
- * body is where the site's own metaphor puts the exit. The plain rung of the
- * brand's ornateness ladder, on purpose: at this size the ornate mark is a
- * bright dot (brand/readme.md). It lights on hover, the reward the keypad
- * gives on the home page, promised here in miniature.
- *
- * `home` defaults by path, so the page templates need not know. A divider
- * placed mid-page on a sub-page should pass `home={false}`: it would
- * otherwise be a second, unexpected link.
+ * With `home`, the rosette gives way to the plain Threshold mark and that
+ * mark is the link to the lobby: HomeNav.astro's masthead on every page but
+ * the lobby. The plain rung of the brand's ornateness ladder, on purpose: at
+ * this size the ornate mark is a bright dot (brand/readme.md). It lights on
+ * hover, the reward the keypad gives on the home page, promised here in
+ * miniature.
  *
  * The plain divider is deliberately id-free, so it can appear as many times
  * on a page as you like; the mirrored bolt is written out rather than
  * referenced. The home variant is the exception: it inlines the mark, whose
- * mask and clip-path carry ids, so it belongs once per page — in the header.
+ * mask and clip-path carry ids, so it belongs once per page — the masthead.
  */
 interface Props {
   home?: boolean;
 }
-const { home = Astro.url.pathname !== '/' } = Astro.props;
+const { home = false } = Astro.props;
 
 // The mark, imported so there is one drawing to maintain: its comment and
 // its own <svg> wrapper dropped, and the rays inside the opening given a
 // hook so CSS can turn the light up. In the template it is cropped to its
 // ink and sized to stand where the dial stood; the transparent rect behind
-// it is the tap target — painted but invisible, so it takes the pointer. The
-// rect grows upward, never downward: the divider's foot is the header's
-// foot, and the header clips its overflow for the sunburst's sake.
+// it is the tap target — painted but invisible, so it takes the pointer.
 const drawing = artwork
   .replace(/<!--[\s\S]*?-->\s*/g, '')
   .replace(/<svg\b[^>]*>/, '')
