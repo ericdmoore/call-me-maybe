@@ -149,14 +149,18 @@ oxblood via the same `data-state` the keypad drives. `not_found_handling:
 
 ## The way back
 
-Every page but the lobby carries the plain Threshold mark and the wordmark at
-top left, inside the frame and aligned to the content column, linking to `/`.
+On every page but the lobby, the dial rosette at the centre of the header's
+divider gives way to the plain Threshold mark, and that mark links to `/`.
 The browser's back button only retraces steps, and a visitor who arrived at
-`/providers/` from a search has none to retrace. `src/components/HomeLink.astro`
-renders it from `brand/mark-threshold.svg`, and `Base.astro` decides by path
-that the lobby itself does not get one. The plain rung of the brand's
-ornateness ladder is deliberate: at two rem the ornate mark is a bright dot.
-The doorway's rays light on hover, the same reward the keypad gives.
+`/providers/` from a search has none to retrace. The doorway on the threshold
+between a page's header and its body is where the site's own metaphor puts
+the exit. `src/components/Divider.astro` renders it from
+`brand/mark-threshold.svg` and decides by path, so the page templates need
+not know; a divider placed mid-page on a sub-page should pass `home={false}`.
+The plain rung of the brand's ornateness ladder is deliberate: at this size
+the ornate mark is a bright dot. The doorway's rays light on hover, the same
+reward the keypad gives. The 404 has no divider and keeps its spoken line,
+"Back to the lobby".
 
 ## Content that lives elsewhere
 

@@ -1,7 +1,6 @@
 ---
 import '../styles/deco.css';
 import PageFrame from '../components/PageFrame.astro';
-import HomeLink from '../components/HomeLink.astro';
 
 interface Props {
   title: string;
@@ -10,10 +9,6 @@ interface Props {
 
 const { title, description } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site ?? 'https://callmemaybe.cc');
-
-// The lobby is home. Every other page — including the 404 — gets the mark
-// at top left as the way back to it; the lobby itself does not need one.
-const isLobby = Astro.url.pathname === '/';
 ---
 
 <!doctype html>
@@ -47,7 +42,6 @@ const isLobby = Astro.url.pathname === '/';
 
   <body data-state-host data-state="waiting">
     <PageFrame />
-    {!isLobby && <HomeLink />}
     <slot />
   </body>
 </html>
