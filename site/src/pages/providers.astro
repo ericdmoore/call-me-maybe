@@ -13,7 +13,7 @@ const featureIds = new Set((await getCollection('features')).map((f) => f.id));
 for (const slug of linkedFeatures) {
   if (!featureIds.has(slug)) throw new Error(`providers.astro: compare.ts links /features/${slug}/ which does not exist`);
 }
-const markText: Record<Mark, string> = { yes: 'Yes', partly: 'Partly', planned: 'Planned', no: 'No' };
+const markText: Record<Mark, string> = { yes: 'Yes', zero: 'A wonderful zero', partly: 'Partly', planned: 'Planned', no: 'No' };
 // Menu labels only; the option value stays the full hardware.ts name. The
 // vendor word is what pushes "Grandstream WP826 · $110" past the field.
 const short = (name: string) => name.replace(/^(Raspberry|Grandstream) /, '');
@@ -502,7 +502,8 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
     padding: 0.1rem 0.45rem;
     white-space: nowrap;
   }
-  .cmp-mark--yes { color: var(--jade); }
+  .cmp-mark--yes,
+  .cmp-mark--zero { color: var(--jade); }
   .cmp-mark--partly { color: var(--accent); }
   .cmp-mark--planned { color: var(--accent-dim); border-style: dashed; }
   .cmp-mark--no { color: var(--text-soft); }

@@ -12,8 +12,12 @@
 
 export const tinCanCheckedAt = 'October 6, 2026';
 
-/** `planned` is on the roadmap and not in the binary; the page says so. */
-export type Mark = 'yes' | 'partly' | 'planned' | 'no';
+/**
+ * `planned` is on the roadmap and not in the binary; the page says so.
+ * `zero` is a yes worth celebrating: the row counts something neither
+ * phone lets happen.
+ */
+export type Mark = 'yes' | 'zero' | 'partly' | 'planned' | 'no';
 
 export interface Side {
   mark: Mark;
@@ -31,6 +35,11 @@ export interface Row {
 const repo = 'https://github.com/ericdmoore/call-me-maybe';
 
 export const rows: Row[] = [
+  {
+    feature: 'Spammers',
+    cmm: { mark: 'zero', note: 'Only delight when the phone rings, zero dread. The people you list ring the house; everyone else meets the doorman, dials an extension or hears “Good day.”' },
+    tinCan: { mark: 'zero', note: 'Only delight when the phone rings, zero dread. Nobody but the contacts approved in the parent app can ring it at all.' },
+  },
   {
     feature: 'Room to room',
     href: `${repo}/blob/main/examples/handsets.example.toml`,
