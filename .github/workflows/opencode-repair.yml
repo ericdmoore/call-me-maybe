@@ -14,7 +14,7 @@ on:
         default: default
         options:
           - default
-          - ollama/gpt-oss:20b
+          - litellm/@local/openai/gpt-oss:20b-64k
           - openrouter/anthropic/claude-opus-5.5
           - openrouter/anthropic/claude-sonnet-5.5
           - openrouter/deepseek/deepseek-v4.1-flash
@@ -69,7 +69,7 @@ jobs:
           PR_NUMBER: ${{ github.event.issue.number || inputs.pr }}
           COMMENT_ID: ${{ github.event.comment.id || inputs.comment }}
           COMMENT_KIND: ${{ github.event_name == 'workflow_dispatch' && (inputs.comment && 'inline' || 'manual') || 'issue' }}
-          DEFAULT_MODEL: ${{ vars.OPENCODE_MODEL || 'ollama/gpt-oss:20b' }}
+          DEFAULT_MODEL: ${{ vars.OPENCODE_MODEL || 'litellm/@local/openai/gpt-oss:20b-64k' }}
           MANUAL_MODEL: ${{ inputs.model }}
           REPAIR_REQUEST: ${{ inputs.prompt }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
@@ -111,6 +111,7 @@ jobs:
           REQUEST: ${{ needs.authorize.outputs.request }}
           REQUEST_SOURCE: ${{ needs.authorize.outputs.source }}
           OPENROUTER_API_KEY: ${{ startsWith(needs.authorize.outputs.model, 'openrouter/') && secrets.OPENROUTER_API_KEY || '' }}
+          LITELLM_KEY_FILE: ${{ vars.LITELLM_KEY_FILE }}
         run: |
           umask 077
           mkdir -p "$AI_POLICY"
@@ -135,8 +136,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           OPENROUTER_API_KEY: ${{ startsWith(needs.authorize.outputs.model, 'openrouter/') && secrets.OPENROUTER_API_KEY || '' }}
+          LITELLM_KEY_FILE: ${{ vars.LITELLM_KEY_FILE }}
         run: |
           node -e 'require(process.env.AI_POLICY + "/limits.cjs").requireRepairBudget(process.env.REPAIR_MODEL, process.env.OPENROUTER_API_KEY).catch(error => { console.error(error.message); process.exit(1); })'
+          # OpenCode substitutes {env:LITELLM_REVIEW_KEY} from this step's environment
+          # for the local route; a cloud route leaves it empty and uses its own secret.
+          LITELLM_REVIEW_KEY="$(node -e 'const m = require(process.env.AI_POLICY + "/models.cjs"); process.stdout.write(m.isLocal(process.env.REPAIR_MODEL) ? m.credential(process.env.REPAIR_MODEL) : "")')"
+          [ -z "$LITELLM_REVIEW_KEY" ] || echo "::add-mask::$LITELLM_REVIEW_KEY"
+          export LITELLM_REVIEW_KEY
           # Child-only gh authentication; no Alpaca credential store or git credential persistence.
           export GIT_CONFIG_GLOBAL=/dev/null
           export GIT_CONFIG_NOSYSTEM=1

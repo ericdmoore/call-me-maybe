@@ -16,7 +16,7 @@ test('local review and re-review spend no token allowance and retain clock/conte
   }
   const config = opencode(local);
   assert.equal(config.agent?.build?.steps, undefined, 'local repairs have no configured step cap');
-  assert.equal(config.provider.ollama.models['gpt-oss:20b'].limit.context, 65536);
+  assert.equal(config.provider.litellm.models['@local/openai/gpt-oss:20b-64k'].limit.context, 65536);
 });
 
 test('paid reviews keep independent positive token budgets including manual model overrides', () => {
