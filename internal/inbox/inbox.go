@@ -31,6 +31,8 @@ import (
 
 // Message is one text as the edge hands it over.
 type Message struct {
+	Source       string    `json:"source,omitempty"`
+	Phonebooks   []string  `json:"phonebooks,omitempty"`
 	ID           string    `json:"id"`
 	From         string    `json:"from"`
 	To           string    `json:"to"`
@@ -108,7 +110,7 @@ func (e *Edge) Pull(ctx context.Context, wait time.Duration) ([]Message, error) 
 	var out struct {
 		Messages []Message `json:"messages"`
 	}
-	if err := e.do(ctx, http.MethodGet, fmt.Sprintf("/inbox/pull?wait=%d", int(wait.Seconds())), nil, &out); err != nil {
+	if err := e.do(ctx, http.MethodGet, fmt.Sprintf("/inbox/pull?wait=%d&contact_uploads=1", int(wait.Seconds())), nil, &out); err != nil {
 		return nil, err
 	}
 	sort.Slice(out.Messages, func(i, j int) bool { return out.Messages[i].ReceivedAt.Before(out.Messages[j].ReceivedAt) })
@@ -117,10 +119,18 @@ func (e *Edge) Pull(ctx context.Context, wait time.Duration) ([]Message, error) 
 
 // Ack tells the edge these are handled; it will not hand them over again.
 func (e *Edge) Ack(ctx context.Context, ids []string) error {
+	return e.ackContacts(ctx, ids, nil)
+}
+
+func (e *Edge) ackContacts(ctx context.Context, ids []string, results []uploadResult) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	return e.do(ctx, http.MethodPost, "/inbox/ack", map[string]any{"ids": ids}, nil)
+	body := map[string]any{"ids": ids}
+	if len(results) > 0 {
+		body["results"] = results
+	}
+	return e.do(ctx, http.MethodPost, "/inbox/ack", body, nil)
 }
 
 // Send texts a reply from the house number, through the edge, which holds
@@ -144,7 +154,7 @@ func safeErr(err error) error {
 }
 
 // Seen is the set of message ids already handled — the reader's only
-// state. VoIP.ms retries callbacks and the edge is at-least-once, so an id
+// deduplication state. VoIP.ms retries callbacks and the edge is at-least-once, so an id
 // can arrive twice; a door opens once.
 type Seen struct {
 	path string
@@ -206,22 +216,23 @@ func (s *Seen) Mark(id string) bool {
 // journal. Never the body, never the full number.
 type Outcome struct {
 	ID string
-	// Result: acted, replied, asked, unchanged, unlisted, unknown-word,
+	// Result: pending, cancelled, acted, replied, asked, unchanged, unlisted, unknown-word,
 	// not-allowed, needs-confirmation, duplicate, failed.
-	Result string
-	Word   string
-	Action string // the [[actions]] id the word performed, when it named one
-	Person string // [[people]] id or name, when the sender is on the list
-	Detail string
-	// To is the sender in E.164 once it parsed as a number, and Reply is
-	// what the house sent back — the fact the house mailbox wants a copy
-	// of. Empty when nothing was sent: a stranger is never answered.
+	Result   string
+	Retry    bool // pending state could not be persisted; do not mark or ack
+	Deferred bool // a shelf timer outcome, not a new inbound message
+	Word     string
+	Action   string // the [[actions]] id the word performed, when it named one
+	Person   string // [[people]] id or name, when the sender is on the list
+	Detail   string
+	// To is the sender in E.164 once parsed. Reply is the SMS sent back,
+	// or the result message returned to an authenticated Shortcut receipt.
 	To    string
 	Reply string
 	// State is what Home Assistant reported when it was asked — the answer
 	// to "garage?" (asked), or the reason nothing moved (unchanged).
 	State string
-	// Via is the transport, for the journal: always "sms" from here.
+	// Via is the transport, for the journal: sms or shortcut.
 	Via string
 }
 
@@ -288,6 +299,7 @@ func (h *HomeAssistant) State(ctx context.Context, entity string) (State, error)
 
 // Deps is what the reader needs from the house.
 type Deps struct {
+	Shelf    *ContactShelf // durable split-card conversations; nil disables delayed imports
 	Policy   *policy.Policy
 	Messages *policy.Messages
 	Edge     *Edge
@@ -308,7 +320,8 @@ type Deps struct {
 
 // Reader is the loop.
 type Reader struct {
-	d Deps
+	deferredContacts []contactOutcome
+	d                Deps
 }
 
 func New(d Deps) *Reader {
@@ -345,16 +358,25 @@ func postJSON(ctx context.Context, target string, payload map[string]string) err
 }
 
 // Handle decides and acts on one text. Every path returns an Outcome; only
-// "acted"/"replied" touch anything.
-func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
-	out := Outcome{ID: m.ID, Via: "sms"}
-	if r.d.Seen != nil {
-		if m.hasContacts() {
+// pending contacts are persisted before acknowledgement.
+func (r *Reader) Handle(ctx context.Context, m Message) (out Outcome) {
+	out = Outcome{ID: m.ID, Via: "sms"}
+	if m.Source == "contact-upload" {
+		out.Via = "shortcut"
+	}
+	// Upload imports are idempotent file writes. Replay them until the edge
+	// acknowledges the result, so a crash cannot strand a receipt as queued.
+	if r.d.Seen != nil && m.Source != "contact-upload" {
+		if r.isContactCommand(m) {
 			if r.d.Seen.Has(m.ID) {
 				out.Result = "duplicate"
 				return out
 			}
-			defer func() { r.d.Seen.Mark(m.ID) }()
+			defer func() {
+				if !out.Retry {
+					r.d.Seen.Mark(m.ID)
+				}
+			}()
 		} else if !r.d.Seen.Mark(m.ID) {
 			out.Result = "duplicate"
 			return out
@@ -378,7 +400,26 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 	if out.Person == "" {
 		out.Person = caller.Name
 	}
+	if m.Source == "contact-upload" {
+		return r.importUpload(ctx, m, out, caller)
+	}
 	text := strings.ToLower(strings.TrimSpace(m.Body))
+	if text == "" && !m.hasContacts() {
+		out.Result = "failed"
+		out.Detail = "empty message; no attachment received"
+		r.reply(ctx, &out, n.Value, "An empty message reached the house. No attachment was included. If you shared a contact, I did not receive its vCard.")
+		return out
+	}
+	if r.d.Shelf != nil {
+		if text == "" && m.hasContacts() {
+			return r.shelveContacts(ctx, m, out, caller)
+		}
+		if text == "cancel" && !m.hasContacts() {
+			if cancelled, ok := r.cancelContacts(ctx, m, out); ok {
+				return cancelled
+			}
+		}
+	}
 	if prefix, destinations, ok := strings.Cut(text, ":"); ok && strings.Join(strings.Fields(prefix), " ") == "add to" {
 		return r.routeContacts(ctx, m, out, destinations, caller)
 	}
@@ -402,11 +443,16 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 	}
 	out.Word = word.Word
 	if !allowed(word.People, caller) {
+		if word.Phonebook != "" {
+			if err := r.stopContactDefault(m, out); err != nil {
+				return retryContacts(out, err)
+			}
+		}
 		out.Result = "not-allowed"
 		return out
 	}
 	if word.Phonebook != "" {
-		return r.importContacts(ctx, m, out, word)
+		return r.routeContacts(ctx, m, out, word.Word, caller)
 	}
 	// An attachment caption must not accidentally operate a door.
 	if m.hasContacts() {
@@ -489,6 +535,10 @@ func (r *Reader) Handle(ctx context.Context, m Message) Outcome {
 // reply sends and records; a failed send is a detail, never a different
 // outcome, because whatever the word did has been done.
 func (r *Reader) reply(ctx context.Context, out *Outcome, to, text string) {
+	if out.Via == "shortcut" {
+		out.Reply = text
+		return
+	}
 	if err := r.d.Edge.Send(ctx, to, text); err != nil {
 		if out.Detail != "" {
 			out.Detail += "; "
@@ -546,20 +596,32 @@ func (r *Reader) allowedWords(c policy.KnownCaller) []string {
 
 // PullOnce pulls once, handles and acks what arrived, and reports how many.
 func (r *Reader) PullOnce(ctx context.Context, wait time.Duration, onOutcome func(Message, Outcome)) (int, error) {
-	msgs, err := r.d.Edge.Pull(ctx, wait)
+	msgs, err := r.d.Edge.Pull(ctx, r.contactWait(wait))
 	if err != nil {
 		return 0, err
 	}
 	var done []string
+	var results []uploadResult
+	retry := false
 	for _, m := range msgs {
 		o := r.Handle(ctx, m)
+		retry = retry || o.Retry
 		if onOutcome != nil {
 			onOutcome(m, o)
 		}
-		done = append(done, m.ID)
+		if !o.Retry {
+			done = append(done, m.ID)
+			if result, ok := uploadResultFor(m, o); ok {
+				results = append(results, result)
+			}
+		}
 	}
-	if err := r.d.Edge.Ack(ctx, done); err != nil {
+	retry = r.advanceContacts(ctx, onOutcome, len(msgs) < 10 && !retry) || retry
+	if err := r.d.Edge.ackContacts(ctx, done, results); err != nil {
 		return len(msgs), fmt.Errorf("ack: %w", err)
+	}
+	if retry {
+		return len(msgs), errors.New("contact work remains pending for retry")
 	}
 	return len(msgs), nil
 }
@@ -573,7 +635,7 @@ func (r *Reader) Run(ctx context.Context, wait time.Duration, onOutcome func(Mes
 		if ctx.Err() != nil {
 			return
 		}
-		msgs, err := r.d.Edge.Pull(ctx, wait)
+		msgs, err := r.d.Edge.Pull(ctx, r.contactWait(wait))
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -593,20 +655,38 @@ func (r *Reader) Run(ctx context.Context, wait time.Duration, onOutcome func(Mes
 		}
 		backoff = time.Second
 		var done []string
+		var results []uploadResult
+		retry := false
 		for _, m := range msgs {
 			o := r.Handle(ctx, m)
+			retry = retry || o.Retry
 			if onOutcome != nil {
 				onOutcome(m, o)
 			}
-			done = append(done, m.ID)
+			if !o.Retry {
+				done = append(done, m.ID)
+				if result, ok := uploadResultFor(m, o); ok {
+					results = append(results, result)
+				}
+			}
 		}
+		retry = r.advanceContacts(ctx, onOutcome, len(msgs) < 10 && !retry) || retry
 		// Acked on its own clock: a text that was handled is handled even
 		// if Ctrl-C arrived while it was, and the seen set covers the rest.
 		ackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		err = r.d.Edge.Ack(ackCtx, done)
+		err = r.d.Edge.ackContacts(ackCtx, done, results)
 		cancel()
 		if err != nil && onError != nil {
 			onError(fmt.Errorf("ack: %w", err))
+		}
+		if retry {
+			// Failed local persistence must not spin on an overdue shelf timer
+			// or repeatedly pull an unacknowledged contact command.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
 		}
 	}
 }

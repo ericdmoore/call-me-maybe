@@ -35,7 +35,7 @@
             ]
           },
           "phonebook": {
-            "description": "Import attached vCards into the shared house directory, or one handset's directory. Names and numbers only; never grants admission. Caption: Add to: word,word for one or more configured destinations, case-insensitive with optional spaces around commas. A bare word still selects one destination. Requires MMS forwarding and vCard parsing at the edge; the house receives only structured names and numbers.",
+            "description": "Import attached vCards into the shared house directory, or one handset's directory. Names and numbers only; never grants admission. Send Add to: word,word promptly after the card, or as its caption, for one or more configured destinations; case-insensitive with optional spaces around commas. Uncaptioned cards wait 15 seconds, then a warning offers two minutes to replace the permitted House default. Late or no-card instructions never apply to a future card. A bare word still selects one destination. Requires MMS forwarding and vCard parsing at the edge; the house receives only structured names and numbers.",
             "type": "string",
             "pattern": "^(house|handset:[a-z0-9][a-z0-9_-]*)$",
             "x-cross-references": [

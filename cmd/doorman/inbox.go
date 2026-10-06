@@ -124,7 +124,14 @@ func runInbox(args []string) int {
 		defer journal.Close()
 	}
 
+	shelf, err := inbox.OpenContactShelf(stateDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✗ pending contacts: %v\n", err)
+		return 2
+	}
+	defer shelf.Close()
 	reader := inbox.New(inbox.Deps{
+		Shelf:  shelf,
 		Policy: pol, Messages: msgs, Seen: seen,
 		Edge:        &inbox.Edge{URL: inboxURL, Token: token},
 		CountryCode: defaultCountryCode(),
@@ -180,7 +187,7 @@ func runInbox(args []string) int {
 			}
 			journalWarned = false
 		}
-		if mail != nil && o.Reply != "" {
+		if mail != nil && o.Reply != "" && o.Via == "sms" {
 			// Best-effort and off the loop: the house has already spoken.
 			go func(o inbox.Outcome) {
 				if err := mail(replySubject(o), replyBody(o, time.Now())); err != nil {
@@ -310,7 +317,10 @@ func journalEvents(o inbox.Outcome) []events.Event {
 	mk := func(t events.Type, reason string) events.Event {
 		return events.Event{Type: t, At: now, Source: "doorman-inbox", Payload: events.Payload{Action: obs, Reason: reason}}
 	}
-	out := []events.Event{mk(events.MessageReceived, o.Result)}
+	var out []events.Event
+	if !o.Deferred {
+		out = append(out, mk(events.MessageReceived, o.Result))
+	}
 	switch {
 	case o.Action == "":
 		if (o.Result == "acted" || o.Result == "replied") && o.Word != "" {
