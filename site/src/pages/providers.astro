@@ -1,6 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
-import Divider from '../components/Divider.astro';
+import HomeNav from '../components/HomeNav.astro';
 import Switchboard from '../components/Switchboard.astro';
 import { providers, track, checkedAt } from '../data/providers';
 import { brains, cells, defaults, estimate, handsetModels, hardwareCost, lightUse, limits, tinCan, usd } from '../data/costs';
@@ -44,9 +44,9 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
         You bring the number. Here is who to buy it from, what each one is good
         at, and what to check before signing up.
       </p>
-      <Divider />
     </div>
   </header>
+  <HomeNav />
 
   <section class="panel">
     <div class="wrap">

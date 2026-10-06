@@ -147,6 +147,21 @@ the line the project already has — "Good day." — and the doorman renders in
 oxblood via the same `data-state` the keypad drives. `not_found_handling:
 "404-page"` in `wrangler.jsonc` is what makes Cloudflare serve it.
 
+## The way back
+
+Every page but the lobby carries the divider with the plain Threshold mark
+standing where the dial stands on the lobby, and that doorway links to `/`.
+At rest it sits under the header's tagline, where the divider always has. On
+desktop, once the header has scrolled out of the viewport, it sticks to the
+top beneath the frame's rail and stud, so the way home is one click from
+anywhere on the page; on a phone it never sticks. The browser's back button
+only retraces steps, and a visitor who arrived at `/providers/` from a search
+has none to retrace. `src/components/HomeNav.astro` renders it, and each
+sub-page places it right after its header rather than inside it, because
+`position: sticky` holds only within its parent. The lobby keeps the rosette
+and the 404 keeps its one line. The doorway's rays light on hover, the same
+reward the keypad gives.
+
 ## Content that lives elsewhere
 
 - `public/llms.txt` is copied from the repository root, so the site serves the
