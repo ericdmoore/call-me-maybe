@@ -14,15 +14,74 @@ Call Me Maybe deployment. No live trunks were tested in this review.
 | Flowroute | From $1/number; confirm monthly amount for selected DID | From $0.005/min | From $0.00833/min, US lower 48/Canada | Rate card lists $1.39 association and $1.50 mandatory fee per E911-enabled US DID/month | [Pricing details](https://flowroute.com/pricing-details/?utm_source=callmemaybe.cc&utm_medium=referral&utm_campaign=providers&utm_content=research-rates) |
 | Callcentric | Pay Per Minute DID $1.95/month, $3.95 setup | $0.015/min | North America Basic $1.95/month + $1.50 setup, 120 minutes; then $0.0198/min US/Canada | Included with North America Basic for US/Canada addresses | [Outgoing plans](https://www.callcentric.com/compare_rate_plans/?utm_source=callmemaybe.cc&utm_medium=referral&utm_campaign=providers&utm_content=research-outgoing), [DIDs](https://www.callcentric.com/compare_did/?utm_source=callmemaybe.cc&utm_medium=referral&utm_campaign=providers&utm_content=research-incoming) |
 
-The site's examples use 100 incoming + 100 outgoing minutes, one number and
-E911: VoIP.ms **from $4.00**, Telnyx **from $3.32**, Callcentric **$5.40** with
-the named incoming/outgoing combination. All exclude setup and taxes. Starting
+The site's light-use example uses 100 incoming + 100 outgoing minutes, one
+number and E911: VoIP.ms **from $4.00**, Telnyx **from $3.32**, Callcentric
+**$5.40** with the named incoming/outgoing combination. Since October 6, 2026
+it is a table rendered from `site/src/data/costs.ts` with hardware (a Pi 5
+and one WP826), the monthly figure, year 1 (hardware, listed one-time fees
+and twelve months), year 2 and a four-year total, with one Tin Can on Party
+Line as a row. Monthly figures exclude setup and taxes. Starting
 rates are illustrative lower bounds, not quotes. No Flowroute all-in example
 is shown because the selected-number recurring charge should be confirmed.
 Callcentric's $1 Dollar Unlimited number is a different, geographically
 limited residential plan; it should not silently replace a widely available
 DID in an apples-to-apples example. Prepaid deposits are cash needed to start,
 not an additional monthly consumption charge.
+
+## Cost calculator basis (added October 6, 2026)
+
+The `/providers/` page also prices a household by the year, so the carriers
+and Tin Can can be read side by side. The arithmetic is
+`site/src/data/costs.ts`; it renders the default household at build time
+and recomputes in the browser from four inputs: handsets, whether the Tin
+Cans share one number or have one each, minutes a month (entered for the
+house or as an average per handset), and a slider from "zero Tin Can
+calls" to "all Tin Can calls" for the share of chats with other Tin Cans. It shows hardware, listed one-time fees, monthly service, year 1,
+year 2 and a four-year total.
+
+- Default: three handsets, a kitchen phone for the adults and one for each
+  of two kids. Hardware is a Raspberry Pi 5 plus one Grandstream WP826 per
+  handset at the `hardware.ts` prices, board and handsets only; two
+  dropdowns offer every brain and every standalone (Wi-Fi or desk) handset
+  on that list, a price range costing at its upper end. Tin Can is one
+  device per handset.
+- Default minutes: two kids at 30 minutes a week is 260 minutes a month
+  (52/12 weeks); the kitchen phone's calls are on top. Minutes are split
+  half outgoing and half incoming. The slider divides the whole figure,
+  since on the Tin Can side every phone is a kid's.
+- Year 1 is hardware, listed fees and twelve months of service, less Tin
+  Can's free first month. Year 2 is service alone. Four years is year 1
+  plus three of year 2.
+- One number with E911 at each provider's advertised US starting rate.
+  Flowroute is omitted for the same reason as the light-use example.
+- Tin Can: $100 per device on the US storefront; Party Line $9.99/month per
+  Tin Can with its own number, first month free; Can 2 Can (other Tin Cans
+  and 911) is free with every device. Several Tin Cans can be linked to one
+  number on one Party Line, in which case all of them ring and share a
+  contact list and voicemail. The table counts one Tin Can per handset,
+  each with its own number by default; a dropdown prices the shared-number
+  case at one Party Line. Sources:
+  [product and plans](https://tincan.kids/products/tin-can?utm_source=callmemaybe.cc&utm_medium=referral&utm_campaign=providers&utm_content=research-tincan),
+  [Can 2 Can vs Party Line](https://faq.tincan.com/t/35yp5d7/what-is-the-difference-between-can-2-can-and-the-party-line-subscription?utm_source=callmemaybe.cc&utm_medium=referral&utm_campaign=providers&utm_content=research-tincan),
+  [one number per device, or shared](https://faq.tincan.com/t/x2yp5wt/will-each-device-in-my-home-have-a-separate-number?utm_source=callmemaybe.cc&utm_medium=referral&utm_campaign=providers&utm_content=research-tincan).
+  The FAQ says Party Line "costs vary by country"; the price used is the US
+  storefront's. An annual Party Line price appears in third-party reviews
+  but not on a Tin Can page, so it is not used. Tin Can checked October 6,
+  2026; the carriers were not rechecked that day.
+- The feature table (`site/src/data/compare.ts`) reads Tin Can's product
+  page for quiet hours ("Quiet hours fully disable both incoming and
+  outgoing calls"), voicemail ("record your own custom greeting"),
+  speakerphone and 2.4 GHz Wi-Fi, and the FAQ for Can 2 Can and linked
+  numbers. Intercom, conference calling and smart-home integration are not
+  mentioned on those pages and are marked no. The Call Me Maybe column
+  marks approved-contacts-only calling "partly": incoming yes, outgoing no
+  in the stock dialplan, and marks roadmap items "planned" rather than
+  claiming them. No Tin Can was used.
+- The slider is the share of the chats that are with other Tin Cans,
+  default 50%. It changes only the Tin Can row, and only at "all Tin Can
+  calls": Party Line is a flat fee, needed for any outside calling. A Call Me Maybe
+  house pays the same carrier minute to a Tin Can friend as to anyone else,
+  and reaches that friend only if their family has Party Line.
 
 ## Recommendations and evidence boundaries
 

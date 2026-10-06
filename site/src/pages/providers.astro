@@ -3,11 +3,36 @@ import Base from '../layouts/Base.astro';
 import Divider from '../components/Divider.astro';
 import Switchboard from '../components/Switchboard.astro';
 import { providers, track, checkedAt } from '../data/providers';
+import { brains, cells, defaults, estimate, handsetModels, hardwareCost, lightUse, limits, tinCan, usd } from '../data/costs';
+import { rows as compareRows, linkedFeatures, tinCanCheckedAt, type Mark } from '../data/compare';
+import { getCollection } from 'astro:content';
+
+// A comparison row that links to a feature page nobody wrote is a dead link
+// on the page most likely to be read by a stranger. Fail the build instead.
+const featureIds = new Set((await getCollection('features')).map((f) => f.id));
+for (const slug of linkedFeatures) {
+  if (!featureIds.has(slug)) throw new Error(`providers.astro: compare.ts links /features/${slug}/ which does not exist`);
+}
+const markText: Record<Mark, string> = { yes: 'Yes', zero: 'A wonderful zero', partly: 'Partly', planned: 'Planned', no: 'No' };
+// Menu labels only; the option value stays the full hardware.ts name. The
+// vendor word is what pushes "Grandstream WP826 · $110" past the field.
+const short = (name: string) => name.replace(/^(Raspberry|Grandstream) /, '');
+
+// The default household is rendered into the HTML, so the table reads
+// correctly with scripting off. The script below writes the same keys back
+// from the same function whenever an input changes.
+const c = cells(defaults);
+const est = estimate(defaults);
+const lines = [est.tinCan, ...est.carriers];
+const costed = est.carriers.map((l) => l.name).join(', ');
+const light = estimate(lightUse);
+const lightLines = [...light.carriers, light.tinCan];
+const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l.yearOne, l.yearTwo, l.fourYears];
 ---
 
 <Base
   title="Phone providers — Call Me Maybe"
-  description="An honest comparison of SIP trunk providers that work with a home phone behind NAT: VoIP.ms, Telnyx, Flowroute and Callcentric. Dated prices, setup caveats and no affiliate links."
+  description="An honest comparison of SIP trunk providers that work with a home phone behind NAT: VoIP.ms, Telnyx, Flowroute and Callcentric, plus what a three-handset house costs next to Tin Can. Dated prices, setup caveats and no affiliate links."
 >
   <header class="lobby prov-hero" style="padding-block:clamp(2.5rem,6vw,4rem) 0;">
     <div class="prov-tangle prov-tangle--l"><Switchboard /></div>
@@ -84,15 +109,36 @@ import { providers, track, checkedAt } from '../data/providers';
       </div>
       <div class="prose">
         <h2 class="prov-h">What a light-use month might cost</h2>
-        <p>For one number, 100 incoming minutes and 100 outgoing minutes:
-          VoIP.ms is <strong>from $4.00</strong> ($1.10 + $0.90 + $0.50 + $1.50 E911);
-          Telnyx is <strong>from $3.32</strong> ($1.00 + $0.32 + $0.50 + $1.50 E911).
-          These use advertised starting rates, not guaranteed destination quotes.</p>
-        <p>Callcentric’s Pay Per Minute DID plus North America Basic is
-          <strong>$5.40</strong> ($1.95 number + $1.50 incoming + $1.95 outgoing plan,
-          including E911). The 100 outgoing minutes fit within its 120-minute allowance.
-          All examples exclude setup, taxes and surcharges. A prepaid deposit funds
-          future use; it is separate from the monthly usage calculation.</p>
+        <p>One number, one phone, {light.inMinutes} incoming minutes and
+          {light.outMinutes} outgoing, at advertised starting rates rather than
+          destination quotes. Hardware is a {defaults.brain} and one {defaults.handset}.
+          Tin Can is one phone on Party Line, since a phone that only calls
+          other Tin Cans is a different purchase.</p>
+      </div>
+      <div class="prov-table" role="region" aria-label="Light-use month cost comparison" tabindex="0">
+        <table>
+          <caption>One phone, {light.inMinutes} in + {light.outMinutes} out a month · checked {checkedAt} · USD</caption>
+          <thead><tr>
+            <th scope="col">Provider</th>
+            <th scope="col">Hardware</th>
+            <th scope="col">Provider costs, monthly</th>
+            <th scope="col">Year 1</th>
+            <th scope="col">Year 2</th>
+            <th scope="col">4 year total</th>
+          </tr></thead>
+          <tbody>{lightLines.map((l) => <tr>
+            <th scope="row">{l.name}<span class="prov-basis">{l.basis}</span></th>
+            <td class="prov-num">{usd(l.hardware)}</td>
+            <td class="prov-num">{usd(l.monthly)}</td>
+            {years(l).map((v, i) => <td class:list={['prov-num', { 'prov-num--sum': i === 2 }]}>{usd(v)}</td>)}
+          </tr>)}</tbody>
+        </table>
+      </div>
+      <div class="prose">
+        <p>Year 1 is hardware, the one-time fees each provider lists and twelve
+          months of service, less Tin Can’s free first month; year 2 is service
+          alone. Taxes, surcharges and a prepaid deposit are not in it. The
+          deposit funds future use and is separate from the monthly figure.</p>
         <p><strong>Our starting recommendation:</strong> VoIP.ms for the documented
           Call Me Maybe setup. Compare Callcentric for bundled minutes, and Telnyx
           or Flowroute if their carrier tools suit you. A lower advertised minute
@@ -101,6 +147,168 @@ import { providers, track, checkedAt } from '../data/providers';
           emergency address and routing using the provider’s testing procedure.
           Power and internet outages can interrupt service; keep another way to
           reach emergency services.</p>
+      </div>
+
+      <div class="prose">
+        <h2 class="prov-h" id="full-setup">What a house costs, by the year</h2>
+        <p>The light-use month above is one number and one phone. A house
+          with children on the phone looks more like the standard issue below.
+          Change any of it; the table follows.</p>
+        <ul>
+          <li><strong>Handsets:</strong> {defaults.handsets} by default, one in the
+            kitchen for the grown-ups and one for each of two kids.
+            Each is a {defaults.handset} at ${hardwareCost.handset}, on a {defaults.brain} at
+            ${hardwareCost.brain}: the pair the project is tested against, not the
+            cheapest. Pick others from the <a href="/#hardware">hardware list</a> below;
+            every brain and every standalone handset on it is offered.</li>
+          <li><strong>Minutes:</strong> two kids at {30} minutes a week each is
+            about {defaults.minutes} a month, which is the default; the kitchen
+            phone’s calls are on top. Enter the house total or an average per
+            handset. Half are placed from the house and half rung in.</li>
+          <li><strong>One house number</strong> with E911, at each provider’s
+            advertised US starting rates.</li>
+        </ul>
+        <p><strong>Tin Can is in the table</strong> because it is the other
+          answer to the same question: a phone for a kid who does not have a
+          smartphone. It is not a SIP provider. It is a phone with the service
+          built in, so its row counts one Tin Can per handset at ${tinCan.device} each.
+          Calls between Tin Cans are free. Calling anyone else needs a Party
+          Line plan at ${tinCan.partyLine} a month for each Tin Can with its own number,
+          first month free; Tin Cans linked to one shared number need one plan
+          between them, and all ring at once. Two questions decide most of the
+          Tin Can row.</p>
+      </div>
+
+      <form class="prov-calc" data-calc aria-labelledby="full-setup" onsubmit="return false">
+        <div class="prov-calc-grid">
+          <label>
+            <span>Handsets</span>
+            <input type="number" name="handsets" inputmode="numeric" min={limits.handsets.min} max={limits.handsets.max} step="1" value={defaults.handsets} />
+          </label>
+          <label>
+            <span>PhoneBrain</span>
+            <select name="brain">
+              {brains.map((b) => <option value={b.name} selected={b.name === defaults.brain}>{short(b.name)} · ${b.price}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Handset model</span>
+            <select name="handset">
+              {handsetModels.map((h) => <option value={h.name} selected={h.name === defaults.handset}>{short(h.name)} · ${h.price}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Tin Can numbers</span>
+            <select name="shared">
+              <option value="own" selected={!defaults.shared}>one each</option>
+              <option value="shared" selected={defaults.shared}>one shared</option>
+            </select>
+          </label>
+          <label>
+            <span>Minutes a month</span>
+            <input type="number" name="minutes" inputmode="numeric" min={limits.minutes.min} max={limits.minutes.max} step="10" value={defaults.minutes} />
+          </label>
+          <label>
+            <span>Counted as</span>
+            <select name="mode">
+              <option value="total" selected>whole house</option>
+              <option value="each">per handset</option>
+            </select>
+          </label>
+        </div>
+        <div class="prov-calc-slider">
+          <output for="tincan-pct" class="prov-calc-readout" data-cost="tinCanPct">{c.tinCanPct}</output>
+          <input type="range" id="tincan-pct" name="tinCanPct" min="0" max="100" step="10" value={defaults.tinCanPct}
+            aria-label="Share of the chats that are with other Tin Cans" />
+          <div class="prov-calc-ends" aria-hidden="true">
+            <span>Zero Tin Can calls</span>
+            <span>All Tin Can calls</span>
+          </div>
+        </div>
+        <p class="prov-calc-note">
+          {/* One line on purpose: a line break beside an expression is dropped, and the words run together. */}
+          <span data-cost="minutes">{c.minutes}</span> minutes a month: <span data-cost="inMinutes">{c.inMinutes}</span> in, <span data-cost="outMinutes">{c.outMinutes}</span> out; <span data-cost="outsideMinutes">{c.outsideMinutes}</span> with people on ordinary phones and <span data-cost="canMinutes">{c.canMinutes}</span> with people on Tin Cans.
+        </p>
+      </form>
+
+      <div class="prov-table" role="region" aria-label="Cost by year" tabindex="0">
+        <table>
+          <caption>Cost by the year · checked {checkedAt} · USD</caption>
+          <thead><tr>
+            <th scope="col">Provider</th>
+            <th scope="col">Hardware</th>
+            <th scope="col">Provider costs, monthly</th>
+            <th scope="col">Year 1</th>
+            <th scope="col">Year 2</th>
+            <th scope="col">4 year total</th>
+          </tr></thead>
+          <tbody>{lines.map((l) => <tr>
+            <th scope="row">{l.name}<span class="prov-basis" data-cost={`${l.key}.basis`}>{c[`${l.key}.basis`]}</span></th>
+            <td class="prov-num" data-cost={`${l.key}.hardware`}>{c[`${l.key}.hardware`]}</td>
+            <td class="prov-num" data-cost={`${l.key}.monthly`}>{c[`${l.key}.monthly`]}</td>
+            <td class="prov-num" data-cost={`${l.key}.yearOne`}>{c[`${l.key}.yearOne`]}</td>
+            <td class="prov-num" data-cost={`${l.key}.yearTwo`}>{c[`${l.key}.yearTwo`]}</td>
+            <td class="prov-num prov-num--sum" data-cost={`${l.key}.fourYears`}>{c[`${l.key}.fourYears`]}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+
+      <div class="prose">
+        <p><strong data-cost="verdict">{c.verdict}</strong> Year 1 is hardware,
+          the one-time fees each provider lists and twelve months of service,
+          less Tin Can’s free first month. Year 2 is service alone, and so is
+          each year after it.</p>
+        <p><strong>Party Line is a flat fee.</strong> It is needed for the first
+          minute of outside chat and costs the same for the last, so the slider
+          only changes the Tin Can row at its far right, where every call is to
+          another Tin Can. Spread over the outside minutes at this setting it
+          comes to <span data-cost="tincan.perOutsideMinute">{c['tincan.perOutsideMinute']}</span>.</p>
+        <p><strong>Sharing a number cuts it to one plan.</strong> Tin Can can
+          link several phones to one number on a single Party Line, ${tinCan.partyLine} a
+          month; choose “one shared” above to price it. Every call then rings
+          every Tin Can, and they share one contact list and one voicemail,
+          which is the part a Call Me Maybe house routes with ladders and
+          extensions instead.</p>
+        <p><strong>The friends who do have Tin Cans</strong> cost a Call Me Maybe
+          house the same carrier minute as anyone else, and the call only
+          connects if that family has Party Line: the free plan reaches other
+          Tin Cans only. Slide all the way to “all Tin Can calls” and the Tin
+          Can row has no monthly cost, and no way to call a house like this one.</p>
+        <p>Left out on both sides: tax and surcharges, a prepaid deposit, Wi-Fi,
+          electricity, a power supply, storage and case for the brain, PoE or
+          a power adapter for a desk phone, and your time. Only {costed} are costed; Flowroute’s recurring number
+          charge should be confirmed in the portal first.</p>
+      </div>
+
+      <div class="prose">
+        <h2 class="prov-h" id="features">Cost is a tiebreaker. This is the argument.</h2>
+        <p>A phone system in the house is a different thing from a phone with
+          a plan. The rows below are what a Call Me Maybe house does with the
+          handsets it already has, next to what Tin Can’s own pages say its
+          phone does. Where those pages say nothing, the cell says no; tell us
+          if that is wrong. A row marked planned is on the roadmap, not in the
+          binary, and says so rather than counting it.</p>
+      </div>
+
+      <div class="prov-table" role="region" aria-label="Feature comparison with Tin Can" tabindex="0">
+        <table class="cmp">
+          <caption>What each one can do · Tin Can checked {tinCanCheckedAt}</caption>
+          <thead><tr>
+            <th scope="col">Feature</th>
+            <th scope="col">Call Me Maybe</th>
+            <th scope="col">Tin Can</th>
+          </tr></thead>
+          <tbody>{compareRows.map((r) => <tr>
+            <th scope="row">{r.href ? <a href={r.href}>{r.feature}</a> : r.feature}</th>
+            {[r.cmm, r.tinCan].map((side) => <td>
+              <span class:list={['cmp-mark', `cmp-mark--${side.mark}`]}>{markText[side.mark]}</span>
+              <span class="cmp-note">{side.note}</span>
+            </td>)}
+          </tr>)}</tbody>
+        </table>
+      </div>
+      <div class="prose">
+        <p class="prov-sources">Tin Can column from {tinCan.sources.map((source, i) => <span>{i > 0 && ', '}<a href={track(source.url, `tin-can-feature-source-${i + 1}`)}>{source.label.toLowerCase()}</a></span>)}. No Tin Can was used for this page.</p>
       </div>
 
       <ul class="prov-list">
@@ -147,6 +355,45 @@ import { providers, track, checkedAt } from '../data/providers';
             </li>
           ))
         }
+        <li class="prov-card">
+          <div class="prov-head">
+            <h3>{tinCan.name}</h3>
+            <span class="prov-tags">
+              <span class="prov-tag">not a SIP provider</span>
+              <span class="prov-tag">subscription</span>
+            </span>
+          </div>
+
+          <p class="prov-summary">
+            A kids’ phone with the service built in, listed for the <a href="#full-setup">cost
+            and feature comparison</a> above. Nothing to
+            configure and one company to call. The trade is that the phone,
+            the number and the rules belong to that company.
+          </p>
+
+          <div class="prov-cols">
+            <div>
+              <h4>Check before choosing</h4>
+              <ul>
+                <li>Calls to anyone without a Tin Can need Party Line: ${tinCan.partyLine} a
+                  month for each Tin Can with its own number, first month free.
+                  Several Tin Cans can share one number and one plan.</li>
+                <li>Only contacts approved in the parent app can call or be
+                  called. That is the approved-only dialing Call Me Maybe’s
+                  stock dialplan does not do.</li>
+                <li>It registers to Tin Can’s service, not to Asterisk, so it
+                  cannot be a handset on this system or keep its number if the
+                  service changes.</li>
+              </ul>
+            </div>
+          </div>
+
+          <p class="prov-links">
+            <a href={track(tinCan.url, 'tin-can')} rel="noopener nofollow">Their site &rarr;</a>
+            <a href={track(tinCan.pricingUrl, 'tin-can-pricing')} rel="noopener nofollow">Their plans &rarr;</a>
+          </p>
+          <p class="prov-sources">Sources checked {tinCanCheckedAt}: {tinCan.sources.map((source, i) => <span>{i > 0 && ' · '}<a href={track(source.url, `tin-can-source-${i + 1}`)}>{source.label}</a></span>)}</p>
+        </li>
       </ul>
 
       <div class="prose" style="margin-top:2.5rem;">
@@ -192,6 +439,38 @@ import { providers, track, checkedAt } from '../data/providers';
   </section>
 </Base>
 
+<script>
+  import { cells } from '../data/costs';
+
+  const form = document.querySelector<HTMLFormElement>('[data-calc]');
+  if (form) {
+    const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement;
+    const read = () => {
+      const handsets = Number(field('handsets').value);
+      const entered = Number(field('minutes').value);
+      const minutes = field('mode').value === 'each' ? entered * handsets : entered;
+      return {
+        handsets,
+        brain: field('brain').value,
+        handset: field('handset').value,
+        shared: field('shared').value === 'shared',
+        minutes,
+        tinCanPct: Number(field('tinCanPct').value),
+      };
+    };
+    const paint = () => {
+      const c = cells(read());
+      for (const el of document.querySelectorAll<HTMLElement>('[data-cost]')) {
+        const v = c[el.dataset.cost ?? ''];
+        if (v !== undefined) el.textContent = v;
+      }
+    };
+    form.addEventListener('input', paint);
+    // A reload can restore what was typed; the HTML is the default.
+    paint();
+  }
+</script>
+
 <style>
   .prov-table { overflow-x: auto; margin-top: 2rem; }
   table { border-collapse: collapse; width: 100%; min-width: 58rem; }
@@ -199,6 +478,106 @@ import { providers, track, checkedAt } from '../data/providers';
   th, td { text-align: left; vertical-align: top; padding: 0.85rem; border: 1px solid var(--rule); }
   thead { background: var(--raised); }
   .prov-sources { color: var(--text-soft); font-size: var(--t-sm); }
+  .prov-num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .prov-basis {
+    display: block;
+    margin-top: 0.3rem;
+    font-weight: 400;
+    font-size: var(--t-xs);
+    color: var(--text-soft);
+  }
+
+  .prov-num--sum { color: var(--accent); }
+
+  table.cmp { min-width: 46rem; }
+  table.cmp th[scope='row'] { width: 14rem; }
+  .cmp-mark {
+    display: inline-block;
+    margin-right: 0.6rem;
+    font-family: var(--display);
+    font-size: var(--t-xs);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border: 1px solid currentColor;
+    padding: 0.1rem 0.45rem;
+    white-space: nowrap;
+  }
+  .cmp-mark--yes,
+  .cmp-mark--zero { color: var(--jade); }
+  .cmp-mark--partly { color: var(--accent); }
+  .cmp-mark--planned { color: var(--accent-dim); border-style: dashed; }
+  .cmp-mark--no { color: var(--text-soft); }
+  .cmp-note { display: block; margin-top: 0.35rem; }
+
+  .prov-calc {
+    max-width: var(--measure);
+    margin-top: 1.5rem;
+    padding: 1.1rem 1.3rem;
+    border: 1px solid var(--rule);
+    background: var(--raised);
+  }
+  .prov-calc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 0.9rem 1.25rem;
+  }
+  .prov-calc label > span:first-child {
+    display: block;
+    margin-bottom: 0.4rem;
+    font-family: var(--display);
+    font-size: var(--t-xs);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+  }
+  .prov-calc input[type='number'],
+  .prov-calc select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.45rem 0.6rem;
+    font: inherit;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    background: var(--ground);
+    border: 1px solid var(--rule);
+    border-radius: 0;
+  }
+  .prov-calc select { font-family: var(--body); }
+  .prov-calc-slider {
+    display: block;
+    margin-top: 1.1rem;
+  }
+  .prov-calc-readout {
+    display: block;
+    text-align: center;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: var(--t-md);
+    color: var(--accent);
+    margin-bottom: 0.3rem;
+  }
+  .prov-calc input[type='range'] {
+    display: block;
+    width: 100%;
+    accent-color: var(--accent);
+  }
+  .prov-calc-ends {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 0.3rem;
+    font-family: var(--display);
+    font-size: var(--t-xs);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+  }
+  .prov-calc-note {
+    margin: 0.9rem 0 0;
+    font-size: var(--t-sm);
+    color: var(--text-soft);
+  }
 
   .prov-hero {
     position: relative;

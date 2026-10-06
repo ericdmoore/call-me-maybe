@@ -23,6 +23,27 @@ export interface Provider {
   emergency: string;
   setup: string;
   sources: { label: string; url: string }[];
+  /**
+   * The same rate card as numbers, for the full-setup table in costs.ts.
+   * USD; per-minute rates are the advertised US starting rates. Leave it out
+   * when a recurring charge is unconfirmed and the provider drops out of the
+   * worked example rather than being costed on a guess.
+   */
+  rates?: Rates;
+}
+
+export interface Rates {
+  /** Monthly charge for one number. */
+  number: number;
+  incoming: number;
+  /** Per minute; ignored when outgoingPlan is set. */
+  outgoing: number;
+  /** Monthly, per enabled number; 0 when a plan includes it. */
+  e911: number;
+  /** One-time fees the provider lists; prepaid deposits are not fees. */
+  setup: number;
+  /** A monthly bundle of outgoing minutes with a per-minute overage. */
+  outgoingPlan?: { monthly: number; minutes: number; overage: number };
 }
 
 /** Attribution for the destination; UTMs alone do not measure our clicks/signups. */
@@ -43,6 +64,7 @@ export const providers: Provider[] = [
     number: 'From $1.10/month', incoming: 'From $0.009/min', outgoing: 'From $0.005/min',
     emergency: '$1.50/month per enabled number; confirm activation charge',
     setup: 'Number setup from $0.40; prepaid funding also required',
+    rates: { number: 1.10, incoming: 0.009, outgoing: 0.005, e911: 1.50, setup: 0.40 },
     pros: ['Separate SIP sub-accounts keep the phone credentials apart from the portal login.', 'Per-number routing and a choice of regional servers.', 'Call Me Maybe can check the account balance and ring a handset when credit is low.'],
     cons: ['Check the actual destination rate: the advertised starting rate is not a quote for every US call.', 'Keep credit funded and configure E911 for the number and address you use.'],
     sources: [{ label: 'Rates and fees', url: 'https://voip.ms/pricing' }, { label: 'SIP setup', url: 'https://wiki.voip.ms/article/How_it_works' }],
@@ -53,6 +75,7 @@ export const providers: Provider[] = [
     registration: 'yes', billing: 'unverified', billingNote: 'Confirm account terms',
     number: 'From $1.00/month', incoming: 'From $0.0032/min', outgoing: 'From $0.005/min',
     emergency: '$1.50/month per enabled number', setup: 'Confirm number, verification and funding requirements',
+    rates: { number: 1.00, incoming: 0.0032, outgoing: 0.005, e911: 1.50, setup: 0 },
     pros: ['Credential-based SIP registration is documented.', 'Secure trunking and T.38 fax support are listed without an extra feature charge.'],
     cons: ['Use SIP trunk pricing, not Voice API pricing; they are different products.', 'No live Call Me Maybe validation recorded here; verify incoming audio, keypad tones and outgoing caller ID.'],
     sources: [{ label: 'SIP rates and emergency calling', url: 'https://telnyx.com/pricing/elastic-sip' }, { label: 'Registration options', url: 'https://support.telnyx.com/en/articles/4245868-sip-connection-types' }],
@@ -76,6 +99,7 @@ export const providers: Provider[] = [
     outgoing: '$1.95/month North America Basic: 120 minutes; then $0.0198/min to US / Canada',
     emergency: 'Included in North America Basic for US / Canada addresses',
     setup: '$3.95 DID + $1.50 North America Basic setup',
+    rates: { number: 1.95, incoming: 0.015, outgoing: 0.0198, e911: 0, setup: 3.95 + 1.50, outgoingPlan: { monthly: 1.95, minutes: 120, overage: 0.0198 } },
     pros: ['Provider publishes an Asterisk PJSIP registration guide.', 'North America Basic includes E911 and 120 outgoing minutes to US, Canada and Puerto Rico.'],
     cons: ['An outgoing plan does not include an incoming number.', 'Live Call Me Maybe compatibility is unverified. The $1 Dollar Unlimited DID is a separate residential offer with limited geographic availability.'],
     sources: [{ label: 'Outgoing plans', url: 'https://www.callcentric.com/compare_rate_plans/' }, { label: 'Incoming number plans', url: 'https://www.callcentric.com/compare_did/' }, { label: 'Asterisk PJSIP setup', url: 'https://www.callcentric.com/support/device/asterisk/17_pjsip' }],
