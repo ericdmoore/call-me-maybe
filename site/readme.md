@@ -147,6 +147,17 @@ the line the project already has — "Good day." — and the doorman renders in
 oxblood via the same `data-state` the keypad drives. `not_found_handling:
 "404-page"` in `wrangler.jsonc` is what makes Cloudflare serve it.
 
+## The way back
+
+Every page but the lobby carries the plain Threshold mark and the wordmark at
+top left, inside the frame and aligned to the content column, linking to `/`.
+The browser's back button only retraces steps, and a visitor who arrived at
+`/providers/` from a search has none to retrace. `src/components/HomeLink.astro`
+renders it from `brand/mark-threshold.svg`, and `Base.astro` decides by path
+that the lobby itself does not get one. The plain rung of the brand's
+ornateness ladder is deliberate: at two rem the ornate mark is a bright dot.
+The doorway's rays light on hover, the same reward the keypad gives.
+
 ## Content that lives elsewhere
 
 - `public/llms.txt` is copied from the repository root, so the site serves the

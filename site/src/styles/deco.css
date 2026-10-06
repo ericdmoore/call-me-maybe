@@ -53,6 +53,10 @@
   --measure: 64ch;
   --gutter: clamp(1.25rem, 5vw, 4rem);
 
+  /* The page frame's distance from the viewport edge. On :root rather than on
+     the frame because the home link sits just inside the same rail. */
+  --pf-inset: clamp(10px, 1.2vw, 16px);
+
   color-scheme: dark;
 }
 
@@ -815,11 +819,10 @@ samp {
    intercepts input — pointer-events is none on the container and inherited by
    everything in it.
 
-   --pf-inset is the one number to change; everything else is derived from it. */
+   --pf-inset (on :root) is the one number to change; everything else is
+   derived from it. */
 
 .page-frame {
-  --pf-inset: clamp(10px, 1.2vw, 16px);
-
   /* How much empty margin actually exists beside the content column. Below
      74rem that is the gutter; above it, the centred column leaves far more. */
   --pf-room: max(var(--gutter), calc((100vw - 74rem) / 2));
@@ -939,6 +942,88 @@ samp {
 @media (prefers-reduced-transparency: reduce) {
   .page-frame {
     opacity: 0.6;
+  }
+}
+
+/* ── Home link ─────────────────────────────────────────────────────────────
+   Every page but the lobby carries the plain Threshold mark and the wordmark
+   at top left, where a visitor expects a site's name to take them home. It
+   sits just inside the frame's top rail, aligned to the content column's left
+   edge, and within the header's top padding, so the centred title beneath it
+   never has to move. Absolute rather than fixed: a logo scrolls away with its
+   header; only the frame stays.
+
+   Two of the stylesheet's existing breakpoints shape it. Below 44rem, where the
+   frame's corners come off, a centred title can reach the column edge, so the
+   link stops floating and takes a slim band of its own above the header. From
+   60rem, where the hero gains its flanking art, there is room for the wordmark
+   beside the glyph; between the two the glyph stands alone. */
+
+.home-link {
+  position: absolute;
+  z-index: 6;
+  top: calc(var(--pf-inset) + 0.75rem);
+  /* The .wrap column's left edge, computed the way .wrap computes it. */
+  left: max(var(--gutter), calc((100% - 74rem) / 2));
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  /* A comfortable tap target whatever the glyph measures; the padding is
+     pulled back so the glyph still sits on the column edge. */
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding-inline: 0.25rem;
+  margin-inline-start: -0.25rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.home-link:hover,
+.home-link:focus-visible {
+  color: var(--accent-lit);
+}
+
+.home-mark {
+  display: block;
+  height: 2rem;
+  width: auto;
+}
+
+/* The doorway lights when pointed at — the reward the keypad gives, in
+   miniature. */
+.home-mark .hl-light {
+  transition: opacity 400ms ease;
+}
+
+.home-link:hover .hl-light,
+.home-link:focus-visible .hl-light {
+  opacity: 1;
+}
+
+.home-word {
+  font-size: var(--t-xs);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* The glyph alone is the convention; the wordmark is a courtesy of width. */
+@media (max-width: 60rem) {
+  .home-word {
+    display: none;
+  }
+}
+
+/* The band. Still positioned, so its lower edge — which the header's padding
+   is pulled up over — keeps receiving taps rather than the header. The
+   negative margin gives back most of what the band takes. */
+@media (max-width: 44rem) {
+  .home-link {
+    position: relative;
+    top: auto;
+    left: auto;
+    display: flex;
+    width: fit-content;
+    margin: calc(var(--pf-inset) + 0.5rem) 0 -1.5rem calc(var(--gutter) - 0.25rem);
   }
 }
 
