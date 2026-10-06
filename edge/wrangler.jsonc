@@ -9,7 +9,9 @@
   "compatibility_date": "2026-07-29",
   "workers_dev": true,
   "routes": [{ "pattern": "edge.callmemaybe.cc", "custom_domain": true }],
-  "observability": { "enabled": true },
+  // The callback path is a credential. Emit sanitized request events from the
+  // handler instead of automatic invocation logs containing raw request URLs.
+  "observability": { "enabled": true, "redact_query_string": true, "logs": { "enabled": true, "invocation_logs": false } },
   "d1_databases": [
     { "binding": "DB", "database_name": "callmemaybe-edge", "database_id": "c27238ac-a4e0-4f59-bbf1-f216306a591b" }
   ]
@@ -18,4 +20,5 @@
   //   HOUSE_MIDBURY_INBOX_TOKEN     what the box presents to pull and send
   //   HOUSE_MIDBURY_DID             the house number, digits only
   //   VOIPMS_API_USERNAME / VOIPMS_API_PASSWORD  the carrier key, here and nowhere else
+  //   CONTACT_UPLOAD_KEYS  token-digest -> {house, sender, phonebooks}; upload-only keys
 }

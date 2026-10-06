@@ -5,6 +5,65 @@ carrier's API key lives. VoIP.ms calls this Worker with each text; the box
 pulls from it with `doorman inbox`; replies go out through it. Design and
 reasons: `.plans/s19-edge-inbox/`.
 
+## Shortcut contact uploads
+
+The Shortcut supplies the contact **and its complete phone-book selection**.
+It never joins, changes, or waits on the SMS contact shelf. Cancelling its
+picker makes no request; an empty destination header is an error, never a
+House default. The house imports as soon as it processes the upload and
+returns a receipt result over the API. This path sends no SMS replies.
+
+Three endpoints use a dedicated `Authorization: Bearer ddc_<random>` key:
+
+- `GET /api/v1/phonebooks`: the key's phone-book choices as a `phonebooks`
+  array of display strings (for example, `House`, `Norah`).
+- `POST /api/v1/contact-imports`: raw UTF-8 vCard body, `Content-Type:
+  text/vcard`, and required `X-Phonebooks: house,norah`. `Idempotency-Key`
+  may be a generated UUID; reuse it only for retries of the same file and
+  selection. Returns HTTP 202 and `{status:"queued", receipt, message}`.
+- `GET /api/v1/contact-imports/<receipt>?wait=20`: same key, optional
+  0–20 second wait, returns `queued`, `saved`, or `failed` with `message`.
+  A receipt is `saved` only after the house reports a completed write.
+  When the house is offline, it stays `queued`. Results expire with the
+  queue's seven-day acknowledged-message retention.
+
+Create 32 random bytes encoded as base64url (43 characters), prefix with
+`ddc_`, and keep the token only in the person's Shortcut/private setup file.
+The `CONTACT_UPLOAD_KEYS` Worker secret is a JSON object keyed by SHA-256
+hex digests of complete tokens:
+
+```json
+{
+  "<sha256-of-token>": {
+    "house": "example",
+    "sender": "+15125550101",
+    "phonebooks": ["house", "norah"]
+  }
+}
+```
+
+The operator binds the key to an existing person and their permitted
+`messages.toml` phone-book words; these are a ceiling, and the house checks
+its own permissions again before every import. The upload body cannot
+choose a sender, house, action, or SMS caption. Remove a digest to revoke a
+key; retain other entries when rotating one person's key. Upload keys cannot
+pull messages, send SMS, acknowledge results, or read another key's receipts.
+
+Uploads are limited to 1300 KiB, three cards, 100 numbers, and 30 new
+requests per hour / 30 pending requests per person. Only bounded names and
+numbers reach the queue. Retries do not rewrite the selection or receipt.
+
+Apply migration `0003_contact_uploads.sql`, deploy the Worker, then deploy
+the compatible `doorman inbox` binary before distributing a key. The new
+consumer requests `contact_uploads=1` and returns terminal results in its
+acknowledgement; old consumers cannot pull or acknowledge uploads. The
+consumer keeps uploads out of its SMS seen-id set so an interrupted result
+acknowledgement can safely repeat the idempotent directory write.
+
+The phone workflow is: get permitted books → choose multiple → combine
+with commas → upload the shared file and selection → check the receipt →
+show its message. See RUNBOOK “Share a contact with an iPhone Shortcut”.
+
     npm install
     npx wrangler d1 create callmemaybe-edge        # once; paste the id into wrangler.jsonc
     npm run db:init                               # the messages table
@@ -107,3 +166,71 @@ before the new importer can process it. Reference: <https://wiki.voip.ms/article
 Local checks (Node.js 22.18+): `npm run check && npm test`. Tests use a local
 SQLite database and mocked media responses; they never contact a carrier or
 deploy the Worker.
+
+
+## Diagnosing contact delivery
+
+The Worker emits one structured `edge.request` event per completed request.
+Use Cloudflare Workers Logs or `npx wrangler tail --format json` (from `edge/`)
+and select the **console log objects** whose `event` is `edge.request`. Raw
+tail envelopes may still include platform request metadata; do not save or
+paste their URLs, headers, or full contents into an issue.
+
+For an authenticated callback, `media_field` and `timestamp_field` distinguish
+`missing`, `empty`, `unexpanded`, and `present` parameters. `media_count`,
+`contact_count`, and `contact_error` show what survived parsing. `outcome`
+distinguishes `queued`, `invalid-media`, `invalid-message`, `media-unavailable`,
+and duplicates. `message_ref` is a hash of the house and message ID, so carrier
+retries can be correlated without logging the supplied ID. `request_ref`
+identifies one attempt. No captions, contact names/numbers, credentials, media
+URLs, or exception strings are included in these application events.
+
+An `internal-error` includes the fixed `stage` that failed (for example,
+`callback-save` or `inbox-pull`) and returns HTTP 500, allowing retry. Automatic
+invocation logs are disabled because the callback path contains a credential;
+query-string redaction is also enabled. Sanitized application events retain
+route, method, status, duration, and failures for every request.
+
+For a fresh `Add to: House, Norah` test with one vCard:
+
+- `media_field=missing`: verify and save `&media={MEDIA}` in the carrier callback.
+- `media_field=empty`: the callback supplied no attachment URL; inspect carrier
+  delivery and look for a separate callback carrying the card. Separate
+  instructions are supported locally once the card reaches the queue.
+- `media_field=unexpanded`: the carrier sent the literal placeholder.
+- `invalid-media`: the list did not meet the HTTPS carrier-host and count limits.
+- `media-unavailable`: a download failed; the Worker returns 503 without queuing.
+- `queued` with a `contact_error`: an attachment arrived but could not be imported.
+- `queued` with nonzero `contact_count`: check the house inbox outcome next.
+- `duplicate-with-new-media`: the same ID was previously accepted without media.
+  The new attachment is not imported; inspect callback order and test with a
+  **new message**, since both the edge and house suppress handled IDs.
+
+The local inbox pairs cards with subsequent instructions from the same sender
+and house number. After 15 seconds of silence it offers a two-minute choice
+window before defaulting to permitted House. Instructions without a pending
+card request a fresh card; they never select a destination for a future card. Diagnostics do not
+make a carrier forward unsupported files. Verify incoming vCard delivery
+before relying on MMS; a secure upload fallback is a separate feature.
+
+For a message already in this house's queue, an operator can call
+`GET /h/:house/inbox/diagnose?id=<numeric-message-id>` with the usual inbox
+bearer token. This read-only diagnostic calls the carrier's `getMMS`, verifies
+message ID, incoming direction, DID and sender, then calls `getMediaMMS`.
+It returns fixed statuses and attachment counts only. It neither imports nor
+requeues messages, downloads media, or returns credentials, contact data or
+media URLs. Responses are bounded, time-limited and not cached. Carrier
+reference: <https://voip.ms/m/apidocs.php> (sign-in required).
+
+- `message_found=true`, zero `record_media_count` and zero
+  `retrievable_media_count`: the carrier APIs expose no retained attachment.
+- Nonzero carrier counts with zero `callback_media_count`: investigate callback
+  forwarding; a recovery path may be possible using carrier media retrieval.
+- `message_found=false` or a failed lookup is inconclusive; do not interpret it
+  as proof that the carrier discarded an attachment.
+
+Live status, 2026-10-05: incoming iPhone vCard delivery is still failing through
+VoIP.ms. Saved callback settings include the media placeholder, and the carrier
+records received MMS, but both API lookups above succeeded with zero media
+for the tested messages. Local shelf tests do not establish end-to-end
+readiness. Carrier tracing and a successful live import remain required.
