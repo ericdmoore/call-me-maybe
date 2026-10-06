@@ -213,13 +213,15 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
             </select>
           </label>
         </div>
-        <label class="prov-calc-slider">
-          <span>Share of the chats with people who do not have a Tin Can</span>
-          <span class="prov-slider-row">
-            <input type="range" name="outsidePct" min="0" max="100" step="10" value={defaults.outsidePct} />
-            <output data-cost="outsidePct">{c.outsidePct}</output>
-          </span>
-        </label>
+        <div class="prov-calc-slider">
+          <output for="tincan-pct" class="prov-calc-readout" data-cost="tinCanPct">{c.tinCanPct}</output>
+          <input type="range" id="tincan-pct" name="tinCanPct" min="0" max="100" step="10" value={defaults.tinCanPct}
+            aria-label="Share of the chats that are with other Tin Cans" />
+          <div class="prov-calc-ends" aria-hidden="true">
+            <span>Zero Tin Can calls</span>
+            <span>All Tin Can calls</span>
+          </div>
+        </div>
         <p class="prov-calc-note">
           {/* One line on purpose: a line break beside an expression is dropped, and the words run together. */}
           <span data-cost="minutes">{c.minutes}</span> minutes a month: <span data-cost="inMinutes">{c.inMinutes}</span> in, <span data-cost="outMinutes">{c.outMinutes}</span> out; <span data-cost="outsideMinutes">{c.outsideMinutes}</span> with people on ordinary phones and <span data-cost="canMinutes">{c.canMinutes}</span> with people on Tin Cans.
@@ -255,8 +257,9 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
           each year after it.</p>
         <p><strong>Party Line is a flat fee.</strong> It is needed for the first
           minute of outside chat and costs the same for the last, so the slider
-          only changes the Tin Can row at zero. Spread over the outside minutes
-          at this setting it comes to <span data-cost="tincan.perOutsideMinute">{c['tincan.perOutsideMinute']}</span>.</p>
+          only changes the Tin Can row at its far right, where every call is to
+          another Tin Can. Spread over the outside minutes at this setting it
+          comes to <span data-cost="tincan.perOutsideMinute">{c['tincan.perOutsideMinute']}</span>.</p>
         <p><strong>Sharing a number cuts it to one plan.</strong> Tin Can can
           link several phones to one number on a single Party Line, ${tinCan.partyLine} a
           month; choose “one shared” above to price it. Every call then rings
@@ -266,8 +269,8 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
         <p><strong>The friends who do have Tin Cans</strong> cost a Call Me Maybe
           house the same carrier minute as anyone else, and the call only
           connects if that family has Party Line: the free plan reaches other
-          Tin Cans only. Move the slider to zero and the Tin Can row has no
-          monthly cost, and no way to call a house like this one.</p>
+          Tin Cans only. Slide all the way to “all Tin Can calls” and the Tin
+          Can row has no monthly cost, and no way to call a house like this one.</p>
         <p>Left out on both sides: tax and surcharges, a prepaid deposit, Wi-Fi,
           electricity, a power supply, storage and case for the brain, PoE or
           a power adapter for a desk phone, and your time. Only {costed} are costed; Flowroute’s recurring number
@@ -449,7 +452,7 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
         handset: field('handset').value,
         shared: field('shared').value === 'shared',
         minutes,
-        outsidePct: Number(field('outsidePct').value),
+        tinCanPct: Number(field('tinCanPct').value),
       };
     };
     const paint = () => {
@@ -541,22 +544,30 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
     display: block;
     margin-top: 1.1rem;
   }
-  .prov-slider-row {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-  .prov-calc input[type='range'] {
-    flex: 1;
-    min-width: 0;
-    accent-color: var(--accent);
-  }
-  .prov-calc output {
-    min-width: 4ch;
-    text-align: right;
+  .prov-calc-readout {
+    display: block;
+    text-align: center;
     font-family: var(--mono);
     font-variant-numeric: tabular-nums;
+    font-size: var(--t-md);
     color: var(--accent);
+    margin-bottom: 0.3rem;
+  }
+  .prov-calc input[type='range'] {
+    display: block;
+    width: 100%;
+    accent-color: var(--accent);
+  }
+  .prov-calc-ends {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 0.3rem;
+    font-family: var(--display);
+    font-size: var(--t-xs);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-soft);
   }
   .prov-calc-note {
     margin: 0.9rem 0 0;

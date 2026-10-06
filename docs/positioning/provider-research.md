@@ -35,8 +35,8 @@ and Tin Can can be read side by side. The arithmetic is
 `site/src/data/costs.ts`; it renders the default household at build time
 and recomputes in the browser from four inputs: handsets, whether the Tin
 Cans share one number or have one each, minutes a month (entered for the
-house or as an average per handset), and the share of the chats with
-people who do not have a Tin Can. It shows hardware, listed one-time fees, monthly service, year 1,
+house or as an average per handset), and a slider from "zero Tin Can
+calls" to "all Tin Can calls" for the share of chats with other Tin Cans. It shows hardware, listed one-time fees, monthly service, year 1,
 year 2 and a four-year total.
 
 - Default: three handsets, a kitchen phone for the adults and one for each
@@ -77,9 +77,9 @@ year 2 and a four-year total.
   marks approved-contacts-only calling "partly": incoming yes, outgoing no
   in the stock dialplan, and marks roadmap items "planned" rather than
   claiming them. No Tin Can was used.
-- The slider is the share of the chats with people who do not have a Tin
-  Can, default 50%. It changes only the Tin Can row, and only at zero:
-  Party Line is a flat fee, needed for any outside calling. A Call Me Maybe
+- The slider is the share of the chats that are with other Tin Cans,
+  default 50%. It changes only the Tin Can row, and only at "all Tin Can
+  calls": Party Line is a flat fee, needed for any outside calling. A Call Me Maybe
   house pays the same carrier minute to a Tin Can friend as to anyone else,
   and reaches that friend only if their family has Party Line.
 

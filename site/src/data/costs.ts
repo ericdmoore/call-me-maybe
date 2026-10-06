@@ -25,8 +25,8 @@ export interface Inputs {
   shared: boolean;
   /** Minutes a month across every handset, both directions together. */
   minutes: number;
-  /** Share of the chats with people who do not have a Tin Can. */
-  outsidePct: number;
+  /** Share of the chats that are with other Tin Cans, 0 to 100. */
+  tinCanPct: number;
 }
 
 /** The standard-issue house: a kitchen phone and two kids. */
@@ -38,7 +38,7 @@ export const defaults: Inputs = {
   shared: false,
   // Two kids at half an hour a week each, 52/12 weeks to the month.
   minutes: Math.round(2 * 30 * (52 / 12)),
-  outsidePct: 50,
+  tinCanPct: 50,
 };
 
 /**
@@ -46,7 +46,7 @@ export const defaults: Inputs = {
  * 100 minutes in and 100 out. Expressed as calculator inputs so the same
  * function prices it; the one Tin Can is assumed to call ordinary numbers.
  */
-export const lightUse: Inputs = { ...defaults, handsets: 1, minutes: 200, outsidePct: 100 };
+export const lightUse: Inputs = { ...defaults, handsets: 1, minutes: 200, tinCanPct: 0 };
 
 export const limits = {
   handsets: { min: 1, max: 12 },
@@ -135,8 +135,8 @@ export function sanitise(raw: Partial<Inputs>): Inputs {
   const handset = pick(handsetModels, raw.handset ?? defaults.handset, defaults.handset).name;
   const shared = Boolean(raw.shared ?? defaults.shared);
   const minutes = clamp(raw.minutes ?? defaults.minutes, limits.minutes.min, limits.minutes.max, defaults.minutes);
-  const outsidePct = clamp(raw.outsidePct ?? defaults.outsidePct, 0, 100, defaults.outsidePct);
-  return { handsets, brain, handset, shared, minutes, outsidePct };
+  const tinCanPct = clamp(raw.tinCanPct ?? defaults.tinCanPct, 0, 100, defaults.tinCanPct);
+  return { handsets, brain, handset, shared, minutes, tinCanPct };
 }
 
 export interface Line {
@@ -170,19 +170,19 @@ function years(hardware: number, setup: number, monthly: number, freeMonths = 0)
 
 export function estimate(raw: Partial<Inputs>): Estimate {
   const inputs = sanitise(raw);
-  const { handsets, shared, minutes, outsidePct } = inputs;
+  const { handsets, shared, minutes, tinCanPct } = inputs;
   const brain = pick(brains, inputs.brain, defaults.brain);
   const handset = pick(handsetModels, inputs.handset, defaults.handset);
   const outMinutes = Math.round(minutes * fullSetup.outgoingShare);
   const inMinutes = minutes - outMinutes;
   // On the Tin Can side every phone is a kid's, so all the chat is theirs.
-  const outsideMinutes = Math.round((minutes * outsidePct) / 100);
-  const canMinutes = minutes - outsideMinutes;
+  const canMinutes = Math.round((minutes * tinCanPct) / 100);
+  const outsideMinutes = minutes - canMinutes;
 
   // Party Line is a flat fee per Tin Can with its own number: it is needed
   // for the first minute of outside chat and costs the same for the last.
   // Tin Cans linked to one shared number need one plan between them.
-  const partyLines = outsidePct > 0 ? (shared ? 1 : handsets) : 0;
+  const partyLines = tinCanPct < 100 ? (shared ? 1 : handsets) : 0;
   const tcMonthly = partyLines * tinCan.partyLine;
   const tcHardware = handsets * tinCan.device;
   const tc = {
@@ -251,7 +251,7 @@ export function cells(raw: Partial<Inputs>): Record<string, string> {
     minutes: String(e.inputs.minutes),
     inMinutes: String(e.inMinutes),
     outMinutes: String(e.outMinutes),
-    outsidePct: `${e.inputs.outsidePct}%`,
+    tinCanPct: `${e.inputs.tinCanPct}%`,
     outsideMinutes: String(e.outsideMinutes),
     canMinutes: String(e.canMinutes),
   };
