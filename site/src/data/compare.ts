@@ -3,9 +3,10 @@
 //
 // Every Tin Can cell comes from its product page or FAQ, checked on the date
 // below; a feature those pages do not mention is marked absent, which is the
-// only honest reading of a product we have not used. The Call Me Maybe cells
-// link to the page or document that describes the feature, and say "partly"
-// where the stock configuration does less than a reader might assume.
+// only honest reading of a product we have not used. Every Call Me Maybe cell
+// links to the feature page on this site that describes it, never to the
+// repository, and says "partly" where the stock configuration does less than
+// a reader might assume.
 //
 // The fun rows come first on purpose. Cost is a tiebreaker; this is the
 // argument.
@@ -32,17 +33,16 @@ export interface Row {
   tinCan: Side;
 }
 
-const repo = 'https://github.com/ericdmoore/call-me-maybe';
-
 export const rows: Row[] = [
   {
     feature: 'Spammers',
+    href: '/features/the-lobby/',
     cmm: { mark: 'zero', note: 'Only delight when the phone rings, zero dread. The people you list ring the house; everyone else meets the doorman, dials an extension or hears “Good day.”' },
     tinCan: { mark: 'zero', note: 'Only delight when the phone rings, zero dread. Nobody but the contacts approved in the parent app can ring it at all.' },
   },
   {
     feature: 'Room to room',
-    href: `${repo}/blob/main/examples/handsets.example.toml`,
+    href: '/features/room-to-room/',
     cmm: { mark: 'yes', note: 'Dial 101 for the kitchen. The call never leaves the house and never touches the carrier.' },
     tinCan: { mark: 'partly', note: 'Two Tin Cans with their own numbers can call each other through Tin Can’s service. Linked to one number, they cannot.' },
   },
@@ -59,13 +59,13 @@ export const rows: Row[] = [
   },
   {
     feature: 'Stories the child steers',
-    href: `${repo}/blob/main/docs/STORY-PACKS.md`,
+    href: '/features/packs/#stories-the-child-steers',
     cmm: { mark: 'planned', note: 'A story the keypad steers. The format is published and public domain, doorman builds the audio and the engine that tells it is written; the extension that puts a call through to it is next.' },
     tinCan: { mark: 'no', note: 'Not mentioned.' },
   },
   {
     feature: 'Open the garage',
-    href: `${repo}/blob/main/docs/RUNBOOK.md#actions`,
+    href: '/features/text-the-house/',
     cmm: { mark: 'yes', note: 'Text “garage” to the house number. Home Assistant opens it, only for the people you list, and the house texts back that it did.' },
     tinCan: { mark: 'no', note: 'Not mentioned.' },
   },
@@ -107,13 +107,13 @@ export const rows: Row[] = [
   },
   {
     feature: 'The phone calls you back',
-    href: `${repo}/blob/main/docs/RUNBOOK.md#scheduled-calls-80-81-82`,
+    href: '/features/scheduled-calls/',
     cmm: { mark: 'yes', note: 'Dial *80, say a time and leave a message. At 7:30 the phone rings and plays it back to you.' },
     tinCan: { mark: 'no', note: 'Not mentioned.' },
   },
   {
     feature: 'A swappable bouncer',
-    href: `${repo}/blob/main/docs/PACKS.md`,
+    href: '/features/packs/',
     cmm: { mark: 'yes', note: 'The stranger’s greeting is a folder of audio. Swap the pack and a Victorian doorman or a ship’s computer answers instead.' },
     tinCan: { mark: 'no', note: 'Strangers cannot call at all, which is its own kind of answer.' },
   },
@@ -143,14 +143,14 @@ export const rows: Row[] = [
   },
   {
     feature: 'Emergency calls',
-    href: '/providers/',
+    href: '/features/emergency-calls/',
     cmm: { mark: 'yes', note: '911 leaves by the trunk whose street address is filed. You configure and verify it with the provider.' },
     tinCan: { mark: 'yes', note: '911 on both plans, with the address set in the app.' },
   },
 ];
 
-/** Feature slugs the rows link to; the build checks each page exists. */
+/** Feature slugs the rows link to, fragments dropped; the build checks each page exists. */
 export const linkedFeatures = rows
   .map((r) => r.href)
   .filter((h): h is string => !!h && h.startsWith('/features/'))
-  .map((h) => h.replace(/^\/features\/|\/$/g, ''));
+  .map((h) => h.replace(/^\/features\//, '').replace(/[#?].*$/, '').replace(/\/$/, ''));
