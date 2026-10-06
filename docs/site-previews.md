@@ -6,7 +6,7 @@ its exact head on GitHub-hosted Ubuntu. Alpaca uploads only the static build to
 Cloudflare Worker `callmemaybe`, using the named preview `pr-<number>`. One
 `github-actions[bot]` comment is updated with its URL and commit; failures replace
 the success message with a workflow link. Closing or merging deletes the preview
-and updates the comment. Production deployment remains `npm run deploy` in `site`.
+and updates the comment. Production is `.github/workflows/site-deploy.yml`, below.
 
 The workflow must be merged into `main` before `pull_request_target` can run it.
 After merging, push a site change or reopen an existing site PR to test the whole
@@ -63,6 +63,26 @@ pending. The comment job has write access on hosted Ubuntu; Alpaca has only a
 read-only GitHub token. Preview content is public. OAuth grants the host broader
 Cloudflare access than this workflow uses; this is not an OS sandbox against
 trusted repository writers or other processes running as the same Unix user.
+
+## Production deploys
+
+`.github/workflows/site-deploy.yml` publishes callmemaybe.cc from `main`. A push
+to `main` that touches `site/**`, `brand/**`, `.github/site/**` or the workflow
+itself builds the site on GitHub-hosted Ubuntu and hands the static output to
+Alpaca, which runs `wrangler deploy` against the committed `site/wrangler.jsonc`
+— the one source of the custom-domain routes — with the host-installed CLI and
+its OAuth login, exactly as previews do. `workflow_dispatch` republishes `main`
+by hand when something outside those paths needs a rebuild.
+
+The job then fetches `https://callmemaybe.cc/` and compares the bytes to the
+`index.html` it just uploaded, retrying for propagation. A deploy that reports
+success against a hostname still serving the previous build is the failure this
+workflow exists to end, so that mismatch fails the run rather than warning.
+
+The host guard admits this workflow only for `push` and `workflow_dispatch`
+events whose ref is `refs/heads/main`, never a PR event. Runs are serialised and
+never cancelled mid-upload, so two quick merges publish in order. `npm run
+deploy` in `site` remains the manual fallback when the runner is offline.
 
 ## Reuse for another static Astro repository
 

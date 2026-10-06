@@ -1,0 +1,72 @@
+name: Site deploy
+# Publishes callmemaybe.cc from main. The site was drifting behind the code
+# because production was a manual `npm run deploy` that nobody ran after a
+# merge; now the merge is the deploy. Same shape as the PR preview workflow:
+# GitHub-hosted Ubuntu builds the static site, Alpaca only uploads it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'brand/**'
+      - '.github/site/**'
+      - '.github/workflows/site-deploy.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: site-deploy
+  # Two merges in quick succession publish in order. Cancelling the first
+  # mid-upload would leave the second's probe racing a half-finished deploy.
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts && npm --ignore-scripts run build
+        working-directory: site
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: site-release
+          path: site/dist/
+          if-no-files-found: error
+          retention-days: 7
+  deploy:
+    needs: build
+    runs-on: [self-hosted, macOS, ARM64, call-me-maybe-ai]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      WRANGLER_BIN: ${{ vars.WRANGLER_BIN }}
+    steps:
+      # The same commit the build used; on a push to main that is main itself,
+      # which is the only ref the host guard admits for this workflow.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: site-release
+          path: site/dist
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        id: release
+        env:
+          SITE_DIR: ${{ github.workspace }}/site
+        with:
+          script: await require('./.github/site/release.cjs').release({context, core});
+      - name: Remove the built site
+        if: always()
+        run: rm -rf -- site/dist
