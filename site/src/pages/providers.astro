@@ -121,7 +121,7 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
             <th scope="col">Provider costs, monthly</th>
             <th scope="col">Year 1</th>
             <th scope="col">Year 2</th>
-            <th scope="col">4 years</th>
+            <th scope="col">4 year total</th>
           </tr></thead>
           <tbody>{lightLines.map((l) => <tr>
             <th scope="row">{l.name}<span class="prov-basis">{l.basis}</span></th>
@@ -235,7 +235,7 @@ const years = (l: { yearOne: number; yearTwo: number; fourYears: number }) => [l
             <th scope="col">Provider costs, monthly</th>
             <th scope="col">Year 1</th>
             <th scope="col">Year 2</th>
-            <th scope="col">4 years</th>
+            <th scope="col">4 year total</th>
           </tr></thead>
           <tbody>{lines.map((l) => <tr>
             <th scope="row">{l.name}<span class="prov-basis" data-cost={`${l.key}.basis`}>{c[`${l.key}.basis`]}</span></th>
