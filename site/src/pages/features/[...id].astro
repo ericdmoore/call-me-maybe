@@ -1,6 +1,7 @@
 ---
 import { getCollection, render } from 'astro:content';
 import Base from '../../layouts/Base.astro';
+import HomeNav from '../../components/HomeNav.astro';
 
 export async function getStaticPaths() {
   const features = await getCollection('features');
@@ -21,6 +22,7 @@ const { Content } = await render(f);
       <p class="tagline">{f.data.tagline}</p>
     </div>
   </header>
+  <HomeNav />
 
   <section class="panel">
     <div class="wrap">

@@ -54,7 +54,7 @@
   --gutter: clamp(1.25rem, 5vw, 4rem);
 
   /* The page frame's distance from the viewport edge. On :root rather than on
-     the frame because the masthead sits just inside the same rail. */
+     the frame because the stuck home nav sits just inside the same rail. */
   --pf-inset: clamp(10px, 1.2vw, 16px);
 
   color-scheme: dark;
@@ -373,14 +373,16 @@ samp {
 }
 
 /* ── Home nav ──────────────────────────────────────────────────────────────
-   Every page but the lobby opens with the divider, the plain Threshold mark
+   Every page but the lobby carries the divider with the plain Threshold mark
    standing where the dial stands on the lobby, and that doorway is the way
-   home. It is a sibling of the page's header rather than part of it, because
+   home. At rest it sits under the header's tagline, where the divider always
+   has. It is a sibling of the header rather than part of it, because
    position: sticky holds only within its parent: in the body it rides the
-   whole page. On desktop it sticks beneath the frame's top rail and stud,
-   with the ground colour behind it so the words passing underneath never
-   collide with the bolts. On a phone it is a plain masthead; a bar that
-   followed the thumb would eat the screen. */
+   whole page, and sticks exactly when its resting spot reaches the top,
+   which is after the words above it have scrolled away. On desktop it then
+   holds beneath the frame's rail and stud, with the ground colour behind it
+   so the words passing underneath never collide with the bolts. On a phone it
+   never sticks; a bar that followed the thumb would eat the screen. */
 
 .home-nav {
   /* Positioned even in flow, so it paints above the header's sunburst. */
@@ -388,13 +390,13 @@ samp {
   z-index: 4; /* above the page, beneath the frame */
   display: flex;
   justify-content: center;
-  padding: calc(var(--pf-inset) + 1rem) var(--gutter) 0.75rem;
+  padding: 1.25rem var(--gutter) 0.75rem;
   /* Solid behind the drawing, then a short fade, so the bar has no hard edge. */
   background: linear-gradient(var(--ground) calc(100% - 0.75rem), transparent);
 }
 
 .home-nav .deco-divider {
-  width: min(22rem, 100%);
+  width: min(30rem, 100%);
   margin: 0;
 }
 
@@ -402,7 +404,8 @@ samp {
   .home-nav {
     position: sticky;
     top: 0;
-    /* Clear the stud hanging from the rail. */
+    /* Room for the stud hanging from the rail once stuck; at rest it is
+       simply the air between the tagline and the divider. */
     padding-top: calc(var(--pf-inset) + 1.5rem);
   }
 }

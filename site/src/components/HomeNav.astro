@@ -3,15 +3,18 @@ import Divider from './Divider.astro';
 
 /**
  * The way back to the lobby from every other page: the divider, with the
- * doorway standing where the dial stands on the lobby, as a masthead above
- * the page's own header. On desktop it sticks to the top of the viewport
+ * doorway standing where the dial stands on the lobby. At rest it sits
+ * where the divider always has, under the header's tagline. On desktop,
+ * once the header has scrolled out of the viewport, it sticks to the top
  * beneath the frame's rail and stud, so the doorway is one click away from
  * anywhere on the page. The browser's back button only retraces steps;
  * someone who arrived at /providers/ from a search has none to retrace.
  *
- * A sibling of the header rather than part of it, because position: sticky
- * holds only within its parent. Inside the header it would scroll away with
- * the header; in the body it rides the whole page.
+ * Each sub-page places it right after its header, as a sibling rather than
+ * inside it, because position: sticky holds only within its parent: inside
+ * the header it would scroll away with the header, while in the body it
+ * rides the whole page and sticks exactly when its resting spot reaches
+ * the top — which is after the words above it have gone.
  */
 ---
 

@@ -1,5 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
+import HomeNav from '../components/HomeNav.astro';
 import Switchboard from '../components/Switchboard.astro';
 import { providers, track, checkedAt } from '../data/providers';
 ---
@@ -20,6 +21,7 @@ import { providers, track, checkedAt } from '../data/providers';
       </p>
     </div>
   </header>
+  <HomeNav />
 
   <section class="panel">
     <div class="wrap">

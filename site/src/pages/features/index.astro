@@ -1,6 +1,7 @@
 ---
 import { getCollection } from 'astro:content';
 import Base from '../../layouts/Base.astro';
+import HomeNav from '../../components/HomeNav.astro';
 import Switchboard from '../../components/Switchboard.astro';
 
 const features = (await getCollection('features')).sort(
@@ -23,6 +24,7 @@ const features = (await getCollection('features')).sort(
       </p>
     </div>
   </header>
+  <HomeNav />
 
   <section class="panel">
     <div class="wrap">
