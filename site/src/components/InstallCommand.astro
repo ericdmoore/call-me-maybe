@@ -13,7 +13,13 @@ const command = 'curl -fsSL https://callmemaybe.cc/install.sh | bash';
 ---
 
 <div class="install">
-  <p class="eyebrow">Or skip the build</p>
+  <p class="eyebrow">Already have a computer that can stay on?</p>
+
+  <p class="install-note">
+    Put it to work as your PhoneBrain. Install doorman on a supported Linux
+    system, then connect your provider and a compatible handset. Start with
+    one phone and add more whenever you like.
+  </p>
 
   <div class="install-line">
     <code data-install-cmd>{command}</code>
@@ -21,13 +27,9 @@ const command = 'curl -fsSL https://callmemaybe.cc/install.sh | bash';
   </div>
 
   <p class="install-note">
-    Detects your OS and architecture, verifies a SHA-256 against the published
-    checksums, and installs to <code>/usr/local/bin</code> — or
-    <code>~/.local/bin</code> when that is not writable. It installs the man page
-    too, and on Debian or Ubuntu offers to install Asterisk with apt — it asks
-    first. No service and no config: those are the runbook's job. Pass
-    <code>--version</code>, <code>--prefix</code>, or <code>--force</code> if you
-    want to be specific.
+    Run this command on your PhoneBrain to install doorman. Then follow the
+    <a href="https://github.com/ericdmoore/call-me-maybe/blob/main/README.md#setup">setup guide</a>
+    to finish connecting your home phone system.
   </p>
 </div>
 

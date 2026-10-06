@@ -1,11 +1,13 @@
 ---
 import Base from '../layouts/Base.astro';
+import { Image } from 'astro:assets';
+import nostalgiaSpammers from '../assets/nostalgia-spammers.png';
 import ThresholdScales from '../components/Threshold-scales.astro';
 import Divider from '../components/Divider.astro';
 import InstallCommand from '../components/InstallCommand.astro';
 import Softphones from '../components/Softphones.astro';
 import Keypad from '../components/Keypad.astro';
-import { byKind, kindLabels, type Kind } from '../data/hardware';
+import { byKind, kindLabels, priceCheckedDate, type Kind } from '../data/hardware';
 
 const repo = 'https://github.com/ericdmoore/call-me-maybe';
 
@@ -70,21 +72,33 @@ const features = [
 
 const steps = [
   {
-    title: 'Grab a number',
-    body: 'A sub-account with a VoIP provider, a DID pointed at it, and E911 switched on. Budget for the number, incoming and outgoing minutes, E911 and taxes. The comparison includes light-use examples.',
-      link: { href: '/providers/', text: 'Compare providers' },
+    title: 'Pick your hardware',
+    body: 'Start with one PhoneBrain — a Raspberry Pi or MiniPC — and one compatible handset. Add more handsets whenever you’re ready. Give the brain power, storage, a supported Linux system, and a wired connection to your router.',
+    link: { href: '#hardware', text: 'Find your hardware' },
   },
   {
-    title: 'Install some software',
-    body: 'One command fetches the binary, checks it against the published checksums, and offers to install Asterisk for you. On a Pi that is the whole rung — the installer knows apt, and asks before it uses it.',
+    title: 'Get a number',
+    body: 'Open a VoIP provider account and choose a phone number. Set up calling credit or billing, and activate emergency calling with your address. You choose the carrier and pay it directly.',
+    link: { href: '/providers/', text: 'Compare providers and costs' },
   },
   {
-    title: 'Give your doorman a voice',
-    body: 'Prompts are rendered once, on a workstation, and copied across as ordinary WAV files. The Pi never synthesises speech, so a broken speech service can never make the phone unreachable — and swapping the voice is swapping a folder.',
+    title: 'Install your doorman',
+    body: 'Install doorman and Asterisk on the PhoneBrain, then add the greeting audio. The installer below gets the software started; the setup guide walks you through the rest.',
+    link: { href: `${repo}/blob/main/README.md#setup`, text: 'Follow the setup guide' },
   },
   {
-    title: 'Add the house rules',
-    body: 'Who is known, what rings, and when. Run doorman check, enable the service, and you are answering calls. Policy edits reload automatically; invalid edits leave the last valid policy in place. Hardware, trunk and generated dialplan changes require rendering and an Asterisk reload.',
+    title: 'Hook it all up',
+    body: 'Connect your provider and register your handset with the PhoneBrain. Follow the guide yourself, or ask Claude or ChatGPT to help you work through it. You’ll still need to plug in the hardware and set up your provider account.',
+    link: { href: '/llms.txt', text: 'Give your AI helper the project guide' },
+  },
+  {
+    title: 'Set your house rules',
+    body: 'Choose who rings straight through, give friends an extension, and decide which phones ring when. Add quiet hours or a handset bedtime to suit your household.',
+  },
+  {
+    title: 'Make the first call',
+    body: 'Call in from another phone, call out, and check that you can hear each other. Try the lobby from a number outside your known callers, then check your extensions and quiet hours before handing the phone to the family.',
+    link: { href: `${repo}/blob/main/docs/RUNBOOK.md`, text: 'Check your setup' },
   },
 ];
 
@@ -113,7 +127,7 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
       </p>
 
       <p class="tagline tagline-detail">Open-source software you run at home on a Raspberry Pi or another Asterisk host.</p>
-      <p><a href="#family-fit">Is this for our family?</a> · <a href="/providers/">Compare running costs</a></p>
+      <p><a href="#family-fit">Is this for our family?</a> · <a href="#get-started">How to get started</a> · <a href="/providers/">Compare running costs</a></p>
       <Keypad />
     </div>
   </header>
@@ -270,18 +284,15 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
   </section>
 
   <!-- ── Setup ──────────────────────────────────────────────────────────── -->
-  <section class="panel">
+  <section class="panel" id="get-started">
     <div class="wrap">
       <p class="eyebrow">Make the switch</p>
-      <h2 class="display">Retro fun on modern systems</h2>
+      <h2 class="display">How to get started</h2>
 
       <div class="prose" style="margin-top:1.25rem;">
         <p>
-          A rotary dial and a bakelite handset, answered by something that
-          follows your call-routing rules and configured schedules. A rotary phone may need a pulse-to-tone converter as well as an analog adapter. In this
-          order, and confirm each rung before climbing — a failure low down
-          explains every symptom above it, which is why the runbook is written
-          as a ladder rather than a checklist.
+          One brain. One handset. Your house, on the line.
+          Start small and add a phone in another room whenever you like.
         </p>
       </div>
 
@@ -304,6 +315,21 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
       </ol>
 
       <InstallCommand />
+
+      <div class="prose setup-signoff">
+        <p><strong>Park the screens. Pick up the phone. Kick it old-school cool.*</strong></p>
+        <details class="setup-meme">
+          <summary class="setup-footnote">*The nostalgia is welcome. The spammers get the lobby.</summary>
+          <Image
+            src={nostalgiaSpammers}
+            alt="A doorman holds up his palm to reject Spammers, then smiles and welcomes Nostalgia."
+            width={640}
+            format="webp"
+            loading="lazy"
+            class="nostalgia-meme"
+          />
+        </details>
+      </div>
     </div>
   </section>
 
@@ -322,7 +348,7 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
           already in your house may need nothing bought at all.
         </p>
         <p>
-          For the PhoneBrain &mdash; a Raspberry Pi or MiniPC &mdash; one choice is worth being rigid about:
+          For the PhoneBrain &mdash; a Raspberry Pi or MiniPC &mdash; one choice is worth being rigid about:{' '}
           <strong>use wired Ethernet</strong>. Wi-Fi jitter on the box handling
           audio is the difference between a clear call and someone sounding
           underwater. Then put it on a small UPS &mdash; a house phone that dies
@@ -334,6 +360,12 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
         kinds.map((kind) => (
           <div class="hw-group">
             <h3>{kindLabels[kind]}</h3>
+            <div class="hw-list-heading" aria-hidden="true">
+              <span>Hardware</span>
+              <span>Type</span>
+              <span>Approx. price</span>
+              <span>Why pick it</span>
+            </div>
             <ul class="hw-list">
               {
                 byKind(kind).map((item) => (
@@ -342,6 +374,11 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
                       {item.url ? <a href={item.url} rel="nofollow sponsored noopener">{item.name}</a> : item.name}
                     </span>
                     <span class="hw-type">{item.type}</span>
+                    <div class="hw-price">
+                      <span class="hw-price-label">Approx. price: </span>
+                      <a href={item.priceSource} aria-label={`Approximate price for ${item.name}: ${item.approxPrice} USD. View price source.`}>{item.approxPrice}</a>
+                      <small>{item.priceBasis}</small>
+                    </div>
                     <p class="hw-note">{item.note}</p>
                   </li>
                 ))
@@ -352,11 +389,19 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
       }
 
       <p class="disclosure">
+        <strong>Budgeting, not a live quote.</strong> Approximate new-hardware prices in USD,
+        checked <time datetime={priceCheckedDate}>October 5, 2026</time>, before tax and shipping.
+        Price links show the reference listing; Amazon prices and bundles may differ.
+        Pi prices cover the board only: allow for a power supply, storage, case and any cooling.
+        DECT bases and extra handsets are separate unless marked as a bundle.
+      </p>
+
+      <p class="disclosure">
         <strong>Disclosure.</strong> The Amazon links above are affiliate links
         &mdash; buy through one and the project earns a commission at no cost to
         you. Nothing here is sponsored and no vendor has paid for placement. Be
-        aware of the obvious bias anyway: every product link in those tables
-        earns something, so the honest guidance is the part that does not.
+        aware of the obvious bias anyway: the Amazon product links earn
+        something, while the price references do not.
         <code>doorman</code> works with any SIP endpoint, the ATA above may mean
         buying nothing at all, and a free softphone will test your whole ringer
         ladder before you spend a cent.
@@ -398,5 +443,30 @@ const kinds: Kind[] = ['brain', 'wifi', 'ata', 'dect', 'desk'];
     font-family: var(--display);
     font-size: var(--t-sm);
     letter-spacing: 0.05em;
+  }
+
+  .setup-signoff {
+    margin-top: 2rem;
+  }
+
+  .setup-footnote {
+    font-size: var(--t-sm);
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 0.2em;
+  }
+
+  .setup-footnote:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+  }
+
+  .nostalgia-meme {
+    display: block;
+    width: 100%;
+    max-width: 40rem;
+    height: auto;
+    margin-top: 1rem;
   }
 </style>
