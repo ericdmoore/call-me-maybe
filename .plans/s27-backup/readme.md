@@ -52,7 +52,11 @@ manifest and says what it is holding before touching anything.
   means enabled. SigV4 for four operations (PUT, GET, LIST, DELETE) on
   `net/http` — a few hundred lines, testable against a fake, and no SDK.
 - `cloud` — the account: `doorman backup login` prints a device code, the
-  page shows a token once, `BACKUP_CLOUD_TOKEN`. Built when the account
+  page shows a token once, `BACKUP_CLOUD_TOKEN`. *Decided 2026-10-07 (#79):
+  the login is `doorman login`, the token lives in
+  `/var/lib/doorman/account/tokens.bin` rather than `.env`, rotates in band,
+  and is never in the bundle — `restore` ends in `doorman login`. The escrow
+  design is in #80.* Built when the account
   exists; the interface is shaped for it now.
 
 **Retention** is the destination's job on each run: keep `BACKUP_KEEP_DAILY`
