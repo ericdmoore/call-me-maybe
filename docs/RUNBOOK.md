@@ -296,7 +296,9 @@ finish with `sudo chown -R doorman:doorman /opt/call-me-maybe` and
 
 ### Prompts
 
-Built on a workstation (piper is not worth installing on a Pi), copied over.
+The bundled prompts are built on a workstation and copied over. Local
+`.cmmpack` installs can also render missing audio ahead of time on the Pi;
+see “Local packs” below. Calls never invoke a renderer.
 
 ```bash
 # On the workstation:
@@ -1315,6 +1317,56 @@ understand why the state machine did what it did.
 ---
 
 ## 6. Day-2 tasks
+
+### Local packs
+
+Use the actual service environment file (`systemctl cat doorman.service`),
+which may differ from `/etc/doorman/.env` on an existing installation:
+
+```bash
+doorman pack lint ./voice.cmmpack
+sudo doorman pack install ./voice.cmmpack --env /etc/doorman/.env --dry-run
+sudo doorman pack install ./voice.cmmpack --env /etc/doorman/.env
+sudo doorman pack list --env /etc/doorman/.env
+sudo doorman pack use <id> --env /etc/doorman/.env
+doorman check --env /etc/doorman/.env
+```
+
+Install reports how many clips need rendering and available character/request
+estimates, then records progress. Bundled audio and valid cached clips skip TTS.
+Credentials, Piper models and exec wrappers belong to the operator. Missing
+credentials or a failed render do not switch the voice; fix the reported cause
+and repeat install to reuse completed output. After a killed process, list may
+still show staged/rendering; the next install can acquire the released lock
+and resume. There is no dependency on the store, an account or DDcc.
+
+Installation and activation are separate. `use` verifies all six lobby prompts,
+changes the environment atomically and restarts the running doorman service.
+Schedule that restart as you would any service restart. If it fails, the command
+restores the old configuration and attempts to restart it. Read a rollback
+failure carefully: restore service health before assuming the new selection
+is playing. `--no-restart` is for another supervisor or offline configuration;
+you must restart it yourself. Per-line `prompts` overrides still win. `check`
+and `pack list` show the configured selection, not a live playback probe.
+
+On a small Pi, prefer bundled audio or a renderer with bounded thread use.
+The installer renders sequentially at reduced priority; external tools can
+still start their own workers. Check free space before large installs: the
+archive, temporary extraction, reusable cache and installed audio coexist.
+Immutable playback versions are in `/var/lib/asterisk/sounds/doorman-packs/`;
+private progress and cache are in `.doorman-packs/` under that sounds root.
+Old versions are retained for current calls and previous selections; automatic
+pruning is not part of this release. Do not delete a version referenced by
+`PROMPT_MEDIA_PREFIX` or any line's `prompts`. Interrupted-process temporary
+`.install-*`/`.render-*` directories may be removed only after confirming no
+installer is running. Changing local models/wrappers requires a new
+`--renderer-revision`; the default changes with the doorman build.
+
+Restore the bundled voice by setting `PROMPT_MEDIA_PREFIX=call-me-maybe` and
+restarting. Its system phrases are untouched by pack installation. Story packs
+install alongside voices but their handset player is separate work (#69).
+See [PACKS.md](PACKS.md) for the format, audio tolerances and authoring commands.
+
 
 ### Add a person to the allow-list
 

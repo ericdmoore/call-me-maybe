@@ -144,7 +144,7 @@ Session finish and handoff do not imply call termination. See [events](docs/even
 - **Caller IDs and PINs must never reach the logs.** This is enforced mechanically by a custom `go/analysis` pass in `tools/nologsecrets`, not just by review. `len(digits)` and `tail(number)` are allowed; the value itself is not, including through `fmt.Sprint` or a slice expression.
 - **Caller IDs are normalised to E.164 before anything compares them.** The same person arrives as `5125550100`, `15125550100`, and `+15125550100` on different days. Probe any value with `doorman e164 "(512) 555-0100"`.
 - **A bad `policy.toml` cannot take the phone down.** Edits are picked up live; a file that fails validation is logged and discarded.
-- **Prompts are pre-rendered WAVs, not runtime TTS.** The Pi never synthesises speech, so a broken speech service can never make the phone unreachable.
+- **No synthesis on the call path.** `doorman pack install` may render missing clips ahead of time on the Pi; calls only play complete installed WAVs. Failed rendering leaves previous audio available. `pack use` explicitly selects a verified voice; local packs need no account. See `doorman pack help` and `docs/PACKS.md`.
 - **The lobby and the bouncer are two branches of one state machine**, not separate services. Splitting them would add a network hop and no seam.
 - **Tests never need a live Asterisk.** State machine changes go through the fake-ARI harness in `internal/lobby/fake_ari_test.go`.
 - **Test fixtures use `555-01xx` numbers**, which are reserved for fiction.

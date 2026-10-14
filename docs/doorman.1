@@ -645,6 +645,86 @@ Print the version. A release binary reports its git tag.
 .TP
 .B doorman help
 Print a usage summary.
+.TP
+.B doorman pack check <dir> [--hashes]
+Validate source without rendering. With
+.B --hashes
+print the source hashes used to bind recorded clips to their scripts.
+.TP
+.B doorman pack build <dir> [flags]
+Render source to audio using the manifest's backend.
+.B -o
+selects the output directory (default <dir>/build).
+.B --archive <file.cmmpack>
+also packages a distributable ZIP with source, audio and checksums.
+.B --source-only
+requires --archive and packages scripts plus declared recordings without
+synthesis.
+.B --dry-run
+reports the work without writing or rendering.
+.B --backend <name>
+overrides the backend only for loose directory builds, not archive output.
+.TP
+.B doorman pack voices --backend <name>
+List voices offered by a configured backend: piper, exec, elevenlabs, openai
+or polly.
+.TP
+.B doorman pack lint <file.cmmpack>
+Validate a version-1 ZIP, checksums, source and supplied audio without
+rendering.
+Only voice and story kinds are supported. Unknown versions, unsafe paths/links,
+undeclared payload, corrupt audio and incomplete bundled pairs fail validation.
+Audio is mono 16-bit PCM: 8 kHz .wav and 16 kHz .wav16.
+Level warnings use RMS and sample peak; see docs/PACKS.md for tolerances.
+.TP
+.B doorman pack install <file.cmmpack> [flags]
+Validate, stage, render missing clips, verify and atomically install an
+immutable
+version. No account or hosted service is required. Bundled and valid cached
+audio
+skip synthesis. Progress and completed renders survive retries; installation
+does
+not change the active voice. Rendering never occurs on the call path.
+.B --dry-run
+reports bundled/cached/missing counts and character/request estimates only.
+.B --sounds-dir <dir>
+selects the Asterisk sounds root (default /var/lib/asterisk/sounds).
+.B --env <file>
+selects operator configuration (default .env; process environment takes
+precedence).
+.B --renderer-revision <id>
+controls cache invalidation (default this doorman build's version); change
+it after
+replacing local models or renderer configuration not identified by the manifest.
+Credentials and executable configuration are never taken from downloaded packs.
+.TP
+.B doorman pack list [--json] [--sounds-dir <dir>] [--env <file>]
+Show installed versions, latest staged/rendering/failed/installed attempts and
+the configured default prefix. An interrupted job can remain staged/rendering
+until retried. An installed upgrade is inactive until explicitly selected.
+JSON exposes local progress and provenance for future delivery adapters.
+.TP
+.B doorman pack use <id> [--sounds-dir <dir>] [--env <file>] [--no-restart]
+Verify a complete installed voice, atomically update PROMPT_MEDIA_PREFIX and
+restart a running doorman.service. The service must read the specified
+environment
+file. If stopped, it takes the selection on its next start. Restart failure
+restores
+the old configuration and attempts to restart it; recovery failures are
+reported.
+.B --no-restart
+saves configuration only; restart your supervisor yourself to activate it.
+Per-line prompts overrides still take precedence. The bundled voice and its
+system phrases are never overwritten. Story packs install alongside voices;
+their handset player is separate work and they cannot be selected as lobby
+voices.
+.PP
+Pack playback versions live under sounds/doorman-packs/<id>/versions/;
+private cache, provenance and progress live under sounds/.doorman-packs/.
+Old versions are retained. Never remove a version referenced by the default
+or a per-line prefix. doorman check reports the configured default, not a
+live playback probe. See docs/PACKS.md and docs/STORY-PACKS.md for the archive,
+source/audio bindings, cache rules and audio level targets.
 .SH FILES
 .TP
 .I policy.toml
