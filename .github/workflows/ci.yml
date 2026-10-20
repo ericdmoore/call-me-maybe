@@ -70,6 +70,9 @@ jobs:
 
       # -race matters here: one call is one goroutine and the session state
       # machine is driven entirely by channel sends from the ARI event router.
+      - name: offline Books audio tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg espeak-ng
+
       - name: test + coverage floors
         run: bash scripts/coverage.sh
 

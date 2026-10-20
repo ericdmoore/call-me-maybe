@@ -88,6 +88,23 @@ removes finished recordings as the Asterisk user, hourly through
 .B --spool
 selects a non\-default Asterisk spool directory (default /var/spool/asterisk).
 The menu/deliver AGI modes are invoked by the generated dialplan, not operators.
+.B *2665
+opens Books: nine recordings or chapters per page, pound for the next page
+(or the page picker on the last page), star to repeat, zero to go back.
+.B doorman books prepare --source catalog.json
+prepares existing local recordings and offline spoken menu labels.
+It requires FFmpeg and espeak-ng;
+.B --library
+defaults to /var/spool/asterisk/cmm-books/library.
+.B doorman books list
+prints that prepared catalog as JSON.
+The AGI menu uses ASTSPOOLDIR and needs a private, Asterisk-writable
+cmm-books/progress directory beside the library.
+During playback, 1/3 changes chapter, 2/8 changes speed by 0.1x,
+4/6 seeks ten seconds, 5 pauses, star repeats help and zero returns
+to the book menu. Speed ranges from 0.5x to 2.0x without changing pitch.
+Progress belongs to the handset, language and recording revision.
+Books respects curfew and needs no cloud connection or persistent service.
 .B *88
 adds a number to the phone that dialled it: the digits, then the spoken
 name; the number is in that phone's directory within a minute and named

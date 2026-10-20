@@ -122,6 +122,7 @@ match_header=To: /(123456_home|5125550100)/
 ; makes Asterisk reject the WHOLE file — no endpoints, no dialplan, and the
 ; only trace is "declined to load" in messages.log (first install, 2026-09-23).
 #tryinclude "pjsip_handsets.conf"
+#tryinclude "pjsip_books.conf"
 
 ; ─── Home Assistant Assist (optional) ────────────────────────
 ; A static endpoint at HA's IP for the native VoIP integration — no
