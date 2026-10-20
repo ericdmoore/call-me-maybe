@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -301,6 +302,49 @@ func TestRecoveryPhraseFilesAndPrivatePersistence(t *testing.T) {
 	}
 	if rc := runRecovery([]string{"restore", "--state", state}); rc == 0 {
 		t.Fatal("restore without root")
+	}
+}
+
+func TestRecoveryPhraseInputExplainsAccountCodesWithoutEchoingSecrets(t *testing.T) {
+	path := filepath.Join(recoveryTestState(t), "phrase")
+	for _, input := range []string{"ABCD-EFGH", "abcd efgh\n", "ABCDEFGH", "short", strings.Repeat("0", 32)} {
+		if err := os.WriteFile(path, []byte(input), 0600); err != nil {
+			t.Fatal(err)
+		}
+		phrase, err := recoveryPhraseFrom(path)
+		if err == nil || phrase != "" {
+			t.Fatal("accepted a sign-in code or malformed backup phrase")
+		}
+		message := err.Error()
+		if !strings.Contains(message, "eight groups") || !strings.Contains(message, "login.dialdoorman.cc/recover") {
+			t.Fatal("missing actionable distinction between the sheets")
+		}
+		if strings.Contains(message, strings.TrimSpace(input)) {
+			t.Fatal("input echoed in error")
+		}
+	}
+	valid, err := backup.NewRecoveryPhrase()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.ToLower(strings.ReplaceAll(valid, "-", " "))+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := recoveryPhraseFrom(path)
+	want, _ := backup.NormaliseRecoveryPhrase(valid)
+	if err != nil || got != want {
+		t.Fatal("valid eight-group phrase no longer accepted")
+	}
+}
+
+func TestRecoveryEnvelopeFailureGuidanceDoesNotExposeCiphertextOrPhrase(t *testing.T) {
+	message := recoveryErrorMessage(backup.ErrRecoveryEnvelope)
+	if !strings.Contains(message, "matching Backup decryption phrase sheet") || !strings.Contains(message, "account sign-in code cannot unlock a backup") {
+		t.Fatal("wrong-factor failure lacks sheet guidance")
+	}
+	network := errors.New("account: service connection failed; credentials were not logged")
+	if recoveryErrorMessage(network) != network.Error() {
+		t.Fatal("unrelated failure presented as a wrong phrase")
 	}
 }
 

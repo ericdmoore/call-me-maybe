@@ -3,6 +3,7 @@ package backup
 import (
 	"bytes"
 	"crypto/rand"
+	_ "embed"
 	"encoding/base64"
 	"html/template"
 	"strings"
@@ -68,4 +69,7 @@ func RecoverySheet(scope RecoveryScope, phrase string) ([]byte, error) {
 	return out.Bytes(), err
 }
 
-var sheetTemplate = template.Must(template.New("sheet").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>Doorman backup recovery sheet</title><style>body{font:18px/1.5 system-ui,sans-serif;max-width:760px;margin:36px auto;padding:24px;color:#17241e}h1{font-size:32px}.phrase{font:22px/1.7 monospace;overflow-wrap:anywhere;border:2px solid;padding:18px}img{width:240px;height:240px}dl{font-size:12px;overflow-wrap:anywhere}dt{font-weight:bold}dd{margin:0 0 8px}small{font-size:13px}@media print{body{margin:0;padding:12mm}img{break-inside:avoid}}</style><h1>Your backup recovery sheet</h1><p>Keep a printed or safely saved copy away from your Brain. Anyone with this phrase and your encrypted recovery material can unlock your backups.</p><p class="phrase">{{.Phrase}}</p><img src="{{.QR}}" alt="QR containing the same recovery phrase in the link fragment"><p>To recover: sign in on the replacement device, run <code>doorman recovery authorize</code>, then <code>doorman recovery restore --root /your/inspection/folder</code>. Enter this phrase privately when asked.</p><p>After using this phrase, save and confirm the replacement sheet. The previous phrase remains active until confirmation. Rotating the hosted copy cannot erase copies already downloaded elsewhere.</p><dl><dt>Account</dt><dd>{{.Scope.Account}}</dd><dt>House</dt><dd>{{.Scope.House}}</dd><dt>Generation</dt><dd>{{.Scope.Generation}}</dd></dl><small>This is your backup-unlock phrase. Keep your account sign-in recovery codes with this sheet; those codes are managed separately. A password or account recovery alone cannot decrypt a backup.</small></html>`))
+//go:embed recovery_sheet.html
+var recoverySheetHTML string
+
+var sheetTemplate = template.Must(template.New("sheet").Parse(recoverySheetHTML))
