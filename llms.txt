@@ -26,6 +26,10 @@ doorman sync run          # observed files → SQLite echo → hosted snapshots;
 doorman sync inventory    # read-only local library measurement; --content sets
                           # the root (default <state>/content/library). The normal
                           # sync loop reports it every 30s; no media is uploaded
+doorman books prepare     # --source catalog.json imports existing local recordings
+                          # for *2665 (*BOOK); offline ffmpeg/espeak-ng preparation
+doorman books list        # prepared recording catalog; --library overrides the
+                          # default <ASTSPOOLDIR>/cmm-books/library directory
 doorman check             # validate a real config and report what it resolves to
 doorman calls --json      # the call log as JSON Lines: one record per call,
                           # numbers redacted unless --no-redact. --line and

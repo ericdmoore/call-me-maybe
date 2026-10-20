@@ -105,6 +105,8 @@ func runCommand() int {
 			os.Exit(runPhonebook(os.Args[2:]))
 		case "reminders":
 			return runReminders(os.Args[2:])
+		case "books":
+			return runBooks(os.Args[2:])
 		case "inbox":
 			return runInbox(os.Args[2:])
 		case "digest":
@@ -301,6 +303,11 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
   doorman reminders prune       remove finished reminder recordings (Asterisk user);
                                 --spool overrides /var/spool/asterisk. The
                                 *80/*81/*82 menus run through Asterisk AGI.
+  doorman books prepare        prepare existing recordings for the *2665 Books menu;
+                                --source catalog.json, --library directory.
+                                Offline preparation needs ffmpeg and espeak-ng.
+  doorman books list           print the prepared recording catalog as JSON;
+                                --library overrides the Asterisk spool library.
   doorman phonebook [flags]     numbers added from handsets with *88: file each
                                 recording's number into that phone's own book
                                 at once (PHONEBOOK_DIR/own/<id>.vcf, served by
@@ -1335,7 +1342,8 @@ func runRender(args []string) int {
 		return true
 	}
 	if !write("pjsip_handsets.conf", frags.PJSIP) || !write("extensions_handsets.conf", frags.Dialplan) ||
-		!write("voicemail_handsets.conf", frags.Voicemail) {
+		!write("voicemail_handsets.conf", frags.Voicemail) ||
+		!write("pjsip_books.conf", frags.BooksPJSIP) || !write("extensions_books.conf", frags.BooksDialplan) {
 		return 1
 	}
 
@@ -1426,6 +1434,8 @@ func runRender(args []string) int {
 	fmt.Println("  sudo cp " + strings.Join(confs, " ") + " /etc/asterisk/")
 	fmt.Println("  sudo chown asterisk:asterisk /etc/asterisk/*_handsets.conf")
 	fmt.Println("  sudo chmod 640 /etc/asterisk/*_handsets.conf")
+	fmt.Println("  sudo chown asterisk:asterisk /etc/asterisk/*_books.conf")
+	fmt.Println("  sudo chmod 640 /etc/asterisk/*_books.conf")
 	if trunkFrags != nil {
 		fmt.Println("  sudo chown asterisk:asterisk /etc/asterisk/*_trunks.conf")
 		fmt.Println("  sudo chmod 640 /etc/asterisk/*_trunks.conf")
@@ -1434,6 +1444,8 @@ func runRender(args []string) int {
 	fmt.Println("\nvoicemail_handsets.conf is read once voicemail.conf ends with")
 	fmt.Println("  #tryinclude \"voicemail_handsets.conf\"")
 	fmt.Println("(the shipped example does). It appends to [household]; hand-written boxes there stay.")
+	fmt.Println("\nBooks: pjsip.conf and extensions.conf must #tryinclude their *_books.conf")
+	fmt.Println("after their *_handsets.conf include (the shipped examples do).")
 	if trunkFrags != nil {
 		fmt.Println("\nThe trunk files are only read once pjsip.conf and extensions.conf")
 		fmt.Println("#include them — see RUNBOOK \"Add a second provider\". Delete the")
