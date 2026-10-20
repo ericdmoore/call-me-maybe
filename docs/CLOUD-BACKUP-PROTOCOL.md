@@ -1,8 +1,8 @@
 # Cloud backup and recovery integration
 
 The CLI supports device-code login and encrypted cloud uploads, alongside file/S3
-backups and local restore. Customer-authorized `restore --from cloud` remains
-integration work.
+backups, local restore, and printed-phrase cloud recovery into an inactive inspection
+directory. Activation is a separate operation.
 
 ## On a source device
 
@@ -90,42 +90,128 @@ files, as well as `<state>/backup`. Custom credential locations need an explicit
 exclusion before they can be supported. Do not place account secrets in ordinary
 configuration files collected as household state.
 
-## Recovery work after uploads
+## Printed-phrase recovery
 
-The first factor is a printed recovery phrase. Passkey PRF and FIDO2 follow.
-The phrase and plaintext backup identity never reach the hosted service; account
-recovery alone cannot unlock a bundle. `internal/backup/recovery.go` contains an **experimental v0** printed-factor
-primitive, not a released format or CLI command. It wraps the existing age
-identity without changing the bundle recipient, and authenticates the expected
-account, house and generation before returning a key. Size and scrypt-work limits
-bound untrusted envelope inputs; errors never carry keys or phrases.
+This version uses `doorman recovery`; `doorman restore` still operates on local
+bundles. Passkey PRF and FIDO2 unlock factors follow. An account passkey approves
+access to encrypted material; it does not decrypt the backup.
 
-The provisional interoperability choice is one age envelope per factor over the
-same generation-bound identity payload. Native age passphrase recipients cannot
-be mixed with other recipient types in one age file; separate envelopes let
-passkey/FIDO2 adapters follow without changing this inner payload. The phrase
-must be cryptographically generated on the customer's device; printed-word/QR
-encoding, receiver-key authorization and a confirmed generation transition still
-need integration before this format can be called stable. No primitive here
-uploads, stores or rotates recovery material by itself.
+On the enrolled source, preserving its existing backup identity:
 
-The next client implementation must test the complete sequence:
+```sh
+doorman recovery authorize --state /var/lib/doorman
+doorman recovery setup --state /var/lib/doorman
+# Print or safely save the private HTML file whose path is shown.
+doorman recovery confirm --state /var/lib/doorman
+```
 
-- Enroll the destination with its own transport key and scoped account tokens.
-- Obtain a separate, expiring, house-scoped recovery authorization; upload
-  credentials alone cannot gain reads.
-- Retrieve ciphertext and the matching encrypted identity generation, then unwrap
-  locally using the printed phrase. Check account, house, generation, recipient
-  and ciphertext integrity before accepting the identity or writing files.
-- Prepare and confirm a fresh phrase/envelope generation before retiring the old
-  one. An interruption before confirmation must preserve the working old factor.
-  Rotation cannot revoke a ciphertext copy someone already downloaded.
-- Restore into an inactive staging root using the existing `restore --root` path;
-  preserve the destination's independent account state. Activation and retirement
-  of the source are separate, explicit operations.
+`authorize` displays a code for `https://login.dialdoorman.cc/backup-recovery`.
+Approve with the account owner's or co-owner's passkey. The separate grant lasts
+30 minutes and never expands the ordinary upload credential. Setup writes the
+printable sheet privately before preparing either hosted copy. Confirmation asks
+for the **entire new phrase**, using hidden terminal input. It downloads the
+prepared envelope and proves it opens locally before sending only its ciphertext
+hash to the confirmation endpoint. The previous phrase remains current until then.
 
-The synthetic acceptance test must cover wrong account/factor, tampering,
-interruption during generation confirmation, missing copies, unauthorized reads,
-and restored file bytes/permissions. An operator retrieving a fixture for a
-storage checksum check is useful evidence, but does not exercise customer
-recovery authorization or replace a fresh-device rehearsal.
+On a replacement, log in independently to the **same house** first. Never copy a
+source device's account directory or transport key. Then:
+
+```sh
+doorman recovery authorize --state /var/lib/doorman
+doorman recovery restore --state /var/lib/doorman --root /srv/backup-inspection/run-1
+# Enter the OLD printed phrase at the hidden prompt.
+# Print or safely save the NEW sheet at the displayed private path.
+sudo doorman recovery confirm --state /var/lib/doorman
+# Enter the NEW phrase. Root restores the recorded owners and groups.
+```
+
+Restore chooses the newest retained bundle, downloads ciphertext with the separate
+grant, checks the account/house/generation and age recipient, and authenticates the
+whole encrypted stream. Encrypted bundles are bounded at 200 MB and expanded
+archives at 512 MiB. Duplicate/unsafe paths, account credentials and the standalone
+backup identity are refused. The new root must not already exist; all files are
+staged beside it, verified for bytes, modes, owners and groups, and fsynced before
+an atomic directory rename. A resumed confirmation checks an already published
+root and refuses extra or altered files. Required users/groups must exist.
+
+No service is started, no installed configuration is overwritten, and no source
+device is retired. The restored identity is **not** installed as the destination's
+live backup identity. Keep the fresh sheet for later recovery; activation requires
+an explicit, separate procedure. Root-run confirmation preserves the account
+user's ownership of credential state so ordinary backup jobs can continue.
+
+For controlled noninteractive use, `--phrase-file` accepts a regular file with no
+symlink and no group/other permissions. Never put the factor in command arguments,
+logs, chat, source control or shell history. HTML sheets are mode 0600 and remain
+in the excluded account directory until their owner chooses where to retain them.
+The command cannot prove that a human printed a sheet; confirmation must follow
+actually saving or printing it.
+
+`doorman recovery status` reports generation IDs and verified-copy counts.
+`doorman recovery cancel` abandons an unconfirmed local operation, preserving the
+current generation; it refuses an already confirmed sheet. Retry the same command
+after a transient failure. Pending ciphertext and operation metadata are durable;
+a lost confirmation response is reconciled with the current generation on retry.
+Reauthorize after expiry. Do not delete account state to clear a pending operation.
+
+The phrase is 160 uniformly random bits, displayed as eight groups of four
+characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`. Spaces, hyphens and case are
+ignored during entry. Its QR link places the canonical phrase after `#phrase=`;
+the landing page reads it locally, clears the fragment from history, and forbids
+network connections. Merely scanning the QR does not consume it. Account sign-in
+recovery codes remain separately managed; keep them with the backup sheet.
+Rotating the hosted envelope cannot revoke copies downloaded earlier, and account
+recovery alone cannot unlock a backup.
+
+### Wire contract: recovery v1
+
+All JSON responses are private/uncached. Request bodies are capped at 32 KiB.
+
+1. Save a fresh random 256-bit secret as `dd_recovery_<base64url-without-padding>`
+   before POSTing `{secret}` to `/v1/login/backup-recovery/start`, authenticated
+   with the backup capability. The reply contains `userCode`, `userCodeSalt`,
+   `requestExpiresAt` (epoch milliseconds), and `interval: 5`. Compute and verify
+   the 60-bit receiver-key code using the enrollment algorithm before showing it.
+   A repeated start with the same secret recovers its existing request. Requests
+   last 15 minutes, with at most six new requests per device per hour.
+2. Poll `/v1/login/backup-recovery/poll` with the recovery secret as bearer.
+   `202` means pending, `410` expired; `200` returns `{id, account, house, box,
+   expiresAt}`. Check all scope fields and expiry. Device revocation, removal of
+   the house or loss of the approver's managing role invalidates the grant.
+3. POST `/v1/backups/recovery/status` with that same grant for `{account, house,
+   box, generations, bundles}`. Generations describe `{id, predecessor, recipient,
+   sha256, bytes, state, healthyCopies}`; states returned here are pending/current.
+   Bundles contain `{id, bytes, createdAt}` newest first.
+4. `/prepare`: `{id, predecessor, recipient, envelope}`. `id` is a new UUID,
+   predecessor is the current generation UUID or null for first setup; envelope
+   is standard base64. It returns `{generation}` only after both immutable copies
+   match SHA-256 and byte count. First setup needs recovery protection entitlement;
+   rotation of retained material does not. `/material`: `{id}` returns `{account,
+   house, generation, envelope}` after independently checking/repairing copies.
+   Either verified copy allows recovery. First material/download access per grant
+   records an account security notification.
+5. `/confirm`: `{id, sha256}` returns the current `{generation}`. Two healthy copies
+   are required for the initial transition. A compare-and-swap retires the exact
+   predecessor and promotes the pending generation; retries of a committed
+   transition succeed. `/cancel`: `{id}` cancels only pending generations, with
+   repeat cancellation allowed. Competing or stale transitions return
+   `409 generation_conflict`. The service never receives a phrase or derived key.
+6. `/download`: `{id}` for a bundle returns `{id, bytes, downloadUrl}`. The signed
+   GET is valid for 60 seconds. Send no account/grant header to storage, refuse
+   redirects, and check the exact byte count before authenticating the ciphertext.
+
+A generation is native age v1 with a single scrypt recipient, work factor 18,
+containing UTF-8 JSON:
+
+```json
+{"format":"doorman-recovery-identity-v1","scope":{"account":"<account UUID>","house":"<house UUID>","generation":"<generation UUID>"},"identity":"<age X25519 secret identity>"}
+```
+
+This example is structural, not a real key. Unknown fields/trailing JSON, wrong
+scope/recipient, excess size/work, and any stream authentication failure are
+rejected. The service limits envelopes to 16 KiB; clients cap plaintext identity
+payloads at 4096 bytes. Future factors use separate envelopes over the same
+scope-bound payload: native scrypt recipients cannot mix with other age recipient
+types in one file. No decryption primitive alone proves the real enrollment,
+printing and restore workflow; perform a fresh-device rehearsal before relying
+on recovery.

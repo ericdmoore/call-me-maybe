@@ -236,7 +236,7 @@ func TestTheBackupPackageIsReachableFromItsCommandsOnly(t *testing.T) {
 	}
 	files, _ := filepath.Glob("*.go")
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") || f == "backup.go" {
+		if strings.HasSuffix(f, "_test.go") || f == "backup.go" || f == "recovery.go" {
 			continue
 		}
 		b, _ := os.ReadFile(f)

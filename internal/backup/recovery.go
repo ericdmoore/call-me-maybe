@@ -1,12 +1,11 @@
 package backup
 
-// Experimental recovery payload for the printed-factor integration (#80).
-// This is not a released disk/wire format or an exposed CLI command. Each factor
-// gets its own age envelope over the same generation-bound payload: native age
-// scrypt cannot coexist with another recipient type in one file. Factor adapters
-// therefore do not require changing the encrypted identity payload later.
+// Printed-factor v1: one age envelope per factor over the same scope-bound identity.
+// Native age scrypt cannot coexist with other recipient types. Future factor
+// adapters use separate envelopes without changing the authenticated payload.
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,7 +14,7 @@ import (
 	"filippo.io/age"
 )
 
-const recoveryFormat = "doorman-recovery-identity-v0"
+const recoveryFormat = "doorman-recovery-identity-v1"
 const maxRecoveryEnvelope = 64 * 1024
 const maxRecoveryPayload = 4096
 const recoveryWorkFactor = 18
@@ -109,4 +108,37 @@ func OpenRecoveryIdentity(encrypted []byte, expected RecoveryScope, phrase strin
 		return nil, ErrRecoveryEnvelope
 	}
 	return identity, nil
+}
+
+// OpenRecoveryBundle authenticates the entire age stream before any restoration.
+// Tar's end marker alone is insufficient: it can precede age's final integrity tag.
+// Bound expansion before the general local bundle parser allocates file contents.
+func OpenRecoveryBundle(cipher []byte, identity *age.X25519Identity) (*Manifest, []Item, error) {
+	if identity == nil || len(cipher) < 1 || len(cipher) > 200000000 {
+		return nil, nil, ErrRecoveryEnvelope
+	}
+	decrypted, err := age.Decrypt(bytes.NewReader(cipher), identity)
+	if err != nil {
+		return nil, nil, ErrRecoveryEnvelope
+	}
+	zipped, err := gzip.NewReader(decrypted)
+	if err != nil {
+		return nil, nil, ErrRecoveryEnvelope
+	}
+	const maxExpanded = 512 * 1024 * 1024
+	n, err := io.Copy(io.Discard, io.LimitReader(zipped, maxExpanded+1))
+	if err != nil || n > maxExpanded {
+		return nil, nil, ErrRecoveryEnvelope
+	}
+	if zipped.Close() != nil {
+		return nil, nil, ErrRecoveryEnvelope
+	}
+	if _, err = io.Copy(io.Discard, decrypted); err != nil {
+		return nil, nil, ErrRecoveryEnvelope
+	}
+	m, items, err := Open(bytes.NewReader(cipher), identity.String())
+	if err != nil {
+		return nil, nil, ErrRecoveryEnvelope
+	}
+	return m, items, nil
 }
