@@ -653,10 +653,6 @@ func runProvisionDirectory(args []string) int {
 		fmt.Fprintf(os.Stderr, "✗ phone books: %v\n", err)
 		return provisionExitUsage
 	}
-	byID := map[string]policy.Handset{}
-	for _, h := range handsets {
-		byID[h.ID] = h
-	}
 	models := map[string]provision.Model{}
 	for _, p := range built.Phones {
 		models[p.ID] = p.Model
@@ -666,11 +662,7 @@ func runProvisionDirectory(args []string) int {
 	srv, err := provserve.New(provserve.Options{
 		StateDir: provisionStateDir(*stateFlag), Phones: built.Phones, Address: address, Directory: true,
 		Phonebook: func(id string) ([]byte, error) {
-			books, err := cache.current()
-			if err != nil {
-				return nil, err
-			}
-			return renderBooks(byID[id], models[id], books)
+			return cache.directory(id, models[id])
 		},
 		OnEvent: func(e provserve.Event) {
 			// Journal lines: a handset id and an address, never a name.

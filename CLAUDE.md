@@ -161,6 +161,11 @@ Layout:
   `PHONEBOOK_DIR/shared` is directory
   storage, never an admission source; it is separate from the *88 writer.
 - `internal/config` — env parsing; names match `examples/.env.example` exactly.
+- `internal/syncmachine` — command-side file observer, SQLite echo, and durable
+  typed changes. The account transport is injected by `cmd/doorman/sync.go`;
+  neither package runs on call admission. `internal/activation` exposes only
+  compiled source digests over a private local Unix socket so receipts can
+  distinguish saved files from a policy accepted by the running daemon.
 
 Config interfaces: `.env` (secrets + tuning), `handsets.toml` (hardware
 inventory — source of truth for the generated Asterisk config), `policy.toml`

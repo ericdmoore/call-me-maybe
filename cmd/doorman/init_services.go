@@ -87,6 +87,12 @@ func decideWants(env func(string) (string, bool), handsetsPath, trunksPath, mess
 	w := host.Wants{Why: map[string]string{}}
 	set := func(k string) bool { v, ok := env(k); return ok && strings.TrimSpace(v) != "" }
 	exists := func(p string) bool { _, err := os.Stat(p); return err == nil }
+	w.Sync = exists("/var/lib/doorman/account/tokens.bin")
+	if w.Sync {
+		w.Why["doorman-sync.service"] = "account credentials are enrolled"
+	} else {
+		w.Why["doorman-sync.service"] = "sign in with doorman login, then rerun init services"
+	}
 
 	switch {
 	case !set("PROVISION_ADDRESS"):

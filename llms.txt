@@ -20,6 +20,9 @@ doorman schema trunks     # just trunks.toml (the optional provider inventory)
 doorman schema contacts   # just contacts.toml (the optional address books)
 doorman schema messages   # just messages.toml (text words and vCard destinations)
 doorman schema env        # just the environment variables
+doorman sync run          # observed files → SQLite echo → hosted snapshots;
+                          # typed schedule/phonebook assignments return via the
+                          # same validation and file path, with durable receipts
 doorman check             # validate a real config and report what it resolves to
 doorman calls --json      # the call log as JSON Lines: one record per call,
                           # numbers redacted unless --no-redact. --line and

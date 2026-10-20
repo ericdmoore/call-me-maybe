@@ -369,6 +369,7 @@ type ResolvedExtension struct {
 
 // Policy is a validated policy file compiled into lookups.
 type Policy struct {
+	sourceDigest   string
 	actions        map[string]Action
 	actionOrder    []string
 	allow          map[string]KnownCaller
@@ -533,7 +534,11 @@ func LoadSplitWith(policyPath, handsetsPath string, o Options) (*Policy, error) 
 			return nil, err
 		}
 	}
-	return fromSplitTOML(pdata, hdata, o)
+	p, err := fromSplitTOML(pdata, hdata, o)
+	if err == nil {
+		p.sourceDigest = SourceDigest(pdata, hdata)
+	}
+	return p, err
 }
 
 // SplitLayout reports whether a handsets file is actually in play — used by

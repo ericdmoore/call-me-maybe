@@ -1,0 +1,188 @@
+package syncmachine
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"syscall"
+
+	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2/unstable"
+)
+
+type span struct{ start, end int }
+type table struct {
+	id     string
+	end    int
+	fields map[string]span
+}
+
+// patchTable changes values in one array table, preserving comments, ordering
+// and every byte outside those values. TOML's parser finds spans; text matching
+// would mistake a header inside a multiline string for an actual table.
+func patchTable(data []byte, section, id string, values map[string]any) ([]byte, error) {
+	var parser unstable.Parser
+	parser.Reset(data)
+	var current *table
+	var tables []*table
+	for parser.NextExpression() {
+		node := parser.Expression()
+		keys := []string{}
+		keyEnd, keyStart := 0, 0
+		it := node.Key()
+		for it.Next() {
+			k := it.Node()
+			if len(keys) == 0 {
+				keyStart = int(k.Raw.Offset)
+			}
+			keys = append(keys, string(k.Data))
+			keyEnd = int(k.Raw.Offset + k.Raw.Length)
+		}
+		if node.Kind == unstable.Table || node.Kind == unstable.ArrayTable {
+			start := bytes.LastIndexByte(data[:keyStart], '\n') + 1
+			if current != nil {
+				current.end = start
+			}
+			current = nil
+			if node.Kind == unstable.ArrayTable && len(keys) == 1 && keys[0] == section {
+				current = &table{end: len(data), fields: map[string]span{}}
+				tables = append(tables, current)
+			}
+			continue
+		}
+		if node.Kind != unstable.KeyValue || current == nil || len(keys) != 1 {
+			continue
+		}
+		if keys[0] == "id" {
+			current.id = string(node.Value().Data)
+		}
+		end := int(node.Raw.Offset + node.Raw.Length)
+		start := keyEnd
+		for start < end && data[start] != '=' {
+			start++
+		}
+		start++
+		for start < end && (data[start] == ' ' || data[start] == '\t') {
+			start++
+		}
+		if start > end {
+			return nil, ErrFiles
+		}
+		current.fields[keys[0]] = span{start, end}
+	}
+	if parser.Error() != nil {
+		return nil, ErrFiles
+	}
+	var target *table
+	for _, t := range tables {
+		if t.id == id {
+			target = t
+			break
+		}
+	}
+	// Only schedules may be created here. Handset inventory must already exist.
+	if target == nil && section != "schedules" {
+		return nil, ErrFiles
+	}
+	type edit struct {
+		span
+		value []byte
+	}
+	edits := []edit{}
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var additions bytes.Buffer
+	for _, k := range keys {
+		var encoded bytes.Buffer
+		if toml.NewEncoder(&encoded).Encode(map[string]any{k: values[k]}) != nil {
+			return nil, ErrFiles
+		}
+		line := encoded.Bytes()
+		eq := bytes.IndexByte(line, '=')
+		if eq < 0 {
+			return nil, ErrFiles
+		}
+		value := bytes.TrimSpace(line[eq+1:])
+		if target != nil {
+			if field, ok := target.fields[k]; ok {
+				edits = append(edits, edit{field, append([]byte{}, value...)})
+				continue
+			}
+		}
+		additions.Write(line)
+	}
+	if target == nil {
+		var header bytes.Buffer
+		fmt.Fprintf(&header, "\n[[%s]]\n", section)
+		if toml.NewEncoder(&header).Encode(map[string]any{"id": id}) != nil {
+			return nil, ErrFiles
+		}
+		header.Write(additions.Bytes())
+		edits = append(edits, edit{span{len(data), len(data)}, header.Bytes()})
+	} else if additions.Len() > 0 {
+		edits = append(edits, edit{span{target.end, target.end}, append([]byte("\n"), additions.Bytes()...)})
+	}
+	sort.Slice(edits, func(i, j int) bool { return edits[i].start > edits[j].start })
+	result := append([]byte{}, data...)
+	for _, e := range edits {
+		result = append(append(append([]byte{}, result[:e.start]...), e.value...), result[e.end:]...)
+	}
+	return result, nil
+}
+
+func atomicReplace(path string, before, after []byte) error {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return ErrFiles
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".sync-*")
+	if err != nil {
+		return ErrFiles
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	if err = f.Chmod(info.Mode().Perm()); err != nil {
+		return ErrFiles
+	}
+	// An operator running as root must not leave a doorman-owned file root-only.
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok && os.Geteuid() == 0 {
+		if f.Chown(int(stat.Uid), int(stat.Gid)) != nil {
+			return ErrFiles
+		}
+	}
+	if _, err = f.Write(after); err != nil || f.Sync() != nil || f.Close() != nil {
+		return ErrFiles
+	}
+	current, err := readFile(path)
+	if err != nil || !bytes.Equal(before, current) {
+		return ErrChanged
+	}
+	if os.Rename(f.Name(), path) != nil {
+		return ErrFiles
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return ErrFiles
+	}
+	defer dir.Close()
+	if dir.Sync() != nil {
+		return ErrFiles
+	}
+	return nil
+}
+
+func verbName(data []byte) string {
+	// A decoded Verb has already passed the closed OpenAPI boundary.
+	var v struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal(data, &v)
+	return strings.TrimSpace(v.Name)
+}

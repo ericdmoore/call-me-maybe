@@ -71,7 +71,7 @@ func (o *backupOpts) sources() backup.Sources {
 // every bundle. A replacement signs in independently; it must not clone tokens
 // or the source device transport identity.
 func (o *backupOpts) excludeDirs() []string {
-	out := []string{filepath.Join(o.stateDir, "backup"), filepath.Join(o.stateDir, "account")}
+	out := []string{filepath.Join(o.stateDir, "backup"), filepath.Join(o.stateDir, "account"), filepath.Join(o.stateDir, "sync")}
 	if p, ok := o.env("BACKUP_PATH"); ok && strings.TrimSpace(p) != "" {
 		out = append(out, strings.TrimSpace(p))
 	}

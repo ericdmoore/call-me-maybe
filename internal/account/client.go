@@ -85,7 +85,11 @@ func (c *Client) post(ctx context.Context, path, token string, value any) (int, 
 	if err != nil {
 		return 0, nil, nil, ErrProtocol
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.origin+path, bytes.NewReader(data))
+	return c.request(ctx, http.MethodPost, path, token, data, 64*1024)
+}
+
+func (c *Client) request(ctx context.Context, method, path, token string, data []byte, limit int64) (int, http.Header, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.origin+path, bytes.NewReader(data))
 	if err != nil {
 		return 0, nil, nil, ErrProtocol
 	}
@@ -98,8 +102,8 @@ func (c *Client) post(ctx context.Context, path, token string, value any) (int, 
 		return 0, nil, nil, ErrNetwork
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024+1))
-	if err != nil || len(body) > 64*1024 {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil || int64(len(body)) > limit {
 		return 0, nil, nil, ErrProtocol
 	}
 	return resp.StatusCode, resp.Header, body, nil
@@ -232,6 +236,12 @@ func (c *Client) Login(ctx context.Context, display func(string)) (Status, error
 }
 
 func (c *Client) authenticated(ctx context.Context, s *store, v *state, capability, path string, body any) (int, http.Header, []byte, error) {
+	return c.authenticatedVia(s, v, capability, func(token string) (int, http.Header, []byte, error) {
+		return c.post(ctx, path, token, body)
+	})
+}
+
+func (c *Client) authenticatedVia(s *store, v *state, capability string, send func(string) (int, http.Header, []byte, error)) (int, http.Header, []byte, error) {
 	t := v.Tokens[capability]
 	token := t.Current
 	if t.Pending != "" {
@@ -240,7 +250,7 @@ func (c *Client) authenticated(ctx context.Context, s *store, v *state, capabili
 	if v.NeedsLogin || !validToken(token, capability) {
 		return 0, nil, nil, ErrLogin
 	}
-	status, headers, data, err := c.post(ctx, path, token, body)
+	status, headers, data, err := send(token)
 	if err != nil {
 		return 0, nil, nil, err
 	}
