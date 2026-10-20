@@ -78,6 +78,8 @@ regular files; network inputs are refused. `origin` is `cli`, `store` or
 not a purchase entitlement. Language identifies the recording and bookmark;
 this initial menu voice speaks English. At most 128 books, 999 chapters per
 book and 24 hours per chapter are accepted.
+Both the source JSON and the prepared catalog must fit within 2 MiB.
+Oversized imports are rejected without replacing the previous catalog.
 
 ```sh
 sudo doorman books prepare --source /path/to/catalog.json

@@ -21,6 +21,9 @@ import (
 
 const DefaultLibrary = "/var/spool/asterisk/cmm-books/library"
 const sampleRate = 16000
+const maxJSONBytes = 2 << 20
+
+var errJSONTooLarge = errors.New("JSON exceeds the 2 MiB limit")
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 var revisionPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
@@ -55,7 +58,7 @@ func readJSON(path string, dst any) error {
 		return err
 	}
 	defer f.Close()
-	d := json.NewDecoder(io.LimitReader(f, 2<<20))
+	d := json.NewDecoder(io.LimitReader(f, maxJSONBytes))
 	d.DisallowUnknownFields()
 	if err := d.Decode(dst); err != nil {
 		return err
@@ -69,8 +72,21 @@ func readJSON(path string, dst any) error {
 
 func writeJSON(path string, value any) error { return publishJSON(path, value, 0o600) }
 
-func publishJSON(path string, value any, mode os.FileMode) error {
+func encodeJSON(value any) ([]byte, error) {
 	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	// Include the final newline: anything we publish must fit the same bound
+	// used by the runtime reader, before touching the previous live file.
+	if len(data)+1 > maxJSONBytes {
+		return nil, errJSONTooLarge
+	}
+	return append(data, '\n'), nil
+}
+
+func publishJSON(path string, value any, mode os.FileMode) error {
+	data, err := encodeJSON(value)
 	if err != nil {
 		return err
 	}
@@ -83,7 +99,7 @@ func publishJSON(path string, value any, mode os.FileMode) error {
 		_ = f.Close()
 		return err
 	}
-	if _, err = f.Write(append(data, '\n')); err == nil {
+	if _, err = f.Write(data); err == nil {
 		err = f.Sync()
 	}
 	closeErr := f.Close()
@@ -178,6 +194,9 @@ func Prepare(ctx context.Context, source, root string) error {
 	if err := validate(c, false); err != nil {
 		return err
 	}
+	if err := preflightCatalog(c); err != nil {
+		return err
+	}
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		return errors.New("prepare requires ffmpeg")
 	}
@@ -240,6 +259,25 @@ func Prepare(ctx context.Context, source, root string) error {
 		}
 	}
 	return publishJSON(filepath.Join(root, "catalog.json"), c, 0o644)
+}
+
+// Reject catalogs that cannot fit even with the shortest duration encoding,
+// before converting audio. Actual durations can occupy more bytes, so the
+// final publication still checks its exact encoding. Copy the chapters to
+// preserve the source paths needed by prepareBook.
+func preflightCatalog(c Catalog) error {
+	prepared := Catalog{Schema: c.Schema, Books: make([]Book, len(c.Books))}
+	for i, b := range c.Books {
+		b.Revision = strings.Repeat("0", 64)
+		b.Chapters = append([]Chapter(nil), b.Chapters...)
+		for j := range b.Chapters {
+			b.Chapters[j].Audio = chapterName(j) + ".sln16"
+			b.Chapters[j].Seconds = 1
+		}
+		prepared.Books[i] = b
+	}
+	_, err := encodeJSON(prepared)
+	return err
 }
 
 func prepareBook(ctx context.Context, source, stage string, b *Book) error {
