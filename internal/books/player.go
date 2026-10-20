@@ -120,7 +120,11 @@ func (m *menu) listen(b Book, p *Position) error {
 		return err
 	}
 	// Help is skippable. A key pressed during it is applied before playback.
-	key, err := m.prompt("controls")
+	intro := "controls"
+	if m.clips["tip"] != "" {
+		intro = "tip"
+	}
+	key, err := m.prompt(intro)
 	if err != nil {
 		return err
 	}
@@ -264,6 +268,9 @@ func (m *menu) listen(b Book, p *Position) error {
 }
 
 func (m *menu) saySpeed(speed int) (int, error) {
+	if clip := m.clips[fmt.Sprintf("speed-%d", speed)]; clip != "" {
+		return m.a.play(clip)
+	}
 	steps := []func() (int, error){func() (int, error) { return m.prompt("speed") }, func() (int, error) { return m.a.number(speed / 10) }, func() (int, error) { return m.prompt("point") }, func() (int, error) { return m.a.number(speed % 10) }}
 	for _, step := range steps {
 		key, err := step()

@@ -27,6 +27,7 @@ doorman sync inventory    # read-only local library measurement; --content sets
                           # the root (default <state>/content/library). The normal
                           # sync loop reports it every 30s; no media is uploaded
 doorman books prepare     # --source catalog.json imports existing local recordings
+doorman books prompts     # --library directory: offline macOS say menu pages; --voice Samantha
                           # for *2665 (*BOOK); offline ffmpeg/espeak-ng preparation
 doorman books list        # prepared recording catalog; --library overrides the
                           # default <ASTSPOOLDIR>/cmm-books/library directory
