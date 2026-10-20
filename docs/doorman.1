@@ -413,12 +413,14 @@ Printed-phrase recovery uses the separate recovery commands below.
 .TP
 .B doorman recovery authorize|setup|restore|confirm|cancel|status
 Printed-phrase cloud recovery. Enrol the device independently, then authorize
-with a separate account passkey approval. Setup prints a private HTML sheet path;
+with a separate account passkey approval. Setup prints a private HTML sheet
+path;
 save or print it and confirm by entering its new phrase at the hidden prompt.
 Restore takes the old phrase and requires a new absolute \fB\-\-root\fR;
 it prepares a replacement sheet before confirmation stages and verifies files.
 Use root for confirmation to restore recorded owners. No services are started
-and no source device is retired. \fB\-\-phrase-file\fR accepts a private regular
+and no source device is retired. \fB\-\-phrase-file\fR accepts a private
+regular
 file instead of terminal input; never put a phrase in command arguments.
 Cancel abandons only an unconfirmed operation and keeps the current phrase.
 See docs/CLOUD-BACKUP-PROTOCOL.md for interruption recovery and limits.
