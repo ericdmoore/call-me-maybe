@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"callmemaybe/internal/ownbook"
 	"callmemaybe/internal/syncwire"
 	"github.com/google/uuid"
 )
@@ -138,6 +139,54 @@ func TestContactSourceEditsEchoAndInvalidSourceKeepsLastGood(t *testing.T) {
 	last, err := m.Latest()
 	if err != nil || last.Revision != next.Revision {
 		t.Fatal("lost last good source values")
+	}
+}
+
+func TestFiledAndSharedPhonebookValuesEchoWithoutChangingAdmission(t *testing.T) {
+	m, p, _ := fixture(t)
+	p.Phonebooks = filepath.Join(filepath.Dir(p.Policy), "phonebook")
+	m.paths = p
+	first, err := m.Observe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ownbook.Save(filepath.Join(p.Phonebooks, "own"), &ownbook.Book{
+		Handset: "kitchen", Entries: []ownbook.Entry{{UID: "fixture", Name: "A filed contact", E164: "+15550100005", Added: time.Now()}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ownbook.Import(filepath.Join(p.Phonebooks, "shared"), "house",
+		[]ownbook.Entry{{Name: "A shared contact", E164: "+15550100006", Added: time.Now()}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ownbook.Import(filepath.Join(p.Phonebooks, "shared"), "handset:kitchen",
+		[]ownbook.Entry{{Name: "A duplicate shared name", E164: "+15550100005", Added: time.Now()}}); err != nil {
+		t.Fatal(err)
+	}
+	next, err := m.Observe()
+	if err != nil || next.Revision == first.Revision {
+		t.Fatalf("filed cards did not enter the echo: %v", err)
+	}
+	books := map[string]int{}
+	for _, book := range next.Configuration.Phonebooks {
+		books[book.Id] = len(book.Contacts)
+	}
+	if books["own:kitchen"] != 1 || books["house"] != 1 {
+		t.Fatal("filed and shared contacts lost their directory scope")
+	}
+	for _, contact := range next.Configuration.Contacts {
+		if contact.Name == "A duplicate shared name" {
+			t.Fatal("shared import overrode a handset-filed contact")
+		}
+	}
+	before, _ := json.Marshal(first.Configuration.Validation)
+	after, _ := json.Marshal(next.Configuration.Validation)
+	if !bytes.Equal(before, after) {
+		t.Fatal("directory additions changed admission policy")
+	}
+	again, err := m.Observe()
+	if err != nil || again.Revision != next.Revision {
+		t.Fatal("unchanged filed cards created another revision")
 	}
 }
 

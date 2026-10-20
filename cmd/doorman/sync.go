@@ -33,6 +33,7 @@ func runSync(args []string) int {
 	h := fs.String("handsets", "", "handset inventory path")
 	tr := fs.String("trunks", "", "provider inventory path")
 	contacts := fs.String("contacts", "", "contact source inventory path")
+	phonebooks := fs.String("phonebooks", "", "directory containing own and shared handset books (default $PHONEBOOK_DIR or state/phonebook)")
 	if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
 		return 2
 	}
@@ -42,7 +43,13 @@ func runSync(args []string) int {
 		fmt.Fprintln(os.Stderr, "sync: sign in with doorman login")
 		return 1
 	}
-	paths := syncmachine.Paths{Policy: policyPathArg(*p), Handsets: handsetsPathArg(*h), Trunks: trunksPathArg(*tr), Contacts: contactsPathArg(*contacts), CountryCode: defaultCountryCode()}
+	if *phonebooks == "" {
+		*phonebooks = os.Getenv("PHONEBOOK_DIR")
+		if *phonebooks == "" {
+			*phonebooks = filepath.Join(*state, "phonebook")
+		}
+	}
+	paths := syncmachine.Paths{Policy: policyPathArg(*p), Handsets: handsetsPathArg(*h), Trunks: trunksPathArg(*tr), Contacts: contactsPathArg(*contacts), CountryCode: defaultCountryCode(), Phonebooks: *phonebooks}
 	dir := filepath.Join(*state, "sync")
 	m, err := syncmachine.Open(dir, status.Box, paths)
 	if err != nil {

@@ -16,6 +16,7 @@ import (
 	"sort"
 
 	contactbook "callmemaybe/internal/contacts"
+	"callmemaybe/internal/ownbook"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/provision"
 	"callmemaybe/internal/syncwire"
@@ -35,6 +36,7 @@ type Paths struct {
 	Trunks      string
 	Contacts    string
 	CountryCode string
+	Phonebooks  string
 }
 
 type observed struct {
@@ -254,6 +256,71 @@ func observe(paths Paths) (*observed, error) {
 				if ids, ok := bySource[source.ID]; ok {
 					books = append(books, map[string]any{"id": source.ID, "label": source.ID, "contacts": ids, "includes": []any{}})
 				}
+			}
+		}
+	}
+	if paths.Phonebooks != "" {
+		// Handset-filed cards and CLI imports are directory-only additions.
+		// They never become an admission list or another handset's selection.
+		add := func(dir, id, bookID, label string, existing map[string]any) error {
+			path := ownbook.Path(dir, id)
+			if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			data, err := readFile(path)
+			if err != nil {
+				return err
+			}
+			out.files[path] = data
+			book, err := ownbook.Load(dir, id)
+			if err != nil {
+				return ErrFiles
+			}
+			haveIDs, haveNumbers := map[string]bool{}, map[string]bool{}
+			for _, id := range list(existing, "contacts") {
+				if id, ok := id.(string); ok {
+					haveIDs[id] = true
+				}
+			}
+			for _, contact := range contacts {
+				c := contact.(map[string]any)
+				if haveIDs[str(c, "id")] {
+					for _, number := range rows(c, "numbers") {
+						haveNumbers[str(number, "number")] = true
+					}
+				}
+			}
+			ids := []any{}
+			for _, entry := range book.Entries {
+				if haveNumbers[entry.E164] {
+					continue
+				}
+				haveNumbers[entry.E164] = true
+				contactID := stableID("filed:", path, entry.UID)
+				ids = append(ids, contactID)
+				contacts = append(contacts, map[string]any{"id": contactID, "name": entry.Name, "numbers": []any{map[string]any{"label": "phone", "number": entry.E164}}})
+			}
+			if existing != nil {
+				existing["contacts"] = append(list(existing, "contacts"), ids...)
+			} else {
+				books = append(books, map[string]any{"id": bookID, "label": label, "contacts": ids, "includes": []any{}})
+			}
+			return nil
+		}
+		house := books[0].(map[string]any)
+		if err := add(filepath.Join(paths.Phonebooks, "shared"), "house", "house", "House", house); err != nil {
+			return nil, err
+		}
+		for _, row := range rows(h, "handsets") {
+			id := str(row, "id")
+			book := map[string]any{"id": "own:" + id, "label": str(row, "label") + " additions", "contacts": []any{}, "includes": []any{}}
+			for _, dir := range []string{filepath.Join(paths.Phonebooks, "own"), filepath.Join(paths.Phonebooks, "shared", "handsets")} {
+				if err := add(dir, id, "own:"+id, str(row, "label"), book); err != nil {
+					return nil, err
+				}
+			}
+			if len(list(book, "contacts")) > 0 {
+				books = append(books, book)
 			}
 		}
 	}

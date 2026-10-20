@@ -28,6 +28,14 @@ func exchange(ctx context.Context, t Transport, endpoint string, value any, resp
 // Exchange makes one bounded, reconnectable round trip. The watcher runs
 // independently; slow network I/O cannot prevent local changes entering SQLite.
 func (m *Machine) Exchange(ctx context.Context, t Transport) error {
+	// Presence is independent of whether the local configuration can currently
+	// be parsed. An invalid edit must not make a reachable box appear offline.
+	if m.SampleStatus != nil {
+		var result syncwire.StatusResult
+		if err := exchange(ctx, t, "status", m.SampleStatus(), "StatusResult", &result); err != nil {
+			return err
+		}
+	}
 	s, err := m.Observe()
 	if err != nil {
 		// Still answer pending work against the last good snapshot. Apply will
@@ -65,12 +73,6 @@ func (m *Machine) Exchange(ctx context.Context, t Transport) error {
 		}
 		if len(receipts.Receipts) != 1 || receipts.Receipts[0].Id != item.Id || receipts.Receipts[0].Status == syncwire.ReceiptResultStatusConflict {
 			return syncwire.ErrInvalid
-		}
-	}
-	if m.SampleStatus != nil {
-		var result syncwire.StatusResult
-		if err := exchange(ctx, t, "status", m.SampleStatus(), "StatusResult", &result); err != nil {
-			return err
 		}
 	}
 	return nil

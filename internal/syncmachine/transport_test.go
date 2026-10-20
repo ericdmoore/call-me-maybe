@@ -6,9 +6,35 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"callmemaybe/internal/syncwire"
 )
+
+func TestInvalidInitialFilesStillReportPresence(t *testing.T) {
+	m, p, _ := fixture(t)
+	if err := os.WriteFile(p.Policy, []byte("invalid = ["), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.SampleStatus = func() syncwire.Status {
+		return syncwire.Status{Schema: 1, Version: "test", SampledAt: time.Now().UnixMilli()}
+	}
+	calls := 0
+	err := m.Exchange(context.Background(), func(_ context.Context, endpoint string, body []byte) ([]byte, error) {
+		calls++
+		if endpoint != "status" {
+			t.Fatal("invalid initial configuration must not upload a snapshot")
+		}
+		var status syncwire.Status
+		if syncwire.Decode("Status", body, &status) != nil {
+			t.Fatal("invalid status")
+		}
+		return []byte(`{"status":"accepted","_links":{"self":{"href":"/v1/sync/status"},"up":{"href":"/v1/sync/"}}}`), nil
+	})
+	if err == nil || calls != 1 {
+		t.Fatal("lost presence or hid invalid configuration")
+	}
+}
 
 func TestRoundTripPublishesLocalEditsAndReplaysLostReceipt(t *testing.T) {
 	m, p, _ := fixture(t)
