@@ -66,9 +66,11 @@ func (o *backupOpts) sources() backup.Sources {
 }
 
 // excludeDirs keeps a file destination out of its own bundles, and the
-// backup state directory (last.json, the on-box key copy) out of every one.
+// backup state (last.json, the on-box key copy) and account credentials out of
+// every bundle. A replacement signs in independently; it must not clone tokens
+// or the source device transport identity.
 func (o *backupOpts) excludeDirs() []string {
-	out := []string{filepath.Join(o.stateDir, "backup")}
+	out := []string{filepath.Join(o.stateDir, "backup"), filepath.Join(o.stateDir, "account")}
 	if p, ok := o.env("BACKUP_PATH"); ok && strings.TrimSpace(p) != "" {
 		out = append(out, strings.TrimSpace(p))
 	}
