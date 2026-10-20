@@ -418,9 +418,11 @@ backups; a replacement enrols independently.
 .TP
 .B doorman sync \fBinventory\fR
 Print a read-only local library report without account enrolment or network
-access. Accepts \fB\-\-state\fR and \fB\-\-content\fR. Missing roots and unreadable
+access. Accepts \fB\-\-state\fR and \fB\-\-content\fR.
+Missing roots and unreadable
 entries remain explicitly unavailable or partial, not zero-sized libraries.
-See docs/CONTENT-INVENTORY.md for the optional .content-source.json import record.
+See docs/CONTENT-INVENTORY.md for the optional
+local .content-source.json import record.
 .TP
 .B doorman backup \fBinit\fR|\fBrun\fR|\fBlist\fR|\fBverify\fR
 The house as one sealed file. \fBinit\fR makes the keypair: the public half
