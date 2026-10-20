@@ -204,7 +204,7 @@ func recoveryPhraseFrom(file string) (string, error) {
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
 			return "", errors.New("recovery: use a terminal or a private --phrase-file; never put the phrase in command arguments")
 		}
-		fmt.Fprint(os.Stderr, "Printed recovery phrase (hidden): ")
+		fmt.Fprint(os.Stderr, "Backup decryption phrase — all eight groups (hidden): ")
 		var err error
 		data, err = term.ReadPassword(int(os.Stdin.Fd()))
 		fmt.Fprintln(os.Stderr)
@@ -212,7 +212,15 @@ func recoveryPhraseFrom(file string) (string, error) {
 			return "", errors.New("recovery: phrase input cancelled")
 		}
 	}
-	return backup.NormaliseRecoveryPhrase(string(data))
+	phrase, err := backup.NormaliseRecoveryPhrase(string(data))
+	if err != nil {
+		compact := strings.Join(strings.Fields(strings.ReplaceAll(string(data), "-", " ")), "")
+		if len(compact) == 8 {
+			return "", errors.New("recovery: this looks like an account sign-in code. Use that code at login.dialdoorman.cc/recover. Here, enter all eight groups from the separate Backup decryption phrase sheet")
+		}
+		return "", errors.New("recovery: enter all eight groups from the Backup decryption phrase sheet; account sign-in codes belong at login.dialdoorman.cc/recover")
+	}
+	return phrase, nil
 }
 func rootForRecovery(root string) error {
 	if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" {
@@ -574,7 +582,7 @@ func runRecovery(args []string) int {
 		return 2
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, recoveryErrorMessage(err))
 		return 1
 	}
 	if op != nil {
@@ -586,6 +594,13 @@ func runRecovery(args []string) int {
 		fmt.Println("The previous phrase remains active until confirmation.")
 	}
 	return 0
+}
+
+func recoveryErrorMessage(err error) string {
+	if errors.Is(err, backup.ErrRecoveryEnvelope) {
+		return "recovery: the backup recovery material could not be opened. Check all eight groups from the matching Backup decryption phrase sheet; an account sign-in code cannot unlock a backup"
+	}
+	return err.Error()
 }
 
 func recoveryFileOwner(f *os.File, directory os.FileInfo) error {

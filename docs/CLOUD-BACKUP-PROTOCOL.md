@@ -92,6 +92,13 @@ configuration files collected as household state.
 
 ## Printed-phrase recovery
 
+The two printed sheets have different jobs. **Account sign-in codes** are eight
+single-use codes, each two groups of four characters; enter one in the browser at
+`login.dialdoorman.cc/recover`. The **Backup decryption phrase** is one phrase of
+eight groups of four characters; enter the entire phrase at the CLI's hidden
+prompt. Account sign-in does not decrypt backups, and a backup phrase does not
+sign you in. Updating the printed layout changes neither credential.
+
 This version uses `doorman recovery`; `doorman restore` still operates on local
 bundles. Passkey PRF and FIDO2 unlock factors follow. An account passkey approves
 access to encrypted material; it does not decrypt the backup.
