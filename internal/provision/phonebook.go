@@ -70,7 +70,7 @@ var houseFeatures = []struct{ name, dial string }{
 	{"Ring everyone", "100"},
 	{"Page everyone", "500"},
 	{"Family conference", "600"},
-	{"Books", "*2665"},
+	{"Audiobooks", "*2665"},
 	{"Voicemail", VoicemailCode},
 	{"Call back today at (*80)", "*80"},
 	{"Call back in (*81)", "*81"},
