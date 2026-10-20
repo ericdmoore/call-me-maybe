@@ -1,7 +1,9 @@
 # The phones' directory: the house, the allow-list, and any contacts source a
 # handset opted into, served over HTTPS with each phone's own credential.
-# Always on, read-only, and it never serves a configuration — that is
+# The listener is read-only and never serves a configuration — that is
 # `doorman provision <id>`, an operator's window, a different process.
+# Changed directories are also imported immediately into supported LAN phones
+# through their authenticated management interface, without rebooting them.
 #
 # Installed and enabled by `sudo doorman init services`; a rerun is the upgrade.
 #
