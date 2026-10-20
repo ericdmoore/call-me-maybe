@@ -13,6 +13,7 @@ import (
 
 	"callmemaybe/internal/account"
 	"callmemaybe/internal/activation"
+	"callmemaybe/internal/contentinventory"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/syncmachine"
 	"callmemaybe/internal/syncwire"
@@ -20,11 +21,11 @@ import (
 
 func runSync(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: doorman sync run|once|snapshot [--state directory]")
+		fmt.Fprintln(os.Stderr, "usage: doorman sync run|once|snapshot|inventory [--state directory] [--content directory]")
 		return 2
 	}
 	mode := args[0]
-	if mode != "run" && mode != "once" && mode != "snapshot" {
+	if mode != "run" && mode != "once" && mode != "snapshot" && mode != "inventory" {
 		return 2
 	}
 	fs := flag.NewFlagSet("sync "+mode, flag.ContinueOnError)
@@ -34,8 +35,19 @@ func runSync(args []string) int {
 	tr := fs.String("trunks", "", "provider inventory path")
 	contacts := fs.String("contacts", "", "contact source inventory path")
 	phonebooks := fs.String("phonebooks", "", "directory containing own and shared handset books (default $PHONEBOOK_DIR or state/phonebook)")
+	content := fs.String("content", "", "library directory to report (default state/content/library)")
 	if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
 		return 2
+	}
+	if *content == "" {
+		*content = filepath.Join(*state, "content", "library")
+	}
+	inventory := &contentinventory.Scanner{Path: *content}
+	if mode == "inventory" {
+		if json.NewEncoder(os.Stdout).Encode(inventory.Sample()) != nil {
+			return 1
+		}
+		return 0
 	}
 	client := account.New(*state)
 	status, err := client.Status()
@@ -58,7 +70,11 @@ func runSync(args []string) int {
 	}
 	defer m.Close()
 	stats := &syncmachine.Stats{}
-	m.SampleStatus = func() syncwire.Status { return stats.Sample(*state, version) }
+	m.SampleStatus = func() syncwire.Status {
+		sample := stats.Sample(*state, version)
+		sample.ContentInventory = inventory.Sample()
+		return sample
+	}
 	m.Applied = func(paths syncmachine.Paths, files map[string][]byte) bool {
 		current, err := activation.Read(dir)
 		if err != nil {

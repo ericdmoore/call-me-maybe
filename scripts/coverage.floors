@@ -6,6 +6,7 @@ callmemaybe/internal/awssig              97
 callmemaybe/internal/calls               89
 callmemaybe/internal/config              87
 callmemaybe/internal/contacts            91
+callmemaybe/internal/contentinventory    89
 callmemaybe/internal/events              81
 callmemaybe/internal/inbox               70
 callmemaybe/internal/lobby               88
