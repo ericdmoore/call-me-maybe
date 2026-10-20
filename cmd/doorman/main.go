@@ -89,6 +89,10 @@ func runCommand() int {
 			return runProvision(os.Args[2:])
 		case "backup":
 			os.Exit(runBackup(os.Args[2:]))
+		case "login":
+			return runLogin(os.Args[2:])
+		case "account":
+			return runAccount(os.Args[2:])
 		case "restore":
 			os.Exit(runRestore(os.Args[2:]))
 		case "stt":
@@ -301,6 +305,12 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 answers; doorman-phonebook.timer runs it every
                                 minute. Never on a call; no STT means the
                                 number keeps its number for a name
+  doorman login [--state DIR]  enrol with a browser/passkey approval; run as the
+                                backup service user. Credentials stay in private
+                                account state and never enter backup bundles
+  doorman account status|rotate
+                                show IDs/capabilities or rotate one capability;
+                                status --json never prints credential values
   doorman backup init|run|list|verify
                                 the house as one sealed file: init makes the
                                 keypair (public half into .env, private printed
@@ -308,8 +318,8 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 the state directory (journal snapshotted),
                                 voicemail, the *88 spool and the hand-written
                                 Asterisk files into one age-encrypted bundle and
-                                delivers it to every destination (BACKUP_PATH;
-                                s3 and the account later), pruning by
+                                delivers it to file, S3 and opted-in cloud
+                                (BACKUP_CLOUD=true after login); local/S3 prune by
                                 BACKUP_KEEP_DAILY/WEEKLY; doorman-backup.timer
                                 runs it nightly; verify opens the newest with
                                 the private key (BACKUP_IDENTITY_FILE or typed)

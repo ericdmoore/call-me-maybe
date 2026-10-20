@@ -87,6 +87,7 @@ type Config struct {
 	// daemon parses and ignores them, as with STT_*.
 	BackupRecipient       string
 	BackupPath            string
+	BackupCloud           bool
 	BackupKeepDaily       int
 	BackupKeepWeekly      int
 	BackupS3Endpoint      string
@@ -213,6 +214,7 @@ func load(get func(string) string, requireSecrets bool) (Config, error) {
 		PhonebookSpool:        str("PHONEBOOK_SPOOL", "/var/spool/call-me-maybe"),
 		BackupRecipient:       str("BACKUP_RECIPIENT", ""),
 		BackupPath:            str("BACKUP_PATH", ""),
+		BackupCloud:           boolean("BACKUP_CLOUD", false),
 		BackupKeepDaily:       integer("BACKUP_KEEP_DAILY", 7),
 		BackupKeepWeekly:      integer("BACKUP_KEEP_WEEKLY", 8),
 		BackupS3Endpoint:      str("BACKUP_S3_ENDPOINT", ""),
