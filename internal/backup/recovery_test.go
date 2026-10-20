@@ -124,9 +124,9 @@ func TestRecoveryIdentityRejectsAuthenticatedMalformedPayload(t *testing.T) {
 	for _, plain := range []string{
 		"not JSON",
 		`{"format":"unknown","scope":{"account":"a","house":"h","generation":"g"},"identity":"bad"}`,
-		`{"format":"doorman-recovery-identity-v0","scope":{"account":"a","house":"h","generation":"g"},"identity":"bad","extra":1}`,
-		`{"format":"doorman-recovery-identity-v0","scope":{"account":"a","house":"h","generation":"g"},"identity":"bad"} {}`,
-		`{"format":"doorman-recovery-identity-v0","scope":{"account":"a","house":"h","generation":"g"},"identity":"bad"}`,
+		`{"format":"doorman-recovery-identity-v1","scope":{"account":"a","house":"h","generation":"g"},"identity":"bad","extra":1}`,
+		`{"format":"doorman-recovery-identity-v1","scope":{"account":"a","house":"h","generation":"g"},"identity":"bad"} {}`,
+		`{"format":"doorman-recovery-identity-v1","scope":{"account":"a","house":"h","generation":"g"},"identity":"bad"}`,
 		strings.Repeat("x", maxRecoveryPayload+1),
 	} {
 		if key, err := OpenRecoveryIdentity(seal([]byte(plain)), scope, phrase); key != nil || !errors.Is(err, ErrRecoveryEnvelope) {

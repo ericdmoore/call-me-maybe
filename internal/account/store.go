@@ -36,6 +36,7 @@ type device struct {
 }
 
 type state struct {
+	Recovery     *recoveryGrant        `json:"recovery,omitempty"`
 	Version      int                   `json:"version"`
 	Box          string                `json:"box,omitempty"`
 	House        string                `json:"house,omitempty"`
@@ -76,6 +77,10 @@ func openStore(stateDir string) (*store, error) {
 	f, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, ErrState
+	}
+	if err := preserveDirectoryOwner(f, dir); err != nil {
+		_ = f.Close()
+		return nil, err
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = f.Close()
@@ -147,6 +152,9 @@ func (s *store) save(value *state) error {
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
+	if err = preserveDirectoryOwner(f, s.dir); err != nil {
+		return err
+	}
 	if _, err = f.Write(data.Bytes()); err != nil {
 		return ErrState
 	}
@@ -187,4 +195,21 @@ func (c *Client) Status() (Status, error) {
 		result.PendingUpload = value.Upload.ID
 	}
 	return result, nil
+}
+
+// Root may run a restore to reproduce file ownership. Its credential writes must
+// remain readable by the device user when the ordinary backup timer resumes.
+func preserveDirectoryOwner(f *os.File, dir string) error {
+	if os.Geteuid() != 0 {
+		return nil
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return ErrState
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || f.Chown(int(stat.Uid), int(stat.Gid)) != nil {
+		return ErrState
+	}
+	return nil
 }

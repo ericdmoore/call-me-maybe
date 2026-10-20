@@ -89,6 +89,8 @@ func runCommand() int {
 			return runProvision(os.Args[2:])
 		case "backup":
 			os.Exit(runBackup(os.Args[2:]))
+		case "recovery":
+			os.Exit(runRecovery(os.Args[2:]))
 		case "login":
 			return runLogin(os.Args[2:])
 		case "account":
@@ -308,6 +310,8 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
   doorman login [--state DIR]  enrol with a browser/passkey approval; run as the
                                 backup service user. Credentials stay in private
                                 account state and never enter backup bundles
+  doorman recovery authorize|setup|restore|confirm|cancel|status
+                                printed-phrase cloud recovery; restore requires an inactive --root
   doorman account status|rotate
                                 show IDs/capabilities or rotate one capability;
                                 status --json never prints credential values
