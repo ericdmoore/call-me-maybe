@@ -1,9 +1,48 @@
 # Cloud backup and recovery integration
 
-The hosted upload contract is ready for the account client in #79 and the cloud
-backup work in #80. The released CLI still supports local/file/S3 backup and
-local restore; `doorman login` and `restore --from cloud` remain integration work.
-This document does not claim those commands have shipped.
+The CLI supports device-code login and encrypted cloud uploads, alongside file/S3
+backups and local restore. Customer-authorized `restore --from cloud` remains
+integration work.
+
+## On a source device
+
+From the installed configuration directory, run as the backup service user:
+
+```sh
+sudo -u doorman /opt/call-me-maybe/bin/doorman login
+sudo -u doorman /opt/call-me-maybe/bin/doorman account status
+# Set BACKUP_CLOUD=true in .env. Preserve BACKUP_RECIPIENT and existing destinations.
+sudo -u doorman /opt/call-me-maybe/bin/doorman backup run
+```
+
+Approve the displayed code at `https://login.dialdoorman.cc/device`, choosing the
+source house. Login generates an X25519 transport key on that device and verifies
+the code's public-key commitment before displaying it. It resumes an unexpired
+pending ceremony. The one-shot service response cannot recover credentials after
+a crash or network loss during successful polling; re-enrolment is then required.
+
+Account state lives in `<state>/account/tokens.bin`, gzip JSON, mode 0600 in a
+0700 directory. Gzip is only an accidental-display guard. State writes use atomic
+replacement and fsync; a process lock serializes credential selection, rotation
+and use. Run login as the same user as backups so both can read private state.
+`--state` defaults to `/var/lib/doorman` and is also accepted by backup commands.
+
+`doorman account rotate --capability backup` saves a pending successor before
+using it. Requests use that successor and never retry the predecessor after an
+ambiguous result. Reuse/revocation requires new enrollment without changing phone
+services. Remote logout/revocation and protocol version negotiation remain
+account-service integration work; deleting local files alone is not logout.
+
+Opt in with `BACKUP_CLOUD=true`. Login alone does not upload household content.
+The obsolete `BACKUP_CLOUD_TOKEN` setting is not used. Local/S3 delivery runs
+independently. Cloud storage reports **stored**, never readback/decryption verified.
+The account app shows stored metadata.
+
+Encrypted in-flight bytes and the signed upload reservation persist in the
+excluded account directory. A later run attempts completion first, finishes an
+interrupted upload, then sends its new bundle. If a declaration response is lost
+before its ID is saved, the server's one-house reservation may block retry until
+expiry. No authenticated list/read request is used to bypass that boundary.
 
 ## Uploads
 

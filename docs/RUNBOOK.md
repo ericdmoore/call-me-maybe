@@ -1187,9 +1187,9 @@ encrypts and can never decrypt, a destination holds blobs it cannot read,
 and a stolen box cannot read its own backups.
 
 **Optional: a copy on the box, and what it costs.** Put a copy at
-`/var/lib/doorman/backup/identity.key` (doorman, 0600 — the one directory
-under the state tree that is never bundled) and every `backup run` reads
-each delivered bundle back from its destination and opens it ("verified
+`/var/lib/doorman/backup/identity.key` (doorman, 0600 — backup state and account
+credentials are never bundled) and every `backup run` reads
+each delivered file/S3 bundle back from its destination and opens it ("verified
 (read back)" in `check`); `verify` and `restore` find the key there too. The
 trade is explicit: **with the copy present, the box — and anyone who gets
 root on it — can decrypt every bundle made for that key, past and future.**
@@ -1208,6 +1208,15 @@ time, every file's hash, and what was excluded (`--no-voicemail` leaves the
 messages out). `doorman check` prints the last run, its age and where it
 went, and fails the check past a day or after a failed destination.
 `backup.completed` / `backup.failed` go to the journal, by destination name.
+
+**Cloud uploads:** run `sudo -u doorman doorman login`, approve the device code in
+the browser for the intended house, then set `BACKUP_CLOUD=true` in `.env`.
+Preserve the existing recipient and local/S3 destinations. `doorman account status`
+shows IDs and capabilities, never credential values. A cloud upload is reported as
+stored, not readback verified: its credential cannot list, read or delete. View
+metadata at <https://app.dialdoorman.cc/backups/>. Customer-authorized cloud recovery
+is still integration work; [the protocol guide](CLOUD-BACKUP-PROTOCOL.md) records
+retry, custody and recovery boundaries.
 
 **A new box from a bundle:**
 

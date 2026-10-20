@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"callmemaybe/internal/account"
 	"callmemaybe/internal/awssig"
 	"callmemaybe/internal/backup"
 	"callmemaybe/internal/events"
@@ -77,8 +78,8 @@ func (o *backupOpts) excludeDirs() []string {
 	return out
 }
 
-// destinations is every backend .env names. The file backend is here; s3
-// and the account are s27 M4 and later, and plug in at this one place.
+// destinations resolves the optional backends independently so a cloud
+// credential failure cannot prevent the local copy from being delivered.
 func (o *backupOpts) destinations() ([]backup.Destination, []string) {
 	var dests []backup.Destination
 	var missing []string
@@ -98,9 +99,54 @@ func (o *backupOpts) destinations() ([]backup.Destination, []string) {
 		}
 	}
 	if t, ok := o.env("BACKUP_CLOUD_TOKEN"); ok && strings.TrimSpace(t) != "" {
-		missing = append(missing, "BACKUP_CLOUD_TOKEN is set but the account destination does not exist yet")
+		missing = append(missing, "BACKUP_CLOUD_TOKEN is obsolete; use doorman login and BACKUP_CLOUD=true")
+	}
+	if value, _ := o.env("BACKUP_CLOUD"); value != "" {
+		enabled, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			missing = append(missing, "BACKUP_CLOUD must be true or false")
+		} else if enabled {
+			dests = append(dests, &cloudDestination{client: account.New(o.stateDir)})
+		}
 	}
 	return dests, missing
+}
+
+type cloudUploader interface {
+	Upload(context.Context, []byte, time.Time) (account.Bundle, error)
+}
+
+type cloudDestination struct {
+	client    cloudUploader
+	createdAt time.Time
+}
+
+func (*cloudDestination) Name() string    { return "cloud" }
+func (*cloudDestination) WriteOnly() bool { return true }
+func (d *cloudDestination) Put(ctx context.Context, name string, r io.Reader) error {
+	data, err := io.ReadAll(io.LimitReader(r, 200000001))
+	if err != nil {
+		return errors.New("cloud: cannot read encrypted bundle")
+	}
+	at := d.createdAt
+	if at.IsZero() {
+		at, _ = backup.StampOf(name)
+	}
+	bundle, err := d.client.Upload(ctx, data, at)
+	if err != nil {
+		return err
+	}
+	fmt.Println("Cloud bundle:", bundle.ID)
+	return nil
+}
+func (*cloudDestination) Get(context.Context, string) (io.ReadCloser, error) {
+	return nil, errors.New("cloud: recovery needs separate authorization; upload credentials cannot download")
+}
+func (*cloudDestination) List(context.Context) ([]string, error) {
+	return nil, errors.New("cloud: view stored backups at https://app.dialdoorman.cc/backups/; upload credentials cannot list")
+}
+func (*cloudDestination) Delete(context.Context, string) error {
+	return errors.New("cloud: retention belongs to the service; upload credentials cannot delete")
 }
 
 func (o *backupOpts) retention() (daily, weekly int) {
@@ -208,14 +254,15 @@ func backupInit(o *backupOpts) int {
 }
 
 type lastBackup struct {
-	At       time.Time `json:"at"`
-	Name     string    `json:"name"`
-	Dests    []string  `json:"dests"`
-	Failed   []string  `json:"failed,omitempty"`
-	Files    int       `json:"files"`
-	Bytes    int64     `json:"bytes"`
-	Doorman  string    `json:"doorman"`
-	Verified bool      `json:"verified"`
+	At         time.Time `json:"at"`
+	Name       string    `json:"name"`
+	Dests      []string  `json:"dests"`
+	Failed     []string  `json:"failed,omitempty"`
+	Files      int       `json:"files"`
+	Bytes      int64     `json:"bytes"`
+	Doorman    string    `json:"doorman"`
+	Verified   bool      `json:"verified"`
+	Unverified []string  `json:"unverified,omitempty"`
 }
 
 func lastBackupPath(stateDir string) string { return filepath.Join(stateDir, "backup", "last.json") }
@@ -253,6 +300,11 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 		defer journal.Close()
 	}
 	last := lastBackup{At: now, Name: name, Files: len(m.Files), Bytes: int64(buf.Len()), Doorman: version}
+	for _, d := range dests {
+		if cloud, ok := d.(*cloudDestination); ok {
+			cloud.createdAt = m.CreatedAt
+		}
+	}
 
 	// The on-box key, when the operator keeps one. A key that is
 	// configured but cannot be read is a failed run: verification was
@@ -285,6 +337,7 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 	for i, r := range results {
 		if r.Err != nil {
 			rc = 1
+			verified = false
 			last.Failed = append(last.Failed, r.Dest)
 			fmt.Printf("✗ %s: %v\n", r.Dest, r.Err)
 			post(ctx, journal, events.BackupFailed, r.Dest)
@@ -294,7 +347,13 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 		// object back and decrypt it, not the buffer that was sent. A
 		// destination that acknowledged a PUT and kept a truncated object
 		// is a failed destination, whatever it answered.
-		if identity != "" {
+		writeOnly, isWriteOnly := dests[i].(backup.WriteOnly)
+		canRead := !isWriteOnly || !writeOnly.WriteOnly()
+		if !canRead {
+			verified = false
+			last.Unverified = append(last.Unverified, r.Dest)
+		}
+		if identity != "" && canRead {
 			if err := readBack(ctx, dests[i], name, identity, len(m.Files)); err != nil {
 				rc = 1
 				verified = false
@@ -309,8 +368,10 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 		if r.Pruned > 0 {
 			fmt.Printf("; pruned %d", r.Pruned)
 		}
-		if identity != "" {
+		if identity != "" && canRead {
 			fmt.Print("; read back and opened")
+		} else if !canRead {
+			fmt.Print("; stored, readback requires recovery authorization")
 		}
 		fmt.Println(")")
 		post(ctx, journal, events.BackupCompleted, r.Dest)
@@ -318,6 +379,8 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 	last.Verified = verified && len(last.Dests) > 0
 	if last.Verified {
 		fmt.Println("✓ verified: every destination's copy was read back and opened with the on-box key")
+	} else if len(last.Unverified) > 0 {
+		fmt.Println("  (not fully verified: write-only cloud storage has not been read back)")
 	} else if identity == "" {
 		fmt.Println("  (not verified: no on-box key copy at " + identityFile(o.stateDir) + ")")
 	}
@@ -638,6 +701,8 @@ func describeBackup(stateDir string, now time.Time, env func(string) (string, bo
 	ok := true
 	if last.Verified {
 		line += ", verified (read back)"
+	} else if len(last.Unverified) > 0 {
+		line += ", not verified (write-only destinations: " + strings.Join(last.Unverified, ", ") + ")"
 	} else if len(last.Failed) == 0 {
 		line += ", not verified (no on-box key: " + identityFile(stateDir) + ")"
 	}

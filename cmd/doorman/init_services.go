@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -120,8 +121,13 @@ func decideWants(env func(string) (string, bool), handsetsPath, trunksPath, mess
 		w.Why["doorman-digest.timer"] = "MAIL_HOOK and MAIL_TO are not both set"
 	}
 	dests := 0
-	for _, k := range []string{"BACKUP_PATH", "BACKUP_S3_BUCKET", "BACKUP_CLOUD_TOKEN"} {
+	for _, k := range []string{"BACKUP_PATH", "BACKUP_S3_BUCKET"} {
 		if set(k) {
+			dests++
+		}
+	}
+	if value, _ := env("BACKUP_CLOUD"); value != "" {
+		if enabled, _ := strconv.ParseBool(strings.TrimSpace(value)); enabled {
 			dests++
 		}
 	}
@@ -129,7 +135,7 @@ func decideWants(env func(string) (string, bool), handsetsPath, trunksPath, mess
 	case !set("BACKUP_RECIPIENT"):
 		w.Why["doorman-backup.timer"] = "no BACKUP_RECIPIENT (`doorman backup init` makes the key)"
 	case dests == 0:
-		w.Why["doorman-backup.timer"] = "BACKUP_RECIPIENT is set but no destination is (BACKUP_PATH, BACKUP_S3_*, BACKUP_CLOUD_TOKEN)"
+		w.Why["doorman-backup.timer"] = "BACKUP_RECIPIENT is set but no destination is (BACKUP_PATH, BACKUP_S3_*, BACKUP_CLOUD)"
 	default:
 		w.Backup, w.Why["doorman-backup.timer"] = true, fmt.Sprintf("BACKUP_RECIPIENT and %d destination(s)", dests)
 	}

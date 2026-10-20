@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -111,5 +112,23 @@ func TestDeliveryPrunesOnlyTheDeliveringHost(t *testing.T) {
 	}
 	if grandma != 10 {
 		t.Errorf("grandma kept %d of 10 — another house's history was pruned", grandma)
+	}
+}
+
+type writeOnlyDest struct{ puts int }
+
+func (*writeOnlyDest) Name() string                                       { return "cloud" }
+func (*writeOnlyDest) WriteOnly() bool                                    { return true }
+func (d *writeOnlyDest) Put(context.Context, string, io.Reader) error     { d.puts++; return nil }
+func (*writeOnlyDest) Get(context.Context, string) (io.ReadCloser, error) { panic("write-only read") }
+func (*writeOnlyDest) List(context.Context) ([]string, error)             { panic("write-only list") }
+func (*writeOnlyDest) Delete(context.Context, string) error               { panic("write-only delete") }
+
+func TestWriteOnlyDeliveryNeverReadsOrPrunes(t *testing.T) {
+	d := &writeOnlyDest{}
+	now := time.Now()
+	results := Deliver(context.Background(), []Destination{d}, Name("synthetic", now), []byte("ciphertext"), 1, 0, now)
+	if len(results) != 1 || results[0].Err != nil || results[0].Pruned != 0 || d.puts != 1 {
+		t.Fatal("write-only delivery failed")
 	}
 }
