@@ -313,6 +313,11 @@ Break these and the phone fails in ways that look like working software.
 - Comments explain *why*, not *what*.
 - British spelling appears in identifiers (`normalise`); match the surrounding
   file rather than converting.
+- A box runs release binaries only: a published `vX.Y.Z` asset verified
+  against its `checksums.txt` on the box, never a local, branch or `make cross`
+  build copied over. Unreleased work ships by merging and cutting a release.
+  `docs/RUNBOOK.md`, "Deploying upgrades", has the procedure, the smoke
+  checkpoints and the one rollback exception.
 
 ## Development without a phone system
 

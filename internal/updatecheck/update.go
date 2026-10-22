@@ -59,7 +59,7 @@ type deps struct {
 func Run(started time.Time, version string, args []string, command func() int) int {
 	instruction := "To upgrade, rerun install.sh (https://raw.githubusercontent.com/ericdmoore/call-me-maybe/main/install.sh)."
 	if runtime.GOOS == "linux" && (runtime.GOARCH == "arm64" || runtime.GOARCH == "arm") {
-		instruction = "To upgrade, scp the new binary from your workstation; see docs/RUNBOOK.md (Deploy)."
+		instruction = "To upgrade, download the release binary on this box and verify its checksum; see docs/RUNBOOK.md (Deploying upgrades)."
 	}
 	return run(started, version, args, command, deps{
 		now: time.Now, getenv: os.Getenv, home: os.UserHomeDir, tty: isTerminal,
