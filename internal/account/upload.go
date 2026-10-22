@@ -45,7 +45,9 @@ func (c *Client) Upload(ctx context.Context, data []byte, createdAt time.Time) (
 	if len(data) == 0 || len(data) > 200000000 {
 		return Bundle{}, errors.New("account: encrypted backup must be between 1 and 200000000 bytes")
 	}
-	s, err := openStore(c.StateDir)
+	// Sync holds the lock only for a moment at a time; waiting it out keeps the
+	// nightly backup from failing on a coincidence.
+	s, err := openStoreWait(ctx, c.StateDir, syncLockWait)
 	if err != nil {
 		return Bundle{}, err
 	}

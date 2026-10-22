@@ -1,7 +1,9 @@
 package syncmachine
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 
@@ -12,9 +14,17 @@ import (
 
 func problem(p syncwire.ReceiptProblem) *syncwire.ReceiptProblem { return &p }
 
+func fileHash(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 // Apply records intent before touching disk. A replay after a crash recognises
-// the prepared result's file digest and finishes its receipt without repeating
+// the target file's written bytes and finishes its receipt without repeating
 // the write. Neither a stale web edit nor a failed parse overwrites local work.
+// The intent is the target's own hash, not the whole observed set: a contacts
+// refresh or an unrelated inventory edit must not turn a landed write into a
+// conflict.
 func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -34,8 +44,9 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 		return result, nil
 	}
 	var oldBody string
-	var oldReceipt, beforeHash, afterHash sql.NullString
-	err = m.db.QueryRow("SELECT body,receipt,before_hash,after_hash FROM commands WHERE id=?", item.Id).Scan(&oldBody, &oldReceipt, &beforeHash, &afterHash)
+	var oldReceipt, targetPath, beforeHash, afterHash sql.NullString
+	err = m.db.QueryRow("SELECT body,receipt,target_path,before_hash,after_hash FROM commands WHERE id=?", item.Id).Scan(&oldBody, &oldReceipt, &targetPath, &beforeHash, &afterHash)
+	saved := false
 	if err == nil {
 		if oldBody != string(body) {
 			return result, syncwire.ErrInvalid
@@ -47,6 +58,7 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 			if result.Status != syncwire.ReceiptStatusSaved {
 				return result, nil
 			}
+			saved = true
 		}
 	} else if errors.Is(err, sql.ErrNoRows) {
 		if _, err = m.db.Exec("INSERT INTO commands (id,body) VALUES (?,?)", item.Id, string(body)); err != nil {
@@ -57,18 +69,34 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 	}
 	o, err := observe(m.paths)
 	if err != nil {
-		result.Status, result.Problem = syncwire.ReceiptStatusRejected, problem(syncwire.Invalid)
-		return save()
+		if saved {
+			return result, nil
+		}
+		// A file rewritten mid-read (a contacts refresh) or unreadable for now is
+		// no answer to the command. Store nothing so the next pass retries it;
+		// the command's own expiry bounds the wait.
+		return result, err
 	}
 	current, err := m.record(o)
 	if err != nil {
 		return result, err
 	}
+	landed := targetPath.Valid && afterHash.Valid && fileHash(o.files[targetPath.String]) == afterHash.String
+	if saved {
+		// A saved receipt is already the server's answer. Later edits can only
+		// stop it being upgraded; they never turn it into a conflict.
+		if landed && m.Applied != nil && m.Applied(m.paths, o.files) {
+			result.Status = syncwire.ReceiptStatusApplied
+			return save()
+		}
+		return result, nil
+	}
 	if current.Generation != item.Base.Generation {
 		result.Status, result.Problem = syncwire.ReceiptStatusStale, problem(syncwire.BaseChanged)
 		return save()
 	}
-	if afterHash.Valid && o.digest() == afterHash.String {
+	if landed {
+		// The process stopped between the rename and the receipt.
 		result.Status = syncwire.ReceiptStatusSaved
 		result.Revision = &current.Revision
 		result.Problem = nil
@@ -77,7 +105,7 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 		}
 		return save()
 	}
-	if oldReceipt.Valid || (beforeHash.Valid && o.digest() != beforeHash.String) || current.Revision != item.Base.Revision {
+	if (targetPath.Valid && beforeHash.Valid && fileHash(o.files[targetPath.String]) != beforeHash.String) || current.Revision != item.Base.Revision {
 		result.Status, result.Problem = syncwire.ReceiptStatusConflict, problem(syncwire.BaseChanged)
 		return save()
 	}
@@ -140,7 +168,6 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 		}
 	}
 	before := o.files[path]
-	beforeDigest := o.digest()
 	o.files[path] = after
 	for _, p := range o.policies {
 		if len(policy.LintSplitWith(o.files[p], o.files[m.paths.Handsets], options)) != 0 {
@@ -148,19 +175,32 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 			return save()
 		}
 	}
-	afterDigest := o.digest()
 	o.files[path] = before
 	if !o.unchanged() {
 		result.Status, result.Problem = syncwire.ReceiptStatusConflict, problem(syncwire.BaseChanged)
 		return save()
 	}
-	if _, err = m.db.Exec("UPDATE commands SET target_path=?,before_hash=?,after_hash=? WHERE id=?", path, beforeDigest, afterDigest, item.Id); err != nil {
+	if _, err = m.db.Exec("UPDATE commands SET target_path=?,before_hash=?,after_hash=? WHERE id=?", path, fileHash(before), fileHash(after), item.Id); err != nil {
 		return result, ErrState
 	}
-	if err = atomicReplace(path, before, after); err != nil {
-		// Leave prepared intent intact. The next pass determines whether a
-		// rename happened, including a directory fsync failure after rename.
+	renamed, err := atomicReplace(path, before, after)
+	if err != nil && renamed {
+		// Leave prepared intent intact. The next pass recognises the target's
+		// bytes, so a directory fsync failure after the rename is not repeated.
 		return result, err
+	}
+	if err != nil {
+		// Nothing replaced the target (a symlink or a directory that refuses a
+		// temporary file), so the answer is final. Without a receipt the same
+		// item would come back every pass and hold every later command.
+		if _, dbErr := m.db.Exec("UPDATE commands SET target_path=NULL,before_hash=NULL,after_hash=NULL WHERE id=?", item.Id); dbErr != nil {
+			return result, ErrState
+		}
+		result.Status, result.Problem = syncwire.ReceiptStatusFailed, problem(syncwire.ExecutionFailed)
+		if errors.Is(err, ErrChanged) {
+			result.Status, result.Problem = syncwire.ReceiptStatusConflict, problem(syncwire.BaseChanged)
+		}
+		return save()
 	}
 	next, err := observe(m.paths)
 	if err != nil {
@@ -171,7 +211,7 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 		return result, err
 	}
 	result.Status, result.Revision = syncwire.ReceiptStatusSaved, &current.Revision
-	if next.digest() != afterDigest {
+	if fileHash(next.files[path]) != fileHash(after) {
 		result.Status, result.Problem = syncwire.ReceiptStatusConflict, problem(syncwire.BaseChanged)
 	} else if m.Applied != nil && m.Applied(m.paths, next.files) {
 		result.Status = syncwire.ReceiptStatusApplied

@@ -55,6 +55,14 @@ func NewClient() *Client {
 // Upload uses the phone's existing LAN web interface and challenge login.
 // The admin password itself is never transmitted. Check the advertised MAC
 // before sending its salted proof; discovery is by the inventory's MAC too.
+//
+// That check is a device-type check, not authentication: a MAC and a model
+// string are whatever the answering host says, so anything able to take the
+// phone's address on the LAN passes it. The transport is plain HTTP because
+// that is the interface this code drives, so the directory's names and numbers
+// cross the LAN in clear and such a host would receive them. What stays safe
+// is the credential: the login is a hash over a one-time nonce and the admin
+// password is random per phone.
 func (c *Client) Upload(ctx context.Context, p provision.Phone, ip netip.Addr, book []byte) error {
 	if !Supported(p.Model.ID) || !ip.Is4() || !ip.IsPrivate() || len(book) > maxBody || p.AdminPassword == "" {
 		return ErrUnavailable

@@ -6,6 +6,7 @@ package account
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -87,6 +88,25 @@ func openStore(stateDir string) (*store, error) {
 		return nil, ErrBusy
 	}
 	return &store{dir, f}, nil
+}
+
+// openStoreWait retries a briefly held lock instead of failing at once. It is
+// for short holders only; callers that run long transfers keep failing fast.
+func openStoreWait(ctx context.Context, stateDir string, limit time.Duration) (*store, error) {
+	deadline := time.Now().Add(limit)
+	for {
+		s, err := openStore(stateDir)
+		if !errors.Is(err, ErrBusy) || !time.Now().Before(deadline) {
+			return s, err
+		}
+		timer := time.NewTimer(25 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ErrBusy
+		case <-timer.C:
+		}
+	}
 }
 
 func (s *store) close() {

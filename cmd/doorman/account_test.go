@@ -161,7 +161,7 @@ func TestAccountPackageRemainsOutsideTheDaemon(t *testing.T) {
 	}
 	files, _ := filepath.Glob("*.go")
 	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") || file == "account.go" || file == "backup.go" || file == "recovery.go" || file == "sync.go" {
+		if strings.HasSuffix(file, "_test.go") || file == "account.go" || file == "backup.go" || file == "recovery.go" || file == "sync.go" || file == "sync_pace.go" {
 			continue
 		}
 		data, err := os.ReadFile(file)
