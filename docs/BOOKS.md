@@ -110,7 +110,10 @@ slice does not yet add ready/mounted status to the cloud inventory contract.
 Use macOS `say` and FFmpeg to generate one recording per menu page, including
 its titles, numbers and navigation instructions. This avoids mixing a title
 voice with Asterisk's stock digit voice. The default is the installed Samantha
-voice; `say -v '?'` lists alternatives. No speech API or credits are used.
+voice; `say -v '?'` lists alternatives, and a name it does not list is refused
+before anything renders (`say` would otherwise fall back to the default voice
+in silence). No speech API or credits are used. Titles are spoken literally:
+`say` speech commands such as `[[slnc 1000]]` inside a title are defused.
 
 ```sh
 # The staging directory only needs the prepared catalog.json from the box.
@@ -121,9 +124,11 @@ Copy `menu-audio/` into the box's prepared library first, then atomically
 install `menus.json` there (upload to a temporary name and rename it). Keep
 both readable by Asterisk. Do not replace the box's catalog or chapter audio.
 The bundle is tied to the catalog's exact order and recording revisions;
-regenerate it after imports. A stale or incomplete installed bundle is refused
-rather than announcing titles against the wrong selection numbers. Libraries
-without `menus.json` keep the original compatibility prompts.
+regenerate it after imports. `books prepare` moves a bundle built for an
+earlier catalog aside to `menus.json.stale` when it publishes a new one. A
+stale, incomplete or unreadable bundle is never used, so titles are never
+announced against the wrong selection numbers: the call logs it and falls back
+to the compatibility prompts, exactly as a library without `menus.json` does.
 
 Audio files have immutable content-derived names. Rebuilding unchanged text
 and voice reuses them; a failed render leaves the previous manifest intact.

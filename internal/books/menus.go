@@ -34,6 +34,13 @@ func pageKey(root, kind string, titles []string, page int) string {
 	return fmt.Sprintf("page/%s/%s/%d", kind, digest(relative), page)
 }
 
+// say obeys embedded [[...]] commands, so a title such as "[[slnc 60000]]"
+// would turn a menu page into dead air. Spacing every bracket means no two can
+// ever form a command delimiter, whatever their run length.
+func speakable(title string) string {
+	return strings.NewReplacer("[", "[ ", "]", " ]").Replace(title)
+}
+
 func menuTexts(root string, c Catalog) map[string]string {
 	texts := make(map[string]string)
 	for name, text := range prompts {
@@ -71,17 +78,17 @@ func menuTexts(root string, c Catalog) map[string]string {
 	for _, b := range c.Books {
 		path := filepath.Join(bookDir(root, b), "title")
 		relative, _ := filepath.Rel(root, path)
-		text := b.Title + "."
+		text := speakable(b.Title) + "."
 		if b.Preview {
 			text += " Preview recording."
 		}
 		texts[relative] = text
 		titles = append(titles, path)
-		names = append(names, b.Title)
+		names = append(names, speakable(b.Title))
 		var chapters, chapterNames []string
 		for i, ch := range b.Chapters {
 			chapters = append(chapters, filepath.Join(bookDir(root, b), chapterName(i)+"-title"))
-			chapterNames = append(chapterNames, ch.Title)
+			chapterNames = append(chapterNames, speakable(ch.Title))
 		}
 		pages("chapters", chapters, chapterNames)
 	}
@@ -99,6 +106,9 @@ func PrepareMenus(ctx context.Context, root, voice string) error {
 	if err != nil {
 		return err
 	}
+	if err := checkVoice(ctx, voice); err != nil {
+		return err
+	}
 	return buildMenus(root, c, voice, func(text, output string) error {
 		return sayMenu(ctx, voice, text, output)
 	})
@@ -108,6 +118,11 @@ func buildMenus(root string, c Catalog, voice string, render func(string, string
 	dir := filepath.Join(root, "menu-audio")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
+	}
+	// A render interrupted by a signal or crash leaves its folder behind.
+	stale, _ := filepath.Glob(filepath.Join(dir, ".render-*"))
+	for _, path := range stale {
+		_ = os.RemoveAll(path)
 	}
 	bundle := menuBundle{Schema: 1, Catalog: digest(c), Voice: voice, Clips: map[string]string{}}
 	for key, text := range menuTexts(root, c) {
@@ -131,6 +146,9 @@ func buildMenus(root string, c Catalog, voice string, render func(string, string
 				err = os.Chmod(output, 0644)
 			}
 			if err == nil {
+				err = syncFile(output)
+			}
+			if err == nil {
 				err = os.Rename(output, destination)
 			}
 			_ = os.RemoveAll(tmp)
@@ -143,19 +161,92 @@ func buildMenus(root string, c Catalog, voice string, render func(string, string
 	return publishJSON(filepath.Join(root, "menus.json"), bundle, 0644)
 }
 
+func toolError(err error, tool, notFound, failed string) error {
+	if errors.Is(err, exec.ErrNotFound) {
+		return fmt.Errorf("%s not found (%s): %w", tool, notFound, err)
+	}
+	return fmt.Errorf("%s: %w", failed, err)
+}
+
+// say silently substitutes the default voice for an unknown name, which would
+// publish a bundle labelled with a voice it does not contain.
+func checkVoice(ctx context.Context, voice string) error {
+	out, err := exec.CommandContext(ctx, "say", "-v", "?").Output()
+	if err != nil {
+		return toolError(err, "say", "macOS only", "listing macOS say voices failed")
+	}
+	for _, name := range voiceNames(string(out)) {
+		if strings.EqualFold(name, voice) {
+			return nil
+		}
+	}
+	return fmt.Errorf("voice %q is not installed; `say -v '?'` lists installed voices", voice)
+}
+
+// Each `say -v '?'` line is "<name> <locale> # <sample>". Names can contain
+// spaces ("Eddy (English (UK))"), so the locale is the last field before '#'.
+func voiceNames(list string) []string {
+	var names []string
+	for _, line := range strings.Split(list, "\n") {
+		if i := strings.Index(line, "#"); i >= 0 {
+			line = line[:i]
+		}
+		line = strings.TrimSpace(line)
+		i := strings.LastIndexAny(line, " \t")
+		if i < 0 {
+			continue
+		}
+		if name := strings.TrimSpace(line[:i]); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 func sayMenu(ctx context.Context, voice, text, output string) error {
 	source := output + ".aiff"
 	defer os.Remove(source)
 	cmd := exec.CommandContext(ctx, "say", "-v", voice, "-r", "170", "-o", source)
 	cmd.Stdin = strings.NewReader(text)
 	if err := cmd.Run(); err != nil {
-		return errors.New("macOS say failed; check the installed voice")
+		return toolError(err, "say", "macOS only", "macOS say failed")
 	}
 	cmd = exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-y", "-i", source, "-af", "loudnorm=I=-18:TP=-2:LRA=7", "-ar", "16000", "-ac", "1", "-f", "s16le", output)
 	if err := cmd.Run(); err != nil {
-		return errors.New("menu audio conversion failed; check FFmpeg")
+		return toolError(err, "ffmpeg", "install FFmpeg", "menu audio conversion failed")
 	}
 	return nil
+}
+
+// Without the sync a power loss after the rename could leave an immutable,
+// content-addressed name pointing at a truncated clip.
+func syncFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	err = f.Sync()
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	return err
+}
+
+// retireStaleMenus moves a bundle built for another catalog aside after a new
+// catalog is published, so the box stops attempting it and the operator can
+// see why the macOS voice went away. The rename is atomic; calls that already
+// loaded the old bundle keep their pinned clips.
+func retireStaleMenus(root string) error {
+	path := filepath.Join(root, "menus.json")
+	var bundle menuBundle
+	if err := readJSON(path, &bundle); os.IsNotExist(err) {
+		return nil
+	} else if err == nil {
+		if c, err := Load(root); err == nil && bundle.Schema == 1 && bundle.Catalog == digest(c) {
+			return nil
+		}
+	}
+	return os.Rename(path, path+".stale")
 }
 
 func loadMenus(root string, c Catalog) (map[string]string, error) {
@@ -165,7 +256,8 @@ func loadMenus(root string, c Catalog) (map[string]string, error) {
 		return nil, nil
 	} // Existing prepared libraries remain usable.
 	if err != nil {
-		return nil, err
+		// Fixed text: decoder errors can quote bundle content.
+		return nil, errors.New("unreadable menus.json")
 	}
 	if bundle.Schema != 1 || bundle.Catalog != digest(c) {
 		return nil, errors.New("rebuild menus for the current catalog")

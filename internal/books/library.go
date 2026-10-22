@@ -258,7 +258,10 @@ func Prepare(ctx context.Context, source, root string) error {
 			return err
 		}
 	}
-	return publishJSON(filepath.Join(root, "catalog.json"), c, 0o644)
+	if err := publishJSON(filepath.Join(root, "catalog.json"), c, 0o644); err != nil {
+		return err
+	}
+	return retireStaleMenus(root)
 }
 
 // Reject catalogs that cannot fit even with the shortest duration encoding,

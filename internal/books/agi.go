@@ -14,6 +14,9 @@ import (
 
 var ErrHangup = errors.New("channel ended")
 
+// stderr reaches the Asterisk log; stdout is the AGI protocol.
+var diagnostics io.Writer = os.Stderr
+
 // AGI has no daemon credentials. stdout is reserved for the Asterisk protocol;
 // raw responses (which can contain digits) never appear in diagnostics.
 type AGI struct {
@@ -149,9 +152,11 @@ func Run(ctx context.Context, a *AGI) error {
 	if err != nil {
 		return err
 	}
-	m.clips, err = loadMenus(m.root, c)
-	if err != nil {
-		return err
+	// A stale or incomplete bundle must not silence Books: the compatibility
+	// prompts are always prepared alongside the catalog and number-safe.
+	if m.clips, err = loadMenus(m.root, c); err != nil {
+		m.clips = nil
+		fmt.Fprintln(diagnostics, "books: menu audio unavailable, using compatibility prompts:", err)
 	}
 	paths := make([]string, len(c.Books))
 	for i, b := range c.Books {
