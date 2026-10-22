@@ -27,15 +27,23 @@ func runBooks(args []string) int {
 		}
 		return 0
 	}
-	if len(args) == 0 || (args[0] != "prepare" && args[0] != "list") {
-		fmt.Fprintln(os.Stderr, "usage: doorman books prepare --source catalog.json [--library directory] | books list [--library directory]")
+	if len(args) == 0 || (args[0] != "prepare" && args[0] != "list" && args[0] != "prompts") {
+		fmt.Fprintln(os.Stderr, "usage: doorman books prepare --source catalog.json [--library directory] | books list [--library directory] | books prompts --library directory [--voice Samantha]")
 		return 2
 	}
 	fs := flag.NewFlagSet("books "+args[0], flag.ContinueOnError)
 	library := fs.String("library", books.DefaultLibrary, "prepared library directory")
+	voice := fs.String("voice", "Samantha", "installed macOS say voice (prompts only)")
 	source := fs.String("source", "", "local recording catalog JSON (prepare only)")
 	if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
 		return 2
+	}
+	if args[0] == "prompts" {
+		if err := books.PrepareMenus(ctx, *library, *voice); err != nil {
+			fmt.Fprintln(os.Stderr, "books prompts:", err)
+			return 1
+		}
+		return 0
 	}
 	if args[0] == "prepare" {
 		if *source == "" {

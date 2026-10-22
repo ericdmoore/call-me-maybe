@@ -96,6 +96,15 @@ prepares existing local recordings and offline spoken menu labels.
 It requires FFmpeg and espeak-ng;
 .B --library
 defaults to /var/spool/asterisk/cmm-books/library.
+.B doorman books prompts --library directory [--voice Samantha]
+renders complete menu pages offline with macOS say and FFmpeg.
+A staging copy of the prepared catalog.json is sufficient. Install menu-audio
+first and menus.json last; rebuild after catalog changes.
+.B books prepare
+moves a stale menus.json aside to menus.json.stale, and calls fall back to
+the compatibility prompts until it is rebuilt. The voice must appear in
+say \-v '?'. No runtime synthesis
+or speech API is used. See docs/BOOKS.md.
 .B doorman books list
 prints that prepared catalog as JSON.
 The AGI menu uses ASTSPOOLDIR and needs a private, Asterisk-writable

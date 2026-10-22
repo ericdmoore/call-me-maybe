@@ -14,6 +14,9 @@ import (
 
 var ErrHangup = errors.New("channel ended")
 
+// stderr reaches the Asterisk log; stdout is the AGI protocol.
+var diagnostics io.Writer = os.Stderr
+
 // AGI has no daemon credentials. stdout is reserved for the Asterisk protocol;
 // raw responses (which can contain digits) never appear in diagnostics.
 type AGI struct {
@@ -106,9 +109,13 @@ type menu struct {
 	a                    *AGI
 	root, state, handset string
 	ctx                  context.Context
+	clips                map[string]string
 }
 
 func (m *menu) prompt(name string) (int, error) {
+	if clip := m.clips[name]; clip != "" {
+		return m.a.play(clip)
+	}
 	return m.a.play(filepath.Join(m.root, "prompts-v1", name))
 }
 
@@ -144,6 +151,12 @@ func Run(ctx context.Context, a *AGI) error {
 	}
 	if err != nil {
 		return err
+	}
+	// A stale or incomplete bundle must not silence Books: the compatibility
+	// prompts are always prepared alongside the catalog and number-safe.
+	if m.clips, err = loadMenus(m.root, c); err != nil {
+		m.clips = nil
+		fmt.Fprintln(diagnostics, "books: menu audio unavailable, using compatibility prompts:", err)
 	}
 	paths := make([]string, len(c.Books))
 	for i, b := range c.Books {
@@ -224,6 +237,9 @@ func (m *menu) announce(kind string, titles []string, page int) (int, error) {
 	if len(titles) == 0 {
 		return m.prompt("empty")
 	}
+	if clip := m.clips[pageKey(m.root, kind, titles, page)]; clip != "" {
+		return m.a.play(clip)
+	}
 	steps := []func() (int, error){func() (int, error) { return m.prompt(kind) }, func() (int, error) { return m.prompt("page") }, func() (int, error) { return m.a.number(page + 1) }, func() (int, error) { return m.prompt("of") }, func() (int, error) { return m.a.number((len(titles) + 8) / 9) }}
 	for i := page * 9; i < len(titles) && i < (page+1)*9; i++ {
 		steps = append(steps, func() (int, error) { return m.a.number(i - page*9 + 1) }, func() (int, error) { return m.a.play(titles[i]) })
@@ -294,7 +310,7 @@ func (m *menu) book(b Book) error {
 	p := m.loadProgress(b)
 	failures := 0
 	for failures < 3 {
-		key, err := m.a.play(filepath.Join(bookDir(m.root, b), "title"))
+		key, err := m.title(filepath.Join(bookDir(m.root, b), "title"))
 		if err != nil {
 			return err
 		}

@@ -51,7 +51,8 @@ import description, not a separately maintained phone menu. Regenerate it
 from the content producer's recording manifest when adding chapters. Order
 here determines spoken order; no cloud/store purchase is inferred from files.
 No audiobook text is synthesized by this command, and no paid API is called.
-Titles and common menu prompts are generated offline with espeak-ng.
+The initial compatibility prompts use espeak-ng. For a consistent, more natural
+menu, replace them with the offline macOS voice bundle below.
 
 ```json
 {
@@ -103,6 +104,44 @@ by Asterisk and progress owned by Asterisk with mode 0700. Neither is served
 by an HTTP endpoint. The prepared catalog is the runtime mount list; existing
 hosted disk inventory continues to report its configured source roots. This
 slice does not yet add ready/mounted status to the cloud inventory contract.
+
+## Render menus on a Mac
+
+Use macOS `say` and FFmpeg to generate one recording per menu page, including
+its titles, numbers and navigation instructions. This avoids mixing a title
+voice with Asterisk's stock digit voice. The default is the installed Samantha
+voice; `say -v '?'` lists alternatives, and a name it does not list is refused
+before anything renders (`say` would otherwise fall back to the default voice
+in silence). No speech API or credits are used. Titles are spoken literally:
+`say` speech commands such as `[[slnc 1000]]` inside a title are defused.
+
+```sh
+# The staging directory only needs the prepared catalog.json from the box.
+./bin/doorman books prompts --library /path/to/staging --voice Samantha
+```
+
+Copy `menu-audio/` into the box's prepared library first, then atomically
+install `menus.json` there (upload to a temporary name and rename it). Keep
+both readable by Asterisk. Do not replace the box's catalog or chapter audio.
+The bundle is tied to the catalog's exact order and recording revisions;
+regenerate it after imports. `books prepare` moves a bundle built for an
+earlier catalog aside to `menus.json.stale` when it publishes a new one. A
+stale, incomplete or unreadable bundle is never used, so titles are never
+announced against the wrong selection numbers: the call logs it and falls back
+to the compatibility prompts, exactly as a library without `menus.json` does.
+
+Audio files have immutable content-derived names. Rebuilding unchanged text
+and voice reuses them; a failed render leaves the previous manifest intact.
+Calls pin their bundle at entry, so retain older menu audio until calls end.
+No synthesis happens during a call, and the box needs neither macOS nor a
+speech engine to play this bundle. Generated voice assets are local deployment
+artifacts, not bundled repository audio.
+
+Single-page menus omit the page count. Playback begins with a short speed/help
+hint; `*` reads the full controls. Titles, preview labels, help, and speed
+announcements all use the chosen voice. Bookmarks and audiobook PCM revisions
+are unchanged. To revert, restore the previous `menus.json`, or remove it to
+return to the original prepared prompts.
 
 ## Install and verify
 
