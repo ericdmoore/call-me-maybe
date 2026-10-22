@@ -263,6 +263,9 @@ type lastBackup struct {
 	Doorman    string    `json:"doorman"`
 	Verified   bool      `json:"verified"`
 	Unverified []string  `json:"unverified,omitempty"`
+	// Removed names cloud destinations that stopped because the account
+	// owner removed this box: a deliberate sign-out, not a failed delivery.
+	Removed []string `json:"removed,omitempty"`
 }
 
 func lastBackupPath(stateDir string) string { return filepath.Join(stateDir, "backup", "last.json") }
@@ -335,6 +338,13 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 	rc := 0
 	verified := identity != ""
 	for i, r := range results {
+		if errors.Is(r.Err, account.ErrRemoved) {
+			// Reported, not failed: the owner chose this, every other
+			// destination still delivers, and nothing was sent to the service.
+			last.Removed = append(last.Removed, r.Dest)
+			fmt.Printf("– %s: stopped, this box was removed from its account (`doorman login` enrols it again)\n", r.Dest)
+			continue
+		}
 		if r.Err != nil {
 			rc = 1
 			verified = false
@@ -716,6 +726,12 @@ func describeBackup(stateDir string, now time.Time, env func(string) (string, bo
 	if len(last.Failed) > 0 {
 		line += " — failed: " + strings.Join(last.Failed, ", ")
 		ok = false
+	}
+	if len(last.Removed) > 0 {
+		line += " — stopped: " + strings.Join(last.Removed, ", ") + " (box removed from its account; `doorman login` enrols it again)"
+		if len(last.Dests) == 0 {
+			ok = false
+		}
 	}
 	if age > 26*time.Hour {
 		line += " — STALE, over a day"

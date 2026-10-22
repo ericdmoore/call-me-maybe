@@ -15,6 +15,12 @@ type Transport func(context.Context, string, []byte) ([]byte, error)
 
 var ErrReceiptConflict = errors.New("sync: the service holds a different receipt for a command; continuing with the queue")
 
+// ErrTransportEnded marks a transport error that no later pass can fix, such
+// as the account having signed this box out. Exchange returns it at once,
+// even from the informational status report, so the caller can stop with one
+// clear line instead of a warning followed by the same refusal.
+var ErrTransportEnded = errors.New("sync: the account transport has ended")
+
 // republishAfter re-sends an unchanged snapshot occasionally, so a service that
 // lost its copy recovers without waiting for a local edit or a restart.
 const republishAfter = 15 * time.Minute
@@ -86,6 +92,9 @@ func (m *Machine) Exchange(ctx context.Context, t Transport) error {
 	if m.SampleStatus != nil {
 		var result syncwire.StatusResult
 		err := exchange(ctx, t, "status", m.SampleStatus(), "StatusResult", &result)
+		if errors.Is(err, ErrTransportEnded) {
+			return err
+		}
 		if err != nil {
 			err = fmt.Errorf("sync: status report not accepted: %w", err)
 		}

@@ -419,6 +419,10 @@ Show identifiers, capabilities and enrolment time, never credential values.
 \fBstatus \-\-json\fR is machine readable. \fBrotate \-\-capability backup|sync\fR
 persists a pending successor before first use commits it. No predecessor
 fallback occurs after an ambiguous first use; invalid credentials require login.
+When the service answers \fBbox_removed\fR (the owner removed this box from
+its account), every credential is forgotten and \fBstatus\fR says so, with
+the time. Calls are unaffected; \fBdoorman login\fR enrols the box again,
+as a new box, and clears the state. \fBdoorman check\fR shows it too.
 .TP
 .B doorman sync \fBrun\fR|\fBonce\fR|\fBsnapshot\fR
 Observe validated files into a private SQLite echo, publish secret-free
@@ -443,6 +447,9 @@ Saved receipts become applied only when the running daemon confirms the
 compiled file revision through its private Unix socket. This is not proof
 that a handset has refreshed its screen. The sync ledger is excluded from
 backups; a replacement enrols independently.
+A removed box logs one line and exits 6, which doorman\-sync.service treats
+as a clean stop: no restart, no retry against the service. After
+\fBdoorman login\fR, start the unit again.
 .TP
 .B doorman sync \fBinventory\fR
 Print a read-only local library report without account enrolment or network
@@ -466,6 +473,8 @@ the private key (\fBBACKUP_IDENTITY_FILE\fR, or typed).
 \fBBACKUP_CLOUD=true\fR additionally uploads through the enrolled account.
 Cloud retention belongs to the service; upload credentials cannot list,
 read or delete bundles. Successful cloud delivery reports stored, not verified.
+On a box removed from its account the cloud destination reports stopped,
+not failed, and asks the service nothing; file and S3 copies continue.
 View metadata at https://app.dialdoorman.cc/backups/.
 Printed-phrase recovery uses the separate recovery commands below.
 .TP
@@ -963,6 +972,13 @@ all. Separate from 1 on purpose \(em an expired API key and an empty account
 look identical from here, and treating one as the other is how a real outage
 gets dismissed as a broken cron job. 1 wins when both happen, because a balance
 known to be low is more actionable than one that is unknown.
+.PP
+.B doorman sync
+adds one:
+.TP
+.B 6
+The account owner removed this box. Sync has stopped for good, on purpose;
+\fBdoorman login\fR enrols the box again.
 .SH EXAMPLES
 Validate a configuration before trusting it:
 .PP
