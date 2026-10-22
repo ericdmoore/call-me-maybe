@@ -222,13 +222,14 @@ For each handset that has `mac` and `model` in `handsets.toml`:
 The bundled pack ships with the repo — six WAVs, free, CC BY-SA. Copy it to
 `<astdatadir>/sounds/call-me-maybe/` — `/var/lib/asterisk` on the Pi, `/usr/share/asterisk` on Ubuntu; `asterisk -rx 'core show settings'` says which — and you are done.
 
-Rendering your own is a workstation job, never the Pi:
+You can render your own on a workstation before copying it over:
 
 ```bash
 doorman pack build ./my-pack        # piper is free, local, offline
 ```
 
-The Pi never synthesises speech. That is why the lobby answers instantly and
+Calls never synthesise speech. Pack installation may render missing audio
+ahead of time on the Pi; only complete installed audio can be selected. That is why the lobby answers instantly and
 why a broken speech service can never make the phone unreachable.
 
 ---
