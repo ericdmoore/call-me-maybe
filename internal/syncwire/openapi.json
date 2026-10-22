@@ -695,6 +695,9 @@
               "required": ["id", "registered", "directoryRevision"]
             },
             "maxItems": 100
+          },
+          "contentInventory": {
+            "$ref": "#/components/schemas/ContentInventory"
           }
         },
         "required": ["schema", "version", "sampledAt"]
@@ -1584,6 +1587,119 @@
           }
         },
         "required": ["error"]
+      },
+      "ContentItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["audiobook", "game", "interactive", "file"]
+          },
+          "origin": {
+            "type": "string",
+            "enum": ["store", "cli", "browser", "unknown"]
+          },
+          "state": {
+            "type": "string",
+            "enum": ["stored", "unreadable"]
+          },
+          "fileCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "allocatedBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          }
+        },
+        "required": ["id", "title", "path", "kind", "origin", "state", "fileCount"]
+      },
+      "ContentInventory": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sampledAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["complete", "partial", "unavailable"]
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContentItem"
+            },
+            "maxItems": 128
+          },
+          "knownAllocatedBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "allocatedBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "capacityBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "usedBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "availableBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "reservedBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          }
+        },
+        "required": ["sampledAt", "state", "label", "items", "knownAllocatedBytes"]
       }
     }
   }

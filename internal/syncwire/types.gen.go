@@ -9,6 +9,93 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for ContentInventoryState.
+const (
+	Complete    ContentInventoryState = "complete"
+	Partial     ContentInventoryState = "partial"
+	Unavailable ContentInventoryState = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the ContentInventoryState enum.
+func (e ContentInventoryState) Valid() bool {
+	switch e {
+	case Complete:
+		return true
+	case Partial:
+		return true
+	case Unavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ContentItemKind.
+const (
+	Audiobook   ContentItemKind = "audiobook"
+	File        ContentItemKind = "file"
+	Game        ContentItemKind = "game"
+	Interactive ContentItemKind = "interactive"
+)
+
+// Valid indicates whether the value is a known member of the ContentItemKind enum.
+func (e ContentItemKind) Valid() bool {
+	switch e {
+	case Audiobook:
+		return true
+	case File:
+		return true
+	case Game:
+		return true
+	case Interactive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ContentItemOrigin.
+const (
+	ContentItemOriginBrowser ContentItemOrigin = "browser"
+	ContentItemOriginCli     ContentItemOrigin = "cli"
+	ContentItemOriginStore   ContentItemOrigin = "store"
+	ContentItemOriginUnknown ContentItemOrigin = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the ContentItemOrigin enum.
+func (e ContentItemOrigin) Valid() bool {
+	switch e {
+	case ContentItemOriginBrowser:
+		return true
+	case ContentItemOriginCli:
+		return true
+	case ContentItemOriginStore:
+		return true
+	case ContentItemOriginUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ContentItemState.
+const (
+	Stored     ContentItemState = "stored"
+	Unreadable ContentItemState = "unreadable"
+)
+
+// Valid indicates whether the value is a known member of the ContentItemState enum.
+func (e ContentItemState) Valid() bool {
+	switch e {
+	case Stored:
+		return true
+	case Unreadable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PolicyValuesActionsConfirm.
 const (
 	None    PolicyValuesActionsConfirm = "none"
@@ -376,6 +463,45 @@ type Contact struct {
 	} `json:"numbers"`
 }
 
+// ContentInventory defines model for ContentInventory.
+type ContentInventory struct {
+	AllocatedBytes      *int64                `json:"allocatedBytes,omitempty"`
+	AvailableBytes      *int64                `json:"availableBytes,omitempty"`
+	CapacityBytes       *int64                `json:"capacityBytes,omitempty"`
+	Items               []ContentItem         `json:"items"`
+	KnownAllocatedBytes int64                 `json:"knownAllocatedBytes"`
+	Label               string                `json:"label"`
+	ReservedBytes       *int64                `json:"reservedBytes,omitempty"`
+	SampledAt           int64                 `json:"sampledAt"`
+	State               ContentInventoryState `json:"state"`
+	UsedBytes           *int64                `json:"usedBytes,omitempty"`
+}
+
+// ContentInventoryState defines model for ContentInventory.State.
+type ContentInventoryState string
+
+// ContentItem defines model for ContentItem.
+type ContentItem struct {
+	AllocatedBytes *int64            `json:"allocatedBytes,omitempty"`
+	Bytes          *int64            `json:"bytes,omitempty"`
+	FileCount      int64             `json:"fileCount"`
+	Id             string            `json:"id"`
+	Kind           ContentItemKind   `json:"kind"`
+	Origin         ContentItemOrigin `json:"origin"`
+	Path           string            `json:"path"`
+	State          ContentItemState  `json:"state"`
+	Title          string            `json:"title"`
+}
+
+// ContentItemKind defines model for ContentItem.Kind.
+type ContentItemKind string
+
+// ContentItemOrigin defines model for ContentItem.Origin.
+type ContentItemOrigin string
+
+// ContentItemState defines model for ContentItem.State.
+type ContentItemState string
+
 // Error defines model for Error.
 type Error struct {
 	Error string `json:"error"`
@@ -607,10 +733,11 @@ type SnapshotResultStatus string
 
 // Status defines model for Status.
 type Status struct {
-	CpuUtilization *float32 `json:"cpuUtilization,omitempty"`
-	DiskFreeBytes  *int64   `json:"diskFreeBytes,omitempty"`
-	DiskTotalBytes *int64   `json:"diskTotalBytes,omitempty"`
-	Handsets       *[]struct {
+	ContentInventory *ContentInventory `json:"contentInventory,omitempty"`
+	CpuUtilization   *float32          `json:"cpuUtilization,omitempty"`
+	DiskFreeBytes    *int64            `json:"diskFreeBytes,omitempty"`
+	DiskTotalBytes   *int64            `json:"diskTotalBytes,omitempty"`
+	Handsets         *[]struct {
 		DirectoryRevision string `json:"directoryRevision"`
 		Id                string `json:"id"`
 		Registered        bool   `json:"registered"`

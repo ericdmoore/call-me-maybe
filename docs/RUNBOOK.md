@@ -574,6 +574,7 @@ valid **transfer target**.
 | *4 | **Outbound console**: call as another one of your numbers. Only interesting with more than one line, and it refuses 911 — see "Outbound caller ID" below. This is the one that goes through doorman |
 | *(none)* | **Bedtime** — a `curfew` on the handset in `handsets.toml` names `[[schedules]]`; while one is active the phone skips ordinary incoming calls, cannot call out (911 and the reminder apps excepted), is left out of pages and ring-all, and has ordinary calls dropped at the hour. Nothing to dial: it is the house's rule, not the phone's. See "Bedtime" below |
 | *80 | **Call back today at** an AM/PM time. Past times are refused with a suggestion to use *81. See “Scheduled calls” below |
+| *2665 (*BOOK) | **Books.** Browse prepared local recordings and chapters, resume, seek, pause and change playback speed. See [Books](BOOKS.md). Respects handset curfew. |
 | *81 | **Call back in** 0–9 hours and 0–99 minutes. Extra minutes carry into hours; the total must be positive |
 | *82 | **Wake up call** at an AM/PM time tomorrow, once |
 | *88 | **Add a number to this phone.** Key the number, `#`, say the name after the beep. The number is in this phone's directory within a minute (named by its number), and under the spoken name once the box has had it transcribed. This phone's book only — never the allow-list. See "Add a number from a handset" |

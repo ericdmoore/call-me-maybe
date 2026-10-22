@@ -13,6 +13,7 @@ import (
 
 	"callmemaybe/internal/account"
 	"callmemaybe/internal/activation"
+	"callmemaybe/internal/contentinventory"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/syncmachine"
 	"callmemaybe/internal/syncwire"
@@ -20,11 +21,11 @@ import (
 
 func runSync(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: doorman sync run|once|snapshot [--state directory]")
+		fmt.Fprintln(os.Stderr, "usage: doorman sync run|once|snapshot|inventory [--state directory] [--content directory]")
 		return 2
 	}
 	mode := args[0]
-	if mode != "run" && mode != "once" && mode != "snapshot" {
+	if mode != "run" && mode != "once" && mode != "snapshot" && mode != "inventory" {
 		return 2
 	}
 	fs := flag.NewFlagSet("sync "+mode, flag.ContinueOnError)
@@ -34,8 +35,18 @@ func runSync(args []string) int {
 	tr := fs.String("trunks", "", "provider inventory path")
 	contacts := fs.String("contacts", "", "contact source inventory path")
 	phonebooks := fs.String("phonebooks", "", "directory containing own and shared handset books (default $PHONEBOOK_DIR or state/phonebook)")
+	content := fs.String("content", "", "library directory to report (default state/content/library)")
 	if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
 		return 2
+	}
+	if *content == "" {
+		*content = filepath.Join(*state, "content", "library")
+	}
+	if mode == "inventory" {
+		if json.NewEncoder(os.Stdout).Encode(contentinventory.Scan(*content)) != nil {
+			return 1
+		}
+		return 0
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -63,7 +74,12 @@ func runSync(args []string) int {
 	}
 	defer m.Close()
 	stats := &syncmachine.Stats{}
-	m.SampleStatus = func() syncwire.Status { return stats.Sample(*state, version) }
+	inventory := &contentinventory.Scanner{Path: *content}
+	m.SampleStatus = func() syncwire.Status {
+		sample := stats.Sample(*state, version)
+		sample.ContentInventory = inventory.Sample()
+		return sample
+	}
 	m.Applied = func(paths syncmachine.Paths, files map[string][]byte) bool {
 		current, err := activation.Read(dir)
 		if err != nil {
@@ -92,6 +108,15 @@ func runSync(args []string) int {
 	watchDone := make(chan struct{})
 	go func() { defer close(watchDone); m.Watch(ctx, nil) }()
 	defer func() { stop(); <-watchDone }()
+	// The exchange only reads the last finished scan. Shutdown deliberately
+	// does not wait for this goroutine: a scan stuck on a hung mount must not
+	// hold the process open, and it exits with the process either way. A
+	// single exchange has no later turn to report a background result in.
+	if mode == "once" {
+		inventory.Refresh()
+	} else {
+		go inventory.Run(ctx)
+	}
 	var lastError string
 	var pace syncPace
 	for {

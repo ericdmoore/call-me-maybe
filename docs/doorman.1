@@ -88,6 +88,23 @@ removes finished recordings as the Asterisk user, hourly through
 .B --spool
 selects a non\-default Asterisk spool directory (default /var/spool/asterisk).
 The menu/deliver AGI modes are invoked by the generated dialplan, not operators.
+.B *2665
+opens Books: nine recordings or chapters per page, pound for the next page
+(or the page picker on the last page), star to repeat, zero to go back.
+.B doorman books prepare --source catalog.json
+prepares existing local recordings and offline spoken menu labels.
+It requires FFmpeg and espeak-ng;
+.B --library
+defaults to /var/spool/asterisk/cmm-books/library.
+.B doorman books list
+prints that prepared catalog as JSON.
+The AGI menu uses ASTSPOOLDIR and needs a private, Asterisk-writable
+cmm-books/progress directory beside the library.
+During playback, 1/3 changes chapter, 2/8 changes speed by 0.1x,
+4/6 seeks ten seconds, 5 pauses, star repeats help and zero returns
+to the book menu. Speed ranges from 0.5x to 2.0x without changing pitch.
+Progress belongs to the handset, language and recording revision.
+Books respects curfew and needs no cloud connection or persistent service.
 .B *88
 adds a number to the phone that dialled it: the digits, then the spoken
 name; the number is in that phone's directory within a minute and named
@@ -403,6 +420,9 @@ passes fail; an unchanged snapshot is not re\-sent;
 \fBonce\fR performs one exchange; \fBsnapshot\fR prints the redacted snapshot
 (contact names and numbers are included, so treat this output as private).
 The state directory defaults to /var/lib/doorman; \fB\-\-state\fR overrides it.
+Content inventory is measured every 30 seconds from <state>/content/library;
+\fB\-\-content\fR overrides the root. Reports contain relative names, import
+provenance and measured sizes, never media bodies or implied phone mounts.
 Policy, handset, trunk and contact inventory paths accept explicit flags.
 The \fB\-\-phonebooks\fR directory defaults to PHONEBOOK_DIR or
 <state>/phonebook. Handset-filed and shared imported cards enter the snapshot
@@ -414,6 +434,14 @@ Saved receipts become applied only when the running daemon confirms the
 compiled file revision through its private Unix socket. This is not proof
 that a handset has refreshed its screen. The sync ledger is excluded from
 backups; a replacement enrols independently.
+.TP
+.B doorman sync \fBinventory\fR
+Print a read-only local library report without account enrolment or network
+access. Accepts \fB\-\-state\fR and \fB\-\-content\fR.
+Missing roots and unreadable
+entries remain explicitly unavailable or partial, not zero-sized libraries.
+See docs/CONTENT-INVENTORY.md for the optional
+local .content-source.json import record.
 .TP
 .B doorman backup \fBinit\fR|\fBrun\fR|\fBlist\fR|\fBverify\fR
 The house as one sealed file. \fBinit\fR makes the keypair: the public half
