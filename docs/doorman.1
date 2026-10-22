@@ -808,7 +808,8 @@ must be terminals. Checks overlap the command within a one-second startup
 budget. Failures are silent; failed commands never print notices. The daemon,
 LSP, CI, pipes and source builds (git distance or dirty stamps) never check.
 Only strictly newer semantic versions are advertised. Nothing auto-updates.
-Upgrade using install.sh on a workstation, or on the Pi download and verify the release binary per docs/RUNBOOK.md.
+Upgrade using install.sh on a workstation; on the Pi, download and verify
+the release binary per docs/RUNBOOK.md.
 State is stored in $XDG_STATE_HOME/doorman/update-check.json, defaulting to
 ~/.local/state/doorman/update-check.json (0600 file, 0700 directory).
 A successful fetch is cached even before the command finishes, for later runs.
