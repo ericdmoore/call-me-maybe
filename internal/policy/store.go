@@ -1,7 +1,6 @@
 package policy
 
 import (
-	"fmt"
 	"os"
 	"sync"
 	"time"
@@ -12,9 +11,8 @@ import (
 // stays live, because a syntax error at 2am should not take the house phone
 // offline.
 //
-// Change detection is mtime+size polling at 1s rather than inotify: it is
-// dependency-free, works on every filesystem including network mounts, and a
-// one-second delay on an allow-list edit is imperceptible for a phone.
+// Change detection hashes file contents every second. Atomic replacements and
+// edits preserving size/mtime still reload, including on network filesystems.
 type Store struct {
 	mu     sync.RWMutex
 	policy *Policy
@@ -79,22 +77,23 @@ func (s *Store) poll() {
 	defer close(s.done)
 
 	stamp := func() string {
-		var b []byte
-		for _, path := range []string{s.policyPath, s.handsetsPath} {
-			if path == "" {
-				continue
-			}
-			info, err := os.Stat(path)
-			if err != nil {
-				b = append(b, "gone;"...)
-				continue
-			}
-			b = append(b, (info.ModTime().String() + "/" + fmt.Sprint(info.Size()) + ";")...)
+		p, err := os.ReadFile(s.policyPath)
+		if err != nil {
+			return "unread"
 		}
-		return string(b)
+		var h []byte
+		if s.handsetsPath != "" {
+			h, err = os.ReadFile(s.handsetsPath)
+			if err != nil && !os.IsNotExist(err) {
+				return "unread"
+			}
+		}
+		return SourceDigest(p, h)
 	}
 
-	last := stamp()
+	// Start with the loaded bytes, not a second read that could hide an edit
+	// made between OpenStore's initial compilation and this goroutine.
+	last := s.policy.SourceDigest()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -116,6 +115,11 @@ func (s *Store) poll() {
 				}
 				continue // previous good policy stays in service
 			}
+			if stamp() != next.SourceDigest() {
+				last = "" // related files changed during compilation; retry
+				continue
+			}
+			last = next.SourceDigest()
 			s.mu.Lock()
 			s.policy = next
 			s.mu.Unlock()

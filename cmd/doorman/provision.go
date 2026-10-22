@@ -18,6 +18,7 @@ import (
 	"callmemaybe/internal/ari"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/provision"
+	"callmemaybe/internal/provision/push"
 	provserve "callmemaybe/internal/provision/serve"
 	"callmemaybe/internal/render"
 	"callmemaybe/internal/xdg"
@@ -614,8 +615,8 @@ func joinIDs(phones []provision.Phone) string {
 // runProvisionDirectory is the always-on process: phone books over HTTPS
 // with each phone's credential, one port above the window, and never a
 // configuration. It re-reads the inventory, the policy and the contacts
-// when they change, so a name added to [[people]] is on every phone at its
-// next poll with no render and no session. With no PROVISION_ADDRESS it
+// when they change. Supported LAN phones also receive changed directories
+// immediately through their authenticated importer. With no PROVISION_ADDRESS it
 // exits 0 — a house of hand-configured phones has nothing to serve.
 func runProvisionDirectory(args []string) int {
 	fs := flag.NewFlagSet("provision directory", flag.ExitOnError)
@@ -653,10 +654,6 @@ func runProvisionDirectory(args []string) int {
 		fmt.Fprintf(os.Stderr, "✗ phone books: %v\n", err)
 		return provisionExitUsage
 	}
-	byID := map[string]policy.Handset{}
-	for _, h := range handsets {
-		byID[h.ID] = h
-	}
 	models := map[string]provision.Model{}
 	for _, p := range built.Phones {
 		models[p.ID] = p.Model
@@ -666,11 +663,7 @@ func runProvisionDirectory(args []string) int {
 	srv, err := provserve.New(provserve.Options{
 		StateDir: provisionStateDir(*stateFlag), Phones: built.Phones, Address: address, Directory: true,
 		Phonebook: func(id string) ([]byte, error) {
-			books, err := cache.current()
-			if err != nil {
-				return nil, err
-			}
-			return renderBooks(byID[id], models[id], books)
+			return cache.directory(id, models[id])
 		},
 		OnEvent: func(e provserve.Event) {
 			// Journal lines: a handset id and an address, never a name.
@@ -688,8 +681,40 @@ func runProvisionDirectory(args []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	uploader := push.NewClient()
+	worker := push.Worker{
+		Documents: func() []push.Document {
+			var documents []push.Document
+			for _, p := range built.Phones {
+				if !push.Supported(p.Model.ID) {
+					continue
+				}
+				if body, err := cache.directory(p.ID, p.Model); err == nil {
+					documents = append(documents, push.Document{Phone: p, XML: body})
+				}
+			}
+			return documents
+		},
+		Neighbours: push.Neighbours,
+		Upload:     uploader.Upload,
+		OnResult: func(result push.Result) {
+			if result.Err != nil {
+				fmt.Printf("%s phonebook push pending %s: %v\n", time.Now().Format(time.RFC3339), result.Handset, result.Err)
+				return
+			}
+			fmt.Printf("%s phonebook imported %s\n", time.Now().Format(time.RFC3339), result.Handset)
+		},
+	}
+	pushDone := make(chan struct{})
+	go func() {
+		defer close(pushDone)
+		worker.Run(ctx)
+	}()
 	fmt.Printf("directory: serving %d phone book(s) on https://%s/prov/<id>/phonebook.xml\n", len(built.Phones), address.HostPort())
-	if err := srv.ListenAndServe(ctx, 0); err != nil {
+	err = srv.ListenAndServe(ctx, 0)
+	stop()
+	<-pushDone
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return 1
 	}

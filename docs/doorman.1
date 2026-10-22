@@ -394,6 +394,27 @@ Show identifiers, capabilities and enrolment time, never credential values.
 persists a pending successor before first use commits it. No predecessor
 fallback occurs after an ambiguous first use; invalid credentials require login.
 .TP
+.B doorman sync \fBrun\fR|\fBonce\fR|\fBsnapshot\fR
+Observe validated files into a private SQLite echo, publish secret-free
+snapshots, and receive typed changes with durable receipts. Requires account
+enrolment. \fBrun\fR observes every second and polls every five seconds,
+backing off with jitter to five minutes (or the service's Retry\-After) while
+passes fail; an unchanged snapshot is not re\-sent;
+\fBonce\fR performs one exchange; \fBsnapshot\fR prints the redacted snapshot
+(contact names and numbers are included, so treat this output as private).
+The state directory defaults to /var/lib/doorman; \fB\-\-state\fR overrides it.
+Policy, handset, trunk and contact inventory paths accept explicit flags.
+The \fB\-\-phonebooks\fR directory defaults to PHONEBOOK_DIR or
+<state>/phonebook. Handset-filed and shared imported cards enter the snapshot
+as directory additions; they never become call-admission rules.
+Policy schedule edits and phonebook assignments validate the real files,
+preserve unrelated TOML and comments, and use ordinary automatic hot reload.
+Invalid or conflicting input leaves the working files unchanged.
+Saved receipts become applied only when the running daemon confirms the
+compiled file revision through its private Unix socket. This is not proof
+that a handset has refreshed its screen. The sync ledger is excluded from
+backups; a replacement enrols independently.
+.TP
 .B doorman backup \fBinit\fR|\fBrun\fR|\fBlist\fR|\fBverify\fR
 The house as one sealed file. \fBinit\fR makes the keypair: the public half
 into .env as

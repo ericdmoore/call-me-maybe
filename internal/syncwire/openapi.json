@@ -1,0 +1,1590 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DialDoorman sync transport",
+    "version": "1.0.0-draft"
+  },
+  "paths": {
+    "/v1/sync/snapshot": {
+      "put": {
+        "operationId": "syncSnapshot",
+        "security": [
+          {
+            "boxToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Snapshot"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted or idempotent replay",
+            "content": {
+              "application/hal+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid strict wire schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid box credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sync capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision, generation or receipt conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "JSON content type required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sync/status": {
+      "post": {
+        "operationId": "syncStatus",
+        "security": [
+          {
+            "boxToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Status"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted or idempotent replay",
+            "content": {
+              "application/hal+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid strict wire schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid box credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sync capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision, generation or receipt conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "JSON content type required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sync/receipts": {
+      "post": {
+        "operationId": "syncReceiptBatch",
+        "security": [
+          {
+            "boxToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiptBatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted or idempotent replay",
+            "content": {
+              "application/hal+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptResults"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid strict wire schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid box credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sync capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision, generation or receipt conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "JSON content type required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sync/queue": {
+      "get": {
+        "operationId": "syncQueue",
+        "security": [
+          {
+            "boxToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending work; pulling does not acknowledge delivery",
+            "content": {
+              "application/hal+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueResult"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "JSON content type required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "boxToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A box token with sync capability; browser sessions are not box tokens."
+      }
+    },
+    "schemas": {
+      "Version": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "type": "string",
+            "maxLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "revision": {
+            "type": "string",
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$"
+          }
+        },
+        "required": ["generation", "revision"]
+      },
+      "Contact": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "numbers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "number": {
+                  "type": "string",
+                  "maxLength": 16,
+                  "pattern": "^\\+[1-9][0-9]{1,14}$"
+                }
+              },
+              "required": ["label", "number"]
+            },
+            "maxItems": 32
+          }
+        },
+        "required": ["id", "name", "numbers"]
+      },
+      "Phonebook": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "contacts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+            },
+            "maxItems": 10000
+          },
+          "includes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": ["id", "label", "contacts", "includes"]
+      },
+      "Handset": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "phonebook": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+          },
+          "pinSet": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "label", "pinSet"]
+      },
+      "Schedule": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+          },
+          "start": {
+            "type": "string",
+            "maxLength": 5,
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          },
+          "end": {
+            "type": "string",
+            "maxLength": 5,
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
+            },
+            "maxItems": 7
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "start", "end", "days", "enabled"]
+      },
+      "Policy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "houseHandsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+            },
+            "maxItems": 100
+          },
+          "people": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Contact"
+            },
+            "maxItems": 10000
+          },
+          "schedules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Schedule"
+            },
+            "maxItems": 100
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                "handsets": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+                  },
+                  "maxItems": 100
+                },
+                "pinSet": {
+                  "type": "boolean"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "afterhours": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+                }
+              },
+              "required": ["id", "label", "handsets", "pinSet", "enabled"]
+            },
+            "maxItems": 1000
+          }
+        },
+        "required": ["id", "label", "houseHandsets", "people", "schedules", "extensions"]
+      },
+      "Configuration": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "handsets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Handset"
+            },
+            "maxItems": 100
+          },
+          "contacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Contact"
+            },
+            "maxItems": 10000
+          },
+          "phonebooks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Phonebook"
+            },
+            "maxItems": 1000
+          },
+          "policies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Policy"
+            },
+            "maxItems": 100
+          },
+          "validation": {
+            "$ref": "#/components/schemas/ValidationContext"
+          }
+        },
+        "required": ["handsets", "contacts", "phonebooks", "policies"]
+      },
+      "Snapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schema": {
+            "type": "integer",
+            "enum": [1],
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "generation": {
+            "type": "string",
+            "maxLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "revision": {
+            "type": "string",
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$"
+          },
+          "replacesGeneration": {
+            "type": "string",
+            "maxLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "observedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "configuration": {
+            "$ref": "#/components/schemas/Configuration"
+          }
+        },
+        "required": ["schema", "generation", "revision", "observedAt", "configuration"]
+      },
+      "Status": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schema": {
+            "type": "integer",
+            "enum": [1],
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "sampledAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "diskFreeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "diskTotalBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "memoryAvailableBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "memoryTotalBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "cpuUtilization": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "handsets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+                },
+                "registered": {
+                  "type": "boolean"
+                },
+                "directoryRevision": {
+                  "type": "string",
+                  "maxLength": 19,
+                  "pattern": "^(0|[1-9][0-9]{0,18})$"
+                }
+              },
+              "required": ["id", "registered", "directoryRevision"]
+            },
+            "maxItems": 100
+          }
+        },
+        "required": ["schema", "version", "sampledAt"]
+      },
+      "Verb": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": ["policy.setSchedule"]
+              },
+              "policy": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+              },
+              "schedule": {
+                "$ref": "#/components/schemas/Schedule"
+              }
+            },
+            "required": ["name", "policy", "schedule"]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": ["phonebook.assign"]
+              },
+              "handset": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+              },
+              "phonebook": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+              }
+            },
+            "required": ["name", "handset", "phonebook"]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": ["contacts.upsert"]
+              },
+              "contact": {
+                "$ref": "#/components/schemas/Contact"
+              }
+            },
+            "required": ["name", "contact"]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": ["backup.run"]
+              }
+            },
+            "required": ["name"]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": ["contacts.refresh"]
+              }
+            },
+            "required": ["name"]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": ["provision.notify"]
+              },
+              "handsets": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+                },
+                "maxItems": 100
+              }
+            },
+            "required": ["name", "handsets"]
+          }
+        ]
+      },
+      "Proposal": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "base": {
+            "$ref": "#/components/schemas/Version"
+          },
+          "notAfter": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "verb": {
+            "$ref": "#/components/schemas/Verb"
+          }
+        },
+        "required": ["id", "base", "notAfter", "verb"]
+      },
+      "QueueItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "base": {
+            "$ref": "#/components/schemas/Version"
+          },
+          "notAfter": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "verb": {
+            "$ref": "#/components/schemas/Verb"
+          },
+          "author": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["person"]
+              },
+              "person": {
+                "type": "string",
+                "maxLength": 36,
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            },
+            "required": ["kind", "person"]
+          },
+          "createdAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          }
+        },
+        "required": ["id", "base", "notAfter", "verb", "author", "createdAt"]
+      },
+      "Receipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "generation": {
+            "type": "string",
+            "maxLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "received",
+              "saved",
+              "applied",
+              "duplicate",
+              "stale",
+              "conflict",
+              "rejected",
+              "failed"
+            ]
+          },
+          "revision": {
+            "type": "string",
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$"
+          },
+          "problem": {
+            "type": "string",
+            "enum": [
+              "invalid",
+              "unsupported",
+              "expired",
+              "base_changed",
+              "needs_reload",
+              "execution_failed"
+            ]
+          }
+        },
+        "required": ["id", "generation", "status"]
+      },
+      "ReceiptBatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "receipts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Receipt"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": ["receipts"]
+      },
+      "PolicyValues": {
+        "type": "object",
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "confirm": {
+                  "type": "string",
+                  "enum": ["none", "passkey"],
+                  "maxLength": 2048
+                },
+                "done_when": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "maxLength": 2048
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "people": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "minItems": 1,
+                  "maxItems": 1000
+                },
+                "reply": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "state": {
+                  "type": "string",
+                  "pattern": "^[a-z_]+\\.[a-z0-9_]+$",
+                  "maxLength": 2048
+                },
+                "webhookSet": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["id", "people"],
+              "additionalProperties": false
+            },
+            "maxItems": 1000
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "afterhours": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "afterhours_ring": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "minItems": 1,
+                  "maxItems": 1000
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "handsets": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "minItems": 1,
+                  "maxItems": 1000
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "handsets": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 2048
+                        },
+                        "minItems": 1,
+                        "maxItems": 1000
+                      },
+                      "rings": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991,
+                        "x-go-type": "int64"
+                      },
+                      "seconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991,
+                        "x-go-type": "int64"
+                      }
+                    },
+                    "required": ["handsets"],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 1000
+                },
+                "voicemail": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "maxLength": 2048
+                },
+                "pinSet": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["pinSet", "label"],
+              "additionalProperties": false
+            },
+            "maxItems": 1000
+          },
+          "house": {
+            "type": "object",
+            "properties": {
+              "caller_id_format": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "handsets": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "minItems": 1,
+                "maxItems": 1000
+              },
+              "voicemail": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                "maxLength": 2048
+              }
+            },
+            "required": ["handsets"],
+            "additionalProperties": false
+          },
+          "line": {
+            "type": "object",
+            "properties": {
+              "failover": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "maxItems": 1000
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "number": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "on_no_input": {
+                "type": "string",
+                "enum": ["dismiss", "ring-house", "voicemail"],
+                "maxLength": 2048
+              },
+              "outbound_cid": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "outbound_handsets": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "minItems": 1,
+                "maxItems": 1000
+              },
+              "prompts": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*(/[A-Za-z0-9][A-Za-z0-9_-]*)*$",
+                "maxLength": 2048
+              },
+              "trunk": {
+                "type": "string",
+                "maxLength": 2048
+              }
+            },
+            "additionalProperties": false,
+            "required": []
+          },
+          "people": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "maxLength": 2048
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "notes": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "numbers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "minItems": 1,
+                  "maxItems": 1000
+                }
+              },
+              "required": ["name", "numbers"],
+              "additionalProperties": false
+            },
+            "maxItems": 1000
+          },
+          "schedules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "days": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": ["SU", "MO", "TU", "WE", "TH", "FR", "SA"],
+                    "maxLength": 2048
+                  },
+                  "maxItems": 1000
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "end": {
+                  "type": "string",
+                  "pattern": "^\\d{1,2}:\\d{2}$",
+                  "maxLength": 2048
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "maxLength": 2048
+                },
+                "start": {
+                  "type": "string",
+                  "pattern": "^\\d{1,2}:\\d{2}$",
+                  "maxLength": 2048
+                }
+              },
+              "required": ["id", "start", "end"],
+              "additionalProperties": false
+            },
+            "maxItems": 1000
+          }
+        },
+        "additionalProperties": false,
+        "required": []
+      },
+      "HandsetValues": {
+        "type": "object",
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "handsets": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "minItems": 1,
+                  "maxItems": 1000
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "maxLength": 2048
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 2048
+                }
+              },
+              "required": ["id", "handsets"],
+              "additionalProperties": false
+            },
+            "maxItems": 1000
+          },
+          "handsets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "curfew": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                    "maxLength": 2048
+                  },
+                  "maxItems": 1000
+                },
+                "email": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "endpoint": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9]+/\\S+$",
+                  "maxLength": 2048
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "maxLength": 2048
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "mac": {
+                  "type": "string",
+                  "pattern": "^[0-9A-Fa-f]{2}([:.\\- ]?[0-9A-Fa-f]{2}){5}$",
+                  "maxLength": 2048
+                },
+                "mailbox": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "maxLength": 2048
+                },
+                "model": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]*$",
+                  "maxLength": 2048
+                },
+                "number": {
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 199,
+                  "x-go-type": "int64"
+                },
+                "page": {
+                  "type": "boolean"
+                },
+                "page_override": {
+                  "type": "boolean"
+                },
+                "password_env": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "phonebook": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                    "maxLength": 2048
+                  },
+                  "maxItems": 1000
+                }
+              },
+              "required": ["id", "endpoint"],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 1000
+          }
+        },
+        "required": ["handsets"],
+        "additionalProperties": false
+      },
+      "TrunkValues": {
+        "type": "object",
+        "properties": {
+          "emergency_trunk": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "trunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "api_password_env": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]*$",
+                  "maxLength": 2048
+                },
+                "api_username": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "balance_min": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "codecs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+$",
+                    "maxLength": 2048
+                  },
+                  "minItems": 1,
+                  "maxItems": 1000
+                },
+                "context": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+                  "maxLength": 2048
+                },
+                "e911": {
+                  "type": "boolean"
+                },
+                "expiration": {
+                  "type": "integer",
+                  "minimum": 30,
+                  "maximum": 86400,
+                  "x-go-type": "int64"
+                },
+                "from_domain": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "from_user": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "host": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:\\d{1,5})?$",
+                  "maxLength": 2048
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "maxLength": 2048
+                },
+                "password_env": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]*$",
+                  "maxLength": 2048
+                },
+                "provider": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "username": {
+                  "type": "string",
+                  "maxLength": 2048
+                }
+              },
+              "required": ["id", "host", "username", "password_env"],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 1000
+          }
+        },
+        "required": ["trunks"],
+        "additionalProperties": false
+      },
+      "ValidationContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["validator", "handsets", "policies"],
+        "properties": {
+          "validator": {
+            "type": "string",
+            "enum": ["doorman-37612e50d5d7"]
+          },
+          "handsets": {
+            "$ref": "#/components/schemas/HandsetValues"
+          },
+          "policies": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "values"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+                },
+                "values": {
+                  "$ref": "#/components/schemas/PolicyValues"
+                }
+              }
+            }
+          },
+          "trunks": {
+            "$ref": "#/components/schemas/TrunkValues"
+          }
+        }
+      },
+      "Link": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "href": {
+            "type": "string",
+            "maxLength": 2048
+          }
+        },
+        "required": ["href"]
+      },
+      "Links": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "self": {
+            "$ref": "#/components/schemas/Link"
+          },
+          "up": {
+            "$ref": "#/components/schemas/Link"
+          }
+        },
+        "required": ["self", "up"]
+      },
+      "SnapshotResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["accepted", "duplicate"]
+          },
+          "generation": {
+            "type": "string",
+            "maxLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "revision": {
+            "type": "string",
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$"
+          },
+          "_links": {
+            "$ref": "#/components/schemas/Links"
+          }
+        },
+        "required": ["status", "generation", "revision", "_links"]
+      },
+      "StatusResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["accepted"]
+          },
+          "_links": {
+            "$ref": "#/components/schemas/Links"
+          }
+        },
+        "required": ["status", "_links"]
+      },
+      "QueueResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueItem"
+            },
+            "maxItems": 100
+          },
+          "pollAfterMs": {
+            "type": "integer",
+            "minimum": 5000,
+            "maximum": 5000,
+            "x-go-type": "int64"
+          },
+          "_links": {
+            "$ref": "#/components/schemas/Links"
+          }
+        },
+        "required": ["items", "pollAfterMs", "_links"]
+      },
+      "ReceiptResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["recorded", "duplicate", "unknown", "conflict"]
+          }
+        },
+        "required": ["id", "status"]
+      },
+      "ReceiptResults": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "receipts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceiptResult"
+            },
+            "maxItems": 100
+          },
+          "_links": {
+            "$ref": "#/components/schemas/Links"
+          }
+        },
+        "required": ["receipts", "_links"]
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": ["error"]
+      }
+    }
+  }
+}

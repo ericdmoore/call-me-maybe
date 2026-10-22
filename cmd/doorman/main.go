@@ -95,6 +95,8 @@ func runCommand() int {
 			return runLogin(os.Args[2:])
 		case "account":
 			return runAccount(os.Args[2:])
+		case "sync":
+			return runSync(os.Args[2:])
 		case "restore":
 			os.Exit(runRestore(os.Args[2:]))
 		case "stt":
@@ -1595,6 +1597,8 @@ func serve() error {
 			o.store.Close()
 		}
 	}()
+	stopActivation := observeActivation(opened)
+	defer stopActivation()
 
 	client := ari.New(ari.Options{
 		BaseURL:      cfg.ARIBaseURL,

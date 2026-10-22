@@ -77,7 +77,7 @@ func TestEveryEmbeddedUnitHasARuleAndTheDaemonComesFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 13 || units[0].Name != "doorman.service" {
+	if len(units) != 14 || units[0].Name != "doorman.service" {
 		t.Fatalf("units = %d, first %s", len(units), units[0].Name)
 	}
 	for _, u := range units {
@@ -86,6 +86,27 @@ func TestEveryEmbeddedUnitHasARuleAndTheDaemonComesFirst(t *testing.T) {
 		}
 		if !strings.Contains(string(u.Content), "ExecStart=") && !u.Timer {
 			t.Errorf("%s has no ExecStart", u.Name)
+		}
+	}
+}
+
+func TestEnrolledBoxEnablesSeparateSyncService(t *testing.T) {
+	lay := layout(t)
+	x := &fakeExec{users: map[string]bool{"asterisk": true, "doorman": true}}
+	p, err := Build(context.Background(), x, lay, Wants{Sync: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, name := range p.Enable {
+		found = found || name == "doorman-sync.service"
+	}
+	if !found {
+		t.Fatal("enrolled box did not enable sync")
+	}
+	for _, name := range p.Disable {
+		if name == "doorman-sync.service" {
+			t.Fatal("enrolled box disabled sync")
 		}
 	}
 }
@@ -112,8 +133,8 @@ func TestPlanInstallsEnablesAndIsIdempotent(t *testing.T) {
 	if n := x.count("systemctl", "enable", "--now"); n != 4 {
 		t.Errorf("enabled = %d, want the daemon, both housekeeping timers and the inbox: %v", n, p.Enable)
 	}
-	if n := x.count("systemctl", "disable", "--now"); n != 4 {
-		t.Errorf("disabled = %d, want directory, digest, balance, backup: %v", n, p.Disable)
+	if n := x.count("systemctl", "disable", "--now"); n != 5 {
+		t.Errorf("disabled = %d, want directory, sync, digest, balance, backup: %v", n, p.Disable)
 	}
 	unit, err := os.ReadFile(filepath.Join(lay.UnitDir, "doorman-inbox.service"))
 	if err != nil || !strings.HasPrefix(string(unit), managedMarker) || !strings.Contains(string(unit), "ExecStart=") {
@@ -272,7 +293,7 @@ func TestInspectReportsWantAgainstHost(t *testing.T) {
 func TestEveryUnitHasShippedLegacyContentRegistered(t *testing.T) {
 	units, _ := Units()
 	for _, u := range units {
-		if strings.HasPrefix(u.Name, "doorman-backup.") || strings.HasPrefix(u.Name, "doorman-reminders.") {
+		if strings.HasPrefix(u.Name, "doorman-backup.") || strings.HasPrefix(u.Name, "doorman-reminders.") || u.Name == "doorman-sync.service" {
 			continue // born with the marker; never shipped under scripts/
 		}
 		if len(legacyUnits[u.Name]) == 0 {

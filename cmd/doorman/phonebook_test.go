@@ -60,6 +60,69 @@ func bookFixture(t *testing.T) bookPaths {
 	return paths
 }
 
+func TestDirectoryFollowsAssignmentAndRetainsLastGoodSelection(t *testing.T) {
+	paths := bookFixture(t)
+	cache := &bookCache{paths: paths}
+	model, _ := provision.Lookup("grandstream-wp826")
+	body, err := cache.directory("kitchen", model)
+	if err != nil || !strings.Contains(string(body), "Grandma") {
+		t.Fatal("initial directory missing the people book")
+	}
+	changed := strings.Replace(bookHandsetsTOML, `id = "kitchen"`, "id = \"kitchen\"\nphonebook = [\"house\"]", 1)
+	if err := os.WriteFile(paths.handsets, []byte(changed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body, err = cache.directory("kitchen", model)
+	if err != nil || strings.Contains(string(body), "Grandma") {
+		t.Fatal("new assignment did not reach the running directory")
+	}
+	if err := os.WriteFile(paths.handsets, []byte("broken = ["), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body, err = cache.directory("kitchen", model)
+	if err != nil || strings.Contains(string(body), "Grandma") {
+		t.Fatal("invalid inventory replaced the last good selection")
+	}
+	if _, err := cache.directory("missing", model); err == nil {
+		t.Fatal("rendered an unknown handset")
+	}
+}
+
+func TestDirectoryFollowsSourceContentWithoutInventoryOrMtimeChange(t *testing.T) {
+	paths := bookFixture(t)
+	cardPath := filepath.Join(filepath.Dir(paths.contacts), "family.vcf")
+	card := "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Alice\r\nTEL:+15550100004\r\nEND:VCARD\r\n"
+	for path, data := range map[string]string{
+		paths.contacts: "[[sources]]\nid = \"family\"\npath = \"family.vcf\"\n",
+		paths.handsets: strings.Replace(bookHandsetsTOML, `id = "kitchen"`, "id = \"kitchen\"\nphonebook = [\"family\"]", 1),
+		cardPath:       card,
+	} {
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cache := &bookCache{paths: paths}
+	model, _ := provision.Lookup("grandstream-wp826")
+	body, err := cache.directory("kitchen", model)
+	if err != nil || !strings.Contains(string(body), "Alice") {
+		t.Fatal("initial contact missing")
+	}
+	info, err := os.Stat(cardPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cardPath, []byte(strings.Replace(card, "Alice", "Betty", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(cardPath, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	body, err = cache.directory("kitchen", model)
+	if err != nil || !strings.Contains(string(body), "Betty") || strings.Contains(string(body), "Alice") {
+		t.Fatal("contact edit did not reach the directory")
+	}
+}
+
 // No contacts.toml: the house and the people, and nothing else — the
 // compatibility gate holds for the phone book too.
 func TestBooksWithoutAContactsFileAreHouseAndPeople(t *testing.T) {

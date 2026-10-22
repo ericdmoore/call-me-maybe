@@ -1142,8 +1142,9 @@ duplicated. Recovery never changes an explicit selection back to House.
 
 Cards live under `PHONEBOOK_DIR/shared/house.vcf` or
 `PHONEBOOK_DIR/shared/handsets/<id>.vcf`, separate from `*88`'s own files. The
-phone-directory service notices changes automatically; each phone shows them
-on its next directory refresh. The normal state-directory backup includes
+phone-directory service notices changes automatically; LAN WP826 phones receive
+an immediate import, while other phones show them at their next directory poll.
+The normal state-directory backup includes
 these files. These are **directory additions only**: importing a contact
 changes neither `[[people]]`, `contacts.toml`, nor call-screening permissions.
 
@@ -1372,10 +1373,56 @@ the phone at the box with the id and its `HANDSET_<ID>_PASSWORD`, confirm
 `Avail` with `pjsip show contacts`.
 
 The phones' directory — the other rooms, the feature codes, and `[[people]]`
-— comes from `doorman-directory.service`, always on, read-only, one port above
-the provisioning window. A name added to `[[people]]` is on every phone at
-its next poll (hourly) with nothing rendered and no window opened. A handset's
+— comes from `doorman-directory.service`, whose read-only HTTPS listener is one
+port above the provisioning window. A handset's
 `phonebook` key narrows what it shows: `["house"]` for a child's room.
+
+The directory service checks the rendered books every second and pushes changed
+XML to LAN WP826 phones using their existing web-admin credential. No reboot,
+provisioning window, Apply button, or call-service restart is needed. File edits,
+CLI imports and hosted assignments take the same path. The importer was verified
+on WP826 firmware 1.0.1.71; other models retain their configured pull interval
+(hourly by default). The WP826's ordinary pull timer has a five-minute minimum,
+so lowering that timer cannot provide interactive delivery.
+
+Discovery matches the inventory's MAC against Linux's IPv4 neighbour cache,
+populated by ordinary traffic between Asterisk and the phones. The service
+checks the device's advertised MAC/model before challenge login. That is a
+device-type check, not authentication: the answering host reports its own MAC
+and model. This uses the
+phone's existing HTTP management interface on the local LAN; passwords are
+hashed with its challenge, sessions are short lived, and redirects/proxies are
+disabled. No credentials or contact values enter logs. Routed or IPv6-only
+phones are not discovered by this path and retain pull delivery.
+
+Know the trade-off before relying on push. The upload is plain HTTP, so the
+household directory — names and numbers — crosses the LAN in clear, and a
+device that can take over a phone's LAN address (ARP spoofing, a reused DHCP
+lease) and answer like a WP826 would receive it. The admin credential is not
+exposed: the login is a hash over a one-time challenge and the password is
+random per phone. If the LAN is shared with devices you do not trust, put the
+phones on their own VLAN or SSID. The firmware's HTTPS management interface is
+not used by this path today.
+
+The importer requires `P333=0` (keep manually edited entries), which our
+provisioning template already sets. It refuses to push when that setting has
+drifted rather than risk erasing local contacts. Replacing the imported book
+removes contacts no longer selected and preserves entries added manually.
+Pending phones retry independently, with bounded backoff. A refusal only a
+person can fix — a failed login, a device that is not the inventory's phone, or
+a drifted keep-manual setting — waits five minutes, so the phone does not see
+an admin login every thirty seconds, unless the book or the phone's inventory
+entry changes first. Edits arriving during an import
+remain pending, and a directory-service restart resends the current book.
+Invalid source edits keep the last good directory.
+
+After upgrading the binary, restart `doorman-directory` to enable push.
+`journalctl -u doorman-directory` reports `phonebook imported <id>` only after the
+phone acknowledges import, or `phonebook push pending <id>` on failure.
+`Active on box` in the hosted UI still describes daemon activation, not handset
+delivery. For an end-to-end timing trial, record the hosted queue creation time
+and poll the handset's authenticated contact list for the expected addition or
+removal; an HTTP 200 or SIP NOTIFY acknowledgement alone is not that proof.
 
 ### Texts to the house
 
