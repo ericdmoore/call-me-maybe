@@ -35,6 +35,7 @@ func runLogin(args []string) int {
 		return 1
 	}
 	fmt.Printf("Signed in: device %s, house %s.\n", result.Box, result.House)
+	forgetRemovedBackup(*state)
 	fmt.Println("Credentials saved privately. Enable BACKUP_CLOUD=true in .env to upload encrypted backups.")
 	if before.Removed {
 		fmt.Println("This box was removed from its old account; hosted sync stopped then. Start it again: sudo systemctl start doorman-sync")

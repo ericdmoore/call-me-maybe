@@ -474,7 +474,8 @@ the private key (\fBBACKUP_IDENTITY_FILE\fR, or typed).
 Cloud retention belongs to the service; upload credentials cannot list,
 read or delete bundles. Successful cloud delivery reports stored, not verified.
 On a box removed from its account the cloud destination reports stopped,
-not failed, and asks the service nothing; file and S3 copies continue.
+not failed, and asks the service nothing; file and S3 copies continue. If
+cloud was the only destination nothing was backed up, and the run exits 1.
 View metadata at https://app.dialdoorman.cc/backups/.
 Printed-phrase recovery uses the separate recovery commands below.
 .TP

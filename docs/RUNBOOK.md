@@ -560,8 +560,13 @@ configuration are unaffected.
 
 `doorman account status` and `doorman check` say the box was removed and when.
 The nightly backup reports `– cloud: stopped, this box was removed from its
-account` instead of failing; file and S3 destinations keep delivering and the
-run still passes.
+account` instead of failing a destination. If a file or S3 destination is also
+configured it keeps delivering and the run still passes. A cloud-only box has
+no copy anywhere: the run prints `✗ nothing was backed up`, exits 1, posts
+`BackupFailed` for the stopped destination, and `doorman check` goes red, until
+you add a file or S3 destination or enrol the box again. `doorman login` also
+clears the "stopped" note from the last run's record, so `doorman check` stops
+reporting it as soon as the box is enrolled.
 
 To connect it again, enrol it as a new box and start sync:
 

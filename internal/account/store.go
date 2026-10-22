@@ -25,6 +25,11 @@ var (
 	// ErrRemoved is a deliberate sign-out by the account owner, not a fault:
 	// nothing retries it, and only a fresh doorman login ends it.
 	ErrRemoved = errors.New("account: this box was removed from its account; run doorman login to enrol it again")
+	// ErrSuperseded means a request outlived the enrolment that sent it: a
+	// doorman login replaced the credential while the request was on the
+	// network, so whatever the service said was about the old box. It is
+	// retryable and never a sign-out; the next attempt uses the new enrolment.
+	ErrSuperseded = errors.New("account: the enrolment changed while the request was in flight; retrying")
 )
 
 type credential struct {
@@ -246,8 +251,16 @@ func (c *Client) markRemoved(s *store, v *state) error {
 	v.Tokens = map[string]credential{}
 	v.Upload = nil
 	v.Recovery = nil
+	// Save first: if the save fails the ciphertext must still be there, or
+	// the surviving state would name an upload nothing can read and every
+	// later attempt would stop on a state error instead of reaching the
+	// service and seeing the removal again. A leftover file is harmless: the
+	// name is fixed and the next upload overwrites it.
+	if err := s.save(v); err != nil {
+		return err
+	}
 	_ = os.Remove(filepath.Join(s.dir, "upload.age"))
-	return s.save(v)
+	return nil
 }
 
 // Root may run a restore to reproduce file ownership. Its credential writes must

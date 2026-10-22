@@ -51,8 +51,14 @@ func (c *Client) Sync(ctx context.Context, endpoint SyncEndpoint, data []byte) (
 		return nil, err
 	}
 	if removed(status, body) {
-		if err := c.settleRemoved(ctx, box); err != nil {
+		applied, err := c.settleRemoved(ctx, box)
+		if err != nil {
 			return nil, err
+		}
+		if !applied {
+			// The removal was about an enrolment that is gone. Do not hand
+			// the caller a removal: it would stop sync for the new box.
+			return nil, ErrSuperseded
 		}
 	} else if status == http.StatusUnauthorized || (status >= 200 && status < 300 && used.Pending != "") {
 		if err := c.settleSync(ctx, used, status); err != nil {
@@ -93,20 +99,25 @@ func (c *Client) syncCredential(ctx context.Context) (string, credential, string
 // a different enrolment: a doorman login that finished while this request
 // was on the network made a new box, which the old box's removal must not
 // touch. A rotation keeps the box, and the service revoked its tokens too.
-func (c *Client) settleRemoved(ctx context.Context, box string) error {
+// It reports whether the removal describes the stored enrolment (recorded
+// now, or already recorded by another process); false means it is stale.
+func (c *Client) settleRemoved(ctx context.Context, box string) (bool, error) {
 	s, err := openStoreWait(ctx, c.StateDir, syncLockWait)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer s.close()
 	v, err := s.load()
 	if err != nil {
-		return err
+		return false, err
 	}
-	if v.Box != box || !v.RemovedAt.IsZero() {
-		return nil
+	if v.Box != box {
+		return false, nil
 	}
-	return c.markRemoved(s, v)
+	if !v.RemovedAt.IsZero() {
+		return true, nil
+	}
+	return true, c.markRemoved(s, v)
 }
 
 // settleSync applies the same promotion and revocation rules as

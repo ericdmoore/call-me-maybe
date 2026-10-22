@@ -103,8 +103,12 @@ func TestSyncRemovalDuringAFreshLoginLeavesTheNewEnrolment(t *testing.T) {
 		fmt.Fprint(w, `{"error":"box_removed"}`)
 	})
 	seed(t, c)
-	if _, err := c.Sync(context.Background(), SyncStatus, []byte(`{}`)); !errors.Is(err, ErrRemoved) {
-		t.Fatal(err)
+	// The stale removal is retryable and is not a removal: a caller that
+	// treats ErrRemoved as final would stop sync for the new enrolment.
+	_, err := c.Sync(context.Background(), SyncStatus, []byte(`{}`))
+	var refused *ServiceError
+	if !errors.Is(err, ErrSuperseded) || errors.Is(err, ErrRemoved) || errors.As(err, &refused) {
+		t.Fatalf("want a retryable non-removal error, got %v", err)
 	}
 	if v := loadTest(t, c); !v.RemovedAt.IsZero() || v.NeedsLogin || v.Tokens["sync"].Current != testToken("sync", "D") {
 		t.Fatal("old box's removal signed out the new enrolment")
@@ -263,5 +267,38 @@ func TestLoginAfterRemovalEnrolsAFreshBox(t *testing.T) {
 	after, err := c.Status()
 	if err != nil || after.Removed || !after.RemovedAt.IsZero() || after.NeedsLogin || len(after.Capabilities) != 2 {
 		t.Fatalf("login left the removal in place: %+v", after)
+	}
+}
+
+func TestFailedSaveOfARemovalKeepsTheCiphertext(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	c := clientServer(t, func(http.ResponseWriter, *http.Request) {})
+	seed(t, c)
+	dir := filepath.Join(c.StateDir, "account")
+	cipher := filepath.Join(dir, "upload.age")
+	if err := os.WriteFile(cipher, []byte("synthetic encrypted bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := openStore(c.StateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	v, err := s.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A directory that refuses new files makes the state save fail.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(dir, 0o700)
+	if err := c.markRemoved(s, v); !errors.Is(err, ErrState) {
+		t.Fatalf("want the save to fail with ErrState, got %v", err)
+	}
+	if _, err := os.Stat(cipher); err != nil {
+		t.Fatalf("ciphertext removed although the cleared state was not saved: %v", err)
 	}
 }

@@ -190,6 +190,7 @@ func TestSyncTransportEndsOnRemovalOnly(t *testing.T) {
 		{account.ErrRemoved, true},
 		{&account.ServiceError{Status: 401, Code: "unauthorized"}, false},
 		{account.ErrLogin, false},
+		{account.ErrSuperseded, false},
 		{account.ErrNetwork, false},
 		{nil, false},
 	} {
@@ -199,4 +200,75 @@ func TestSyncTransportEndsOnRemovalOnly(t *testing.T) {
 			t.Fatalf("%v: ended=%t", test.err, errors.Is(err, syncmachine.ErrTransportEnded))
 		}
 	}
+}
+
+// A removal that raced a fresh login is not a sign-out: runSync leaves its
+// loop only for errors.Is(err, ErrRemoved) (exit 6, which the unit treats as
+// a clean stop), so the stale error must not match, must not end the pass,
+// and must back off like any other retryable failure.
+func TestStaleRemovalNeitherEndsSyncNorExitsSix(t *testing.T) {
+	send := func(context.Context, account.SyncEndpoint, []byte) ([]byte, error) {
+		return nil, account.ErrSuperseded
+	}
+	_, err := syncTransport(send)(context.Background(), "status", nil)
+	if errors.Is(err, account.ErrRemoved) || errors.Is(err, syncmachine.ErrTransportEnded) {
+		t.Fatalf("a stale removal would stop sync for the new enrolment: %v", err)
+	}
+	pace := syncPace{jitter: func(d time.Duration) time.Duration { return d }}
+	if d := pace.next(err, time.Second); d <= 0 || d > syncMaxDelay {
+		t.Fatalf("no retry scheduled: %v", d)
+	}
+}
+
+func TestNightlyBackupOfACloudOnlyRemovedBoxIsNotGreen(t *testing.T) {
+	root := t.TempDir()
+	recipient, _, err := backup.NewKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(root, "state")
+	writeRemovedAccount(t, state)
+	env := filepath.Join(root, ".env")
+	if err := os.WriteFile(env, []byte("BACKUP_RECIPIENT="+recipient+"\nBACKUP_CLOUD=true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := capture(t, func() {
+		if rc := runBackup([]string{"run", "--env", env, "--state", state, "--no-voicemail",
+			"--asterisk", filepath.Join(root, "missing")}); rc != 1 {
+			t.Errorf("a run that delivered nowhere exited %d, want 1", rc)
+		}
+	})
+	if !strings.Contains(out, "– cloud: stopped") || !strings.Contains(out, "✗ nothing was backed up") {
+		t.Fatalf("incorrect result: %s", out)
+	}
+	var last lastBackup
+	raw, err := os.ReadFile(lastBackupPath(state))
+	if err != nil || json.Unmarshal(raw, &last) != nil || len(last.Dests) != 0 ||
+		len(last.Removed) != 1 || last.Removed[0] != "cloud" {
+		t.Fatalf("last run misrecorded: %s", raw)
+	}
+	if _, ok := describeBackup(state, last.At, secretsFrom(map[string]string{"BACKUP_RECIPIENT": recipient})); ok {
+		t.Fatal("check passed a box with no copy anywhere")
+	}
+}
+
+func TestLoginClearsTheRemovedNoteFromTheLastBackup(t *testing.T) {
+	state := t.TempDir()
+	forgetRemovedBackup(state) // no record yet: nothing to do, nothing created
+	if _, err := os.Stat(lastBackupPath(state)); !os.IsNotExist(err) {
+		t.Fatal("created a record out of nothing")
+	}
+	at := time.Date(2026, 10, 20, 3, 0, 0, 0, time.UTC)
+	writeLast(state, lastBackup{At: at, Name: "n", Files: 3, Bytes: 10, Removed: []string{"cloud"}})
+	forgetRemovedBackup(state)
+	var last lastBackup
+	raw, err := os.ReadFile(lastBackupPath(state))
+	if err != nil || json.Unmarshal(raw, &last) != nil || len(last.Removed) != 0 || last.Name != "n" || last.Files != 3 {
+		t.Fatalf("record not cleared cleanly: %s", raw)
+	}
+	line, _ := describeBackup(state, at, secretsFrom(map[string]string{}))
+	if strings.Contains(line, "stopped") {
+		t.Fatalf("a re-enrolled box still reads as stopped: %q", line)
+	}
+	forgetRemovedBackup(state) // a record with no note is left alone
 }
