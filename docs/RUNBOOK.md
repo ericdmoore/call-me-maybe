@@ -154,14 +154,29 @@ $ sudo mkdir -p /opt/call-me-maybe
 $ sudo chown "$USER" /opt/call-me-maybe
 $ git clone https://github.com/YOU/call-me-maybe /opt/call-me-maybe
 
-# On a WORKSTATION (not the Pi), build and ship the binary. Check the Pi arch
-# first: uname -m says aarch64 -> arm64 build, armv7l -> armv7 build.
-$ make cross
-$ scp bin/doorman-linux-arm64 pi@raspberrypi:/opt/call-me-maybe/bin/doorman
-$ ssh pi@raspberrypi /opt/call-me-maybe/bin/doorman version
+# On the box, download the release binary for its arch and verify it against
+# that release's checksums.txt (uname -m: x86_64 -> amd64, aarch64 -> arm64,
+# armv7l -> armv7). Boxes run release binaries only; see "Deploying upgrades".
+$ V=v0.14.0 A=arm64
+$ B=https://github.com/ericdmoore/call-me-maybe/releases/download/$V
+$ curl -fsSLO "$B/doorman-linux-$A" && curl -fsSLO "$B/checksums.txt"
+$ grep " doorman-linux-$A\$" checksums.txt | sha256sum -c -
+$ sudo install -m 0755 "doorman-linux-$A" /opt/call-me-maybe/bin/doorman
+$ /opt/call-me-maybe/bin/doorman version          # exactly "doorman 0.14.0"
 ```
 
 ### Deploying upgrades
+
+**A box runs release binaries only.** Every `doorman` on a box (the services'
+copy, `/usr/local/bin`, the operator's `~/.local/bin`, and anything a systemd
+unit or drop-in starts) is a published `vX.Y.Z` release asset, checked against
+that release's `checksums.txt` on the box. Never a `make cross` or branch
+build copied over, and never a one-off binary wired in through a drop-in:
+`doorman version` must print exactly the release version, and a `-N-gSHA`
+suffix or any other label means an unofficial build. To ship unreleased work,
+merge it and cut a release; a hotfix is a patch release. The one exception is
+an emergency rollback to the previous known-good binary (below), which is
+followed by a release, not left in place.
 
 On a workstation, rerun the documented `install.sh` installer:
 
@@ -189,10 +204,38 @@ The script refuses to continue if the unit file or a managed template in
 `/opt/call-me-maybe/asterisk` changed between releases — review the diff,
 copy the new one into place, then rerun.
 
-For the Pi, build the desired release with `make cross` and use the `scp`
-command above. Keep `bin/doorman.prev` for rollback, then restart the doorman
-service and verify `doorman version`. The interactive notice names `install.sh`
-on workstations and the `scp` path on Linux ARM hosts.
+For the Pi, download and verify the release asset as in the install steps
+above. Keep each binary you replace beside it as `doorman.before-vX.Y.Z`, named
+for the release you are installing, so a retried upgrade cannot overwrite the
+rollback target. Check that no call is up (`sudo asterisk -rx "core show
+channels count"`), then restart `doorman`, `doorman-sync`, `doorman-directory`
+and `doorman-inbox`; Asterisk does not need a restart for a binary change. The
+interactive notice names `install.sh` on workstations and this download path on
+Linux ARM hosts.
+
+#### After an upgrade: smoke checkpoints
+
+Record each before the upgrade and compare after; any failure means roll back.
+
+1. **Identity:** every copy prints exactly the release version, and its
+   SHA-256 matches `checksums.txt`.
+2. **Configuration:** `doorman check` passes on the live files.
+3. **Services:** the four units are active with no restarts; only the units you
+   restarted have new PIDs.
+4. **Phone network:** the trunk shows `Registered` (`pjsip show
+   registrations`) and the `doorman` ARI app is connected (`ari show apps`).
+5. **Calls:** a known caller rings the house; an unknown caller hears the
+   lobby, and a wrong extension gets "Good day"; an outbound call and a
+   Room2Room call connect.
+6. **Backup:** `sudo systemctl start doorman-backup` succeeds to every
+   destination.
+7. **Sync, if enrolled:** the box's last-seen time and reported version update,
+   the content library totals are unchanged, and a harmless hosted edit (and
+   its revert) comes back `applied`.
+8. **Logs:** no new warnings from any unit for ten minutes.
+
+`./scripts/smoke.sh` on the box covers the deployment checks it knows about;
+the call and hosted checks need a person.
 
 Successful interactive operator commands can print a newer-release notice to
 stderr, after their output, at most once per 24 hours. Both stdout and stderr
@@ -545,12 +588,17 @@ names it. `cannot reach ARI` is rungs 4–5. The unit has
 ### Rolling back
 
 ```bash
-# The binary is the deploy artifact. Keep the previous one around by copying
-# bin/doorman to bin/doorman.prev before each deploy; then rollback is:
-$ sudo systemctl stop doorman
-$ mv /opt/call-me-maybe/bin/doorman.prev /opt/call-me-maybe/bin/doorman
-$ sudo systemctl start doorman
+# The binary is the deploy artifact. Each upgrade keeps the replaced copies as
+# doorman.before-vX.Y.Z (see "Deploying upgrades"); rollback restores them all
+# and restarts the same units:
+$ V=v0.14.0
+$ for t in /opt/call-me-maybe/bin/doorman /usr/local/bin/doorman; do
+>   sudo cp -a "$t.before-$V" "$t"; done
+$ sudo systemctl restart doorman doorman-sync doorman-directory doorman-inbox
 ```
+
+This is the one time a box may run a binary that is not the current release:
+the previous known-good one, until the fix ships as a patch release.
 
 Asterisk config is not in the deploy path — roll it back separately by editing
 `/etc/asterisk/` and running `sudo asterisk -rx "core reload"`.
