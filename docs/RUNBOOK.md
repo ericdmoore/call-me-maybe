@@ -585,6 +585,42 @@ names it. `cannot reach ARI` is rungs 4–5. The unit has
 `StartLimitBurst=5`, so it stops rather than looping forever — clear with
 `sudo systemctl reset-failed doorman` after fixing.
 
+### Box removed from its account
+
+```bash
+$ journalctl -u doorman-sync -n 20 --no-pager
+$ sudo -u doorman doorman account status
+```
+
+``sync: this box was removed from its account; hosted sync and cloud backups
+have stopped; calls keep working; run `doorman login` to enrol it again`` means
+an account owner removed this box. It is a deliberate sign-out, not a fault:
+the service answered `401 box_removed`, and the box forgot every credential,
+recorded when it happened, and stopped. `doorman-sync` exits 6, which its unit
+treats as a clean stop, so it is inactive rather than failed and nothing
+retries against the service. Calls, policies, phonebooks and the local
+configuration are unaffected.
+
+`doorman account status` and `doorman check` say the box was removed and when.
+The nightly backup reports `– cloud: stopped, this box was removed from its
+account` instead of failing a destination. If a file or S3 destination is also
+configured it keeps delivering and the run still passes. A cloud-only box has
+no copy anywhere: the run prints `✗ nothing was backed up`, exits 1, posts
+`BackupFailed` for the stopped destination, and `doorman check` goes red, until
+you add a file or S3 destination or enrol the box again. `doorman login` also
+clears the "stopped" note from the last run's record, so `doorman check` stops
+reporting it as soon as the box is enrolled.
+
+To connect it again, enrol it as a new box and start sync:
+
+```bash
+$ sudo -u doorman doorman login
+$ sudo systemctl start doorman-sync     # or: sudo doorman init services
+```
+
+A plain `401` without that word is still the old "sign in again" case: sync
+keeps its backoff and asks for `doorman login`.
+
 ### Rolling back
 
 ```bash
@@ -1266,7 +1302,8 @@ shows IDs and capabilities, never credential values. A cloud upload is reported 
 stored, not readback verified: its credential cannot list, read or delete. View
 metadata at <https://app.dialdoorman.cc/backups/>. Customer-authorized cloud recovery
 is still integration work; [the protocol guide](CLOUD-BACKUP-PROTOCOL.md) records
-retry, custody and recovery boundaries.
+retry, custody and recovery boundaries. A box removed from its account stops uploading
+and says so; see [Box removed from its account](#box-removed-from-its-account).
 
 **A new box from a bundle:**
 

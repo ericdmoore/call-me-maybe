@@ -755,6 +755,9 @@ func checkEnvironment() int {
 		v, ok := dotenv[k]
 		return v, ok
 	}, 3*time.Second))
+	if line := describeAccount("/var/lib/doorman"); line != "" {
+		fmt.Println(line)
+	}
 	if line, ok := describeBackup("/var/lib/doorman", time.Now(), func(k string) (string, bool) {
 		if v, ok := os.LookupEnv(k); ok {
 			return v, true

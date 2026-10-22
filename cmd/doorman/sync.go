@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -54,6 +55,9 @@ func runSync(args []string) int {
 	status, err := syncAccount(ctx, client)
 	if ctx.Err() != nil {
 		return 0
+	}
+	if err == nil && status.Removed {
+		return syncRemoved()
 	}
 	if err != nil || status.NeedsLogin || status.Box == "" {
 		fmt.Fprintln(os.Stderr, "sync: sign in with doorman login")
@@ -122,12 +126,13 @@ func runSync(args []string) int {
 	for {
 		at := time.Now()
 		bounded, cancel := context.WithTimeout(ctx, 20*time.Second)
-		err = m.Exchange(bounded, func(ctx context.Context, endpoint string, body []byte) ([]byte, error) {
-			return client.Sync(ctx, account.SyncEndpoint(endpoint), body)
-		})
+		err = m.Exchange(bounded, syncTransport(client.Sync))
 		cancel()
 		if ctx.Err() != nil {
 			return 0
+		}
+		if errors.Is(err, account.ErrRemoved) {
+			return syncRemoved()
 		}
 		if err != nil {
 			// Package errors are categorical: never print requests, responses,
@@ -153,4 +158,33 @@ func runSync(args []string) int {
 		case <-timer.C:
 		}
 	}
+}
+
+// syncTransport hands the machine the account's closed sync surface, and
+// marks a removal as the end of the transport so the pass stops at once.
+func syncTransport(send func(context.Context, account.SyncEndpoint, []byte) ([]byte, error)) syncmachine.Transport {
+	return func(ctx context.Context, endpoint string, body []byte) ([]byte, error) {
+		reply, err := send(ctx, account.SyncEndpoint(endpoint), body)
+		if errors.Is(err, account.ErrRemoved) {
+			err = fmt.Errorf("%w: %w", syncmachine.ErrTransportEnded, err)
+		}
+		return reply, err
+	}
+}
+
+// syncExitRemoved is the exit status for an owner's deliberate sign-out. The
+// unit lists it in SuccessExitStatus, so systemd neither restarts the process
+// nor counts it against the start limit, and the unit does not read as failed.
+// It is LSB's "program is not configured", which is what the box now is.
+const syncExitRemoved = 6
+
+// syncRemovedMessage is the one line a removed box logs. It is categorical:
+// no token, header, box or house identifier, nothing from the response.
+const syncRemovedMessage = "sync: this box was removed from its account; hosted sync and cloud backups have stopped; calls keep working; run `doorman login` to enrol it again"
+
+// syncRemoved stops for good rather than polling: the service revoked every
+// token, so another pass would only ask the same question again.
+func syncRemoved() int {
+	fmt.Fprintln(os.Stderr, syncRemovedMessage)
+	return syncExitRemoved
 }

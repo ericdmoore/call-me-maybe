@@ -66,6 +66,9 @@ func (c *Client) AuthorizeRecovery(ctx context.Context, display func(string)) (R
 	if err != nil {
 		return RecoveryScope{}, err
 	}
+	if !v.RemovedAt.IsZero() {
+		return RecoveryScope{}, ErrRemoved
+	}
 	if v.Box == "" || v.NeedsLogin {
 		return RecoveryScope{}, ErrLogin
 	}
@@ -161,6 +164,9 @@ func (c *Client) recoveryPost(ctx context.Context, path string, input, output an
 	if err != nil {
 		return RecoveryScope{}, err
 	}
+	if !v.RemovedAt.IsZero() {
+		return RecoveryScope{}, ErrRemoved
+	}
 	if v.NeedsLogin || v.Box == "" {
 		return RecoveryScope{}, ErrLogin
 	}
@@ -171,6 +177,12 @@ func (c *Client) recoveryPost(ctx context.Context, path string, input, output an
 	status, headers, body, err := c.post(ctx, "/v1/backups/recovery/"+path, g.Secret, input)
 	if err != nil {
 		return RecoveryScope{}, err
+	}
+	if removed(status, body) {
+		if err = c.markRemoved(s, v); err != nil {
+			return RecoveryScope{}, err
+		}
+		return RecoveryScope{}, failure(status, headers, body)
 	}
 	if status == 401 {
 		g.Scope.ExpiresAt = 0

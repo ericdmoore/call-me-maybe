@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -87,5 +88,21 @@ func TestRoundTripPublishesLocalEditsAndReplaysLostReceipt(t *testing.T) {
 	// The replay pass re-sends nothing the service already accepted.
 	if len(posted) != 2 || posted[0].Revision == posted[1].Revision {
 		t.Fatal("resulting snapshot did not return to service, or was re-sent unchanged")
+	}
+}
+
+func TestAnEndedTransportStopsThePassWithoutAWarning(t *testing.T) {
+	m, _, _ := fixture(t)
+	m.SampleStatus = func() syncwire.Status {
+		return syncwire.Status{Schema: 1, Version: "test", SampledAt: time.Now().UnixMilli()}
+	}
+	ended := fmt.Errorf("%w: signed out", ErrTransportEnded)
+	calls := 0
+	err := m.Exchange(context.Background(), func(context.Context, string, []byte) ([]byte, error) {
+		calls++
+		return nil, ended
+	})
+	if !errors.Is(err, ErrTransportEnded) || calls != 1 || len(m.warned) != 0 {
+		t.Fatalf("ended transport kept going: err=%v calls=%d warned=%v", err, calls, m.warned)
 	}
 }

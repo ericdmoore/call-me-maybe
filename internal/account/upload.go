@@ -56,6 +56,9 @@ func (c *Client) Upload(ctx context.Context, data []byte, createdAt time.Time) (
 	if err != nil {
 		return Bundle{}, err
 	}
+	if !v.RemovedAt.IsZero() {
+		return Bundle{}, ErrRemoved
+	}
 	if v.NeedsLogin || v.Box == "" {
 		return Bundle{}, ErrLogin
 	}

@@ -22,6 +22,14 @@ var (
 	ErrLogin    = errors.New("account: sign in with doorman login")
 	ErrProtocol = errors.New("account: invalid service response")
 	ErrNetwork  = errors.New("account: service connection failed; credentials were not logged")
+	// ErrRemoved is a deliberate sign-out by the account owner, not a fault:
+	// nothing retries it, and only a fresh doorman login ends it.
+	ErrRemoved = errors.New("account: this box was removed from its account; run doorman login to enrol it again")
+	// ErrSuperseded means a request outlived the enrolment that sent it: a
+	// doorman login replaced the credential while the request was on the
+	// network, so whatever the service said was about the old box. It is
+	// retryable and never a sign-out; the next attempt uses the new enrolment.
+	ErrSuperseded = errors.New("account: the enrolment changed while the request was in flight; retrying")
 )
 
 type credential struct {
@@ -46,6 +54,7 @@ type state struct {
 	Tokens       map[string]credential `json:"tokens"`
 	Device       *device               `json:"device,omitempty"`
 	NeedsLogin   bool                  `json:"needsLogin,omitempty"`
+	RemovedAt    time.Time             `json:"removedAt,omitzero"`
 	Upload       *pendingUpload        `json:"upload,omitempty"`
 }
 
@@ -55,6 +64,8 @@ type Status struct {
 	House         string    `json:"house,omitempty"`
 	EnrolledAt    time.Time `json:"enrolledAt,omitempty"`
 	NeedsLogin    bool      `json:"needsLogin"`
+	Removed       bool      `json:"removed,omitempty"`
+	RemovedAt     time.Time `json:"removedAt,omitzero"`
 	Capabilities  []string  `json:"capabilities"`
 	PendingUpload string    `json:"pendingUpload,omitempty"`
 }
@@ -205,7 +216,8 @@ func (c *Client) Status() (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	result := Status{Box: value.Box, House: value.House, EnrolledAt: value.EnrolledAt, NeedsLogin: value.NeedsLogin || value.Box == ""}
+	result := Status{Box: value.Box, House: value.House, EnrolledAt: value.EnrolledAt, NeedsLogin: value.NeedsLogin || value.Box == "",
+		Removed: !value.RemovedAt.IsZero(), RemovedAt: value.RemovedAt}
 	for _, cap := range []string{"sync", "backup"} {
 		if value.Tokens[cap].Current != "" {
 			result.Capabilities = append(result.Capabilities, cap)
@@ -215,6 +227,40 @@ func (c *Client) Status() (Status, error) {
 		result.PendingUpload = value.Upload.ID
 	}
 	return result, nil
+}
+
+// removed reports whether a response is the service's word for an owner who
+// removed this box from the account. Every other 401 keeps its old meaning.
+func removed(status int, body []byte) bool {
+	if status != 401 {
+		return false
+	}
+	var data struct {
+		Error string `json:"error"`
+	}
+	return json.Unmarshal(body, &data) == nil && data.Error == "box_removed"
+}
+
+// markRemoved records the sign-out durably and forgets every credential the
+// service has already revoked, so nothing can retry or rotate them. Box and
+// House stay for display; a re-enrolled box is a new box to the service.
+// An unfinished upload's reservation died with the box; its ciphertext goes.
+func (c *Client) markRemoved(s *store, v *state) error {
+	v.RemovedAt = c.now().UTC()
+	v.NeedsLogin = true
+	v.Tokens = map[string]credential{}
+	v.Upload = nil
+	v.Recovery = nil
+	// Save first: if the save fails the ciphertext must still be there, or
+	// the surviving state would name an upload nothing can read and every
+	// later attempt would stop on a state error instead of reaching the
+	// service and seeing the removal again. A leftover file is harmless: the
+	// name is fixed and the next upload overwrites it.
+	if err := s.save(v); err != nil {
+		return err
+	}
+	_ = os.Remove(filepath.Join(s.dir, "upload.age"))
+	return nil
 }
 
 // Root may run a restore to reproduce file ownership. Its credential writes must

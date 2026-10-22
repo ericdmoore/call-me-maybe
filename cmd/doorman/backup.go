@@ -263,6 +263,9 @@ type lastBackup struct {
 	Doorman    string    `json:"doorman"`
 	Verified   bool      `json:"verified"`
 	Unverified []string  `json:"unverified,omitempty"`
+	// Removed names cloud destinations that stopped because the account
+	// owner removed this box: a deliberate sign-out, not a failed delivery.
+	Removed []string `json:"removed,omitempty"`
 }
 
 func lastBackupPath(stateDir string) string { return filepath.Join(stateDir, "backup", "last.json") }
@@ -335,6 +338,14 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 	rc := 0
 	verified := identity != ""
 	for i, r := range results {
+		if errors.Is(r.Err, account.ErrRemoved) {
+			// Reported, not failed: the owner chose this, nothing was sent
+			// to the service, and the run only fails below if no other
+			// destination delivered either.
+			last.Removed = append(last.Removed, r.Dest)
+			fmt.Printf("– %s: stopped, this box was removed from its account (`doorman login` enrols it again)\n", r.Dest)
+			continue
+		}
 		if r.Err != nil {
 			rc = 1
 			verified = false
@@ -376,6 +387,17 @@ func backupRun(ctx context.Context, o *backupOpts) int {
 		fmt.Println(")")
 		post(ctx, journal, events.BackupCompleted, r.Dest)
 	}
+	// A removal alone is quiet only while another destination holds the
+	// copy. When it was the only destination (a cloud-only box), the run
+	// delivered nothing: exit nonzero and post the same BackupFailed event a
+	// failed destination does, so the unit and the journal do not read green.
+	if len(last.Dests) == 0 && len(last.Removed) > 0 && rc == 0 {
+		rc = 1
+		fmt.Println("✗ nothing was backed up: the only destination stopped because this box was removed from its account (`doorman login` enrols it again, or add a file or S3 destination)")
+		for _, dest := range last.Removed {
+			post(ctx, journal, events.BackupFailed, dest)
+		}
+	}
 	last.Verified = verified && len(last.Dests) > 0
 	if last.Verified {
 		fmt.Println("✓ verified: every destination's copy was read back and opened with the on-box key")
@@ -404,6 +426,23 @@ func readBack(ctx context.Context, d backup.Destination, name, identity string, 
 		return fmt.Errorf("manifest lists %d files, %d were sent", len(m.Files), files)
 	}
 	return nil
+}
+
+// forgetRemovedBackup drops the "stopped: removed" note from the last run's
+// record once the box is enrolled again. That note described the old
+// enrolment; leaving it would keep `doorman check` red until the next
+// nightly run for a box that is signed in. The rest of the record stays.
+func forgetRemovedBackup(stateDir string) {
+	b, err := os.ReadFile(lastBackupPath(stateDir))
+	if err != nil {
+		return
+	}
+	var last lastBackup
+	if json.Unmarshal(b, &last) != nil || len(last.Removed) == 0 {
+		return
+	}
+	last.Removed = nil
+	writeLast(stateDir, last)
 }
 
 func writeLast(stateDir string, last lastBackup) {
@@ -716,6 +755,12 @@ func describeBackup(stateDir string, now time.Time, env func(string) (string, bo
 	if len(last.Failed) > 0 {
 		line += " — failed: " + strings.Join(last.Failed, ", ")
 		ok = false
+	}
+	if len(last.Removed) > 0 {
+		line += " — stopped: " + strings.Join(last.Removed, ", ") + " (box removed from its account; `doorman login` enrols it again)"
+		if len(last.Dests) == 0 {
+			ok = false
+		}
 	}
 	if age > 26*time.Hour {
 		line += " — STALE, over a day"

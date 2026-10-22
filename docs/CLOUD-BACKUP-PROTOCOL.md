@@ -74,6 +74,7 @@ Useful refusals:
 | HTTP | Error | Client behavior |
 | --- | --- | --- |
 | 401 | unauthorized, unknown, expired, revoked, reuse | Follow account-client reauthentication/rotation policy; do not loop. |
+| 401 | box_removed | The owner removed this box. Forget its credentials, stop uploading, report it as stopped (not failed), and keep local copies; only a new login resumes. |
 | 403 | capability | Wrong capability; do not retry with a broader credential. |
 | 403 | no_backup_plan, held_in_grace | Report the allowance or hold; local backup continues. |
 | 409 | upload_in_progress | A house already has a reservation; finish it or wait for its expiry. |

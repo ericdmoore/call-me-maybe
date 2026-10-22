@@ -62,6 +62,12 @@ func (e *ServiceError) Error() string {
 	return fmt.Sprintf("account: service refused request (%d, %s)", e.Status, e.Code)
 }
 
+// Is lets a caller ask errors.Is(err, ErrRemoved) whether the refusal came
+// from the network just now or from the state a previous refusal recorded.
+func (e *ServiceError) Is(target error) bool {
+	return target == ErrRemoved && e.Status == 401 && e.Code == "box_removed"
+}
+
 func failure(status int, header http.Header, body []byte) error {
 	var data struct {
 		Error string `json:"error"`
@@ -69,7 +75,7 @@ func failure(status int, header http.Header, body []byte) error {
 	_ = json.Unmarshal(body, &data)
 	code := "service_error"
 	switch data.Error {
-	case "bad_request", "unauthorized", "unknown", "expired", "revoked", "reuse", "capability", "denied", "consumed", "slow_down", "rate_limited",
+	case "bad_request", "unauthorized", "box_removed", "unknown", "expired", "revoked", "reuse", "capability", "denied", "consumed", "slow_down", "rate_limited",
 		"no_backup_plan", "held_in_grace", "too_large", "invalid_size", "upload_in_progress", "unknown_upload", "not_uploaded", "size_mismatch", "entitlements_unavailable", "generation_conflict", "recovery_unavailable", "unknown_generation", "unknown_bundle":
 		code = data.Error
 	}
@@ -225,6 +231,7 @@ func (c *Client) Login(ctx context.Context, display func(string)) (Status, error
 			return Status{}, ErrProtocol
 		}
 		v.Box, v.House, v.EnrolledAt, v.NeedsLogin, v.Device = done.Box, done.House, c.now(), false, nil
+		v.RemovedAt = time.Time{}
 		v.Tokens = map[string]credential{"sync": {Current: done.Tokens["sync"]}, "backup": {Current: done.Tokens["backup"]}}
 		v.Upload = nil
 		if err := s.save(v); err != nil {
@@ -247,6 +254,9 @@ func (c *Client) authenticatedVia(s *store, v *state, capability string, send fu
 	if t.Pending != "" {
 		token = t.Pending
 	}
+	if !v.RemovedAt.IsZero() {
+		return 0, nil, nil, ErrRemoved
+	}
 	if v.NeedsLogin || !validToken(token, capability) {
 		return 0, nil, nil, ErrLogin
 	}
@@ -254,7 +264,11 @@ func (c *Client) authenticatedVia(s *store, v *state, capability string, send fu
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	if status == 401 {
+	if removed(status, data) {
+		if err := c.markRemoved(s, v); err != nil {
+			return 0, nil, nil, err
+		}
+	} else if status == 401 {
 		// Never fall back to the predecessor: an ambiguous first use may
 		// already have committed the successor on the server.
 		v.NeedsLogin = true

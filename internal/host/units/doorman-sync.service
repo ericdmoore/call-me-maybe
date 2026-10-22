@@ -4,6 +4,9 @@
 # Network and service failures, and a busy account store at startup, are
 # retried inside the process; the start limit only counts exits that a restart
 # cannot fix (no enrolment, a second sync process), so it stops, not loops.
+# Exit 6 is the account owner removing this box: a deliberate sign-out, not a
+# fault. It is a clean stop, never restarted; `doorman login` and a restart of
+# this unit (or `doorman init services`) bring sync back.
 [Unit]
 Description=Call Me Maybe — household configuration sync
 Documentation=https://callmemaybe.cc
@@ -22,6 +25,7 @@ EnvironmentFile=/opt/call-me-maybe/.env
 ExecStart=/opt/call-me-maybe/bin/doorman sync run --state /var/lib/doorman
 Restart=on-failure
 RestartSec=10
+SuccessExitStatus=6
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
