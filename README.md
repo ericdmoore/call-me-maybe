@@ -335,6 +335,12 @@ curl -fsSL https://callmemaybe.cc/install.sh | bash
 It detects your OS and architecture, verifies the SHA-256 against the
 published checksums, and installs to `/usr/local/bin` (or `~/.local/bin` when
 that isn't writable). `--version`, `--prefix`, and `--force` all work.
+Missing, malformed or duplicate checksum entries, a missing/failing SHA-256 tool,
+and mismatches stop installation before the downloaded binary runs or replaces an
+existing copy. `--force` does not bypass verification. Install `sha256sum` or
+`shasum` if neither is available; use a release with a complete `checksums.txt`.
+This checks integrity against the hosted release manifest; it is not independent
+publisher authentication. [Signed release metadata is tracked separately](https://github.com/ericdmoore/call-me-maybe/issues/120).
 
 ---
 
