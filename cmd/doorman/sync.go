@@ -37,8 +37,13 @@ func runSync(args []string) int {
 	if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
 		return 2
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	client := account.New(*state)
-	status, err := client.Status()
+	status, err := syncAccount(ctx, client)
+	if ctx.Err() != nil {
+		return 0
+	}
 	if err != nil || status.NeedsLogin || status.Box == "" {
 		fmt.Fprintln(os.Stderr, "sync: sign in with doorman login")
 		return 1
@@ -84,12 +89,11 @@ func runSync(args []string) int {
 		}
 		return 0
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	watchDone := make(chan struct{})
 	go func() { defer close(watchDone); m.Watch(ctx, nil) }()
 	defer func() { stop(); <-watchDone }()
 	var lastError string
+	var pace syncPace
 	for {
 		at := time.Now()
 		bounded, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -116,11 +120,7 @@ func runSync(args []string) int {
 			}
 			return 0
 		}
-		delay := 5*time.Second - time.Since(at)
-		if delay < time.Second {
-			delay = time.Second
-		}
-		timer := time.NewTimer(delay)
+		timer := time.NewTimer(pace.next(err, time.Since(at)))
 		select {
 		case <-ctx.Done():
 			timer.Stop()

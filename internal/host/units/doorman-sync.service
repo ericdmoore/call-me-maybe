@@ -1,5 +1,9 @@
 # The hosted value sync runs separately from call admission. It observes files
-# every second and polls for typed changes every five seconds.
+# every second and polls for typed changes every five seconds, backing off with
+# jitter (to five minutes, or the service's Retry-After) while passes fail.
+# Network and service failures, and a busy account store at startup, are
+# retried inside the process; the start limit only counts exits that a restart
+# cannot fix (no enrolment, a second sync process), so it stops, not loops.
 [Unit]
 Description=Call Me Maybe — household configuration sync
 Documentation=https://callmemaybe.cc
