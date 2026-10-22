@@ -42,15 +42,19 @@ func runSync(args []string) int {
 	if *content == "" {
 		*content = filepath.Join(*state, "content", "library")
 	}
-	inventory := &contentinventory.Scanner{Path: *content}
 	if mode == "inventory" {
-		if json.NewEncoder(os.Stdout).Encode(inventory.Sample()) != nil {
+		if json.NewEncoder(os.Stdout).Encode(contentinventory.Scan(*content)) != nil {
 			return 1
 		}
 		return 0
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	client := account.New(*state)
-	status, err := client.Status()
+	status, err := syncAccount(ctx, client)
+	if ctx.Err() != nil {
+		return 0
+	}
 	if err != nil || status.NeedsLogin || status.Box == "" {
 		fmt.Fprintln(os.Stderr, "sync: sign in with doorman login")
 		return 1
@@ -70,6 +74,7 @@ func runSync(args []string) int {
 	}
 	defer m.Close()
 	stats := &syncmachine.Stats{}
+	inventory := &contentinventory.Scanner{Path: *content}
 	m.SampleStatus = func() syncwire.Status {
 		sample := stats.Sample(*state, version)
 		sample.ContentInventory = inventory.Sample()
@@ -100,12 +105,20 @@ func runSync(args []string) int {
 		}
 		return 0
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	watchDone := make(chan struct{})
 	go func() { defer close(watchDone); m.Watch(ctx, nil) }()
 	defer func() { stop(); <-watchDone }()
+	// The exchange only reads the last finished scan. Shutdown deliberately
+	// does not wait for this goroutine: a scan stuck on a hung mount must not
+	// hold the process open, and it exits with the process either way. A
+	// single exchange has no later turn to report a background result in.
+	if mode == "once" {
+		inventory.Refresh()
+	} else {
+		go inventory.Run(ctx)
+	}
 	var lastError string
+	var pace syncPace
 	for {
 		at := time.Now()
 		bounded, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -132,11 +145,7 @@ func runSync(args []string) int {
 			}
 			return 0
 		}
-		delay := 5*time.Second - time.Since(at)
-		if delay < time.Second {
-			delay = time.Second
-		}
-		timer := time.NewTimer(delay)
+		timer := time.NewTimer(pace.next(err, time.Since(at)))
 		select {
 		case <-ctx.Done():
 			timer.Stop()

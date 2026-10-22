@@ -28,6 +28,14 @@ type Machine struct {
 	// nil keeps an honest saved receipt until a later run can confirm it.
 	Applied      func(Paths, map[string][]byte) bool
 	SampleStatus func() syncwire.Status
+	// Warn receives categorical problems that do not stop a pass. nil prints
+	// them to stderr.
+	Warn func(error)
+
+	// Exchange-only state; Exchange never runs concurrently with itself.
+	published   string
+	publishedAt time.Time
+	warned      map[string]string
 }
 
 // Open keeps the ledger scoped to the enrolled device. It belongs in state/sync,

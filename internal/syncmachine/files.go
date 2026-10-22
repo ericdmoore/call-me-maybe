@@ -13,7 +13,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 
 	contactbook "callmemaybe/internal/contacts"
 	"callmemaybe/internal/ownbook"
@@ -352,19 +351,4 @@ func (o *observed) unchanged() bool {
 		}
 	}
 	return true
-}
-
-func (o *observed) digest() string {
-	keys := make([]string, 0, len(o.files))
-	for k := range o.files {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	h := sha256.New()
-	for _, k := range keys {
-		// Length framing keeps different splits of file contents distinct.
-		fmt.Fprintf(h, "%d:%s:%d:", len(k), k, len(o.files[k]))
-		h.Write(o.files[k])
-	}
-	return hex.EncodeToString(h.Sum(nil))
 }

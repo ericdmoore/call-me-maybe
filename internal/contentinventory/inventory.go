@@ -3,6 +3,7 @@
 package contentinventory
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,13 +12,23 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"callmemaybe/internal/syncwire"
 )
 
 const metadataName = ".content-source.json"
 const maxBytes = int64(9_007_199_254_740_991)
+const maxItems = 128
+const maxNodes = 20000
+
+// errBudget means the walk stopped because the shared node, depth or time
+// budget ran out, not because the entry could not be read. The server's item
+// state is a closed enum with no "not scanned", so such items stay stored and
+// simply carry no sizes.
+var errBudget = errors.New("inventory: scan limit")
 
 type itemMetadata struct {
 	Path   string                     `json:"path"`
@@ -34,22 +45,42 @@ type metadata struct {
 	Items  []itemMetadata             `json:"items"`
 }
 
-// Scanner is owned by the existing sync loop. Disk walks are cached separately
-// from the five-second liveness sample and never run in the call daemon.
+// Scanner keeps the last completed scan for the sync loop. Run walks the disk
+// on its own goroutine so a slow or hung mount can only make the inventory
+// stale; Sample never waits on the filesystem and is safe from any goroutine.
 type Scanner struct {
-	Path string
-	next time.Time
-	last *syncwire.ContentInventory
+	Path     string
+	Interval time.Duration // zero means 30 seconds
+	last     atomic.Pointer[syncwire.ContentInventory]
 }
 
-func (s *Scanner) Sample() *syncwire.ContentInventory {
-	now := time.Now()
-	if s.last == nil || !now.Before(s.next) {
-		report := Scan(s.Path)
-		s.last = &report
-		s.next = now.Add(30 * time.Second)
+// Sample returns the last completed report, or nil before the first scan has
+// finished; a status without contentInventory is valid on the wire.
+func (s *Scanner) Sample() *syncwire.ContentInventory { return s.last.Load() }
+
+// Refresh scans now and publishes the result.
+func (s *Scanner) Refresh() {
+	report := Scan(s.Path)
+	s.last.Store(&report)
+}
+
+// Run refreshes immediately and then on the interval until ctx ends. A scan
+// already blocked in a syscall finishes before Run notices cancellation, which
+// is why callers must not wait for Run to return before shutting down.
+func (s *Scanner) Run(ctx context.Context) {
+	interval := s.Interval
+	if interval <= 0 {
+		interval = 30 * time.Second
 	}
-	return s.last
+	for ctx.Err() == nil {
+		s.Refresh()
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
+	}
 }
 
 func readMetadata(root *os.Root) (metadata, error) {
@@ -102,14 +133,20 @@ type walk struct {
 
 func (w *walk) measure(name string, item *syncwire.ContentItem, local map[string]bool, depth int) error {
 	w.nodes++
-	if w.nodes > 20000 || depth > 64 || time.Now().After(w.deadline) {
-		return errors.New("inventory: scan limit")
+	if w.nodes > maxNodes || depth > 64 || time.Now().After(w.deadline) {
+		return errBudget
 	}
 	info, err := w.root.Lstat(name)
 	if err != nil {
 		return err
 	}
 	if !info.IsDir() && !info.Mode().IsRegular() {
+		// Inside an item, a symlink, socket or lost+found's special files are
+		// not content: leave them out rather than lose the item's sizes. A
+		// top-level one is the item itself, which cannot be measured.
+		if depth > 0 {
+			return nil
+		}
 		return errors.New("inventory: unsupported entry")
 	}
 	key, allocated, ok := allocation(info)
@@ -188,25 +225,23 @@ func Scan(directory string) syncwire.ContentInventory {
 	for _, item := range meta.Items {
 		index[item.Path] = item
 	}
-	dir, err := root.Open(".")
-	if err != nil {
+	names, complete, ok := listNames(root)
+	if !ok {
 		report.State = "unavailable"
 		return report
 	}
-	children, err := dir.ReadDir(130)
-	dir.Close()
-	if err != nil && err != io.EOF {
-		report.State = "unavailable"
-		return report
+	if !complete {
+		report.State = "partial"
 	}
-	sort.Slice(children, func(i, j int) bool { return children[i].Name() < children[j].Name() })
 	w := walk{root: root, seen: map[string]bool{}, deadline: time.Now().Add(2 * time.Second)}
-	for _, child := range children {
-		name := child.Name()
+	for _, name := range names {
 		if name == metadataName {
 			continue
 		}
-		if len(report.Items) == 128 || len(name) > 128 {
+		// A name that is not UTF-8 would reach JSON as U+FFFD, so two distinct
+		// files could share an id the server refuses. Skipping is simpler and
+		// safer than a reversible encoding nobody can read as a title.
+		if len(report.Items) == maxItems || len(name) > 128 || !utf8.ValidString(name) {
 			report.State = "partial"
 			continue
 		}
@@ -226,14 +261,15 @@ func Scan(directory string) syncwire.ContentInventory {
 			}
 		}
 		if err := w.measure(name, &item, map[string]bool{}, 0); err != nil {
-			item.State = "unreadable"
+			if !errors.Is(err, errBudget) {
+				item.State = "unreadable"
+			}
+			// A partial count beside missing byte totals reads as a measurement.
+			item.FileCount = 0
 			item.Bytes, item.AllocatedBytes = nil, nil
 			report.State = "partial"
 		}
 		report.Items = append(report.Items, item)
-	}
-	if len(children) == 130 {
-		report.State = "partial"
 	}
 	// Include the library directory and its provenance file in total disk use,
 	// while keeping that bookkeeping out of the content list.
@@ -248,6 +284,61 @@ func Scan(directory string) syncwire.ContentInventory {
 	report.KnownAllocatedBytes = w.known
 	if report.State == "complete" {
 		report.AllocatedBytes = &report.KnownAllocatedBytes
+	}
+	return conform(report)
+}
+
+// listNames reads every top-level name up to the node budget and sorts them,
+// so the first 128 items are the same set whatever order readdir returns.
+// complete is false when the budget cut the listing short.
+func listNames(root *os.Root) (names []string, complete, ok bool) {
+	dir, err := root.Open(".")
+	if err != nil {
+		return nil, false, false
+	}
+	defer dir.Close()
+	for len(names) <= maxNodes {
+		batch, err := dir.Readdirnames(256)
+		names = append(names, batch...)
+		if err == io.EOF {
+			sort.Strings(names)
+			return names, true, true
+		}
+		if err != nil {
+			return nil, false, false
+		}
+	}
+	sort.Strings(names)
+	return names, false, true
+}
+
+// conform holds the report to the server's schema before it leaves the box:
+// one item the server would refuse makes it refuse the whole status, which
+// also stops configuration sync. Offending items are dropped and the report
+// becomes partial; if what remains still fails, only the bare report is sent.
+func conform(report syncwire.ContentInventory) syncwire.ContentInventory {
+	seen := map[string]bool{}
+	kept := report.Items[:0:0]
+	for _, item := range report.Items {
+		data, err := json.Marshal(item)
+		if len(kept) == maxItems || seen[item.Id] || err != nil ||
+			!utf8.ValidString(item.Id) || !utf8.ValidString(item.Path) || !utf8.ValidString(item.Title) ||
+			syncwire.Decode("ContentItem", data, &syncwire.ContentItem{}) != nil {
+			report.State = "partial"
+			continue
+		}
+		seen[item.Id] = true
+		kept = append(kept, item)
+	}
+	report.Items = kept
+	if report.State != "complete" {
+		report.AllocatedBytes = nil
+	}
+	if data, err := json.Marshal(report); err != nil || !utf8.ValidString(report.Label) ||
+		syncwire.Decode("ContentInventory", data, &syncwire.ContentInventory{}) != nil {
+		return syncwire.ContentInventory{
+			SampledAt: report.SampledAt, State: "partial", Label: "Local library", Items: []syncwire.ContentItem{},
+		}
 	}
 	return report
 }

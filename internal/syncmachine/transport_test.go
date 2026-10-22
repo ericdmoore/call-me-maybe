@@ -84,7 +84,8 @@ func TestRoundTripPublishesLocalEditsAndReplaysLostReceipt(t *testing.T) {
 	if string(after) != string(content) || receipt.Status != syncwire.ReceiptStatusApplied {
 		t.Fatal("lost receipt repeated or lost the effect")
 	}
-	if len(posted) != 4 || posted[0].Revision == posted[1].Revision || posted[1].Revision != posted[3].Revision {
-		t.Fatal("resulting snapshot did not return to service")
+	// The replay pass re-sends nothing the service already accepted.
+	if len(posted) != 2 || posted[0].Revision == posted[1].Revision {
+		t.Fatal("resulting snapshot did not return to service, or was re-sent unchanged")
 	}
 }

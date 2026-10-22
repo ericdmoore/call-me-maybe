@@ -137,45 +137,48 @@ func patchTable(data []byte, section, id string, values map[string]any) ([]byte,
 	return result, nil
 }
 
-func atomicReplace(path string, before, after []byte) error {
+// atomicReplace reports whether the rename happened. Every failure before it
+// leaves the target exactly as it was; a failure after it (the directory fsync)
+// leaves the new bytes in place without a durability guarantee.
+func atomicReplace(path string, before, after []byte) (renamed bool, err error) {
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() {
-		return ErrFiles
+		return false, ErrFiles
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".sync-*")
 	if err != nil {
-		return ErrFiles
+		return false, ErrFiles
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
 	if err = f.Chmod(info.Mode().Perm()); err != nil {
-		return ErrFiles
+		return false, ErrFiles
 	}
 	// An operator running as root must not leave a doorman-owned file root-only.
 	if stat, ok := info.Sys().(*syscall.Stat_t); ok && os.Geteuid() == 0 {
 		if f.Chown(int(stat.Uid), int(stat.Gid)) != nil {
-			return ErrFiles
+			return false, ErrFiles
 		}
 	}
 	if _, err = f.Write(after); err != nil || f.Sync() != nil || f.Close() != nil {
-		return ErrFiles
+		return false, ErrFiles
 	}
 	current, err := readFile(path)
 	if err != nil || !bytes.Equal(before, current) {
-		return ErrChanged
+		return false, ErrChanged
 	}
 	if os.Rename(f.Name(), path) != nil {
-		return ErrFiles
+		return false, ErrFiles
 	}
 	dir, err := os.Open(filepath.Dir(path))
 	if err != nil {
-		return ErrFiles
+		return true, ErrFiles
 	}
 	defer dir.Close()
 	if dir.Sync() != nil {
-		return ErrFiles
+		return true, ErrFiles
 	}
-	return nil
+	return true, nil
 }
 
 func verbName(data []byte) string {

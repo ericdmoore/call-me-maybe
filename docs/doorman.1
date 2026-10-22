@@ -423,7 +423,9 @@ fallback occurs after an ambiguous first use; invalid credentials require login.
 .B doorman sync \fBrun\fR|\fBonce\fR|\fBsnapshot\fR
 Observe validated files into a private SQLite echo, publish secret-free
 snapshots, and receive typed changes with durable receipts. Requires account
-enrolment. \fBrun\fR observes every second and polls every five seconds;
+enrolment. \fBrun\fR observes every second and polls every five seconds,
+backing off with jitter to five minutes (or the service's Retry\-After) while
+passes fail; an unchanged snapshot is not re\-sent;
 \fBonce\fR performs one exchange; \fBsnapshot\fR prints the redacted snapshot
 (contact names and numbers are included, so treat this output as private).
 The state directory defaults to /var/lib/doorman; \fB\-\-state\fR overrides it.

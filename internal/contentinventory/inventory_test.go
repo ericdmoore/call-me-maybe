@@ -3,7 +3,9 @@
 package contentinventory
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,12 +136,16 @@ func TestBoundedReportsAndCachedRefresh(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "first.mp3", "one")
 	scanner := Scanner{Path: root}
+	if scanner.Sample() != nil {
+		t.Fatal("a report existed before any scan")
+	}
+	scanner.Refresh()
 	first := scanner.Sample()
 	write(t, root, "second.mp3", "two")
 	if scanner.Sample() != first || len(first.Items) != 1 {
-		t.Fatal("cache rescanned before its deadline")
+		t.Fatal("Sample walked the disk instead of returning the cached report")
 	}
-	scanner.next = time.Time{}
+	scanner.Refresh()
 	if len(scanner.Sample().Items) != 2 {
 		t.Fatal("new content did not enter the next report")
 	}
@@ -163,5 +169,128 @@ func TestBoundedReportsAndCachedRefresh(t *testing.T) {
 		if limited.measure("first.mp3", &item, map[string]bool{}, 0) == nil {
 			t.Fatal("scan budget ignored")
 		}
+	}
+}
+
+func TestRunPublishesInBackgroundAndStopsWithContext(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "first.mp3", "one")
+	scanner := &Scanner{Path: root, Interval: time.Millisecond}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); scanner.Run(ctx) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		// Readers on another goroutine are the sync exchange; -race checks them.
+		if report := scanner.Sample(); report != nil && len(report.Items) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no background report")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run ignored cancellation")
+	}
+	idle := &Scanner{Path: root}
+	stopped, stop := context.WithCancel(context.Background())
+	stop()
+	idle.Run(stopped)
+	if idle.Sample() != nil {
+		t.Fatal("a cancelled Run still scanned")
+	}
+}
+
+func TestBudgetExhaustionIsNotUnreadable(t *testing.T) {
+	root := t.TempDir()
+	big := filepath.Join(root, "big")
+	if err := os.Mkdir(big, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i <= maxNodes; i++ {
+		f, err := os.Create(filepath.Join(big, fmt.Sprintf("%05d.mp3", i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+	write(t, root, "small.mp3", "x")
+	report := Scan(root)
+	if report.State != "partial" || report.AllocatedBytes != nil || len(report.Items) != 2 {
+		t.Fatalf("budget not reported as partial: %+v", report)
+	}
+	for _, item := range report.Items {
+		if item.State != "stored" || item.Bytes != nil || item.AllocatedBytes != nil || item.FileCount != 0 {
+			t.Fatalf("healthy item reported as damaged or half-measured: %+v", item)
+		}
+	}
+}
+
+func TestTopLevelSelectionIsSortedBeforeTruncation(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 300; i++ {
+		write(t, root, fmt.Sprintf("%03d", i), "x")
+	}
+	report := Scan(root)
+	if report.State != "partial" || len(report.Items) != maxItems {
+		t.Fatalf("selection: %+v", report)
+	}
+	for i, item := range report.Items {
+		if item.Id != fmt.Sprintf("%03d", i) {
+			t.Fatalf("item %d is %q; the first 128 sorted names are expected", i, item.Id)
+		}
+	}
+}
+
+func TestSymlinksAndSpecialFilesInsideAnItemAreSkipped(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	write(t, outside, "private.txt", strings.Repeat("secret", 500))
+	write(t, root, "book/chapter.mp3", "audio")
+	if err := os.Symlink(outside, filepath.Join(root, "book", "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(root, "book", "pipe"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report := Scan(root)
+	item := report.Items[0]
+	if report.State != "complete" || report.AllocatedBytes == nil || item.State != "stored" ||
+		item.FileCount != 1 || item.Bytes == nil || *item.Bytes != 5 {
+		t.Fatalf("link or FIFO spoiled the item: %+v %+v", report, item)
+	}
+}
+
+func TestConformDropsWhatTheServerWouldRefuse(t *testing.T) {
+	good := func(id string) syncwire.ContentItem {
+		return syncwire.ContentItem{Id: id, Path: id, Title: id, Kind: "file", Origin: "unknown", State: "stored"}
+	}
+	long, badKind, negative, badUTF8 := good(strings.Repeat("l", 129)), good("kind"), good("negative"), good("utf8")
+	badKind.Kind = "film"
+	negative.FileCount = -1
+	badUTF8.Title = "a\xff"
+	allocated := int64(1)
+	report := syncwire.ContentInventory{
+		SampledAt: 1, State: "complete", Label: "Local library", AllocatedBytes: &allocated,
+		Items: []syncwire.ContentItem{good("one"), good("one"), long, badKind, negative, badUTF8},
+	}
+	for i := 0; i < maxItems; i++ {
+		report.Items = append(report.Items, good(fmt.Sprintf("extra-%03d", i)))
+	}
+	got := conform(report)
+	if got.State != "partial" || got.AllocatedBytes != nil || len(got.Items) != maxItems || got.Items[0].Id != "one" || got.Items[1].Id != "extra-000" {
+		t.Fatalf("conform: state %s, %d items, first %+v", got.State, len(got.Items), got.Items[:2])
+	}
+	data, err := json.Marshal(got)
+	if err != nil || syncwire.Decode("ContentInventory", data, &syncwire.ContentInventory{}) != nil {
+		t.Fatalf("conformed report still refused: %v", err)
+	}
+	report.Label = strings.Repeat("x", 65)
+	if bare := conform(report); bare.State != "partial" || len(bare.Items) != 0 || bare.Label != "Local library" {
+		t.Fatalf("unsendable report not reduced: %+v", bare)
 	}
 }
