@@ -1387,18 +1387,32 @@ so lowering that timer cannot provide interactive delivery.
 
 Discovery matches the inventory's MAC against Linux's IPv4 neighbour cache,
 populated by ordinary traffic between Asterisk and the phones. The service
-checks the device's advertised MAC/model before challenge login. This uses the
+checks the device's advertised MAC/model before challenge login. That is a
+device-type check, not authentication: the answering host reports its own MAC
+and model. This uses the
 phone's existing HTTP management interface on the local LAN; passwords are
 hashed with its challenge, sessions are short lived, and redirects/proxies are
 disabled. No credentials or contact values enter logs. Routed or IPv6-only
 phones are not discovered by this path and retain pull delivery.
 
+Know the trade-off before relying on push. The upload is plain HTTP, so the
+household directory — names and numbers — crosses the LAN in clear, and a
+device that can take over a phone's LAN address (ARP spoofing, a reused DHCP
+lease) and answer like a WP826 would receive it. The admin credential is not
+exposed: the login is a hash over a one-time challenge and the password is
+random per phone. If the LAN is shared with devices you do not trust, put the
+phones on their own VLAN or SSID. The firmware's HTTPS management interface is
+not used by this path today.
+
 The importer requires `P333=0` (keep manually edited entries), which our
 provisioning template already sets. It refuses to push when that setting has
 drifted rather than risk erasing local contacts. Replacing the imported book
 removes contacts no longer selected and preserves entries added manually.
-Pending phones retry independently, with bounded backoff; a failed login waits
-five minutes to avoid locking out the owner. Edits arriving during an import
+Pending phones retry independently, with bounded backoff. A refusal only a
+person can fix — a failed login, a device that is not the inventory's phone, or
+a drifted keep-manual setting — waits five minutes, so the phone does not see
+an admin login every thirty seconds, unless the book or the phone's inventory
+entry changes first. Edits arriving during an import
 remain pending, and a directory-service restart resends the current book.
 Invalid source edits keep the last good directory.
 

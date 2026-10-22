@@ -147,3 +147,71 @@ func TestWorkerRetriesFailureAndWaitsForDiscovery(t *testing.T) {
 	cancel()
 	<-done
 }
+
+func TestWorkerHoldsRefusalsUntilTheBookOrPhoneChanges(t *testing.T) {
+	for _, refusal := range []error{ErrImport, ErrIdentity, ErrAuth} {
+		t.Run(refusal.Error(), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var mu sync.Mutex
+			p := testPhone()
+			body := "book"
+			attempts := make(chan string, 20)
+			worker := Worker{
+				Interval: time.Millisecond,
+				Documents: func() []Document {
+					mu.Lock()
+					defer mu.Unlock()
+					return []Document{{Phone: p, XML: []byte(body)}}
+				},
+				Neighbours: func() map[string]netip.Addr {
+					return map[string]netip.Addr{p.MAC: netip.MustParseAddr("192.168.7.54")}
+				},
+				Upload: func(_ context.Context, _ provision.Phone, _ netip.Addr, b []byte) error {
+					attempts <- string(b)
+					return refusal
+				},
+			}
+			done := make(chan struct{})
+			go func() { defer close(done); worker.Run(ctx) }()
+			<-attempts
+			select {
+			case <-attempts:
+				t.Fatal("retried a refusal on the short backoff")
+			case <-time.After(60 * time.Millisecond):
+			}
+			mu.Lock()
+			body = "edited"
+			mu.Unlock()
+			select {
+			case got := <-attempts:
+				if got != "edited" {
+					t.Fatal(got)
+				}
+			case <-time.After(300 * time.Millisecond):
+				t.Fatal("a changed book stayed held")
+			}
+			mu.Lock()
+			p.AdminPassword = "corrected-fixture"
+			mu.Unlock()
+			select {
+			case <-attempts:
+			case <-time.After(300 * time.Millisecond):
+				t.Fatal("a corrected inventory stayed held")
+			}
+			cancel()
+			<-done
+		})
+	}
+}
+
+func TestRefusalsWaitAsLongAsAFailedLogin(t *testing.T) {
+	for _, err := range []error{ErrImport, ErrIdentity, ErrAuth} {
+		if backoff(err, 1) != holdBackoff {
+			t.Fatalf("%v retries an admin login too soon", err)
+		}
+	}
+	if backoff(ErrUnavailable, 1) != time.Second || backoff(ErrUnavailable, 9) != 30*time.Second {
+		t.Fatal("an unreachable phone lost its short bounded retry")
+	}
+}

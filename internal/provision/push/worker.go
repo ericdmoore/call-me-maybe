@@ -3,6 +3,7 @@ package push
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"net/netip"
 	"sync"
@@ -39,6 +40,42 @@ type delivery struct {
 	busy   bool
 	retry  time.Time
 	fail   int
+	// held is the attempt a refusal answered. Retrying the same book against
+	// the same phone record cannot succeed sooner, but a change can.
+	held [32]byte
+}
+
+// holdBackoff spaces out answers that only a person can change: a wrong admin
+// password, a device that is not the inventory's phone, or a phone whose
+// keep-manual-entries setting has drifted. Each attempt is a full admin login,
+// and the phone's owner should not see one every thirty seconds.
+const holdBackoff = 5 * time.Minute
+
+func held(err error) bool {
+	return errors.Is(err, ErrAuth) || errors.Is(err, ErrIdentity) || errors.Is(err, ErrImport)
+}
+
+func backoff(err error, fail int) time.Duration {
+	if held(err) {
+		return holdBackoff
+	}
+	return min(30*time.Second, time.Second<<min(fail-1, 5))
+}
+
+// attempt identifies what an upload would send and to whom. The admin
+// password participates so a corrected inventory retries at once; the value is
+// only ever hashed in memory.
+func attempt(p provision.Phone, ip netip.Addr, xml []byte) [32]byte {
+	h := sha256.New()
+	for _, part := range [][]byte{[]byte(p.MAC), []byte(p.Model.ID), []byte(p.AdminPassword), ip.AsSlice(), xml} {
+		var n [8]byte
+		binary.BigEndian.PutUint64(n[:], uint64(len(part)))
+		h.Write(n[:])
+		h.Write(part)
+	}
+	var sum [32]byte
+	copy(sum[:], h.Sum(nil))
+	return sum
 }
 
 func (w Worker) Run(ctx context.Context) {
@@ -69,7 +106,11 @@ func (w Worker) Run(ctx context.Context) {
 				states[id] = state
 			}
 			ip, found := neighbours[doc.Phone.MAC]
-			if !found || state.busy || time.Now().Before(state.retry) {
+			if !found || state.busy {
+				continue
+			}
+			key := attempt(doc.Phone, ip, doc.XML)
+			if time.Now().Before(state.retry) && (state.held == [32]byte{} || state.held == key) {
 				continue
 			}
 			digest := sha256.Sum256(doc.XML)
@@ -93,16 +134,16 @@ func (w Worker) Run(ctx context.Context) {
 				state.busy = false
 				if err == nil {
 					state.digest, state.ip, state.done, state.fail = digest, ip, true, 0
-					state.retry = time.Time{}
+					state.retry, state.held = time.Time{}, [32]byte{}
 				} else {
 					state.done = false
 					state.fail++
-					backoff := min(30*time.Second, time.Second<<min(state.fail-1, 5))
-					if errors.Is(err, ErrAuth) {
+					state.held = [32]byte{}
+					if held(err) {
 						// Wrong credentials must not lock out the phone's owner.
-						backoff = 5 * time.Minute
+						state.held = key
 					}
-					state.retry = time.Now().Add(backoff)
+					state.retry = time.Now().Add(backoff(err, state.fail))
 				}
 				report := err == nil || state.fail == 1
 				mu.Unlock()
