@@ -42,9 +42,8 @@ func runSync(args []string) int {
 	if *content == "" {
 		*content = filepath.Join(*state, "content", "library")
 	}
-	inventory := &contentinventory.Scanner{Path: *content}
 	if mode == "inventory" {
-		if json.NewEncoder(os.Stdout).Encode(inventory.Sample()) != nil {
+		if json.NewEncoder(os.Stdout).Encode(contentinventory.Scan(*content)) != nil {
 			return 1
 		}
 		return 0
@@ -70,6 +69,7 @@ func runSync(args []string) int {
 	}
 	defer m.Close()
 	stats := &syncmachine.Stats{}
+	inventory := &contentinventory.Scanner{Path: *content}
 	m.SampleStatus = func() syncwire.Status {
 		sample := stats.Sample(*state, version)
 		sample.ContentInventory = inventory.Sample()
@@ -105,6 +105,15 @@ func runSync(args []string) int {
 	watchDone := make(chan struct{})
 	go func() { defer close(watchDone); m.Watch(ctx, nil) }()
 	defer func() { stop(); <-watchDone }()
+	// The exchange only reads the last finished scan. Shutdown deliberately
+	// does not wait for this goroutine: a scan stuck on a hung mount must not
+	// hold the process open, and it exits with the process either way. A
+	// single exchange has no later turn to report a background result in.
+	if mode == "once" {
+		inventory.Refresh()
+	} else {
+		go inventory.Run(ctx)
+	}
 	var lastError string
 	for {
 		at := time.Now()
