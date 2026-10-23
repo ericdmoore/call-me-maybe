@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"callmemaybe/internal/accountbook"
+	"callmemaybe/internal/configcheck"
 	"callmemaybe/internal/contacts"
 	"callmemaybe/internal/ownbook"
 	"callmemaybe/internal/policy"
@@ -124,8 +126,37 @@ func loadBooks(paths bookPaths) (provision.Books, error) {
 			}
 			books[key] = book
 		}
+		// Books the account manages: composed with house when a phone's
+		// directory is rendered, never read for admission. Refused as a set
+		// by the same rules sync applies, so the last good directory stays
+		// up through a bad delivery or a hand edit.
+		dir := accountDir(paths.own)
+		names, err := filepath.Glob(filepath.Join(dir, "*.toml"))
+		if err != nil {
+			return nil, err
+		}
+		files := map[string][]byte{}
+		for _, path := range names {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil, err
+			}
+			files[filepath.Base(path)] = data
+		}
+		held, problems := configcheck.AccountBooks(files, handsets)
+		if len(problems) > 0 {
+			return nil, fmt.Errorf("%s: %s", filepath.Join(dir, problems[0].File), policy.RedactProblem(problems[0].Message, policy.MaxProblemLength))
+		}
+		for id, b := range held {
+			books[id] = provision.AccountBook(b)
+		}
 	}
 	return books, nil
+}
+
+// accountDir is where account-managed books live, beside own/ and shared/.
+func accountDir(own string) string {
+	return filepath.Join(filepath.Dir(own), accountbook.Dir)
 }
 
 // renderBooks is one phone's directory, in its own format.
@@ -196,6 +227,9 @@ func (c *bookCache) fingerprint() string {
 			files, _ := filepath.Glob(filepath.Join(dir, "*.vcf"))
 			watched = append(watched, files...)
 		}
+		// A delivered account book changes what phones show at once.
+		books, _ := filepath.Glob(filepath.Join(accountDir(c.paths.own), "*.toml"))
+		watched = append(watched, books...)
 	}
 	digest := sha256.New()
 	for _, path := range watched {

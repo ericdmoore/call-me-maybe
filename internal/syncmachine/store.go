@@ -90,7 +90,18 @@ func Open(dir, box string, paths Paths) (*Machine, error) {
 	db.SetMaxOpenConns(1)
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS echo (singleton INTEGER PRIMARY KEY CHECK(singleton=1), box TEXT NOT NULL, generation TEXT NOT NULL, revision INTEGER NOT NULL, configuration TEXT NOT NULL, observed_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, body TEXT NOT NULL, receipt TEXT, target_path TEXT, before_hash TEXT, after_hash TEXT);
+CREATE TABLE IF NOT EXISTS revisions (revision INTEGER PRIMARY KEY, box_digest TEXT NOT NULL);
 `)
+	// writes is the intent of a command that changes several files: a JSON
+	// list of {path, before, after}. Single-file rows from earlier releases
+	// keep target_path/before_hash/after_hash and are read as one write.
+	var hasWrites int
+	if err == nil {
+		err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('commands') WHERE name='writes'").Scan(&hasWrites)
+	}
+	if err == nil && hasWrites == 0 {
+		_, err = db.Exec("ALTER TABLE commands ADD COLUMN writes TEXT")
+	}
 	if err == nil {
 		_, err = db.Exec("INSERT OR IGNORE INTO echo VALUES (1,?,?,0,'',0)", box, uuid.NewString())
 	}
@@ -131,10 +142,39 @@ func (m *Machine) record(o *observed) (syncwire.Snapshot, error) {
 		return syncwire.Snapshot{}, ErrState
 	}
 	_, err = m.db.Exec("UPDATE echo SET revision=revision+1,configuration=?,observed_at=? WHERE singleton=1 AND configuration!=? AND revision<9223372036854775807", string(body), m.now().UnixMilli(), string(body))
+	if err == nil {
+		_, err = m.db.Exec("INSERT OR IGNORE INTO revisions SELECT revision,? FROM echo WHERE singleton=1", o.boxDigest)
+	}
+	if err == nil {
+		_, err = m.db.Exec("DELETE FROM revisions WHERE revision < (SELECT revision FROM echo WHERE singleton=1) - ?", keptRevisions)
+	}
 	if err != nil {
 		return syncwire.Snapshot{}, ErrState
 	}
 	return m.snapshot()
+}
+
+// keptRevisions bounds the revision history used to recognise a base that
+// differs from the current revision only by delivered account books. A
+// proposal lives at most a day; a box rarely makes a thousand revisions in
+// one, and an unrecognised base is only judged strictly.
+const keptRevisions = 1000
+
+// sameBase reports whether a proposal written against base still describes
+// the box's own files: the same revision, or one whose configuration differs
+// only in account-managed books. Those are delivered outside the
+// one-pending-change slot, and must not turn a pending edit to policy.toml
+// or handsets.toml into a conflict.
+func (m *Machine) sameBase(base string, current syncwire.Snapshot) bool {
+	if base == current.Revision {
+		return true
+	}
+	var then, now string
+	err := m.db.QueryRow("SELECT box_digest FROM revisions WHERE revision=?", base).Scan(&then)
+	if err == nil {
+		err = m.db.QueryRow("SELECT box_digest FROM revisions WHERE revision=?", current.Revision).Scan(&now)
+	}
+	return err == nil && then == now
 }
 
 // Observe reconciles startup and every polling pass, including atomic rename,

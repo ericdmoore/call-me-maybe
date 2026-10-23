@@ -115,6 +115,10 @@ func TestContactSourceIDsAreUniqueAndWellFormed(t *testing.T) {
 	if e := contactsError(t, bad); !strings.Contains(e, "lowercase") {
 		t.Errorf("error = %q", e)
 	}
+	reserved := "[[sources]]\nid = \"acct-family\"\npath = \"/tmp/a.vcf\"\n"
+	if e := contactsError(t, reserved); !strings.Contains(e, "reserved for account-managed phonebooks") {
+		t.Errorf("error = %q", e)
+	}
 }
 
 func TestContactKindIsAdmitOrBlock(t *testing.T) {

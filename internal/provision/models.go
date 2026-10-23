@@ -25,6 +25,10 @@ type Model struct {
 	// seen to fetch through in a rehearsal. Empty means only the LAN IP is
 	// known to work, which is the form render always prints.
 	Discovery []string
+	// DirectoryCapacity is the most contacts this model's directory has been
+	// measured to hold, or 0 while unmeasured (every model, today). A
+	// measured value lowers the composed-directory limit for its handsets.
+	DirectoryCapacity int
 }
 
 var models = []Model{

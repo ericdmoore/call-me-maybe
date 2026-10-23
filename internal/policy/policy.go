@@ -666,6 +666,12 @@ func LoadHandsets(path string) ([]Handset, []Group, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	return HandsetsFromTOML(data)
+}
+
+// HandsetsFromTOML is LoadHandsets for bytes already read, so a validator
+// checks exactly the content it was handed.
+func HandsetsFromTOML(data []byte) ([]Handset, []Group, error) {
 	hf, unknown, err := decode(data, "handsets")
 	if err != nil {
 		return nil, nil, err

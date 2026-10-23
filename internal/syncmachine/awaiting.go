@@ -1,5 +1,7 @@
 package syncmachine
 
+import "database/sql"
+
 // AwaitingApply answers, without the network, whether any command's receipt
 // is still waiting for the daemon to load what was written. waiting holds
 // every command answered saved whose written bytes are on disk and whose
@@ -13,17 +15,24 @@ package syncmachine
 func (m *Machine) AwaitingApply() (waiting, ready []string, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	rows, err := m.db.Query(`SELECT id,target_path,after_hash FROM commands
-WHERE json_extract(receipt,'$.status')='saved' AND target_path IS NOT NULL AND after_hash IS NOT NULL
+	rows, err := m.db.Query(`SELECT id,target_path,before_hash,after_hash,writes FROM commands
+WHERE json_extract(receipt,'$.status')='saved' AND (writes IS NOT NULL OR (target_path IS NOT NULL AND after_hash IS NOT NULL))
 AND json_extract(body,'$.notAfter')>? ORDER BY id`, m.now().UnixMilli())
 	if err != nil {
 		return nil, nil, ErrState
 	}
-	type pending struct{ id, path, hash string }
+	type pending struct {
+		id     string
+		writes []write
+	}
 	var all []pending
 	for rows.Next() {
 		var p pending
-		if err = rows.Scan(&p.id, &p.path, &p.hash); err != nil {
+		var target, before, after, writes sql.NullString
+		if err = rows.Scan(&p.id, &target, &before, &after, &writes); err == nil {
+			p.writes, err = intentOf(target, before, after, writes)
+		}
+		if err != nil {
 			rows.Close()
 			return nil, nil, ErrState
 		}
@@ -47,7 +56,11 @@ AND json_extract(body,'$.notAfter')>? ORDER BY id`, m.now().UnixMilli())
 	for _, p := range all {
 		// A later local edit replaced the written bytes: Apply will never
 		// upgrade it, and the command's own expiry ends the wait.
-		if fileHash(o.files[p.path]) != p.hash {
+		landed := true
+		for _, w := range p.writes {
+			landed = landed && state(o.files, w.Path) == w.After
+		}
+		if !landed {
 			continue
 		}
 		waiting = append(waiting, p.id)

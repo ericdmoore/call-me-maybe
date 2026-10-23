@@ -33,6 +33,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"callmemaybe/internal/accountbook"
 )
 
 // ContactFile is the raw shape of contacts.toml.
@@ -272,6 +274,12 @@ func compileContacts(f ContactFile) (*Contacts, []string) {
 	for _, s := range f.Sources {
 		if !handsetIDPattern.MatchString(s.ID) {
 			fail("source id %q must be lowercase alphanumeric/dash/underscore", s.ID)
+			continue
+		}
+		if strings.HasPrefix(s.ID, accountbook.Prefix) {
+			// A handset's phonebook list names books by id alone, so a source
+			// may not take an id an account-managed book could have.
+			fail("source id %q: the %s prefix is reserved for account-managed phonebooks", s.ID, accountbook.Prefix)
 			continue
 		}
 		if seen[s.ID] {

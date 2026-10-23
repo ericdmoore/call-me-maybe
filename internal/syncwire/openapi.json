@@ -471,9 +471,97 @@
               "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
             },
             "maxItems": 100
+          },
+          "origin": {
+            "type": "string",
+            "enum": ["box", "account"]
+          },
+          "revision": {
+            "type": "string",
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$"
+          },
+          "hash": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[0-9a-f]{64}$"
           }
         },
         "required": ["id", "label", "contacts", "includes"]
+      },
+      "AccountContact": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 28,
+            "pattern": "^c-[0-9a-hjkmnp-tv-z]{26}$"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "numbers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "number": {
+                  "type": "string",
+                  "maxLength": 16,
+                  "pattern": "^\\+[1-9][0-9]{1,14}$"
+                }
+              },
+              "required": ["label", "number"]
+            },
+            "minItems": 1,
+            "maxItems": 8
+          }
+        },
+        "required": ["id", "name", "numbers"]
+      },
+      "AccountBook": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 31,
+            "pattern": "^acct-[0-9a-hjkmnp-tv-z]{26}$"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "revision": {
+            "type": "string",
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]{0,18})$"
+          },
+          "includes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 31,
+              "pattern": "^(house|acct-[0-9a-hjkmnp-tv-z]{26})$"
+            },
+            "maxItems": 16
+          },
+          "contacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountContact"
+            },
+            "maxItems": 2000
+          }
+        },
+        "required": ["id", "label", "revision", "includes", "contacts"]
       },
       "Handset": {
         "type": "object",
@@ -892,6 +980,72 @@
               }
             },
             "required": ["name", "handsets"]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": ["phonebook.put"]
+              },
+              "book": {
+                "$ref": "#/components/schemas/AccountBook"
+              },
+              "beforeHash": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "required": ["name", "book"]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": ["phonebook.remove"]
+              },
+              "book": {
+                "type": "string",
+                "maxLength": 31,
+                "pattern": "^acct-[0-9a-hjkmnp-tv-z]{26}$"
+              },
+              "revision": {
+                "type": "string",
+                "maxLength": 19,
+                "pattern": "^(0|[1-9][0-9]{0,18})$"
+              }
+            },
+            "required": ["name", "book", "revision"]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": ["phonebook.select"]
+              },
+              "handset": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+              },
+              "books": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                },
+                "minItems": 1,
+                "maxItems": 16
+              }
+            },
+            "required": ["name", "handset", "books"]
           }
         ]
       },
@@ -915,9 +1069,17 @@
           },
           "verb": {
             "$ref": "#/components/schemas/Verb"
+          },
+          "verbs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Verb"
+            },
+            "minItems": 1,
+            "maxItems": 32
           }
         },
-        "required": ["id", "base", "notAfter", "verb"]
+        "required": ["id", "base", "notAfter"]
       },
       "QueueItem": {
         "type": "object",
@@ -939,6 +1101,14 @@
           },
           "verb": {
             "$ref": "#/components/schemas/Verb"
+          },
+          "verbs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Verb"
+            },
+            "minItems": 1,
+            "maxItems": 32
           },
           "author": {
             "type": "object",
@@ -963,7 +1133,7 @@
             "x-go-type": "int64"
           }
         },
-        "required": ["id", "base", "notAfter", "verb", "author", "createdAt"]
+        "required": ["id", "base", "notAfter", "author", "createdAt"]
       },
       "Receipt": {
         "type": "object",

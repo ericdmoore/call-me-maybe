@@ -111,6 +111,24 @@ func (e ContentItemState) Valid() bool {
 	}
 }
 
+// Defines values for PhonebookOrigin.
+const (
+	Account PhonebookOrigin = "account"
+	Box     PhonebookOrigin = "box"
+)
+
+// Valid indicates whether the value is a known member of the PhonebookOrigin enum.
+func (e PhonebookOrigin) Valid() bool {
+	switch e {
+	case Account:
+		return true
+	case Box:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PolicyValuesActionsConfirm.
 const (
 	None    PolicyValuesActionsConfirm = "none"
@@ -459,6 +477,51 @@ func (e Verb5Name) Valid() bool {
 	}
 }
 
+// Defines values for Verb6Name.
+const (
+	PhonebookPut Verb6Name = "phonebook.put"
+)
+
+// Valid indicates whether the value is a known member of the Verb6Name enum.
+func (e Verb6Name) Valid() bool {
+	switch e {
+	case PhonebookPut:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for Verb7Name.
+const (
+	PhonebookRemove Verb7Name = "phonebook.remove"
+)
+
+// Valid indicates whether the value is a known member of the Verb7Name enum.
+func (e Verb7Name) Valid() bool {
+	switch e {
+	case PhonebookRemove:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for Verb8Name.
+const (
+	PhonebookSelect Verb8Name = "phonebook.select"
+)
+
+// Valid indicates whether the value is a known member of the Verb8Name enum.
+func (e Verb8Name) Valid() bool {
+	switch e {
+	case PhonebookSelect:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SyncBellParamsUpgrade.
 const (
 	Websocket SyncBellParamsUpgrade = "websocket"
@@ -472,6 +535,25 @@ func (e SyncBellParamsUpgrade) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// AccountBook defines model for AccountBook.
+type AccountBook struct {
+	Contacts []AccountContact `json:"contacts"`
+	Id       string           `json:"id"`
+	Includes []string         `json:"includes"`
+	Label    string           `json:"label"`
+	Revision string           `json:"revision"`
+}
+
+// AccountContact defines model for AccountContact.
+type AccountContact struct {
+	Id      string `json:"id"`
+	Name    string `json:"name"`
+	Numbers []struct {
+		Label  string `json:"label"`
+		Number string `json:"number"`
+	} `json:"numbers"`
 }
 
 // BellSignal defines model for BellSignal.
@@ -602,11 +684,17 @@ type Links struct {
 
 // Phonebook defines model for Phonebook.
 type Phonebook struct {
-	Contacts []string `json:"contacts"`
-	Id       string   `json:"id"`
-	Includes []string `json:"includes"`
-	Label    string   `json:"label"`
+	Contacts []string         `json:"contacts"`
+	Hash     *string          `json:"hash,omitempty"`
+	Id       string           `json:"id"`
+	Includes []string         `json:"includes"`
+	Label    string           `json:"label"`
+	Origin   *PhonebookOrigin `json:"origin,omitempty"`
+	Revision *string          `json:"revision,omitempty"`
 }
+
+// PhonebookOrigin defines model for Phonebook.Origin.
+type PhonebookOrigin string
 
 // Policy defines model for Policy.
 type Policy struct {
@@ -700,7 +788,8 @@ type QueueItem struct {
 	CreatedAt int64   `json:"createdAt"`
 	Id        string  `json:"id"`
 	NotAfter  int64   `json:"notAfter"`
-	Verb      Verb    `json:"verb"`
+	Verb      *Verb   `json:"verb,omitempty"`
+	Verbs     *[]Verb `json:"verbs,omitempty"`
 }
 
 // QueueItemAuthorKind defines model for QueueItem.Author.Kind.
@@ -904,6 +993,36 @@ type Verb5 struct {
 // Verb5Name defines model for Verb.5.Name.
 type Verb5Name string
 
+// Verb6 defines model for Verb.6.
+type Verb6 struct {
+	BeforeHash *string     `json:"beforeHash,omitempty"`
+	Book       AccountBook `json:"book"`
+	Name       Verb6Name   `json:"name"`
+}
+
+// Verb6Name defines model for Verb.6.Name.
+type Verb6Name string
+
+// Verb7 defines model for Verb.7.
+type Verb7 struct {
+	Book     string    `json:"book"`
+	Name     Verb7Name `json:"name"`
+	Revision string    `json:"revision"`
+}
+
+// Verb7Name defines model for Verb.7.Name.
+type Verb7Name string
+
+// Verb8 defines model for Verb.8.
+type Verb8 struct {
+	Books   []string  `json:"books"`
+	Handset string    `json:"handset"`
+	Name    Verb8Name `json:"name"`
+}
+
+// Verb8Name defines model for Verb.8.Name.
+type Verb8Name string
+
 // Version defines model for Version.
 type Version struct {
 	Generation string `json:"generation"`
@@ -1073,6 +1192,84 @@ func (t *Verb) FromVerb5(v Verb5) error {
 
 // MergeVerb5 performs a merge with any union data inside the Verb, using the provided Verb5
 func (t *Verb) MergeVerb5(v Verb5) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsVerb6 returns the union data inside the Verb as a Verb6
+func (t Verb) AsVerb6() (Verb6, error) {
+	var body Verb6
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromVerb6 overwrites any union data inside the Verb as the provided Verb6
+func (t *Verb) FromVerb6(v Verb6) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeVerb6 performs a merge with any union data inside the Verb, using the provided Verb6
+func (t *Verb) MergeVerb6(v Verb6) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsVerb7 returns the union data inside the Verb as a Verb7
+func (t Verb) AsVerb7() (Verb7, error) {
+	var body Verb7
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromVerb7 overwrites any union data inside the Verb as the provided Verb7
+func (t *Verb) FromVerb7(v Verb7) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeVerb7 performs a merge with any union data inside the Verb, using the provided Verb7
+func (t *Verb) MergeVerb7(v Verb7) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsVerb8 returns the union data inside the Verb as a Verb8
+func (t Verb) AsVerb8() (Verb8, error) {
+	var body Verb8
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromVerb8 overwrites any union data inside the Verb as the provided Verb8
+func (t *Verb) FromVerb8(v Verb8) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeVerb8 performs a merge with any union data inside the Verb, using the provided Verb8
+func (t *Verb) MergeVerb8(v Verb8) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
