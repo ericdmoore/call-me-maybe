@@ -45,15 +45,18 @@ admitted from an address book is recorded with the source that named them
 (`doorman calls` shows `Grandma (contacts/eric)`), which is the answer to "why
 did the phone ring for someone I never allow-listed".
 
-With a file, the lobby walks a five-rung ladder and the first match wins:
+With a file, the lobby walks this ladder and the first match wins (rung 3
+exists only on a box enrolled with an account that has delivered a lobby pass
+book — see [The lobby pass book](#the-lobby-pass-book)):
 
 | | Source | Result |
 |---|---|---|
 | 1 | a **block** source | dismissed, and never hears the lobby |
 | 2 | `[[people]]` | straight through — you said so explicitly |
-| 3 | a **personal** contact | straight through |
-| 4 | a **published** contact | the lobby: dial an extension |
-| 5 | anybody else | the lobby |
+| 3 | the account's **lobby pass** book | straight through, welcomed by the contact's name |
+| 4 | a **personal** contact | straight through |
+| 5 | a **published** contact | the lobby: dial an extension |
+| 6 | anybody else | the lobby |
 
 `[[people]]` still beats the classifier, so writing somebody down is the
 override and needs no new mechanism. **A number that is both allow-listed and
@@ -651,6 +654,60 @@ It is trimmed and cut to at most 64 characters on a character boundary.
 After that the account owns the name: rename the box there. Changing
 `BOX_NAME` or the hostname later renames nothing. The name goes only to the
 household's own connected account and is never logged.
+
+### The lobby pass book
+
+The account can let callers skip the lobby, the way `[[people]]` does, without
+anybody editing `policy.toml`: the household gives a contact a *lobby pass* on
+the account, and the account delivers its pass holders to the box as one
+special account book.
+
+Account books arrive through sync as `PHONEBOOK_DIR/account/acct-<id>.toml`.
+An ordinary one is **directory only**: being in a phone's book makes a number
+dialable from that phone and admits nobody. The one book whose file carries
+`role = "lobby-pass"` is the reverse:
+
+- **Read by admission, never shown.** No handset may select it, no book may
+  include it, and it includes nothing; sync refuses a `phonebook.select`,
+  `phonebook.assign` or delivery that would put it in a directory
+  (`rejected`/`invalid`), and `doorman check` fails on a hand edit that does.
+  A pass holder need not be in any other book or on any phone.
+- **One per box**, up to 5000 contacts (a directory book stays at 2000), in a
+  file of at most 1 MiB.
+- **After `[[people]]`.** A number in both is welcomed by the `[[people]]`
+  name; a number a block source names is still dismissed. `[[people]]` stays
+  the box's own list and the deliberate override.
+- **Local data only.** A call reads an in-memory map; nothing on the call path
+  reads a file or the network for it.
+- **Hot reload with last good.** The daemon re-reads the account books within
+  a second of any change to them or to `handsets.toml`, through the same
+  rules sync and the directory apply. A set those rules refuse keeps the
+  pass book in service; a restart onto a refused set runs the last good copy
+  (`PHONEBOOK_DIR/account/.lobby-pass.last-good`, written only from accepted
+  bytes), and with no copy the box starts with nobody holding a pass — they
+  hear the lobby, and the phone keeps answering.
+- **Delivered like any book**: `phonebook.put` (with `beforeHash` to replace),
+  `phonebook.remove`, the echo carrying its revision, hash and role. The
+  receipt says `applied` once the running daemon admits from exactly the
+  delivered bytes.
+
+What a log line or `doorman check` says about it is counts:
+
+```text
+Lobby pass: 3 holders, 4 numbers   (acct-…, revision 7)
+  /opt/call-me-maybe/policy.toml: 3 admitted by pass; 1 already in [[people]], welcomed by that name
+```
+
+```bash
+$ journalctl -u doorman --no-pager | grep 'lobby pass'
+# lobby pass book loaded book=acct-… revision=7 holders=3 numbers=4
+```
+
+A pass holder's call is logged as `known caller, welcoming` with the name,
+`via=lobby-pass` and the usual masked caller, and `doorman calls` shows it as
+`Grandpa Joe (lobby-pass)`. The file is managed: take a pass away on the
+account, not here. Removing the book on the account (or deleting the file)
+sends every holder back to the lobby within a second.
 
 ### Sync is slow to pick up a hosted change
 

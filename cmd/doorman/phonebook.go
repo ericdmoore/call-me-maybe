@@ -127,7 +127,8 @@ func loadBooks(paths bookPaths) (provision.Books, error) {
 			books[key] = book
 		}
 		// Books the account manages: composed with house when a phone's
-		// directory is rendered, never read for admission. Refused as a set
+		// directory is rendered, never read for admission — all but the
+		// lobby pass book, which is the reverse. Refused as a set
 		// by the same rules sync applies, so the last good directory stays
 		// up through a bad delivery or a hand edit.
 		dir := accountDir(paths.own)
@@ -148,6 +149,12 @@ func loadBooks(paths bookPaths) (provision.Books, error) {
 			return nil, fmt.Errorf("%s: %s", filepath.Join(dir, problems[0].File), policy.RedactProblem(problems[0].Message, policy.MaxProblemLength))
 		}
 		for id, b := range held {
+			if b.LobbyPass() {
+				// Never a directory, whatever selects it: the rules above
+				// already refuse a selection, and leaving it out here means
+				// no composition can reach it either.
+				continue
+			}
 			books[id] = provision.AccountBook(b)
 		}
 	}

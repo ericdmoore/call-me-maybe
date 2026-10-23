@@ -164,6 +164,16 @@ Layout:
   the queue before defaulting; pinned selections survive restart and retries.
   `PHONEBOOK_DIR/shared` is directory
   storage, never an admission source; it is separate from the *88 writer.
+- `internal/accountbook` — books the account manages, delivered by sync to
+  `PHONEBOOK_DIR/account/acct-<id>.toml` and composed into handset
+  directories. Directory only — with one exception: the single book with
+  `role = "lobby-pass"` is never selectable, never included, never rendered
+  into any directory, includes nothing, holds up to 5000 contacts, and is the
+  one book admission reads (`cmd/doorman/lobbypass.go`, through
+  `lobby.Passes`). It is validated with the rest by
+  `configcheck.AccountBooks`, so the daemon admits from exactly the set sync
+  reports, reloads within a second, and keeps the last good pass book
+  (`account/.lobby-pass.last-good` across a restart).
 - `internal/config` — env parsing; names match `examples/.env.example` exactly.
 - `internal/syncmachine` — command-side file observer, SQLite echo, and durable
   typed changes. The account transport is injected by `cmd/doorman/sync.go`;
@@ -195,7 +205,10 @@ Without one nothing is read, nothing is logged, and the admission ladder is the
 two tiers it has always been: `[[people]]`, then the lobby. With one it becomes
 five — a block source, `[[people]]`, a personal contact, a published contact,
 everybody else — first match wins. Block beats `[[people]]`, and a number in
-both fails `doorman check` rather than being ranked in silence.
+both fails `doorman check` rather than being ranked in silence. A box holding
+the account's lobby pass book adds one rung directly after `[[people]]`:
+`[[people]]` wins over a pass, a block wins over both, and an ordinary
+account book never admits anyone.
 
 **No `trunks.toml` is the normal state and the compatibility gate.** Without
 one, `doorman render` generates only the handset files and the hand-written
@@ -300,6 +313,16 @@ Break these and the phone fails in ways that look like working software.
    on a telephone — the file is 0600 and `doorman calls` redacts by
    default. Entered digits and PINs are still absolute: a record says
    whether a PIN was valid, never what was typed.
+
+10a. **A phonebook is not a door, except the one that says so.** Being in a
+   handset's directory — `house`, a contacts source shown on a phone, an
+   `own/` or `shared/` book, an ordinary account book — admits nobody. The
+   only account data admission reads is the single book with
+   `role = "lobby-pass"`, which no directory may show (no selection, no
+   include; refused by `configcheck.AccountBooks`, skipped by the directory
+   even so). It is read into memory off the call path and consulted after
+   a block source and `[[people]]`; a call never reads a file or the network
+   for it, and a refused set never replaces the pass book in service.
 
 9a. **Generated files are outputs.** `asterisk/generated/*` and the
    installed `*_handsets.conf` and `*_trunks.conf` come from `doorman

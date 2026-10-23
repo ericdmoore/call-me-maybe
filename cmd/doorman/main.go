@@ -32,6 +32,7 @@ import (
 	"syscall"
 	"time"
 
+	"callmemaybe/internal/accountbook"
 	"callmemaybe/internal/ari"
 	"callmemaybe/internal/calls"
 	"callmemaybe/internal/config"
@@ -575,6 +576,12 @@ func runCheck(args []string) (code int) {
 		set = contacts.Load(contactSources, defaultCountryCode())
 	}
 	if !printContacts(set, lists) {
+		rc = 1
+	}
+	// Silent without a lobby pass book, which is every box not enrolled with
+	// an account: who the account lets past the lobby, as counts per line.
+	accountBooks := filepath.Join(render.PhonebookDir(render.Env(secretLookup(*envFlag))), accountbook.Dir)
+	if !printLobbyPass(accountBooks, results[0].pol.HandsetList(), lists, set) {
 		rc = 1
 	}
 	// The words, when there are any. Absent is the state every install is in
@@ -1609,7 +1616,23 @@ func serve() error {
 			o.store.Close()
 		}
 	}()
-	stopActivation := observeActivation(opened)
+	// The account's lobby pass book: global, like the address books, and
+	// loaded before the first call so a pass holder is never sent to the
+	// lobby by a race with startup. Read with the default line's inventory,
+	// the one every line shares, so a selection that makes the set invalid
+	// keeps the last good pass book exactly as it keeps the last good
+	// directory. A box with no account books holds no passes.
+	defaultLine := opened[0].store
+	passes := openPasses(filepath.Join(cfg.PhonebookDir, accountbook.Dir), func() ([]policy.Handset, string) {
+		p := defaultLine.Current()
+		return p.HandsetList(), p.SourceDigest()
+	}, log)
+	if cfg.PolicyWatch {
+		passCtx, stopPasses := context.WithCancel(context.Background())
+		defer stopPasses()
+		go passes.watch(passCtx, time.Second)
+	}
+	stopActivation := observeActivation(opened, passes)
 	defer stopActivation()
 
 	client := ari.New(ari.Options{
@@ -1771,6 +1794,7 @@ func serve() error {
 		if journal != nil {
 			deps.Events = journal
 		}
+		deps.Passes = passes
 		if callLog != nil {
 			deps.Calls = callLog
 		}

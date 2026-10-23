@@ -62,9 +62,12 @@ type Problem struct {
 //
 // The rules: each file parses strictly and is named for its book; the set
 // keeps accountbook's limits, includes resolve without a cycle or a chain
-// deeper than accountbook.MaxDepth; a handset names only books the box
-// holds; and what a handset's account books compose to, with the house they
-// include, fits that handset's directory (provision.DirectoryLimit). The
+// deeper than accountbook.MaxDepth; at most one book is the lobby pass book,
+// and no book includes it and no handset selects it; a handset names only
+// books the box holds; and what a handset's account books compose to, with
+// the house they include, fits that handset's directory
+// (provision.DirectoryLimit). The daemon asks this too, before it admits
+// from the lobby pass book, so it admits from exactly the set sync reports. The
 // sync observer, the sync executor before it writes, and the directory
 // before it serves all ask this, and so can a hosted validator built from
 // this source.
@@ -121,8 +124,16 @@ func AccountBooks(files map[string][]byte, handsets []policy.Handset) (map[strin
 			if !strings.HasPrefix(id, accountbook.Prefix) {
 				continue
 			}
-			if _, ok := books[id]; !ok {
+			b, ok := books[id]
+			if !ok {
 				problems = append(problems, Problem{"", fmt.Sprintf("handset %q uses account book %s, which this box does not hold", h.ID, id)})
+				continue
+			}
+			if b.LobbyPass() {
+				// The pass book admits; a directory shows. A phone that
+				// showed it would turn "who may ring straight through" into
+				// a list on a screen in the hall.
+				problems = append(problems, Problem{"", fmt.Sprintf("handset %q selects the lobby pass book %s, which is never shown in a directory", h.ID, id)})
 				continue
 			}
 			mine = append(mine, id)

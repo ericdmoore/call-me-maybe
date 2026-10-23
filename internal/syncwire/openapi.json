@@ -476,6 +476,11 @@
             "type": "string",
             "enum": ["box", "account"]
           },
+          "role": {
+            "type": "string",
+            "enum": ["lobby-pass"],
+            "description": "Present only on the account's lobby pass book."
+          },
           "revision": {
             "type": "string",
             "maxLength": 19,
@@ -544,6 +549,11 @@
             "maxLength": 19,
             "pattern": "^(0|[1-9][0-9]{0,18})$"
           },
+          "role": {
+            "type": "string",
+            "enum": ["lobby-pass"],
+            "description": "Absent: a directory book, shown on the handsets that select it and never read for admission. lobby-pass: the box's one lobby pass book, whose contacts skip the lobby; never selectable, never included, never shown in a directory, with no includes and up to 5000 contacts. Every other book keeps the 2000-contact limit."
+          },
           "includes": {
             "type": "array",
             "items": {
@@ -558,7 +568,7 @@
             "items": {
               "$ref": "#/components/schemas/AccountContact"
             },
-            "maxItems": 2000
+            "maxItems": 5000
           }
         },
         "required": ["id", "label", "revision", "includes", "contacts"]

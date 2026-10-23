@@ -9,6 +9,21 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for AccountBookRole.
+const (
+	AccountBookRoleLobbyPass AccountBookRole = "lobby-pass"
+)
+
+// Valid indicates whether the value is a known member of the AccountBookRole enum.
+func (e AccountBookRole) Valid() bool {
+	switch e {
+	case AccountBookRoleLobbyPass:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BellSignalT.
 const (
 	Sync BellSignalT = "sync"
@@ -123,6 +138,21 @@ func (e PhonebookOrigin) Valid() bool {
 	case Account:
 		return true
 	case Box:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PhonebookRole.
+const (
+	PhonebookRoleLobbyPass PhonebookRole = "lobby-pass"
+)
+
+// Valid indicates whether the value is a known member of the PhonebookRole enum.
+func (e PhonebookRole) Valid() bool {
+	switch e {
+	case PhonebookRoleLobbyPass:
 		return true
 	default:
 		return false
@@ -544,7 +574,13 @@ type AccountBook struct {
 	Includes []string         `json:"includes"`
 	Label    string           `json:"label"`
 	Revision string           `json:"revision"`
+
+	// Role Absent: a directory book, shown on the handsets that select it and never read for admission. lobby-pass: the box's one lobby pass book, whose contacts skip the lobby; never selectable, never included, never shown in a directory, with no includes and up to 5000 contacts. Every other book keeps the 2000-contact limit.
+	Role *AccountBookRole `json:"role,omitempty"`
 }
+
+// AccountBookRole Absent: a directory book, shown on the handsets that select it and never read for admission. lobby-pass: the box's one lobby pass book, whose contacts skip the lobby; never selectable, never included, never shown in a directory, with no includes and up to 5000 contacts. Every other book keeps the 2000-contact limit.
+type AccountBookRole string
 
 // AccountContact defines model for AccountContact.
 type AccountContact struct {
@@ -691,10 +727,16 @@ type Phonebook struct {
 	Label    string           `json:"label"`
 	Origin   *PhonebookOrigin `json:"origin,omitempty"`
 	Revision *string          `json:"revision,omitempty"`
+
+	// Role Present only on the account's lobby pass book.
+	Role *PhonebookRole `json:"role,omitempty"`
 }
 
 // PhonebookOrigin defines model for Phonebook.Origin.
 type PhonebookOrigin string
+
+// PhonebookRole Present only on the account's lobby pass book.
+type PhonebookRole string
 
 // Policy defines model for Policy.
 type Policy struct {

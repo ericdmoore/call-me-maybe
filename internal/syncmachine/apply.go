@@ -487,6 +487,9 @@ func fromWire(w syncwire.AccountBook) (accountbook.Book, bool) {
 		return accountbook.Book{}, false
 	}
 	b := accountbook.Book{ID: w.Id, Revision: revision, Label: w.Label, Includes: append([]string{}, w.Includes...)}
+	if w.Role != nil {
+		b.Role = string(*w.Role)
+	}
 	for _, c := range w.Contacts {
 		contact := accountbook.Contact{ID: c.Id, Name: c.Name}
 		for _, n := range c.Numbers {
