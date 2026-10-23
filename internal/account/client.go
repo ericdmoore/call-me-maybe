@@ -26,10 +26,13 @@ var idShape = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{
 
 type Client struct {
 	StateDir string
-	origin   string
-	http     *http.Client
-	now      func() time.Time
-	wait     func(context.Context, time.Duration) error
+	// Name is the box name suggested at enrolment (config.BoxName), sent only
+	// to the account being enrolled with and never logged. Empty omits it.
+	Name   string
+	origin string
+	http   *http.Client
+	now    func() time.Time
+	wait   func(context.Context, time.Duration) error
 }
 
 func New(stateDir string) *Client {
@@ -157,9 +160,19 @@ func (c *Client) Login(ctx context.Context, display func(string)) (Status, error
 		if err := s.save(v); err != nil {
 			return Status{}, err
 		}
-		status, headers, body, err := c.post(ctx, "/v1/login/box/device", "", map[string]string{
+		start := map[string]string{
 			"transportPublicKey": base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()),
-		})
+		}
+		if c.Name != "" {
+			start["name"] = c.Name
+		}
+		status, headers, body, err := c.post(ctx, "/v1/login/box/device", "", start)
+		if err == nil && status == http.StatusBadRequest && start["name"] != "" {
+			// A service that predates the name refuses the whole request.
+			// The name is only a suggestion: enrol without it.
+			delete(start, "name")
+			status, headers, body, err = c.post(ctx, "/v1/login/box/device", "", start)
+		}
 		if err != nil {
 			return Status{}, err
 		}

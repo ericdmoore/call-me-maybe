@@ -15,6 +15,7 @@ import (
 
 	"callmemaybe/internal/account"
 	"callmemaybe/internal/backup"
+	"callmemaybe/internal/config"
 )
 
 func TestCloudFailurePreservesLocalBackupAndFailsOverallVerification(t *testing.T) {
@@ -171,5 +172,28 @@ func TestAccountPackageRemainsOutsideTheDaemon(t *testing.T) {
 		if bytes.Contains(data, []byte(`"callmemaybe/internal/account"`)) {
 			t.Errorf("%s imports account outside the account, backup, recovery and sync commands", file)
 		}
+	}
+}
+
+// login reads BOX_NAME from its environment first, then from the .env the
+// units read, and otherwise suggests the hostname.
+func TestLoginSuggestsBOX_NAMEThenTheHostname(t *testing.T) {
+	envFile := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(envFile, []byte("BOX_NAME=\"Cabin\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BOX_NAME", "")
+	if got := suggestedBoxName(envFile); got != "Cabin" {
+		t.Fatalf(".env: got %q", got)
+	}
+	t.Setenv("BOX_NAME", "Barn")
+	if got := suggestedBoxName(envFile); got != "Barn" {
+		t.Fatalf("environment: got %q", got)
+	}
+	t.Setenv("BOX_NAME", "")
+	host, _ := os.Hostname()
+	want := config.BoxName(func(string) string { return "" }, os.Hostname)
+	if got := suggestedBoxName(filepath.Join(t.TempDir(), "missing")); got != want {
+		t.Fatalf("hostname %q: got %q, want %q", host, got, want)
 	}
 }

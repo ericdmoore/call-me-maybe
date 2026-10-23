@@ -791,6 +791,11 @@
           },
           "configRejection": {
             "$ref": "#/components/schemas/ConfigRejection"
+          },
+          "boxName": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "The name the box suggests for itself: BOX_NAME, otherwise its hostname. Sent until one status report carrying it has been accepted for the box's current enrolment, then omitted, so a box enrolled before enrolment carried a name still supplies one. A suggestion only: the name the household sets on the account wins."
           }
         },
         "required": ["schema", "version", "sampledAt"]
