@@ -44,8 +44,18 @@ jobs:
 
       # Same tools as CI's test job: without them the Books audio
       # integration tests skip and the coverage floor fails only here.
+      # A pinned static ffmpeg and cached espeak-ng packages, with bounded,
+      # retried apt only as the fallback: a stalled Ubuntu mirror once held
+      # this step for hours. See scripts/ci-audio-tools.sh.
+      - name: Cache offline Books audio tools
+        uses: actions/cache@v4
+        with:
+          path: ~/audio-tools
+          key: audio-tools-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('scripts/ci-audio-tools.sh') }}
+
       - name: offline Books audio tools
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg espeak-ng
+        timeout-minutes: 10
+        run: bash scripts/ci-audio-tools.sh ~/audio-tools
 
       - name: Gate on the same checks as CI
         run: |

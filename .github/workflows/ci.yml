@@ -68,11 +68,21 @@ jobs:
       - name: lint (nilness + nologsecrets)
         run: make lint
 
+      # A pinned static ffmpeg and cached espeak-ng packages, with bounded,
+      # retried apt only as the fallback: a stalled Ubuntu mirror once held
+      # this step for hours. See scripts/ci-audio-tools.sh.
+      - name: Cache offline Books audio tools
+        uses: actions/cache@v4
+        with:
+          path: ~/audio-tools
+          key: audio-tools-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ hashFiles('scripts/ci-audio-tools.sh') }}
+
+      - name: offline Books audio tools
+        timeout-minutes: 10
+        run: bash scripts/ci-audio-tools.sh ~/audio-tools
+
       # -race matters here: one call is one goroutine and the session state
       # machine is driven entirely by channel sends from the ARI event router.
-      - name: offline Books audio tools
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg espeak-ng
-
       - name: test + coverage floors
         run: bash scripts/coverage.sh
 
