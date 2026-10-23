@@ -1,0 +1,41 @@
+# The voicemail recording links: GET /v/<token>, the per-message links
+# `doorman voicemail notify` puts in the voicemail mail, served to loopback,
+# private, link-local and tailnet addresses and refused (403) to anything
+# else. Only as private as the network it is reachable on — RUNBOOK, "The
+# house mailbox". Runs as the asterisk user, which owns the recordings, and
+# reads /etc/asterisk/cmm-mail.env and nothing of doorman's: no .env, and no
+# SIP, ARI or account credential is ever in this process.
+#
+# Installed by `sudo doorman init services`, and enabled when
+# VOICEMAIL_LINK_BASE is set in /etc/asterisk/cmm-mail.env; a rerun is the
+# upgrade. Exits 0 and stays quiet without it: no link is ever made.
+[Unit]
+Description=Call Me Maybe — voicemail recording links
+Documentation=https://callmemaybe.cc
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=asterisk
+Group=asterisk
+ExecStart=/opt/call-me-maybe/bin/doorman voicemail serve
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/asterisk/cmm-voicemail
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=64M
+
+SyslogIdentifier=cmm-voicemail
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

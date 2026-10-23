@@ -145,6 +145,7 @@ func decideWants(env func(string) (string, bool), handsetsPath, trunksPath, mess
 	default:
 		w.Backup, w.Why["doorman-backup.timer"] = true, fmt.Sprintf("BACKUP_RECIPIENT and %d destination(s)", dests)
 	}
+	w.Voicemail, w.Why["doorman-voicemail.service"] = voicemailLinksWanted(cmmMailEnvPath())
 	if exists(trunksPath) {
 		w.Balance, w.Why["doorman-balance.timer"] = true, trunksPath+" exists"
 	} else {

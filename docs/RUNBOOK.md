@@ -385,7 +385,10 @@ What it enables and why: `doorman`, `doorman-phonebook.timer` and `doorman-remin
 `doorman-directory` with `PROVISION_ADDRESS` and a handset carrying `mac` +
 `model`; `doorman-inbox` with `INBOX_URL` and `messages.toml`;
 `doorman-digest.timer` with `MAIL_HOOK` + `MAIL_TO`; `doorman-balance.timer`
-with `trunks.toml`. A rerun is the upgrade: a unit doorman wrote (it carries
+with `trunks.toml`; `doorman-voicemail` (the voicemail recording links, as
+the asterisk user) with `VOICEMAIL_LINK_BASE` in `/etc/asterisk/cmm-mail.env`
+— root reads that file, so `doorman check` run as the service account says
+it cannot tell. A rerun is the upgrade: a unit doorman wrote (it carries
 a "Managed by" first line) is replaced when the binary's copy differs, a
 unit it did not write is left alone and named. Changing `.env` later —
 adding `INBOX_URL`, say — is a rerun, which enables the inbox and nothing
@@ -1006,11 +1009,139 @@ the record. `journalctl -t cmm-voicemail` says why — no `MAIL_TO`, the CLI
 not on `PATH`, a token revoked. Nothing about a failed send reaches a
 caller, and nothing here runs on a call.
 
+`scripts/voicemail-notify` is a thin wrapper: it checks Asterisk's
+arguments and starts `doorman voicemail notify` detached (its own session,
+output to syslog as `cmm-voicemail`), so Asterisk never waits on a
+transcription. Asterisk runs `externnotify` whenever a box's counts change —
+a message left, and a message listened to — so notify keeps a list of what
+it has mailed (`/var/lib/asterisk/cmm-voicemail/notified`, message ids, no
+numbers) and mails each message once; a message more than an hour old when
+it is first seen is never news, so the first run after an upgrade does not
+mail the backlog.
+
 **What this puts on the box:** a token that can send as the house, in
 `/var/lib/asterisk/.bullmoose/`, and the address in a root-owned file. No
 mail password, no login, and no way to read the mailbox from here. The
 mailbox itself becomes the most sensitive thing in the house — recordings
 and full caller numbers — so keep it to people who would answer the phone.
+
+#### The settings file
+
+Everything the voicemail mail reads is in `/etc/asterisk/cmm-mail.env`,
+root-owned, group asterisk, 0640. It is not `.env`: notify and the link
+listener run as the asterisk user, which cannot read `.env` and must never
+hold what is in it. Every key but `MAIL_TO` is optional, and a file with
+`MAIL_TO` alone sends exactly the mail it always did, plus a line saying
+`(no transcript)`:
+
+```bash
+# /etc/asterisk/cmm-mail.env
+MAIL_TO=midbury@example.com          # a box with no email of its own
+# MAIL_HOOK=/opt/call-me-maybe/scripts/mail-hook-bullmoose   (the default)
+
+# Transcripts: the same three lines as .env, copied (see below).
+STT_ENDPOINT=http://alpaca:9001/v1/audio/transcriptions
+STT_MODEL=
+STT_TIMEOUT_MS=120000
+
+# A recording link that plays at home (see below).
+VOICEMAIL_LINK_BASE="http://jepsen.tail1234.ts.net:8095 http://jepsen.local:8095"
+# VOICEMAIL_LINK_LISTEN=:8095
+# VOICEMAIL_LINK_DAYS=14
+```
+
+Edits take effect on the next message for notify; the link listener reads
+the file at start, so `sudo systemctl restart doorman-voicemail` after
+changing a `VOICEMAIL_LINK_*` line, and `sudo doorman init services` after
+setting `VOICEMAIL_LINK_BASE` the first time (it enables the unit).
+
+#### Transcripts
+
+The same speech service the `*88` names use (`doorman stt <url>`, an
+OpenAI-compatible `/v1/audio/transcriptions` on the LAN or the tailnet).
+`doorman stt` writes `.env`, which the asterisk user cannot read, so copy
+the line it prints into `cmm-mail.env` — `STT_ENDPOINT`, and `STT_MODEL` /
+`STT_TIMEOUT_MS` if you set them; same names, same meanings. Notify sends
+the message's PCM `.wav` (the box stores `wav49|wav`; the `.WAV` is GSM,
+which speech services decode unevenly) and puts the text in the mail as a
+quote. Down, slow past `STT_TIMEOUT_MS`, or not configured: the mail goes
+anyway and says `(no transcript)`. The transcript is never logged; the log
+says how many characters came back.
+
+#### A recording link that plays at home
+
+With `VOICEMAIL_LINK_BASE` set, the mail carries a link instead of the
+attachment. Notify hard-links the message's `.wav` (a copy, 0640, if the
+spool is on another filesystem) into
+`/var/lib/asterisk/cmm-voicemail/links/` (0750, asterisk's) under a token
+of 128 random bits, and prints one link per base:
+`http://jepsen.local:8095/v/<token>`. `doorman voicemail serve`
+(`doorman-voicemail.service`, as the asterisk user) answers that one path
+and nothing else — the recording as `audio/wav`, or a page with a player
+for a browser — with `Cache-Control: no-store` and `Referrer-Policy:
+no-referrer`.
+
+**Which name to print — list both.** `.local` names resolve on the LAN only
+(mDNS); off the LAN, over the tailnet, the box's MagicDNS name
+(`tailscale status` shows it, `<box>.<tailnet>.ts.net`) is the one that
+works. `VOICEMAIL_LINK_BASE` takes several, space-separated, and the mail
+lists a link for each; on an eero, where nothing on the LAN resolves the
+box by name, the LAN IP works as well (`http://192.168.7.133:8095`).
+
+**How private it is, plainly.** The link is only as private as the network
+it is reachable on. The token is unguessable — 128 bits from `crypto/rand`,
+so the link cannot be found by trying — but anybody who has the link and is
+on the home network or the tailnet can play the message, so treat a
+forwarded voicemail mail as a forwarded recording. As a second fence the
+listener refuses (403) any client that is not loopback, a private LAN
+range, link-local, IPv6 unique-local, or the tailnet (`100.64.0.0/10`,
+`fd7a:115c:a1e0::/48`), so a mistaken port forward exposes nothing; it
+never believes `X-Forwarded-For`. Never put it behind a public proxy —
+Tailscale Funnel included: a proxy on the box arrives from loopback, which
+the fence has to allow.
+
+**How long a link lasts:** `VOICEMAIL_LINK_DAYS` (14) from the message,
+then the listener (hourly) and notify (each run) prune it. A link is a link
+to the recording itself, not to a slot in the box — app_voicemail renumbers
+`msgNNNN` when an earlier message is deleted, and a link by path would one
+day play somebody else's message. So **a link keeps playing for its full
+14 days even after the message is deleted from the box.** To end one
+early, remove its file:
+`sudo -u asterisk rm /var/lib/asterisk/cmm-voicemail/links/<token>.wav`.
+
+**Smoke test.** Leave a message (step 5), then:
+
+```bash
+$ journalctl -t cmm-voicemail -n 5          # "sent family's new message to …"
+$ systemctl status doorman-voicemail        # active, "listening" on :8095
+# On a phone on the tailnet, Wi-Fi off: open the link from the mail — it plays.
+# From outside both (a server elsewhere, not on the tailnet):
+$ curl -sI http://<the box's public address>:8095/v/<token>   # no answer, or 403
+```
+
+The last line is the one that matters. The box should not be reachable from
+outside at all; the 403 is for the day it accidentally is.
+
+#### Each mailbox to its own address
+
+The email on a box's line in `voicemail.conf` — `box => pin,Full Name,email`
+— is where notify sends that box's mail; a handset's `email` in
+`handsets.toml` lands on its generated line in `voicemail_handsets.conf`,
+which notify reads through the `#tryinclude`. Several addresses separated
+by `|` each get the mail. A box with no email goes to `MAIL_TO`; with
+neither, the message stays in the box and the log says so. A business line
+and a family line are two boxes, two addresses:
+
+```ini
+[household]
+family => 4242,Family,midbury@example.com
+office => 4242,Office,front-desk@example.com
+```
+
+The PIN field is never read, printed or logged. **Pick one route:** with
+`externnotify`, leave `mailcmd` unset and no sendmail on the box —
+Asterisk's own `attach=yes` mail goes to the same address, and a box would
+be mailed twice.
 
 #### The other three feeds
 

@@ -54,6 +54,10 @@ type Layout struct {
 	// AsteriskDir and VoicemailDir are what the backup reads as doorman;
 	// init services grants the ACLs. Empty skips them.
 	AsteriskDir, VoicemailDir string
+	// VoicemailState is the asterisk user's own directory for the voicemail
+	// links and the list of messages already mailed: made here because
+	// doorman-voicemail.service may write only inside it. Empty skips it.
+	VoicemailState string
 }
 
 // asteriskFiles are the hand-written files the backup carries; the same
@@ -66,6 +70,7 @@ func DefaultLayout() Layout {
 		UnitDir: "/etc/systemd/system", StateDir: "/var/lib/doorman", Spool: "/var/spool/call-me-maybe",
 		DoormanUser: "doorman", DoormanGroup: "doorman", AsteriskUser: "asterisk",
 		AsteriskDir: "/etc/asterisk", VoicemailDir: "/var/spool/asterisk/voicemail",
+		VoicemailState: "/var/lib/asterisk/cmm-voicemail",
 	}
 }
 
@@ -79,6 +84,7 @@ type Wants struct {
 	Balance   bool // trunks.toml
 	Backup    bool // BACKUP_RECIPIENT and at least one destination
 	Sync      bool // this installation has enrolled account credentials
+	Voicemail bool // VOICEMAIL_LINK_BASE in /etc/asterisk/cmm-mail.env
 	// Why records the reason for each decision, by unit, for the plan.
 	Why map[string]string
 }
@@ -112,6 +118,7 @@ func Units() ([]Unit, error) {
 		"doorman-backup.service":    {},
 		"doorman-backup.timer":      {wanted: func(w Wants) bool { return w.Backup }},
 		"doorman-sync.service":      {wanted: func(w Wants) bool { return w.Sync }},
+		"doorman-voicemail.service": {wanted: func(w Wants) bool { return w.Voicemail }},
 	}
 	entries, err := fs.ReadDir(unitFS, "units")
 	if err != nil {
@@ -209,6 +216,10 @@ func Build(ctx context.Context, x Exec, lay Layout, w Wants) (*Plan, error) {
 	if userExists(ctx, x, lay.AsteriskUser) {
 		p.Steps = append(p.Steps, Step{Describe: "directory " + lay.Spool + " (" + lay.AsteriskUser + ":" + lay.DoormanGroup + ", 2770 — the *88 spool)",
 			Argv: []string{"install", "-d", "-o", lay.AsteriskUser, "-g", lay.DoormanGroup, "-m", "2770", lay.Spool}})
+		if lay.VoicemailState != "" {
+			p.Steps = append(p.Steps, Step{Describe: "directory " + lay.VoicemailState + " (" + lay.AsteriskUser + ", 0750 — the voicemail links)",
+				Argv: []string{"install", "-d", "-o", lay.AsteriskUser, "-g", lay.AsteriskUser, "-m", "0750", lay.VoicemailState}})
+		}
 	} else {
 		p.Steps = append(p.Steps, Step{Describe: "skip " + lay.Spool + ": no user " + lay.AsteriskUser + " yet (install Asterisk, rerun)"})
 	}

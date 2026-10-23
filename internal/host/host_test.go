@@ -77,7 +77,7 @@ func TestEveryEmbeddedUnitHasARuleAndTheDaemonComesFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 14 || units[0].Name != "doorman.service" {
+	if len(units) != 15 || units[0].Name != "doorman.service" {
 		t.Fatalf("units = %d, first %s", len(units), units[0].Name)
 	}
 	for _, u := range units {
@@ -133,8 +133,8 @@ func TestPlanInstallsEnablesAndIsIdempotent(t *testing.T) {
 	if n := x.count("systemctl", "enable", "--now"); n != 4 {
 		t.Errorf("enabled = %d, want the daemon, both housekeeping timers and the inbox: %v", n, p.Enable)
 	}
-	if n := x.count("systemctl", "disable", "--now"); n != 5 {
-		t.Errorf("disabled = %d, want directory, sync, digest, balance, backup: %v", n, p.Disable)
+	if n := x.count("systemctl", "disable", "--now"); n != 6 {
+		t.Errorf("disabled = %d, want directory, sync, voicemail, digest, balance, backup: %v", n, p.Disable)
 	}
 	unit, err := os.ReadFile(filepath.Join(lay.UnitDir, "doorman-inbox.service"))
 	if err != nil || !strings.HasPrefix(string(unit), managedMarker) || !strings.Contains(string(unit), "ExecStart=") {
@@ -293,7 +293,7 @@ func TestInspectReportsWantAgainstHost(t *testing.T) {
 func TestEveryUnitHasShippedLegacyContentRegistered(t *testing.T) {
 	units, _ := Units()
 	for _, u := range units {
-		if strings.HasPrefix(u.Name, "doorman-backup.") || strings.HasPrefix(u.Name, "doorman-reminders.") || u.Name == "doorman-sync.service" {
+		if strings.HasPrefix(u.Name, "doorman-backup.") || strings.HasPrefix(u.Name, "doorman-reminders.") || u.Name == "doorman-sync.service" || u.Name == "doorman-voicemail.service" {
 			continue // born with the marker; never shipped under scripts/
 		}
 		if len(legacyUnits[u.Name]) == 0 {
@@ -321,5 +321,55 @@ func TestAMissingSetfaclIsALineInThePlanNotAFailedApply(t *testing.T) {
 	}
 	if x.count("install", "-o", "root") == 0 {
 		t.Error("no unit was installed")
+	}
+}
+
+// The voicemail links live in the asterisk user's own directory, which the
+// unit may write and nothing else may read; the plan makes it only where
+// Asterisk is installed, and enables the listener only when it is wanted.
+func TestTheVoicemailDirectoryAndUnit(t *testing.T) {
+	lay := layout(t)
+	lay.VoicemailState = filepath.Join(t.TempDir(), "cmm-voicemail")
+	os.MkdirAll(lay.UnitDir, 0o755)
+	want := []string{"install", "-d", "-o", "asterisk", "-g", "asterisk", "-m", "0750", lay.VoicemailState}
+	has := func(p *Plan) bool {
+		for _, s := range p.Steps {
+			if strings.Join(s.Argv, " ") == strings.Join(want, " ") {
+				return true
+			}
+		}
+		return false
+	}
+	p, err := Build(context.Background(), &fakeExec{users: map[string]bool{"asterisk": true}}, lay, Wants{Voicemail: true, Why: map[string]string{"doorman-voicemail.service": "VOICEMAIL_LINK_BASE is set"}})
+	if err != nil || !has(p) {
+		t.Fatalf("no voicemail directory step: %v", err)
+	}
+	enabled := false
+	for _, n := range p.Enable {
+		enabled = enabled || n == "doorman-voicemail.service"
+	}
+	if !enabled {
+		t.Errorf("wanted but not enabled: %v", p.Enable)
+	}
+	if p, _ := Build(context.Background(), &fakeExec{users: map[string]bool{}}, lay, Wants{Why: map[string]string{}}); has(p) {
+		t.Error("voicemail directory planned on a box with no asterisk user")
+	}
+	units, _ := Units()
+	for _, u := range units {
+		if u.Name != "doorman-voicemail.service" {
+			continue
+		}
+		c := string(u.Content)
+		for _, line := range []string{"User=asterisk", "ExecStart=/opt/call-me-maybe/bin/doorman voicemail serve", "ReadWritePaths=/var/lib/asterisk/cmm-voicemail", "ProtectSystem=strict"} {
+			if !strings.Contains(c, line+"\n") {
+				t.Errorf("unit lacks %q", line)
+			}
+		}
+		if strings.Contains(c, "EnvironmentFile") || strings.Contains(c, ".env\n") {
+			t.Error("the voicemail listener must not load doorman's .env")
+		}
+		if DefaultLayout().VoicemailState != "/var/lib/asterisk/cmm-voicemail" {
+			t.Error("the unit's ReadWritePaths and the layout disagree")
+		}
 	}
 }

@@ -65,16 +65,7 @@ func runPhonebook(args []string) int {
 		handsets: byID, countryCode: defaultCountryCode(),
 		now: time.Now, out: func(f string, a ...any) { fmt.Printf(f+"\n", a...) },
 	}
-	if ep, ok := env("STT_ENDPOINT"); ok && strings.TrimSpace(ep) != "" {
-		w := &stt.Whisper{Endpoint: strings.TrimSpace(ep)}
-		if m, ok := env("STT_MODEL"); ok {
-			w.Model = strings.TrimSpace(m)
-		}
-		if ms, ok := env("STT_TIMEOUT_MS"); ok {
-			if n, err := strconv.Atoi(strings.TrimSpace(ms)); err == nil && n > 0 {
-				w.Timeout = time.Duration(n) * time.Millisecond
-			}
-		}
+	if w := whisperFromEnv(env); w != nil {
 		job.stt = w
 	}
 	if p, ok := env("EVENT_JOURNAL_PATH"); ok && strings.TrimSpace(p) != "" {

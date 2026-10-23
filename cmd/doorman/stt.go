@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"callmemaybe/internal/setup"
+	"callmemaybe/internal/stt"
 )
 
 // runSTT is `doorman stt`: where the *88 names are transcribed.
@@ -63,6 +65,9 @@ func runSTT(args []string) int {
 		}
 		fmt.Printf("✓ STT_ENDPOINT = %s\n", u.String())
 		fmt.Println(describeSTT(secretLookup(envPath), 4*time.Second))
+		// The voicemail transcripts run as the asterisk user, which cannot
+		// read .env; they keep their own copy.
+		fmt.Printf("  Voicemail transcripts read their own copy: STT_ENDPOINT=%s in /etc/asterisk/cmm-mail.env (RUNBOOK, \"The house mailbox\").\n", u.String())
 		return 0
 	}
 }
@@ -100,4 +105,26 @@ func probeSTT(u *url.URL, timeout time.Duration) string {
 		return "answering"
 	}
 	return "not answering"
+}
+
+// whisperFromEnv is the STT client STT_ENDPOINT, STT_MODEL and
+// STT_TIMEOUT_MS describe, or nil when no endpoint is set. Two readers with
+// two files: `doorman phonebook` through .env, and `doorman voicemail
+// notify` through /etc/asterisk/cmm-mail.env — the same names and meanings
+// in both, so a copied line means the same thing.
+func whisperFromEnv(env func(string) (string, bool)) *stt.Whisper {
+	ep, ok := env("STT_ENDPOINT")
+	if !ok || strings.TrimSpace(ep) == "" {
+		return nil
+	}
+	w := &stt.Whisper{Endpoint: strings.TrimSpace(ep)}
+	if m, ok := env("STT_MODEL"); ok {
+		w.Model = strings.TrimSpace(m)
+	}
+	if ms, ok := env("STT_TIMEOUT_MS"); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(ms)); err == nil && n > 0 {
+			w.Timeout = time.Duration(n) * time.Millisecond
+		}
+	}
+	return w
 }

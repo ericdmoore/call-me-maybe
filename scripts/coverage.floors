@@ -32,5 +32,6 @@ callmemaybe/internal/textlog             81
 callmemaybe/internal/tmpl                74
 callmemaybe/internal/updatecheck         87
 callmemaybe/internal/voice               89
+callmemaybe/internal/voicemail           93
 callmemaybe/internal/xdg                 100
 TOTAL                                    70
