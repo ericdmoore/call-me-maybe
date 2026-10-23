@@ -149,13 +149,27 @@ func TestCheckDaemonAndSyncRefuseTheSameInvalidTime(t *testing.T) {
 	if _, err := m.Observe(); err == nil || m.Rejection() == nil || m.Rejection().File != "policy.toml" {
 		t.Fatal("observer does not report the file the daemon refused")
 	}
-	// Without a usable copy it refuses, as it always has.
+	// Without a usable copy, the file v0.15 accepted (a disabled schedule was
+	// never compiled then) runs under v0.15's rules: no worse than before.
 	if err := os.RemoveAll(filepath.Join(dir, "policy.last-good")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := openLines(files, handsetsPath, trunksPath, false, slog.New(slog.DiscardHandler), nil); err == nil {
-		t.Fatal("started on a refused file with no last good copy")
+	bootstrapped, err := openLines(files, handsetsPath, trunksPath, false, slog.New(slog.DiscardHandler), nil)
+	if err != nil || !bootstrapped[0].store.PreviousRules() {
+		t.Fatalf("no bootstrap under the previous rules: %v", err)
 	}
+	bootstrapped[0].store.Close()
+	if _, err := os.Stat(filepath.Join(dir, "policy.last-good")); !os.IsNotExist(err) {
+		t.Fatal("a leniently loaded file seeded a last good copy")
+	}
+	// What v0.15 refused too — an enabled schedule at 25:99 — still refuses.
+	if err := os.WriteFile(policyPath, []byte(strings.Replace(oneValidatorPolicy("25:99"), "enabled = false\n", "", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := openLines(files, handsetsPath, trunksPath, false, slog.New(slog.DiscardHandler), nil); err == nil {
+		t.Fatal("started on a file the previous release refused too")
+	}
+	write("25:99")
 
 	write("03:05")
 	if rc := check(); rc != 0 {
@@ -201,5 +215,62 @@ func TestOneDigitHourIsAcceptedEverywhere(t *testing.T) {
 	}
 	if got := s.Configuration.Policies[0].Schedules[0].Start; got != "07:00" {
 		t.Fatalf("wire start = %q, want 07:00", got)
+	}
+}
+
+// The first start after an upgrade has no last good copy. A file the previous
+// release ran (here, with an unknown key and an unknown handset model) runs
+// under its rules, loudly, without seeding a copy; the first strictly valid
+// edit is accepted on reload and becomes the copy.
+func TestFirstBootRunsUnderThePreviousRulesUntilAStrictEdit(t *testing.T) {
+	lenient := goodPolicy + "\n[house.extras]\nflavour = \"vanilla\"\n"
+	dir := policyDir(t, map[string]string{"policy.toml": lenient})
+	policyPath, handsetsPath := filepath.Join(dir, "policy.toml"), filepath.Join(dir, "handsets.toml")
+	trunksPath := filepath.Join(dir, "trunks.toml")
+	os.WriteFile(handsetsPath, []byte(goodHandsets+"mac = \"000b82010203\"\nmodel = \"acme-handset\"\n"), 0o600)
+	var logs lockedBuffer
+	files, _ := policy.DiscoverLines(policyPath)
+	opened, err := openLines(files, handsetsPath, trunksPath, true, slog.New(slog.NewTextHandler(&logs, nil)), nil)
+	if err != nil {
+		t.Fatalf("a file the previous release ran did not start: %v", err)
+	}
+	defer opened[0].store.Close()
+	if !opened[0].store.PreviousRules() {
+		t.Fatal("not running under the previous rules")
+	}
+	out := logs.String()
+	if !strings.Contains(out, "POLICY REFUSED BY THE CURRENT RULES") || !strings.Contains(out, "extras") || strings.Contains(out, "428917") {
+		t.Fatalf("bootstrap not reported (or not redacted): %s", out)
+	}
+	lastGood := filepath.Join(dir, "policy.last-good")
+	if _, err := os.Stat(lastGood); !os.IsNotExist(err) {
+		t.Fatal("a leniently loaded file seeded a last good copy")
+	}
+	m, err := syncmachine.Open(filepath.Join(dir, "sync"), "ac409cd3-8105-4200-9a32-42a064a98bb0",
+		syncmachine.Paths{Policy: policyPath, Handsets: handsetsPath, Trunks: trunksPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	m.Warn = func(error) {}
+	if _, err := m.Observe(); err == nil || m.Rejection() == nil {
+		t.Fatal("observer does not report the refused files")
+	}
+
+	// A strictly valid edit: accepted on reload, and the copy is seeded.
+	os.WriteFile(handsetsPath, []byte(goodHandsets), 0o600)
+	os.WriteFile(policyPath, []byte(goodPolicy), 0o600)
+	deadline := time.Now().Add(4 * time.Second)
+	for opened[0].store.Fallback() != nil && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if opened[0].store.Fallback() != nil || opened[0].store.PreviousRules() {
+		t.Fatal("a strictly valid edit was not accepted on reload")
+	}
+	if data, err := os.ReadFile(filepath.Join(lastGood, policy.DefaultLine, "policy.toml")); err != nil || string(data) != goodPolicy {
+		t.Fatalf("the accepted edit did not seed the last good copy: %v", err)
+	}
+	if _, err := m.Observe(); err != nil || m.Rejection() != nil {
+		t.Fatalf("observer still rejects: %v", err)
 	}
 }

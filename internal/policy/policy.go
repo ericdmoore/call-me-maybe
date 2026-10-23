@@ -465,6 +465,16 @@ type Options struct {
 	// OnLastGoodError is told when a last good copy could not be written.
 	// The policy is in service regardless; only the safety net is missing.
 	OnLastGoodError func(error)
+
+	// previousRules compiles with the rules the v0.15 daemon applied: no
+	// bounds, disabled schedules not compiled. Set only by a Store's
+	// bootstrap fallback (see previousRulesOptions), never by a caller.
+	previousRules bool
+
+	// Bootstrap lets a Store whose current files are refused at startup, and
+	// which has no usable last good copy, run them under the previous
+	// release's rules instead of refusing to start (see PreviousRules).
+	Bootstrap bool
 }
 
 // decode is the single TOML entry point for both config files: it fills a
@@ -783,8 +793,13 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		// Compiled whether or not it is enabled: a disabled schedule is still
 		// configuration, one edit away from being live, and every reader of
 		// the file — check, the daemon and sync — must agree that it is valid.
+		disabled := sc.Enabled != nil && !*sc.Enabled
+		if disabled && o.previousRules {
+			schedules[sc.ID] = nil // v0.15 never compiled a disabled schedule
+			continue
+		}
 		window := compileWindow("schedule "+sc.ID, sc.Start, sc.End, sc.Days, fail)
-		if sc.Enabled != nil && !*sc.Enabled {
+		if disabled {
 			// Present but off: references resolve to nil, i.e. inert. This
 			// is the holiday switch.
 			window = nil
@@ -1123,7 +1138,9 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		}
 	}
 
-	checkBounds(f, fail)
+	if !o.previousRules {
+		checkBounds(f, fail)
+	}
 
 	if len(problems) > 0 {
 		return nil, problems

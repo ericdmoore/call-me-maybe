@@ -68,7 +68,9 @@ finally honouring the `additionalProperties: false` the schema always
 declared. The daemon's reload and sync refuse the same key — one validator
 for all three — and a refused reload keeps the last good policy. At startup,
 refused files mean the daemon runs the last good copy it saved in
-`policy.last-good/` and says so; it refuses to start only without one. `doorman check`
+`policy.last-good/` and says so; with no copy yet it runs the files under the
+previous release's rules, and refuses to start only on a file that release
+refused too. `doorman check`
 also prints every extension's settings including the defaults it applied, so a
 key that was dropped reads as a feature you configured and did not get.
 

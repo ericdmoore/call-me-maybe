@@ -554,7 +554,7 @@ func Policy() *Schema {
 			"Allow-listed numbers may be written in any format; they normalise to E.164 at load time. An unparseable number is a load error, not a silent never-match.",
 			"`doorman check`, the daemon's reload and sync apply one validator, so they accept and refuse the same files. Unknown keys are errors in all three.",
 			"Bounds: ids at most 60 characters; handset, extension and line labels at most 128; a person's name at most 256 and at most 32 numbers; at most 100 handsets, 100 schedules per policy and 100 handsets in any one list; any other value at most 2048 characters and any list at most 1000 entries. A ladder step's rings is 1-1000 and seconds 1-86400 when set.",
-			"At startup the daemon falls back to its last good copy (policy.last-good/ beside policy.toml) when the current files are refused, and refuses to start only when there is none.",
+			"At startup the daemon falls back to its last good copy (policy.last-good/ beside policy.toml) when the current files are refused, or, with none, runs the current files under the previous release's rules; it refuses to start only on a file that release refused too.",
 		},
 		Properties: map[string]*Schema{
 			"line":       line(),

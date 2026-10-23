@@ -61,6 +61,7 @@ func openLines(files []policy.LineFile, handsetsPath, trunksPath string, watch b
 				"hint", "run `doorman check` for the full report")
 		}
 		opts.LastGood = policy.LastGoodPath(lf.Path, lf.Name)
+		opts.Bootstrap = true
 		opts.OnLastGoodError = func(err error) {
 			lineLog.Warn("cannot save the last good copy of the policy; the policy is in service, but a restart after a bad edit has nothing to fall back to",
 				"lastGood", opts.LastGood, "problem", policy.RedactProblem(err.Error(), 0))
@@ -100,13 +101,17 @@ func openLines(files []policy.LineFile, handsetsPath, trunksPath string, watch b
 		opened = append(opened, openLine{lf.Name, store, lineLog})
 		if refused := store.Fallback(); refused != nil {
 			// One line that cannot be missed: the box is answering calls, but
-			// not with the files on disk.
+			// not with the files on disk, or not under the current rules.
+			reason, msg := "running-last-good-policy", "POLICY REFUSED AT STARTUP — running the last good configuration until the files are fixed"
+			if store.PreviousRules() {
+				reason, msg = "running-policy-under-previous-rules", "POLICY REFUSED BY THE CURRENT RULES — running it under the previous release's rules until the files are fixed"
+			}
 			if journal != nil {
-				e := events.System(events.ConfigReloadFailed, "running-last-good-policy", 0)
+				e := events.System(events.ConfigReloadFailed, reason, 0)
 				e.Line = lf.Name
 				journal.Post(e)
 			}
-			lineLog.Error("POLICY REFUSED AT STARTUP — running the last good configuration until the files are fixed",
+			lineLog.Error(msg,
 				"path", lf.Path, "lastGood", opts.LastGood, "problem", policy.RedactProblem(refused.Error(), 0),
 				"hint", "run `doorman check` for the full report")
 		}

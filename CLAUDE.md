@@ -218,7 +218,9 @@ Break these and the phone fails in ways that look like working software.
 4. **An invalid `policy.toml` must never take the phone down.** The store
    keeps the last good policy on a failed reload, at startup it runs the last
    good copy (`policy.last-good/<line>`, saved atomically on every accepted
-   load) when the current files are refused, and `RotatePins` validates
+   load) when the current files are refused — or, with no copy, the current
+   files under the previous release's rules (never a copy source) — and
+   `RotatePins` validates
    before writing and writes atomically. Preserve all three on any change to
    those paths.
 5. **PIN comparison stays exact-match against a map.** No prefix matching, no

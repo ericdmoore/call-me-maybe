@@ -222,9 +222,9 @@ Record each before the upgrade and compare after; any failure means roll back.
 2. **Configuration:** `doorman check` passes on the live files. Worth running
    the *new* binary's `doorman check --policy-only` before restarting: a
    release can tighten validation. If it refuses the live files, the daemon
-   still starts — on the last good copy it saved (see *An invalid policy must
-   never take the phone down*) — but your edits since then are not in service
-   until the files pass.
+   still starts — on the last good copy it saved, or on the first upgrade
+   under the previous release's rules (see *An invalid policy must never take
+   the phone down*) — but it says so loudly until the files pass.
 3. **Services:** the four units are active with no restarts; only the units you
    restarted have new PIDs.
 4. **Phone network:** the trunk shows `Registered` (`pjsip show
@@ -1449,9 +1449,19 @@ was stopped, or a release whose validation is stricter — it runs that copy
 and logs one line you cannot miss:
 `POLICY REFUSED AT STARTUP — running the last good configuration until the
 files are fixed`, with the redacted reason. Fix the files and the ordinary
-reload picks them up. Only when there is no usable copy does a refused
-default line stop the daemon starting. The copies hold PINs, like the files
-they copy; leave them where they are and never commit them.
+reload picks them up. The copies hold PINs, like the files they copy; leave
+them where they are and never commit them.
+
+With no usable copy — the first start after upgrading from a release that
+never wrote one — the daemon runs the current files under the previous
+release's rules, so an upgrade never leaves a box worse off than before:
+unknown keys and handset models are warnings again, `[line] trunk` goes
+unchecked, the new size bounds and disabled-schedule checks do not apply. It
+logs `POLICY REFUSED BY THE CURRENT RULES — running it under the previous
+release's rules until the files are fixed`, and sync still reports the
+rejection. Nothing loaded that way becomes the last good copy; the first edit
+the current rules accept does. Only a file the previous release refused too
+stops the daemon starting.
 
 ### Add a handset
 

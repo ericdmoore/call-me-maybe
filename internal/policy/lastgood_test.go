@@ -165,3 +165,53 @@ func TestLastGoodWriteFailureIsReportedNotFatal(t *testing.T) {
 		t.Fatal("a failed copy was not reported")
 	}
 }
+
+// The bootstrap fallback is exactly the previous release's rules: what it ran
+// runs, what it refused is refused, and nothing it loads seeds a copy.
+func TestBootstrapUsesExactlyThePreviousRules(t *testing.T) {
+	for _, c := range []struct {
+		name, body string
+		runs       bool
+	}{
+		{"unknown key", validatorPolicy + "typo = 1\n", true},
+		{"disabled schedule 25:99", withSchedule("enabled = false\nstart = \"25:99\"\nend = \"07:00\""), true},
+		{"over-long id", validatorPolicy + "[[schedules]]\nid = \"" + strings.Repeat("a", 61) + "\"\nstart = \"21:00\"\nend = \"07:00\"\n", true},
+		{"line trunk with no trunks.toml", "[line]\ntrunk = \"t\"\n" + validatorPolicy, true},
+		{"enabled schedule 25:99", withSchedule("start = \"25:99\"\nend = \"07:00\""), false},
+		{"no house", "", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir, policyPath, handsetsPath, o := lastGoodFixture(t, c.body)
+			if _, err := OpenStoreWith(policyPath, handsetsPath, false, o, nil, nil); err == nil {
+				t.Fatal("without Bootstrap, a refused file with no copy started")
+			}
+			o.Bootstrap = true
+			s, err := OpenStoreWith(policyPath, handsetsPath, false, o, nil, nil)
+			if (err == nil) != c.runs {
+				t.Fatalf("err = %v, want runs=%v", err, c.runs)
+			}
+			if err != nil {
+				return
+			}
+			defer s.Close()
+			if !s.PreviousRules() || s.Fallback() == nil {
+				t.Fatal("not reported as running under the previous rules")
+			}
+			if _, err := os.Stat(filepath.Join(dir, "policy.last-good")); !os.IsNotExist(err) {
+				t.Fatal("a leniently loaded file seeded a last good copy")
+			}
+		})
+	}
+	// A usable copy wins over the previous rules.
+	good := withSchedule("start = \"03:05\"\nend = \"07:00\"")
+	_, policyPath, handsetsPath, o := lastGoodFixture(t, good)
+	o.Bootstrap = true
+	first, _ := OpenStoreWith(policyPath, handsetsPath, false, o, nil, nil)
+	first.Close()
+	os.WriteFile(policyPath, []byte(validatorPolicy+"typo = 1\n"), 0o600)
+	s, err := OpenStoreWith(policyPath, handsetsPath, false, o, nil, nil)
+	if err != nil || s.PreviousRules() || s.Fallback() == nil {
+		t.Fatalf("copy not preferred: %v", err)
+	}
+	s.Close()
+}

@@ -175,7 +175,8 @@ daemon's reload and
 apply one validator and refuse the same files; a reload that is refused keeps
 the last good policy in service, and at startup the daemon runs its last good
 copy (\fIpolicy.last-good/\fR beside \fIpolicy.toml\fR) when the current files
-are refused. Suggestions are offered \(em
+are refused, or, with no copy yet, runs them under the previous release's
+rules. Suggestions are offered \(em
 .B afterhous
 is told about
 .BR afterhours .

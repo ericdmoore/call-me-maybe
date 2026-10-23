@@ -21,7 +21,8 @@ type Store struct {
 	handsetsPath string
 	opts         Options
 	initial      string // the stamp the poller starts from
-	fallback     error  // why startup is running the last good copy, if it is
+	fallback     error  // why startup is running a fallback, if it is
+	previous     bool   // the fallback is the current files under v0.15's rules
 	onReload     func(*Policy)
 	onError      func(error)
 
@@ -66,16 +67,28 @@ func OpenStoreWith(policyPath, handsetsPath string, watch bool, o Options, onRel
 	case err == nil:
 		s.policy, s.initial = p, p.SourceDigest()+trunks
 		s.keepLastGood(p)
-	case o.LastGood != "":
-		last, lastErr := loadLastGood(o.LastGood, handsetsPath != "", o.TrunksPath != "", o)
-		if lastErr != nil {
-			return nil, err // no usable copy: refused, as without one
-		}
-		// The poller starts from the refused files, so they are not
-		// reported a second time; an edit to them is tried at once.
-		s.policy, s.initial, s.fallback = last, before, err
 	default:
-		return nil, err
+		if o.LastGood != "" {
+			if last, lastErr := loadLastGood(o.LastGood, handsetsPath != "", o.TrunksPath != "", o); lastErr == nil {
+				// The poller starts from the refused files, so they are not
+				// reported a second time; an edit to them is tried at once.
+				s.policy, s.initial, s.fallback = last, before, err
+				break
+			}
+		}
+		// No usable copy — the first start after upgrading from a release
+		// that never wrote one. An upgrade must never leave a box worse off
+		// than the release before it, so the current files are tried under
+		// that release's rules. Nothing loaded this way seeds a last good
+		// copy: only the current rules do, on the first accepted reload.
+		if !o.Bootstrap {
+			return nil, err
+		}
+		previous, prevErr := LoadSplitWith(policyPath, handsetsPath, previousRulesOptions(o))
+		if prevErr != nil {
+			return nil, err // refused by the previous release too: as before
+		}
+		s.policy, s.initial, s.fallback, s.previous = previous, before, err, true
 	}
 	if watch {
 		go s.poll()
@@ -93,12 +106,28 @@ func (s *Store) Current() *Policy {
 	return s.policy
 }
 
-// Fallback is the refusal that put this store on its last good copy at
-// startup, or nil when it is running the current files.
+// Fallback is the refusal that put this store on a fallback at startup, or
+// nil once it is running the current files under the current rules.
 func (s *Store) Fallback() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.fallback
+}
+
+// PreviousRules reports whether the fallback is the current files loaded
+// under the previous release's rules, rather than the last good copy.
+func (s *Store) PreviousRules() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.fallback != nil && s.previous
+}
+
+// previousRulesOptions is what the v0.15 daemon loaded with: unknown keys
+// reported and ignored, any well-formed handset model, [line] trunk not
+// checked, no bounds, disabled schedules not compiled. Exactly that, so the
+// bootstrap fallback is no looser than the release it replaces.
+func previousRulesOptions(o Options) Options {
+	return Options{OnUnknownKey: o.OnUnknownKey, previousRules: true}
 }
 
 // stamp identifies the current bytes of every file a load reads. The trunk
@@ -159,10 +188,12 @@ func (s *Store) poll() {
 				continue
 			}
 			last = next.SourceDigest() + trunks
-			s.mu.Lock()
-			s.policy, s.fallback = next, nil
-			s.mu.Unlock()
+			// The copy first, so anyone who sees the new policy in service
+			// also finds it saved.
 			s.keepLastGood(next)
+			s.mu.Lock()
+			s.policy, s.fallback, s.previous = next, nil, false
+			s.mu.Unlock()
 			if s.onReload != nil {
 				s.onReload(next)
 			}
