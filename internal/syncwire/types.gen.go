@@ -9,6 +9,21 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for BellSignalT.
+const (
+	Sync BellSignalT = "sync"
+)
+
+// Valid indicates whether the value is a known member of the BellSignalT enum.
+func (e BellSignalT) Valid() bool {
+	switch e {
+	case Sync:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ContentInventoryState.
 const (
 	Complete    ContentInventoryState = "complete"
@@ -444,6 +459,29 @@ func (e Verb5Name) Valid() bool {
 	}
 }
 
+// Defines values for SyncBellParamsUpgrade.
+const (
+	Websocket SyncBellParamsUpgrade = "websocket"
+)
+
+// Valid indicates whether the value is a known member of the SyncBellParamsUpgrade enum.
+func (e SyncBellParamsUpgrade) Valid() bool {
+	switch e {
+	case Websocket:
+		return true
+	default:
+		return false
+	}
+}
+
+// BellSignal defines model for BellSignal.
+type BellSignal struct {
+	T BellSignalT `json:"t"`
+}
+
+// BellSignalT defines model for BellSignal.T.
+type BellSignalT string
+
 // ConfigRejection Present while the newest configuration on the box's disk is rejected by its validator; the box keeps its last good revision. Omitted once a valid configuration is accepted.
 type ConfigRejection struct {
 	// At Unix milliseconds when the box first rejected this content.
@@ -871,6 +909,14 @@ type Version struct {
 	Generation string `json:"generation"`
 	Revision   string `json:"revision"`
 }
+
+// SyncBellParams defines parameters for SyncBell.
+type SyncBellParams struct {
+	Upgrade SyncBellParamsUpgrade `json:"Upgrade"`
+}
+
+// SyncBellParamsUpgrade defines parameters for SyncBell.
+type SyncBellParamsUpgrade string
 
 // SyncReceiptBatchJSONRequestBody defines body for SyncReceiptBatch for application/json ContentType.
 type SyncReceiptBatchJSONRequestBody = ReceiptBatch

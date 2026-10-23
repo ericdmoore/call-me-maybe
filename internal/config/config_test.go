@@ -214,3 +214,31 @@ func TestUpdateChecksWithoutDaemonConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncBellIsOnByDefaultAndItsSafetyNetIsBounded(t *testing.T) {
+	get := func(kv map[string]string) func(string) string {
+		return func(k string) string { return kv[k] }
+	}
+	on, poll, issue := SyncBellSettings(get(nil))
+	if !on || poll != DefaultSyncBellPoll || issue != "" {
+		t.Fatalf("defaults: %t %v %q", on, poll, issue)
+	}
+	// A broken daemon setting is not sync's business.
+	on, poll, issue = SyncBellSettings(get(map[string]string{"SYNC_BELL": "false", "SYNC_BELL_POLL_S": "60", "LOG_LEVEL": "loud"}))
+	if on || poll.Seconds() != 60 || issue != "" {
+		t.Fatalf("explicit: %t %v %q", on, poll, issue)
+	}
+	for _, bad := range []string{"4", "3601", "five", "-300"} {
+		on, poll, issue = SyncBellSettings(get(map[string]string{"SYNC_BELL_POLL_S": bad}))
+		if !on || poll != DefaultSyncBellPoll || !strings.Contains(issue, "SYNC_BELL_POLL_S") {
+			t.Errorf("%s: %t %v %q", bad, on, poll, issue)
+		}
+		if _, err := LoadForCheck(get(map[string]string{"SYNC_BELL_POLL_S": bad})); err == nil || !strings.Contains(err.Error(), "SYNC_BELL_POLL_S") {
+			t.Errorf("doorman check accepted SYNC_BELL_POLL_S=%s: %v", bad, err)
+		}
+	}
+	cfg, err := LoadForCheck(get(map[string]string{"SYNC_BELL": "off"}))
+	if err != nil || cfg.SyncBell || cfg.SyncBellPoll != DefaultSyncBellPoll {
+		t.Fatalf("check view: %+v %v", cfg.SyncBell, err)
+	}
+}

@@ -3,6 +3,7 @@
 callmemaybe/cmd/doorman                  48
 callmemaybe/internal/ari                 30
 callmemaybe/internal/awssig              97
+callmemaybe/internal/bell                96
 callmemaybe/internal/books               80
 callmemaybe/internal/calls               89
 callmemaybe/internal/config              87

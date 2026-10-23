@@ -1,6 +1,9 @@
 # The hosted value sync runs separately from call admission. It observes files
 # every second and polls for typed changes every five seconds, backing off with
 # jitter (to five minutes, or the service's Retry-After) while passes fail.
+# With the sync capability it also holds the bell, an outbound WebSocket that
+# only ever says "sync now"; while it is up polling slows to SYNC_BELL_POLL_S
+# (300 s), and SYNC_BELL=false in .env turns it off.
 # Network and service failures, and a busy account store at startup, are
 # retried inside the process; the start limit only counts exits that a restart
 # cannot fix (no enrolment, a second sync process), so it stops, not loops.

@@ -22,7 +22,11 @@ doorman schema messages   # just messages.toml (text words and vCard destination
 doorman schema env        # just the environment variables
 doorman sync run          # observed files → SQLite echo → hosted snapshots;
                           # typed schedule/phonebook assignments return via the
-                          # same validation and file path, with durable receipts
+                          # same validation and file path, with durable receipts.
+                          # The "bell" (an outbound, quiet WebSocket that only
+                          # says "sync now") makes changes land in about a second
+                          # and slows polling to SYNC_BELL_POLL_S (300) while up;
+                          # SYNC_BELL=false turns it off (five-second polling)
 doorman sync inventory    # read-only local library measurement; --content sets
                           # the root (default <state>/content/library). The normal
                           # sync loop reports it every 30s; no media is uploaded
