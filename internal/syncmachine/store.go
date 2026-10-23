@@ -29,6 +29,10 @@ type Machine struct {
 	// nil keeps an honest saved receipt until a later run can confirm it.
 	Applied      func(Paths, map[string][]byte) bool
 	SampleStatus func() syncwire.Status
+	// BoxName is the name the box suggests (config.BoxName). The status report
+	// carries it until the service has accepted one report with it for this
+	// enrolment; empty never sends one. Never logged.
+	BoxName string
 	// Warn receives categorical problems that do not stop a pass. nil prints
 	// them to stderr.
 	Warn func(error)
@@ -43,6 +47,12 @@ type Machine struct {
 	published   string
 	publishedAt time.Time
 	warned      map[string]string
+	// nameAccepted mirrors the box_name row for this enrolment; nameRetryAt
+	// pauses the suggestion after a refused report (see reportStatus).
+	nameAccepted bool
+	nameRetryAt  time.Time
+
+	box string
 }
 
 // Open keeps the ledger scoped to the enrolled device. It belongs in state/sync,
@@ -90,6 +100,7 @@ func Open(dir, box string, paths Paths) (*Machine, error) {
 	db.SetMaxOpenConns(1)
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS echo (singleton INTEGER PRIMARY KEY CHECK(singleton=1), box TEXT NOT NULL, generation TEXT NOT NULL, revision INTEGER NOT NULL, configuration TEXT NOT NULL, observed_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, body TEXT NOT NULL, receipt TEXT, target_path TEXT, before_hash TEXT, after_hash TEXT);
+CREATE TABLE IF NOT EXISTS box_name (box TEXT PRIMARY KEY, accepted_at INTEGER NOT NULL);
 `)
 	if err == nil {
 		_, err = db.Exec("INSERT OR IGNORE INTO echo VALUES (1,?,?,0,'',0)", box, uuid.NewString())
@@ -98,11 +109,17 @@ CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, body TEXT NOT NULL, re
 	if err == nil {
 		err = db.QueryRow("SELECT box FROM echo WHERE singleton=1").Scan(&owner)
 	}
+	// The row records only that a name was accepted, never the name: the
+	// service owns it from then on, and a rename there must not be undone.
+	var accepted int
+	if err == nil && owner == box {
+		err = db.QueryRow("SELECT COUNT(*) FROM box_name WHERE box=?", box).Scan(&accepted)
+	}
 	if err != nil || owner != box {
 		db.Close()
 		return fail()
 	}
-	return &Machine{db: db, lock: lock, paths: paths, now: time.Now}, nil
+	return &Machine{db: db, lock: lock, paths: paths, now: time.Now, box: box, nameAccepted: accepted > 0}, nil
 }
 
 func (m *Machine) Close() error {

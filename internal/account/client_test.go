@@ -327,3 +327,35 @@ func TestCredentialRedirectsAndUnsafeStateAreRefused(t *testing.T) {
 		t.Fatal("followed token symlink")
 	}
 }
+
+// The enrolment request carries the suggested box name when there is one and
+// no "name" key at all when there is not.
+func TestEnrollmentSuggestsTheBoxName(t *testing.T) {
+	for _, name := range []string{"kitchen-pi", ""} {
+		var sent map[string]any
+		c := clientServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/login/box/device" {
+				t.Errorf("unexpected route %s", r.URL.Path)
+				w.WriteHeader(404)
+				return
+			}
+			_ = json.NewDecoder(r.Body).Decode(&sent)
+			w.WriteHeader(400)
+			fmt.Fprint(w, `{"error":"bad_request"}`)
+		})
+		c.Name = name
+		if _, err := c.Login(context.Background(), func(string) {}); err == nil {
+			t.Fatal("refusal ignored")
+		}
+		got, present := sent["name"]
+		if name == "" && present {
+			t.Fatalf("empty name sent as %v", got)
+		}
+		if name != "" && got != name {
+			t.Fatalf("name: got %v, want %q", got, name)
+		}
+		if _, ok := sent["transportPublicKey"]; !ok || len(sent) != map[bool]int{true: 2, false: 1}[name != ""] {
+			t.Fatalf("unexpected enrolment body keys: %v", sent)
+		}
+	}
+}

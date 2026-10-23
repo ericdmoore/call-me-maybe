@@ -626,6 +626,28 @@ $ sudo systemctl start doorman-sync     # or: sudo doorman init services
 A plain `401` without that word is still the old "sign in again" case: sync
 keeps its backoff and asks for `doorman login`.
 
+### The box's name on the account
+
+The account shows each box by the name the box suggested, or by an identifier
+fragment when it suggested none. The suggestion is `BOX_NAME` from `.env`, or
+the hostname when that is unset; an empty name or `localhost` suggests nothing.
+It is trimmed and cut to at most 64 characters on a character boundary.
+
+- `doorman login` sends it with the enrolment request. It reads `BOX_NAME`
+  from its environment, else from `--env` (default
+  `/opt/call-me-maybe/.env`), so a plain `sudo -u doorman doorman login` sees
+  the value the units see.
+- `doorman sync run` sends it in the status report until one report carrying
+  it has been accepted for this enrolment, records that in the sync state
+  directory (`echo.db`), and never sends it again, restarts included. This is
+  how a box enrolled before enrolment carried a name gets one. If the service
+  refuses a report carrying the name, the same report is sent again at once
+  without it, and the name is offered again after 15 minutes.
+
+After that the account owns the name: rename the box there. Changing
+`BOX_NAME` or the hostname later renames nothing. The name goes only to the
+household's own connected account and is never logged.
+
 ### Sync is slow to pick up a hosted change
 
 A hosted edit normally reaches the box in about a second: `doorman sync run`

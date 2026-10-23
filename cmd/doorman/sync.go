@@ -91,6 +91,7 @@ func runSync(args []string) int {
 		return sample
 	}
 	m.Applied = activationApplied(dir)
+	m.BoxName = config.BoxName(os.Getenv, os.Hostname)
 	if mode == "snapshot" {
 		s, err := m.Observe()
 		if err != nil {
