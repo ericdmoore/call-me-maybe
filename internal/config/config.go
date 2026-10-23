@@ -105,6 +105,10 @@ type Config struct {
 	EventJournalMaxEvents int
 	EventJournalMaxAge    time.Duration
 	WebhookMode           string // legacy | doorbell
+	// Sync bell keys: read by `doorman sync run`; the daemon parses and
+	// ignores them, as with BACKUP_*.
+	SyncBell     bool
+	SyncBellPoll time.Duration
 
 	// WebhookURL enables the event webhook. Empty — the default — means no
 	// webhook at all. Treat the value as a secret: a Home Assistant webhook
@@ -232,6 +236,8 @@ func load(get func(string) string, requireSecrets bool) (Config, error) {
 		EventJournalMaxEvents: integer("EVENT_JOURNAL_MAX_EVENTS", 100000),
 		EventJournalMaxAge:    time.Duration(days) * 24 * time.Hour,
 		WebhookMode:           str("WEBHOOK_MODE", "legacy"),
+		SyncBell:              boolean("SYNC_BELL", true),
+		SyncBellPoll:          time.Duration(integer("SYNC_BELL_POLL_S", 300)) * time.Second,
 
 		WebhookURL:            str("WEBHOOK_URL", ""),
 		WebhookToken:          str("WEBHOOK_TOKEN", ""),
@@ -286,6 +292,11 @@ func load(get func(string) string, requireSecrets bool) (Config, error) {
 		}
 	}
 
+	if c.SyncBellPoll < MinSyncBellPoll || c.SyncBellPoll > MaxSyncBellPoll {
+		issues = append(issues, "  "+syncBellPollIssue)
+		c.SyncBellPoll = DefaultSyncBellPoll
+	}
+
 	issues = append(issues, c.JournalIssues()...)
 	if len(issues) > 0 {
 		return Config{}, fmt.Errorf("invalid environment configuration:\n%s\n\nSee examples/.env.example", strings.Join(issues, "\n"))
@@ -321,6 +332,34 @@ func isLoopback(host string) bool {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+// The safety-net poll while the sync bell is up. Never faster than the
+// ordinary five-second cadence, never so slow that a missed ring waits hours.
+const (
+	DefaultSyncBellPoll = 5 * time.Minute
+	MinSyncBellPoll     = 5 * time.Second
+	MaxSyncBellPoll     = time.Hour
+)
+
+const syncBellPollIssue = "SYNC_BELL_POLL_S: must be a whole number of seconds from 5 to 3600"
+
+// SyncBellSettings reads the sync bell's two keys without requiring the rest
+// of the environment to be valid: sync must not stop because of a daemon
+// setting it never uses. A bad value falls back to its default and is
+// returned as an issue, worded as doorman check words it.
+func SyncBellSettings(get func(string) string) (enabled bool, poll time.Duration, issue string) {
+	enabled = get("SYNC_BELL") == "" || truthy.MatchString(get("SYNC_BELL"))
+	v := get("SYNC_BELL_POLL_S")
+	if v == "" {
+		return enabled, DefaultSyncBellPoll, ""
+	}
+	n, err := strconv.Atoi(v)
+	poll = time.Duration(n) * time.Second
+	if err != nil || poll < MinSyncBellPoll || poll > MaxSyncBellPoll {
+		return enabled, DefaultSyncBellPoll, syncBellPollIssue
+	}
+	return enabled, poll, ""
 }
 
 // UpdateChecksEnabled reads the operator preference without requiring ARI

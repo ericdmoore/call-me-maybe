@@ -432,7 +432,19 @@ Observe validated files into a private SQLite echo, publish secret-free
 snapshots, and receive typed changes with durable receipts. Requires account
 enrolment. \fBrun\fR observes every second and polls every five seconds,
 backing off with jitter to five minutes (or the service's Retry\-After) while
-passes fail; an unchanged snapshot is not re\-sent;
+passes fail; an unchanged snapshot is not re\-sent.
+With the sync capability, \fBrun\fR also keeps the \fIbell\fR: an outbound,
+normally quiet WebSocket on which the service only says "sync now". A ring
+runs the ordinary pass at once (rings during a pass merge into one more pass);
+a ping every 25 seconds keeps it alive and a missing pong reconnects it, with
+backoff from one second to five minutes. While the bell is up, polling slows to
+.B SYNC_BELL_POLL_S
+(default 300 seconds); while it is down, refused or not offered, polling is
+every five seconds as before. Nothing on the socket is configuration or a
+command. A refused credential is not retried until it changes; only state
+changes are logged.
+.B SYNC_BELL=false
+turns the bell off.
 \fBonce\fR performs one exchange; \fBsnapshot\fR prints the redacted snapshot
 (contact names and numbers are included, so treat this output as private).
 The state directory defaults to /var/lib/doorman; \fB\-\-state\fR overrides it.
@@ -856,6 +868,15 @@ application named in
 .TP
 .BR POLICY_PATH ", " HANDSETS_PATH ", " TRUNKS_PATH ", " CONTACTS_PATH ", " POLICY_WATCH
 Where the config files are, and whether to reload them on change.
+.TP
+.BR SYNC_BELL ", " SYNC_BELL_POLL_S
+Read by
+.B doorman sync run
+only. The sync bell is on by default for a box enrolled with the sync
+capability; false turns it off and sync polls every five seconds exactly as
+before. While the bell is up, sync polls every
+.B SYNC_BELL_POLL_S
+seconds (default 300, 5 to 3600) as a safety net.
 .I CONTACTS_PATH
 is optional and a missing file is the normal state, in which nothing is read,
 nothing is logged, and the lobby admits exactly who

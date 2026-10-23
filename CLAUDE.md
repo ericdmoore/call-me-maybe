@@ -63,7 +63,7 @@ they do not.
 ## Environment
 
 Go, stdlib-first: `BurntSushi/toml` and `gopkg.in/yaml.v3` for configuration
-and templates, `gorilla/websocket` for the ARI event stream. The deliverable is
+and templates, `gorilla/websocket` for the ARI event stream and the sync bell. The deliverable is
 one static binary — no runtime on the
 Pi, no node_modules, nothing to install but the file. This project is a
 deliberate exception to the owner's TypeScript-first standard: it is a leaf
@@ -170,6 +170,12 @@ Layout:
   neither package runs on call admission. `internal/activation` exposes only
   compiled source digests over a private local Unix socket so receipts can
   distinguish saved files from a policy accepted by the running daemon.
+- `internal/bell` — the sync bell: an outbound, normally quiet WebSocket on
+  which the account service says only "sync now". `doorman sync run` holds
+  it; a ring runs the ordinary HTTPS pass, and while it is up polling slows to
+  `SYNC_BELL_POLL_S`. Nothing read from it is configuration or a command, and
+  the credential stays in `internal/account` (`DialBell`). Unrelated to the
+  journal's `doorbell` webhook mode, which runs the other way.
 
 Config interfaces: `.env` (secrets + tuning), `handsets.toml` (hardware
 inventory — source of truth for the generated Asterisk config), `policy.toml`

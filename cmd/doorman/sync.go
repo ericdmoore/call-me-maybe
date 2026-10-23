@@ -9,15 +9,21 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"callmemaybe/internal/account"
 	"callmemaybe/internal/activation"
+	"callmemaybe/internal/bell"
+	"callmemaybe/internal/config"
 	"callmemaybe/internal/contentinventory"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/syncmachine"
 	"callmemaybe/internal/syncwire"
+
+	"github.com/gorilla/websocket"
 )
 
 func runSync(args []string) int {
@@ -121,13 +127,113 @@ func runSync(args []string) int {
 	} else {
 		go inventory.Run(ctx)
 	}
+	exchange := func(ctx context.Context) error {
+		bounded, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		return m.Exchange(bounded, syncTransport(client.Sync))
+	}
+	if mode == "once" {
+		return syncLoop(ctx, exchange, nil, true)
+	}
+	wake := newSyncWake()
+	enabled, slow, issue := config.SyncBellSettings(os.Getenv)
+	if issue != "" {
+		fmt.Fprintln(os.Stderr, "sync: "+issue+"; using the default")
+	}
+	if enabled && slices.Contains(status.Capabilities, "sync") {
+		wake.slow = slow
+		b := &bell.Bell{
+			Dial: func(ctx context.Context) (*websocket.Conn, error) {
+				conn, err := client.DialBell(ctx)
+				return conn, bellError(err)
+			},
+			Credential: func(ctx context.Context) (string, error) {
+				tag, err := client.SyncCredentialTag(ctx)
+				return tag, bellError(err)
+			},
+			Ring: wake.ring, Healthy: wake.setBell, Log: func(line string) { fmt.Fprintln(os.Stderr, line) }}
+		bellCtx, stopBell := context.WithCancel(ctx)
+		bellDone := make(chan struct{})
+		go func() { defer close(bellDone); _ = b.Run(bellCtx) }()
+		defer func() { stopBell(); <-bellDone }()
+	}
+	return syncLoop(ctx, exchange, wake, false)
+}
+
+// bellError reads the account's answers in the bell's terms. The bell
+// package never sees the account client (nothing under internal/ may), only
+// what each answer means for it: stop, wait for a new credential, or back off.
+func bellError(err error) error {
+	var refused *account.BellRefused
+	var service *account.ServiceError
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, account.ErrRemoved):
+		return fmt.Errorf("%w: %w", bell.ErrGone, err)
+	case errors.As(err, &refused):
+		return &bell.Refused{Reason: fmt.Sprintf("%d %s", refused.Status, refused.Code)}
+	case errors.Is(err, account.ErrLogin):
+		return &bell.Refused{Reason: "sign in with doorman login"}
+	case errors.As(err, &service) && service.RetryAfter > 0:
+		return &bell.Later{Err: err, After: service.RetryAfter}
+	}
+	return err
+}
+
+// syncWake is how the bell reaches the poll loop: a ring asks for a pass now,
+// and the bell's health picks the interval between passes. Without a bell it
+// is never touched and the loop polls exactly as it always has.
+type syncWake struct {
+	rings   chan struct{}
+	changed chan struct{}
+	up      atomic.Bool
+	slow    time.Duration
+}
+
+func newSyncWake() *syncWake {
+	return &syncWake{rings: make(chan struct{}, 1), changed: make(chan struct{}, 1)}
+}
+
+// ring never blocks. One buffered ring is the whole merge: rings during a
+// pass leave exactly one more pass to run after it, however many arrived.
+func (w *syncWake) ring() {
+	select {
+	case w.rings <- struct{}{}:
+	default:
+	}
+}
+
+func (w *syncWake) setBell(up bool) {
+	w.up.Store(up)
+	select {
+	case w.changed <- struct{}{}:
+	default:
+	}
+}
+
+// interval is the healthy cadence: the safety net while the bell is up,
+// the ordinary five seconds otherwise.
+func (w *syncWake) interval() time.Duration {
+	if w != nil && w.slow > 0 && w.up.Load() {
+		return w.slow
+	}
+	return syncInterval
+}
+
+// syncLoop runs passes until ctx ends. Every wait is interruptible by a ring,
+// and by the bell going down, which brings the next pass back to the
+// ordinary cadence instead of leaving it at the safety net's.
+func syncLoop(ctx context.Context, exchange func(context.Context) error, wake *syncWake, once bool) int {
 	var lastError string
 	var pace syncPace
+	var rings, changed chan struct{}
+	if wake != nil {
+		rings, changed = wake.rings, wake.changed
+	}
 	for {
 		at := time.Now()
-		bounded, cancel := context.WithTimeout(ctx, 20*time.Second)
-		err = m.Exchange(bounded, syncTransport(client.Sync))
-		cancel()
+		err := exchange(ctx)
 		if ctx.Err() != nil {
 			return 0
 		}
@@ -144,18 +250,32 @@ func runSync(args []string) int {
 		} else {
 			lastError = ""
 		}
-		if mode == "once" {
+		if once {
 			if err != nil {
 				return 1
 			}
 			return 0
 		}
-		timer := time.NewTimer(pace.next(err, time.Since(at)))
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return 0
-		case <-timer.C:
+		timer := time.NewTimer(pace.next(err, time.Since(at), wake.interval()))
+	wait:
+		for {
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return 0
+			case <-timer.C:
+				break wait
+			case <-rings:
+				timer.Stop()
+				break wait
+			case <-changed:
+				// Only a healthy pass waits on the bell's interval; a
+				// failing one keeps its backoff either way.
+				if err == nil {
+					timer.Stop()
+					timer = time.NewTimer(max(time.Until(at.Add(wake.interval())), 0))
+				}
+			}
 		}
 	}
 }

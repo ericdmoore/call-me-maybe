@@ -11,9 +11,13 @@ import (
 	"callmemaybe/internal/account"
 )
 
-const (
+const syncMaxDelay = 5 * time.Minute
+
+// The healthy cadence and the shortest gap between passes. Variables only so
+// the loop's tests can run in milliseconds; nothing else sets them.
+var (
 	syncInterval = 5 * time.Second
-	syncMaxDelay = 5 * time.Minute
+	syncMinGap   = time.Second
 )
 
 // syncPace keeps the healthy five-second cadence (a queued command lands within
@@ -24,10 +28,13 @@ type syncPace struct {
 	jitter   func(time.Duration) time.Duration
 }
 
-func (p *syncPace) next(err error, elapsed time.Duration) time.Duration {
+// next is the wait before the following pass. interval is the healthy
+// cadence: syncInterval, or the slower safety net while the sync bell is up.
+// Failures back off from syncInterval regardless, exactly as without a bell.
+func (p *syncPace) next(err error, elapsed, interval time.Duration) time.Duration {
 	if err == nil {
 		p.failures = 0
-		return max(syncInterval-elapsed, time.Second)
+		return max(interval-elapsed, syncMinGap)
 	}
 	p.failures++
 	d := min(syncInterval<<min(p.failures-1, 8), syncMaxDelay)

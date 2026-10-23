@@ -14,36 +14,36 @@ import (
 
 func TestSyncPaceBacksOffHonoursRetryAfterAndRecovers(t *testing.T) {
 	p := syncPace{jitter: func(d time.Duration) time.Duration { return d }}
-	if d := p.next(nil, time.Second); d != 4*time.Second {
+	if d := p.next(nil, time.Second, syncInterval); d != 4*time.Second {
 		t.Fatalf("healthy cadence changed: %v", d)
 	}
-	if d := p.next(nil, 10*time.Second); d != time.Second {
+	if d := p.next(nil, 10*time.Second, syncInterval); d != time.Second {
 		t.Fatalf("slow pass lost the floor: %v", d)
 	}
 	failed := errors.New("account: service connection failed")
 	var got []time.Duration
 	for range 10 {
-		got = append(got, p.next(failed, 0))
+		got = append(got, p.next(failed, 0, syncInterval))
 	}
 	if got[0] != 5*time.Second || got[1] != 10*time.Second || got[2] != 20*time.Second || got[9] != syncMaxDelay {
 		t.Fatalf("unexpected backoff: %v", got)
 	}
 	p.jitter = func(time.Duration) time.Duration { return 0 }
-	if d := p.next(failed, 0); d != syncMaxDelay/2 {
+	if d := p.next(failed, 0, syncInterval); d != syncMaxDelay/2 {
 		t.Fatalf("jitter is not half the delay: %v", d)
 	}
-	if d := p.next(&account.ServiceError{Status: 429, Code: "rate_limited", RetryAfter: 20 * time.Minute}, 0); d != 20*time.Minute {
+	if d := p.next(&account.ServiceError{Status: 429, Code: "rate_limited", RetryAfter: 20 * time.Minute}, 0, syncInterval); d != 20*time.Minute {
 		t.Fatalf("ignored Retry-After: %v", d)
 	}
-	if d := p.next(nil, 0); d != syncInterval {
+	if d := p.next(nil, 0, syncInterval); d != syncInterval {
 		t.Fatalf("success did not reset the backoff: %v", d)
 	}
-	if d := p.next(failed, 0); d != syncInterval/2 {
+	if d := p.next(failed, 0, syncInterval); d != syncInterval/2 {
 		t.Fatalf("backoff did not restart from the base: %v", d)
 	}
 	p.jitter = nil
 	for range 50 {
-		if d := p.next(failed, 0); d < 0 || d > syncMaxDelay {
+		if d := p.next(failed, 0, syncInterval); d < 0 || d > syncMaxDelay {
 			t.Fatalf("random jitter out of bounds: %v", d)
 		}
 	}

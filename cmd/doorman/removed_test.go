@@ -215,7 +215,7 @@ func TestStaleRemovalNeitherEndsSyncNorExitsSix(t *testing.T) {
 		t.Fatalf("a stale removal would stop sync for the new enrolment: %v", err)
 	}
 	pace := syncPace{jitter: func(d time.Duration) time.Duration { return d }}
-	if d := pace.next(err, time.Second); d <= 0 || d > syncMaxDelay {
+	if d := pace.next(err, time.Second, syncInterval); d <= 0 || d > syncMaxDelay {
 		t.Fatalf("no retry scheduled: %v", d)
 	}
 }

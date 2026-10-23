@@ -76,7 +76,8 @@ func failure(status int, header http.Header, body []byte) error {
 	code := "service_error"
 	switch data.Error {
 	case "bad_request", "unauthorized", "box_removed", "unknown", "expired", "revoked", "reuse", "capability", "denied", "consumed", "slow_down", "rate_limited",
-		"no_backup_plan", "held_in_grace", "too_large", "invalid_size", "upload_in_progress", "unknown_upload", "not_uploaded", "size_mismatch", "entitlements_unavailable", "generation_conflict", "recovery_unavailable", "unknown_generation", "unknown_bundle":
+		"no_backup_plan", "held_in_grace", "too_large", "invalid_size", "upload_in_progress", "unknown_upload", "not_uploaded", "size_mismatch", "entitlements_unavailable", "generation_conflict", "recovery_unavailable", "unknown_generation", "unknown_bundle",
+		"sync_required", "upgrade_required":
 		code = data.Error
 	}
 	seconds, _ := strconv.Atoi(header.Get("Retry-After"))

@@ -626,6 +626,37 @@ $ sudo systemctl start doorman-sync     # or: sudo doorman init services
 A plain `401` without that word is still the old "sign in again" case: sync
 keeps its backoff and asks for `doorman login`.
 
+### Sync is slow to pick up a hosted change
+
+A hosted edit normally reaches the box in about a second: `doorman sync run`
+holds the *bell*, an outbound WebSocket to the account service that carries
+nothing but "sync now". The box sends `ping` every 25 seconds and expects
+`pong`; a ring runs the ordinary HTTPS sync at once. While the bell is up the
+box polls only every `SYNC_BELL_POLL_S` seconds (default 300) as a safety net;
+while it is down it polls every five seconds, exactly as without a bell. So a
+blocked bell costs speed of delivery at worst, never correctness.
+
+```bash
+$ journalctl -u doorman-sync --no-pager | grep 'bell:'
+```
+
+Only state changes are logged, and a failure that repeats is logged once an
+hour, not once a minute:
+
+| Line | Meaning |
+|---|---|
+| `bell: connected; polling slowly while it stays up` | healthy |
+| `bell: disconnected (network)` / `(no heartbeat answer)` / `(service heartbeat timeout)` | it reconnects with backoff, 1 s doubling to 5 min; polling is back to five seconds meanwhile |
+| `bell: disconnected (replaced)` | a newer bell for the same box took over. Once is a restart. If a line asking whether a second `doorman sync run` is running follows, find the other process (`pgrep -a doorman`) |
+| `bell: unavailable (… 404 …)` | the service does not offer the bell there, or a proxy strips WebSocket upgrades. Polling continues at five seconds; the box tries again every few minutes |
+| `bell: refused for this credential (401 unauthorized)` / `(403 sync_required)` | the credential will not be let in. The bell waits for a new one (`doorman login`, `doorman account rotate`) and does not retry until then; sync itself reports the same credential problem |
+
+A removed box (`box_removed`) stops the bell along with sync — see *Box
+removed from its account*. To run without the bell, set `SYNC_BELL=false` in
+`.env` and `sudo systemctl restart doorman-sync`. Nothing read from the socket
+is ever configuration or a command: the one message it acts on asks for the
+same sync the next poll would have run anyway.
+
 ### Rolling back
 
 ```bash
