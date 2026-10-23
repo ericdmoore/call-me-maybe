@@ -270,6 +270,32 @@ func checkBalances(ctx context.Context, c balanceCheck) []balanceResult {
 	return out
 }
 
+// trunkAPIConfig resolves a trunk's provider API credentials — a login and a
+// password, or a key — into a client config. unset names the variable that
+// trunks.toml points at and the environment does not hold, or is "".
+//
+// The one place the credential fields are read, shared by `doorman balance`
+// and `doorman numbers` so the two cannot disagree about which secret a trunk
+// means — and so the fence test can keep naming exactly one file that touches
+// them.
+func trunkAPIConfig(tr policy.Trunk, secret func(string) (string, bool), endpoint string) (cfg provider.Config, unset string) {
+	cfg = provider.Config{Endpoint: endpoint, Username: tr.APIUsername}
+	for _, need := range []struct {
+		env  string
+		into *string
+	}{{tr.APIPasswordEnv, &cfg.Password}, {tr.APIKeyEnv, &cfg.Key}} {
+		if need.env == "" {
+			continue
+		}
+		v, ok := secret(need.env)
+		if !ok || v == "" {
+			return provider.Config{}, need.env
+		}
+		*need.into = v
+	}
+	return cfg, ""
+}
+
 // checkTrunkBalance answers for one trunk. Every path returns a result: there
 // is no branch here that drops a trunk on the floor.
 func checkTrunkBalance(ctx context.Context, c balanceCheck, tr policy.Trunk) balanceResult {
@@ -285,19 +311,14 @@ func checkTrunkBalance(ctx context.Context, c balanceCheck, tr policy.Trunk) bal
 		return r
 	}
 
-	cfg := provider.Config{Endpoint: c.endpoint, Username: tr.APIUsername}
-	if tr.APIPasswordEnv != "" {
-		secret, ok := c.secret(tr.APIPasswordEnv)
-		if !ok || secret == "" {
-			// An unset variable is a mistake somebody made, not a provider that
-			// has nothing to report — so it counts as unchecked rather than as
-			// unconfigured, and the exit code says so.
-			r.State = balanceError
-			r.Detail = fmt.Sprintf("%s is not set in the environment or the secrets file",
-				tr.APIPasswordEnv)
-			return r
-		}
-		cfg.Password = secret
+	cfg, unset := trunkAPIConfig(tr, c.secret, c.endpoint)
+	if unset != "" {
+		// An unset variable is a mistake somebody made, not a provider that
+		// has nothing to report — so it counts as unchecked rather than as
+		// unconfigured, and the exit code says so.
+		r.State = balanceError
+		r.Detail = fmt.Sprintf("%s is not set in the environment or the secrets file", unset)
+		return r
 	}
 
 	p, err := provider.New(tr.Provider, cfg)
@@ -490,7 +511,8 @@ func printBalanceNotes(results []balanceResult, fallbackMin float64) {
 			fmt.Println("    nobody here is watching.")
 		case balanceUnconfigured:
 			fmt.Printf("\n  %s: %s\n", r.Trunk, r.Detail)
-			fmt.Println("    Add api_username and api_password_env to this trunk in trunks.toml,")
+			fmt.Println("    Add api_username and api_password_env to this trunk in trunks.toml —")
+			fmt.Println("    or api_key_env, for a provider such as Telnyx that uses one key —")
 			fmt.Println("    and the variable it names to the environment. On VoIP.ms the API")
 			fmt.Println("    password is a separate one set in Main Menu → Account Settings →")
 			fmt.Println("    API, where API access also has to be switched on and the IP of the")

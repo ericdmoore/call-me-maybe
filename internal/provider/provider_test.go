@@ -43,9 +43,9 @@ func TestCanonicalAcceptsTheSpellingsPeopleWrite(t *testing.T) {
 }
 
 func TestNewNamesWhatItDoesHaveWhenItDoesNotHaveThis(t *testing.T) {
-	_, err := New("telnyx", Config{})
+	_, err := New("callcentric", Config{})
 	if !errors.Is(err, ErrUnknown) {
-		t.Fatalf("New(telnyx) error = %v, want ErrUnknown", err)
+		t.Fatalf("New(callcentric) error = %v, want ErrUnknown", err)
 	}
 	// The list matters: "unknown provider" with nothing else leaves an operator
 	// guessing whether they misspelled it.
@@ -82,8 +82,8 @@ func TestAmountPrintsTwoPlacesAndOnlyARealCurrency(t *testing.T) {
 // advertise a provider doorman cannot actually ask.
 func TestBalanceBackendsAreOnlyTheOnesThatCanAnswer(t *testing.T) {
 	got := BalanceBackends()
-	if len(got) != 1 || got[0] != "voip.ms" {
-		t.Fatalf("BalanceBackends() = %v, want [voip.ms]", got)
+	if strings.Join(got, ",") != "telnyx,voip.ms" {
+		t.Fatalf("BalanceBackends() = %v, want [telnyx voip.ms]", got)
 	}
 	for _, name := range got {
 		if Canonical(name) == "" {
@@ -93,6 +93,32 @@ func TestBalanceBackendsAreOnlyTheOnesThatCanAnswer(t *testing.T) {
 	if len(BalanceBackends()) >= len(Backends()) {
 		t.Error("every backend reports a balance, which means the optional " +
 			"interface is not being exercised by anything")
+	}
+}
+
+// The second capability, held to the same rule: advertised only where it is
+// real, and not by every backend, or the optional interface proves nothing.
+func TestNumberBackendsAreOnlyTheOnesThatCanAnswer(t *testing.T) {
+	got := NumberBackends()
+	if strings.Join(got, ",") != "telnyx" {
+		t.Fatalf("NumberBackends() = %v, want [telnyx]", got)
+	}
+	voipms, err := New("voip.ms", Config{Username: "a@example.invalid", Password: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := voipms.(NumberLister); ok {
+		t.Error("voip.ms claims NumberLister — nothing here asks its API for DIDs yet, " +
+			"and advertising it would make every policy number read as missing")
+	}
+}
+
+func TestAnUnassignedConnectionIsTheZeroValue(t *testing.T) {
+	if (Connection{}).Assigned() {
+		t.Error("the zero Connection must read as assigned to none")
+	}
+	if !(Connection{Name: "house"}).Assigned() || !(Connection{ID: "1"}).Assigned() {
+		t.Error("a connection with an id or a name is assigned")
 	}
 }
 

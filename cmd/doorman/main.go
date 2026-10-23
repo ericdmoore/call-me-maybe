@@ -7,6 +7,7 @@
 //	doorman schema [name]    print the config surface as JSON Schema
 //	doorman calls            read the call log
 //	doorman balance          what is left on each prepaid trunk
+//	doorman numbers          which numbers each trunk's account holds
 //	doorman pack             build and check prompt packs
 //	doorman rotate [flags] [label ...]
 //	                         rotate extension PINs (all, or by label)
@@ -87,6 +88,8 @@ func runCommand() int {
 			return runCalls(os.Args[2:])
 		case "balance":
 			return runBalance(os.Args[2:])
+		case "numbers":
+			return runNumbers(os.Args[2:])
 		case "provision":
 			return runProvision(os.Args[2:])
 		case "backup":
@@ -219,7 +222,25 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -min n                    threshold for trunks that declare no balance_min
       -json                     machine-readable, for a cron job on another box
       -timeout d                how long to wait on one provider (default 20s)
-  doorman schema [name]         print the configuration surface as JSON Schema:
+  doorman numbers [flags] [path]
+                                which numbers each trunk's account holds, from
+                                the provider's API, against the numbers the
+                                policy files claim for it ([line] number and
+                                outbound_cid with [line] trunk): on the account
+                                and assigned to the connection the trunk
+                                registers as, assigned to none or to another,
+                                or not on the account at all. Exit 1 when a
+                                claimed number is not where the policy says,
+                                3 when a trunk could not be checked. Telnyx
+                                today (api_key_env on the trunk); a provider
+                                it cannot ask is reported, never failed. The
+                                daemon never reads the key
+      -trunks path              provider inventory (default $TRUNKS_PATH or ./trunks.toml)
+      -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
+      -env path                 secrets file holding the API keys (default ./.env)
+      -json                     machine-readable
+      -timeout d                how long to wait on one provider (default 30s)
+  doorman schema [name]        print the configuration surface as JSON Schema:
                                 every key, type, default, and cross-file
                                 reference for policy.toml, handsets.toml,
                                 trunks.toml, contacts.toml, and the environment.
@@ -423,7 +444,7 @@ func loadDotEnv(path string) map[string]string {
 }
 
 // secretLookup resolves a named secret for the subcommands that need one —
-// `render` for SIP passwords, `balance` for provider API passwords. The real
+// `render` for SIP passwords, `balance` and `numbers` for provider API keys. The real
 // environment wins over the file, so a systemd unit or a CI runner can supply
 // a value the file does not have.
 func secretLookup(envPath string) func(string) (string, bool) {

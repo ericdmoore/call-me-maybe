@@ -106,6 +106,18 @@ balance_min = 25
 	}
 }
 
+// Telnyx authenticates with one bearer key, so a key alone is a trunk the
+// provider commands can ask — and balance_min may be set against it.
+func TestTrunkAPIKeyAloneIsConfigured(t *testing.T) {
+	tr := mustTrunks(t, oneTrunk+`
+api_key_env = "TRUNK_VOIPMS_API_KEY"
+balance_min = 10
+`).All()[0]
+	if !tr.BalanceConfigured() || tr.APIKeyEnv != "TRUNK_VOIPMS_API_KEY" {
+		t.Errorf("a key alone must be configured: %+v", tr)
+	}
+}
+
 func TestTrunkProblems(t *testing.T) {
 	cases := []struct {
 		name, body, want string
@@ -128,6 +140,9 @@ func TestTrunkProblems(t *testing.T) {
 		{"api username alone", oneTrunk + "api_username = \"a@b.invalid\"\n", "no api_password_env"},
 		{"api password alone", oneTrunk + "api_password_env = \"TRUNK_VOIPMS_API_PASSWORD\"\n", "no api_username"},
 		{"threshold nothing can check", oneTrunk + "balance_min = 20.0\n", "nothing can ever check it"},
+		{"api key env pasted", oneTrunk + "api_key_env = \"KEY0123-live\"\n", "never the key itself"},
+		{"api key beside a login", oneTrunk + "api_key_env = \"TRUNK_VOIPMS_API_KEY\"\napi_username = \"a@b.invalid\"\napi_password_env = \"K\"\n", "one or the other"},
+		{"api key beside a password", oneTrunk + "api_key_env = \"TRUNK_VOIPMS_API_KEY\"\napi_password_env = \"K\"\n", "one or the other"},
 		{"negative threshold", oneTrunk + "api_username = \"a@b.invalid\"\napi_password_env = \"K\"\nbalance_min = -1.0\n", "must not be negative"},
 	}
 	for _, c := range cases {

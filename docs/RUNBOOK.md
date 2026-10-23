@@ -2137,6 +2137,131 @@ $ sudo asterisk -rvvv                      # then ring the number: you want a
                                            # NoOp naming the line, not silence
 ```
 
+### Adding a Telnyx line
+
+> **Written from Telnyx's documentation, not from a working line.** This
+> section was written in October 2026 from developers.telnyx.com and
+> support.telnyx.com. The owner has decided to buy a Telnyx line; nobody has
+> registered one yet. Portal labels are what the documentation calls them and
+> may have moved. Treat every step as unverified, and rewrite this note — with
+> what actually happened — the day the first one registers.
+
+Telnyx sells SIP trunking as *SIP Connections*. The one this project can use
+is a **credentials** connection: the box registers outbound with a username
+and password, inbound calls come back down that registration, and no port is
+opened and no IP allow-list is kept. FQDN and IP connections are IP
+authentication — the shape issue #5 rules out — and are not covered here.
+
+**Nothing in `doorman render` is Telnyx-specific.** The generated
+registration, the `line=yes` + `endpoint=` binding and the two identify blocks
+are the same ones VoIP.ms gets (`internal/render/telnyx_test.go` is the
+proof). What differs is the portal, and four settings in it.
+
+1. **Create the connection.** In the Mission Control portal, under Voice → SIP
+   Trunking, add a SIP Connection and choose **Credentials** as the
+   authentication type. Pick the username and password there: they are what
+   this box registers as, and the username is also what `doorman numbers`
+   matches the connection by. A long random password is right — nobody types
+   it, `.env` holds it.
+
+2. **Inbound: leave the destination number format on a number.** The
+   connection's inbound settings choose what Telnyx puts in the Request-URI:
+   `+E.164` (the default), `E.164`, `National`, or `SIP Username`. The first
+   three all work — the generated dialplan routes every DID in all three
+   forms. **Not `SIP Username`:** it replaces the dialled number with the
+   connection's username, so the trunk is still identified but the dialplan
+   has no digits to route on, and every call fails with "extension not
+   found". While there, allow G.711 μ-law and G.722 and nothing that would
+   transcode.
+
+3. **Outbound: assign an outbound voice profile.** A connection with no
+   outbound voice profile places no calls. Create one (or use the account's
+   default) and attach the connection to it.
+
+4. **Point each number at the connection.** Under Numbers, set each number's
+   connection to the one from step 1. A number assigned to no connection is
+   one Telnyx has nowhere to send — it rings nowhere, with nothing on the box
+   to show for it. While there, enable **emergency calling** on the number
+   with the household's street address. Telnyx does it per number, and
+   `e911 = true` in `trunks.toml` is only true once it is done.
+
+5. **Declare the trunk** in `trunks.toml` (the commented block in
+   `examples/trunks.example.toml` is this one) and put the password in
+   `.env`:
+
+   ```toml
+   [[trunks]]
+   id       = "telnyx"
+   provider = "telnyx"
+   host     = "sip.telnyx.com"
+   username = "cmm-home"                     # the connection's SIP username
+   password_env = "TRUNK_TELNYX_PASSWORD"    # the NAME of a .env variable
+   e911     = true                           # only once step 4 is done
+   ```
+
+   ```bash
+   $ sudo -u doorman nano .env      # TRUNK_TELNYX_PASSWORD=…
+   ```
+
+6. **Give the number a line** — `[line] number` and `[line] trunk = "telnyx"`
+   in its policy file, exactly as in "Add a second provider" step 2. Declare
+   **every** number assigned to this connection: the identify blocks match the
+   numbers this config names, and if Telnyx does not echo the `;line=` tag
+   back, a call to a number no line declares matches no endpoint and is
+   dropped. `doorman numbers` (below) lists any it finds.
+
+7. **Render, install, reload** — "Add a second provider" steps 3 and 4. Then:
+
+   ```bash
+   $ sudo asterisk -rx 'pjsip reload'
+   $ sudo asterisk -rx 'pjsip show registrations'   # want telnyx_reg … Registered
+   $ sudo asterisk -rx 'pjsip show endpoint telnyx'
+   $ sudo asterisk -rvvv                            # ring the number: want a NoOp
+                                                    # naming its line, not silence
+   ```
+
+   `Rejected` with a 401/403 is the username or password. Stuck at `Unregistered`
+   with no answer is the network or the host. Registered but silent on a call
+   is step 2 or step 4 — or step 6, for a number no line declares.
+
+8. **Place a call from the line** and check both ends, as in "Add a second
+   provider" step 5. Telnyx presents the number in `From` only when the
+   account holds it.
+
+#### Checking the account's numbers
+
+A number copied by hand from the portal into a policy file is one typo from a
+line that never rings. Telnyx's API can say which numbers the account holds
+and which connection each is assigned to, and `doorman numbers` asks it.
+
+The API key is **not** the connection's password and is far more privilege —
+it can buy and release numbers and reconfigure every connection on the
+account. Create one on the portal's API Keys page, keep it on whatever machine
+runs the check (ideally not the Pi), and name it in `trunks.toml`:
+
+```toml
+api_key_env = "TRUNK_TELNYX_API_KEY"   # in the [[trunks]] block above
+```
+
+```bash
+$ nano .env                            # TRUNK_TELNYX_API_KEY=…  (not on the Pi)
+$ ./bin/doorman numbers
+telnyx (telnyx), registers as cmm-home — 3 numbers on the account
+  ✓ +15125550142  line default answers it — on this account, assigned to connection house (…), the one this trunk registers as
+  ✗ +15125550143  line biz answers it — on this account but assigned to no connection, …
+  · +15125550199  on this account, claimed by no policy file — assigned to connection house (…)
+```
+
+It exits 1 when a number a policy file claims for the trunk is not on the
+account, is not active yet, or — for a number a line *answers* — is assigned
+to no connection or to one some other username registers as. It exits 3 when
+the account could not be asked, and 0 otherwise. The daemon never reads the
+key. The same key lets `doorman balance` report the account's available
+credit.
+
+Like the provider client, this was written against Telnyx's published API
+reference and has not yet been run against a live account.
+
 ### Which trunk carries 911
 
 **Read this section before you add a second provider, not after.** It is where

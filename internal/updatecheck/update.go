@@ -26,7 +26,7 @@ const releaseURL = "https://github.com/ericdmoore/call-me-maybe/releases/tag/"
 // never acquire network activity just because their streams happen to be TTYs.
 func Allowed(command string) bool {
 	switch command {
-	case "check", "render", "rotate", "balance", "calls", "e164", "schema", "pack", "template", "init":
+	case "check", "render", "rotate", "balance", "numbers", "calls", "e164", "schema", "pack", "template", "init":
 		return true
 	}
 	return false

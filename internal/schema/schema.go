@@ -285,8 +285,8 @@ func Trunks() *Schema {
 			"from_user is emitted only when it differs from username. Defaulted to the sub-account it makes VoIP.ms answer 503 on every outbound call; left alone, the DID from [line] outbound_cid rides in From.",
 			"One inbound dialplan context per trunk, because each registration binds to its own endpoint with its own context=. Inside it, one route per DID, generated from [line] number and [line] trunk across every policy file.",
 			"A trunk id may not collide with a handset id: both become a PJSIP endpoint named after the id.",
-			"Secrets are named here, never written here. password_env and api_password_env hold the NAME of a .env variable; the loader refuses anything that is not shaped like one, so a pasted password fails loudly instead of being committed.",
-			"A trunk may also carry provider API credentials (api_username, api_password_env) so `doorman balance` can report what is left on a prepaid account. That key is considerably more privilege than the SIP password — it manages DIDs, sub-accounts and billing — and the daemon never reads it: balance checking is a CLI, best run wherever alerting already lives rather than on the Pi.",
+			"Secrets are named here, never written here. password_env, api_password_env and api_key_env hold the NAME of a .env variable; the loader refuses anything that is not shaped like one, so a pasted password fails loudly instead of being committed.",
+			"A trunk may also carry provider API credentials — api_username and api_password_env, or api_key_env for a provider such as Telnyx that uses one bearer key — so `doorman balance` can report what is left on a prepaid account and `doorman numbers` can list the numbers the account holds. That key is considerably more privilege than the SIP password — it manages DIDs, sub-accounts and billing — and the daemon never reads it: balance checking is a CLI, best run wherever alerting already lives rather than on the Pi.",
 			"Deleting trunks.toml is the whole rollback. There is no migration and no stored state.",
 		},
 		Properties: map[string]*Schema{
@@ -418,13 +418,27 @@ func trunkItem() *Schema {
 				},
 				CrossRefs: []string{"the environment, and examples/.env.example"},
 			},
+			"api_key_env": {
+				Type:    "string",
+				Pattern: "^[A-Z][A-Z0-9_]*$",
+				Description: "Name of the .env variable holding a provider API key, for a provider that authenticates with one bearer key rather than a login and a password — Telnyx. Read by `doorman balance` and `doorman numbers` and by nothing else. " +
+					"The alternative to api_username + api_password_env, never beside them: a trunk is one account, and one account has one way in.",
+				Rules: []string{
+					"HIGHER PRIVILEGE THAN THE SIP PASSWORD, exactly like api_password_env: a Telnyx API key can buy and release numbers and reconfigure every connection on the account. The daemon never reads it.",
+					"Names a variable; never put the key here. The pattern is enforced so a pasted key fails the load rather than reaching a commit.",
+					"Convention: TRUNK_<ID>_API_KEY.",
+					"Mutually exclusive with api_username and api_password_env.",
+					"On Telnyx it is a key from the API Keys page of the Mission Control portal — not the SIP connection's password, which is password_env.",
+				},
+				CrossRefs: []string{"the environment, and examples/.env.example", "`doorman numbers`", "`doorman balance`"},
+			},
 			"balance_min": {
 				Type:        "number",
 				Minimum:     ptr(0),
 				Description: "The balance below which `doorman balance` exits 1, in whatever currency the account is held in. Unset means this trunk is reported and never fails — a threshold nobody chose fires at the wrong time, and the command is meant to run untended from cron.",
 				Rules: []string{
 					"Choose a number that leaves time to act. A warning at zero is a death rattle, not an alert: a prepaid trunk that reaches zero stops inbound calls arriving with no error anywhere.",
-					"Requires api_username and api_password_env — a threshold nothing can evaluate is refused at load, because it is the same silent failure the check exists to remove.",
+					"Requires api_username and api_password_env, or api_key_env — a threshold nothing can evaluate is refused at load, because it is the same silent failure the check exists to remove.",
 					"`doorman balance --min` supplies a default for trunks that declare none; a trunk's own balance_min always wins.",
 				},
 				CrossRefs: []string{"`doorman balance`, exit code 1"},

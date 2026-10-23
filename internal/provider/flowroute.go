@@ -18,7 +18,9 @@ package provider
 // "postpaid, so a zero balance cannot silently take the line down" as a
 // reason to choose them. This is the same fact, in the place the CLI can read
 // it. A provider whose model is genuinely mixed — Telnyx and CallCentric are
-// both "either" on that page — is deliberately absent instead of guessed at.
+// both "either" on that page — is not guessed at: Telnyx is here because its
+// API reports an available credit either way (see telnyx.go), and CallCentric
+// is absent.
 
 type flowroute struct{}
 
