@@ -636,13 +636,17 @@ It is trimmed and cut to at most 64 characters on a character boundary.
 - `doorman login` sends it with the enrolment request. It reads `BOX_NAME`
   from its environment, else from `--env` (default
   `/opt/call-me-maybe/.env`), so a plain `sudo -u doorman doorman login` sees
-  the value the units see.
+  the value the units see. If the service refuses that request as invalid
+  (`400`, as a service that predates the name does), login retries once
+  without the name and enrols as before.
 - `doorman sync run` sends it in the status report until one report carrying
   it has been accepted for this enrolment, records that in the sync state
   directory (`echo.db`), and never sends it again, restarts included. This is
   how a box enrolled before enrolment carried a name gets one. If the service
-  refuses a report carrying the name, the same report is sent again at once
-  without it, and the name is offered again after 15 minutes.
+  refuses a report carrying the name as invalid (`400`), the same report is
+  sent again at once without it and the name is offered again after 24 hours,
+  so the name can never stop status reporting. Any other failure is the
+  report's, and the next pass offers the name again.
 
 After that the account owns the name: rename the box there. Changing
 `BOX_NAME` or the hostname later renames nothing. The name goes only to the

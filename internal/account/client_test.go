@@ -332,30 +332,76 @@ func TestCredentialRedirectsAndUnsafeStateAreRefused(t *testing.T) {
 // no "name" key at all when there is not.
 func TestEnrollmentSuggestsTheBoxName(t *testing.T) {
 	for _, name := range []string{"kitchen-pi", ""} {
-		var sent map[string]any
+		var bodies []map[string]any
 		c := clientServer(t, func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/v1/login/box/device" {
 				t.Errorf("unexpected route %s", r.URL.Path)
 				w.WriteHeader(404)
 				return
 			}
+			var sent map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&sent)
-			w.WriteHeader(400)
-			fmt.Fprint(w, `{"error":"bad_request"}`)
+			bodies = append(bodies, sent)
+			w.WriteHeader(410)
+			fmt.Fprint(w, `{"error":"expired"}`)
 		})
 		c.Name = name
 		if _, err := c.Login(context.Background(), func(string) {}); err == nil {
 			t.Fatal("refusal ignored")
 		}
-		got, present := sent["name"]
+		if len(bodies) != 1 {
+			t.Fatalf("a refusal other than 400 was retried: %d requests", len(bodies))
+		}
+		got, present := bodies[0]["name"]
 		if name == "" && present {
 			t.Fatalf("empty name sent as %v", got)
 		}
 		if name != "" && got != name {
 			t.Fatalf("name: got %v, want %q", got, name)
 		}
-		if _, ok := sent["transportPublicKey"]; !ok || len(sent) != map[bool]int{true: 2, false: 1}[name != ""] {
-			t.Fatalf("unexpected enrolment body keys: %v", sent)
+		if _, ok := bodies[0]["transportPublicKey"]; !ok || len(bodies[0]) != map[bool]int{true: 2, false: 1}[name != ""] {
+			t.Fatalf("unexpected enrolment body keys: %v", bodies[0])
+		}
+	}
+}
+
+// A service that predates the name refuses the whole request with 400. The
+// box enrols anyway, retrying once without the name; a 400 to a request with
+// no name is not retried.
+func TestEnrollmentRetriesWithoutANameTheServiceRefuses(t *testing.T) {
+	for _, name := range []string{"kitchen-pi", ""} {
+		var names []any
+		strict := true
+		c := clientServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/login/box/device" {
+				t.Errorf("unexpected route %s", r.URL.Path)
+				w.WriteHeader(404)
+				return
+			}
+			var sent map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&sent)
+			names = append(names, sent["name"])
+			if _, has := sent["name"]; has || (name == "" && strict) {
+				w.WriteHeader(400)
+				fmt.Fprint(w, `{"error":"bad_request"}`)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"deviceCode": strings.Repeat("Z", 43), "userCode": "AAAAAAAAAAAA",
+				"userCodeSalt": base64.RawURLEncoding.EncodeToString(make([]byte, 32)), "expiresIn": 900, "interval": 5})
+		})
+		c.Name = name
+		_, err := c.Login(context.Background(), func(string) { t.Fatal("displayed mismatched code") })
+		if name == "" {
+			var service *ServiceError
+			if !errors.As(err, &service) || service.Status != 400 || len(names) != 1 {
+				t.Fatalf("nameless 400: err=%v requests=%v", err, names)
+			}
+			continue
+		}
+		// The retry reached the service and its answer was handled as usual
+		// (here, a code that does not match the key).
+		if !errors.Is(err, ErrProtocol) || len(names) != 2 || names[0] != name || names[1] != nil {
+			t.Fatalf("err=%v names=%v", err, names)
 		}
 	}
 }

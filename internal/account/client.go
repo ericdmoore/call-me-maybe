@@ -167,6 +167,12 @@ func (c *Client) Login(ctx context.Context, display func(string)) (Status, error
 			start["name"] = c.Name
 		}
 		status, headers, body, err := c.post(ctx, "/v1/login/box/device", "", start)
+		if err == nil && status == http.StatusBadRequest && start["name"] != "" {
+			// A service that predates the name refuses the whole request.
+			// The name is only a suggestion: enrol without it.
+			delete(start, "name")
+			status, headers, body, err = c.post(ctx, "/v1/login/box/device", "", start)
+		}
 		if err != nil {
 			return Status{}, err
 		}

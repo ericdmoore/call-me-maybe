@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -301,8 +302,12 @@ func syncLoop(ctx context.Context, exchange func(context.Context) error, wake *s
 func syncTransport(send func(context.Context, account.SyncEndpoint, []byte) ([]byte, error)) syncmachine.Transport {
 	return func(ctx context.Context, endpoint string, body []byte) ([]byte, error) {
 		reply, err := send(ctx, account.SyncEndpoint(endpoint), body)
-		if errors.Is(err, account.ErrRemoved) {
+		var service *account.ServiceError
+		switch {
+		case errors.Is(err, account.ErrRemoved):
 			err = fmt.Errorf("%w: %w", syncmachine.ErrTransportEnded, err)
+		case errors.As(err, &service) && service.Status == http.StatusBadRequest:
+			err = fmt.Errorf("%w: %w", syncmachine.ErrBadRequest, err)
 		}
 		return reply, err
 	}

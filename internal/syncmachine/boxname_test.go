@@ -82,8 +82,9 @@ func TestAnEmptyBoxNameIsNeverSent(t *testing.T) {
 	}
 }
 
-// A service that refuses the report carrying the name still gets the rest of
-// the report in the same pass, and is not asked again until republishAfter.
+// A service that refuses the report carrying the name as invalid (one with a
+// strict schema that predates the field) still gets the rest of the report in
+// the same pass, and is not offered the name again until nameRetryAfter.
 func TestARefusedNameDoesNotCostTheReport(t *testing.T) {
 	m, _, _ := fixture(t)
 	now := time.Now()
@@ -93,7 +94,7 @@ func TestARefusedNameDoesNotCostTheReport(t *testing.T) {
 	refusing := true
 	send := statusOnly(t, &names, func(s syncwire.Status) error {
 		if refusing && s.BoxName != nil {
-			return errors.New("service refused request (400, bad_request)")
+			return fmt.Errorf("%w: service refused request (400, bad_request)", ErrBadRequest)
 		}
 		return nil
 	})
@@ -105,11 +106,16 @@ func TestARefusedNameDoesNotCostTheReport(t *testing.T) {
 	if len(names) != 3 || names[2] != "" {
 		t.Fatalf("name retried before its pause ended: %q", names)
 	}
+	now = now.Add(nameRetryAfter - time.Minute)
+	_ = m.Exchange(context.Background(), send)
+	if len(names) != 4 || names[3] != "" {
+		t.Fatalf("name retried before a day passed: %q", names)
+	}
 	refusing = false
-	now = now.Add(republishAfter)
+	now = now.Add(time.Minute)
 	_ = m.Exchange(context.Background(), send)
 	_ = m.Exchange(context.Background(), send)
-	if strings.Join(names[3:], ",") != "kitchen-pi," {
+	if strings.Join(names[4:], ",") != "kitchen-pi," {
 		t.Fatalf("after the pause: %q", names)
 	}
 }
@@ -140,5 +146,30 @@ func TestBoxNameAcceptanceIsPerEnrolment(t *testing.T) {
 	}
 	if err := m.db.QueryRow("SELECT COUNT(*) FROM box_name WHERE box!=?", "ac409cd3-8105-4200-9a32-42a064a98bb0").Scan(&rows); err != nil || rows != 0 {
 		t.Fatalf("acceptance recorded for another box: %d %v", rows, err)
+	}
+}
+
+// Any other failure (the network, a 5xx) is the report's, not the name's:
+// nothing is resent without the name, and the next pass offers it again.
+func TestAFailedReportKeepsOfferingTheName(t *testing.T) {
+	m, _, _ := fixture(t)
+	m.SampleStatus, m.BoxName = sampled, "kitchen-pi"
+	var names []string
+	failing := true
+	send := statusOnly(t, &names, func(syncwire.Status) error {
+		if failing {
+			return errors.New("sync: network unavailable")
+		}
+		return nil
+	})
+	_ = m.Exchange(context.Background(), send)
+	if fmt.Sprint(names) != "[kitchen-pi]" || m.warned["status"] == "" {
+		t.Fatalf("reports %q, warned %v", names, m.warned)
+	}
+	failing = false
+	_ = m.Exchange(context.Background(), send)
+	_ = m.Exchange(context.Background(), send)
+	if fmt.Sprint(names) != "[kitchen-pi kitchen-pi ]" {
+		t.Fatalf("reports %q", names)
 	}
 }
