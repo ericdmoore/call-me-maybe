@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 
+	"callmemaybe/internal/configcheck"
 	"callmemaybe/internal/policy"
-	"callmemaybe/internal/provision"
 	"callmemaybe/internal/syncwire"
 )
 
@@ -159,13 +159,16 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 		result.Problem = problem(syncwire.Unsupported)
 		return save()
 	}
-	options := policy.Options{ModelKnown: provision.Known, StrictUnknownKeys: true}
+	// The same rules observe applied, so a change is saved only when the
+	// result is a configuration observe — and check, and the daemon — accept.
+	options := configcheck.Options(nil)
 	if data, ok := o.files[m.paths.Trunks]; ok {
-		options.Trunks, err = policy.TrunksFromTOML(data)
+		trunks, err := policy.TrunksFromTOML(data)
 		if err != nil {
 			result.Problem = problem(syncwire.Invalid)
 			return save()
 		}
+		options = configcheck.Options(trunks)
 	}
 	before := o.files[path]
 	o.files[path] = after

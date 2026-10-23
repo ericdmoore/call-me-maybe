@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -31,6 +32,12 @@ type Machine struct {
 	// Warn receives categorical problems that do not stop a pass. nil prints
 	// them to stderr.
 	Warn func(error)
+
+	// rejection is the newest content's validation problem while it is
+	// refused, and rejectedKey identifies that content so it is logged once.
+	// Guarded by mu: the watcher and Exchange both observe.
+	rejection   *syncwire.ConfigRejection
+	rejectedKey string
 
 	// Exchange-only state; Exchange never runs concurrently with itself.
 	published   string
@@ -136,10 +143,58 @@ func (m *Machine) Observe() (syncwire.Snapshot, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	o, err := observe(m.paths)
+	var rejected *Rejection
+	switch {
+	case errors.As(err, &rejected):
+		m.reject(rejected)
+	case err == nil:
+		m.accept()
+	}
 	if err != nil {
 		return syncwire.Snapshot{}, err
 	}
 	return m.record(o)
+}
+
+// reject records why the newest content was refused. It logs once per
+// distinct content: the watcher looks every second, and a file left broken
+// overnight is one line in the journal, not thirty thousand.
+func (m *Machine) reject(r *Rejection) {
+	if r.key == m.rejectedKey {
+		return
+	}
+	m.rejectedKey = r.key
+	m.rejection = &syncwire.ConfigRejection{File: r.File, Message: r.Message, At: m.now().UnixMilli()}
+	m.report(r)
+}
+
+func (m *Machine) accept() {
+	if m.rejection == nil {
+		return
+	}
+	file := m.rejection.File
+	m.rejection, m.rejectedKey = nil, ""
+	m.report(fmt.Errorf("sync: configuration accepted again after %s was rejected", file))
+}
+
+func (m *Machine) report(err error) {
+	if m.Warn != nil {
+		m.Warn(err)
+		return
+	}
+	fmt.Fprintln(os.Stderr, err)
+}
+
+// Rejection is the configRejection field of the status report: present while
+// the newest configuration on disk is refused, nil once one is accepted.
+func (m *Machine) Rejection() *syncwire.ConfigRejection {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.rejection == nil {
+		return nil
+	}
+	r := *m.rejection
+	return &r
 }
 
 func (m *Machine) Latest() (syncwire.Snapshot, error) {

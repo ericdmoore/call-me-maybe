@@ -5,11 +5,14 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"unicode/utf16"
 )
 
@@ -71,6 +74,23 @@ func Decode(name string, data []byte, target any) error {
 	return nil
 }
 
+// patterns caches compiled schema patterns. The observer validates every
+// string in the configuration on every pass, and compiling each pattern per
+// string was most of an idle box's sync CPU.
+var patterns sync.Map // string -> *regexp.Regexp, nil when it does not compile
+
+func pattern(expr string) *regexp.Regexp {
+	if re, ok := patterns.Load(expr); ok {
+		return re.(*regexp.Regexp)
+	}
+	re, err := regexp.Compile(expr)
+	if err != nil {
+		re = nil
+	}
+	patterns.Store(expr, re)
+	return re
+}
+
 func matches(s schema, value any) bool {
 	if s.Ref != "" {
 		return matches(schemas[strings.TrimPrefix(s.Ref, "#/components/schemas/")], value)
@@ -127,8 +147,8 @@ func matches(s schema, value any) bool {
 			return false
 		}
 		if s.Pattern != "" {
-			match, err := regexp.MatchString(s.Pattern, v)
-			return err == nil && match
+			re := pattern(s.Pattern)
+			return re != nil && re.MatchString(v)
 		}
 		return true
 	case "boolean":
@@ -144,6 +164,12 @@ func matches(s schema, value any) bool {
 // Project accepts only the schema's explicitly public properties. Callers first
 // replace credential values with presence flags; new local fields cannot leak
 // into snapshots merely because they were added to a TOML file.
+//
+// An optional property written as its zero value — "", 0 or [] — means the
+// same as leaving it out to every TOML reader on the box (voicemail = "",
+// number = 0, codecs = []). Where the schema would refuse that zero value it is
+// dropped instead, so sync accepts exactly the files the box's validator
+// accepts rather than refusing an equivalent spelling.
 func Project(name string, value any) (any, error) {
 	s, ok := schemas[name]
 	if !ok {
@@ -172,7 +198,11 @@ func project(s schema, value any) any {
 		out := map[string]any{}
 		for k, v := range obj {
 			if child, ok := s.Properties[k]; ok {
-				out[k] = project(child, v)
+				v = project(child, v)
+				if zero(v) && !contains(s.Required, k) && !matches(child, v) {
+					continue
+				}
+				out[k] = v
 			}
 		}
 		return out
@@ -185,4 +215,105 @@ func project(s schema, value any) any {
 		return out
 	}
 	return value
+}
+
+func zero(v any) bool {
+	switch v := v.(type) {
+	case string:
+		return v == ""
+	case float64:
+		return v == 0
+	case []any:
+		return len(v) == 0
+	}
+	return false
+}
+
+func contains(list []string, s string) bool {
+	for _, item := range list {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
+// Explain names the first place value fails the named schema, as a JSON path
+// such as "policies[0].schedules[1].start", or "" when it matches. It names
+// keys and positions only, never a value, so the answer can be logged.
+func Explain(name string, value any) string {
+	s, ok := schemas[name]
+	if !ok {
+		return name
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "(not representable as JSON)"
+	}
+	var plain any
+	if json.Unmarshal(data, &plain) != nil {
+		return "(not representable as JSON)"
+	}
+	if matches(s, plain) {
+		return ""
+	}
+	path := explain(s, plain, "")
+	if path == "" {
+		return "(top level)"
+	}
+	return path
+}
+
+func explain(s schema, value any, path string) string {
+	if s.Ref != "" {
+		return explain(schemas[strings.TrimPrefix(s.Ref, "#/components/schemas/")], value, path)
+	}
+	if s.Type == "object" && s.Enum == nil && s.OneOf == nil {
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return path
+		}
+		for _, k := range s.Required {
+			if _, ok := obj[k]; !ok {
+				return join(path, k) + " (missing)"
+			}
+		}
+		keys := make([]string, 0, len(obj))
+		for k := range obj {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			child, ok := s.Properties[k]
+			if !ok {
+				return join(path, k) + " (not allowed)"
+			}
+			if !matches(child, obj[k]) {
+				return explain(child, obj[k], join(path, k))
+			}
+		}
+		return path
+	}
+	if s.Type == "array" && s.Items != nil {
+		arr, ok := value.([]any)
+		if !ok || len(arr) < s.MinItems {
+			return path
+		}
+		if len(arr) > s.MaxItems {
+			return path + fmt.Sprintf(" (more than %d entries)", s.MaxItems)
+		}
+		for i, child := range arr {
+			if !matches(*s.Items, child) {
+				return explain(*s.Items, child, fmt.Sprintf("%s[%d]", path, i))
+			}
+		}
+	}
+	return path
+}
+
+func join(path, key string) string {
+	if path == "" {
+		return key
+	}
+	return path + "." + key
 }

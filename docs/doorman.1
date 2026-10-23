@@ -169,11 +169,14 @@ resolved to nothing, which is how a misspelled optional key becomes visible:
 you configured quiet hours and the output says there are none. PINs are shown
 only as their length, never their value.
 .IP
-A key that matches no field in the schema is an error here, and only here.
-The daemon warns about the same key and carries on, because a policy it
-loaded yesterday must not start taking the phone down today; this command is
-a linting tool with an operator reading its output, where silence about a
-typo is the whole defect. Suggestions are offered \(em
+A key that matches no field in the schema is an error. This command, the
+daemon's reload and
+.B doorman sync
+apply one validator and refuse the same files; a reload that is refused keeps
+the last good policy in service, and at startup the daemon runs its last good
+copy (\fIpolicy.last-good/\fR beside \fIpolicy.toml\fR) when the current files
+are refused, or, with no copy yet, runs them under the previous release's
+rules. Suggestions are offered \(em
 .B afterhous
 is told about
 .BR afterhours .

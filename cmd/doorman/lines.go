@@ -1,10 +1,12 @@
 package main
 
 import (
+	"errors"
 	"log/slog"
 	"sort"
 	"strings"
 
+	"callmemaybe/internal/configcheck"
 	"callmemaybe/internal/events"
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/policy"
@@ -24,11 +26,18 @@ type openLine struct {
 // sections of one. Invariant 4 says an invalid policy must never take the
 // phone down; per-line stores generalise it to *an invalid policy must never
 // take down a line it does not belong to*, at startup and on every reload
-// after it. A named line that will not load is reported and dropped — calls
-// arriving on it are served by the default line, the same place an unknown
-// name lands. A default line that will not load is returned as an error,
-// because that is the whole phone rather than one number.
-func openLines(files []policy.LineFile, handsetsPath string, watch bool, log *slog.Logger, journal *events.Writer) ([]openLine, error) {
+// after it. A line whose current files are refused at startup runs its last
+// good copy (policy.last-good/<line>, written each time a load is accepted)
+// and says so loudly. Only without a usable copy is a named line dropped —
+// calls arriving on it are served by the default line, the same place an
+// unknown name lands — and a default line returned as an error, because that
+// is the whole phone rather than one number.
+//
+// Every line is validated by configcheck.Options, the rules `doorman check`
+// and sync apply, with [line] trunk checked against trunksPath at every load.
+// Validation problems are logged through policy.RedactProblem: a message may
+// quote a number or a PIN from the file, and neither belongs in a log.
+func openLines(files []policy.LineFile, handsetsPath, trunksPath string, watch bool, log *slog.Logger, journal *events.Writer) ([]openLine, error) {
 
 	var opened []openLine
 	for _, lf := range files {
@@ -40,17 +49,22 @@ func openLines(files []policy.LineFile, handsetsPath string, watch bool, log *sl
 			lineLog = log.With("line", lf.Name)
 		}
 
-		// Unknown keys warn here and refuse in `doorman check`. The daemon
-		// must keep answering the phone (invariant 4), so a key it does not
-		// recognise is something to say loudly and then ignore — which is what
-		// the decoder was already doing, minus the saying. Only names are
+		// Unknown keys are refused here as in `doorman check` and sync — one
+		// validator (call-me-maybe#131). Each is still named on its own line,
+		// so the reason a reload was refused is easy to find. Only names are
 		// logged; a key's value never is.
-		opts := policy.Options{
-			OnUnknownKey: func(u policy.UnknownKey) {
-				lineLog.Warn("unrecognised key in config, ignoring it",
-					"file", u.File, "key", u.Path, "didYouMean", u.Suggest,
-					"hint", "run `doorman check` for the full report")
-			},
+		opts := configcheck.Options(nil)
+		opts.TrunksPath = trunksPath
+		opts.OnUnknownKey = func(u policy.UnknownKey) {
+			lineLog.Warn("unrecognised key in config",
+				"file", u.File, "key", u.Path, "didYouMean", u.Suggest,
+				"hint", "run `doorman check` for the full report")
+		}
+		opts.LastGood = policy.LastGoodPath(lf.Path, lf.Name)
+		opts.Bootstrap = true
+		opts.OnLastGoodError = func(err error) {
+			lineLog.Warn("cannot save the last good copy of the policy; the policy is in service, but a restart after a bad edit has nothing to fall back to",
+				"lastGood", opts.LastGood, "problem", policy.RedactProblem(err.Error(), 0))
 		}
 
 		store, err := policy.OpenStoreWith(lf.Path, handsetsPath, watch, opts,
@@ -69,21 +83,38 @@ func openLines(files []policy.LineFile, handsetsPath string, watch bool, log *sl
 					e.Line = lf.Name
 					journal.Post(e)
 				}
-				lineLog.Error("policy reload failed, keeping previous version", "err", err)
+				lineLog.Error("policy reload failed, keeping previous version",
+					"problem", policy.RedactProblem(err.Error(), 0))
 			},
 		)
 		if err != nil {
 			if lf.Name == policy.DefaultLine {
-				// Returned unwrapped: the only error this can be is the
-				// default line's, and the caller already knows its path.
-				return opened, err
+				// The only error this can be is the default line's, and the
+				// caller already knows its path.
+				return opened, errors.New(policy.RedactProblem(err.Error(), 0))
 			}
 			// Fail loudly where an operator will see it, and keep answering.
 			lineLog.Error("line policy will not load — calls on this line are served by the default line instead",
-				"path", lf.Path, "err", err)
+				"path", lf.Path, "problem", policy.RedactProblem(err.Error(), 0))
 			continue
 		}
 		opened = append(opened, openLine{lf.Name, store, lineLog})
+		if refused := store.Fallback(); refused != nil {
+			// One line that cannot be missed: the box is answering calls, but
+			// not with the files on disk, or not under the current rules.
+			reason, msg := "running-last-good-policy", "POLICY REFUSED AT STARTUP — running the last good configuration until the files are fixed"
+			if store.PreviousRules() {
+				reason, msg = "running-policy-under-previous-rules", "POLICY REFUSED BY THE CURRENT RULES — running it under the previous release's rules until the files are fixed"
+			}
+			if journal != nil {
+				e := events.System(events.ConfigReloadFailed, reason, 0)
+				e.Line = lf.Name
+				journal.Post(e)
+			}
+			lineLog.Error(msg,
+				"path", lf.Path, "lastGood", opts.LastGood, "problem", policy.RedactProblem(refused.Error(), 0),
+				"hint", "run `doorman check` for the full report")
+		}
 
 		pol := store.Current()
 		// onNoInput is on the startup line because it is the one policy value

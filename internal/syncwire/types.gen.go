@@ -444,6 +444,18 @@ func (e Verb5Name) Valid() bool {
 	}
 }
 
+// ConfigRejection Present while the newest configuration on the box's disk is rejected by its validator; the box keeps its last good revision. Omitted once a valid configuration is accepted.
+type ConfigRejection struct {
+	// At Unix milliseconds when the box first rejected this content.
+	At int64 `json:"at"`
+
+	// File Base name of the rejected file, such as policy.toml.
+	File string `json:"file"`
+
+	// Message The validation problem, with phone numbers, PINs and tokens redacted.
+	Message string `json:"message"`
+}
+
 // Configuration defines model for Configuration.
 type Configuration struct {
 	Contacts   []Contact          `json:"contacts"`
@@ -733,6 +745,8 @@ type SnapshotResultStatus string
 
 // Status defines model for Status.
 type Status struct {
+	// ConfigRejection Present while the newest configuration on the box's disk is rejected by its validator; the box keeps its last good revision. Omitted once a valid configuration is accepted.
+	ConfigRejection  *ConfigRejection  `json:"configRejection,omitempty"`
 	ContentInventory *ContentInventory `json:"contentInventory,omitempty"`
 	CpuUtilization   *float32          `json:"cpuUtilization,omitempty"`
 	DiskFreeBytes    *int64            `json:"diskFreeBytes,omitempty"`

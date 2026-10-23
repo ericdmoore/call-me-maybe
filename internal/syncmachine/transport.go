@@ -86,12 +86,18 @@ func (m *Machine) publish(ctx context.Context, t Transport, s syncwire.Snapshot)
 // independently; slow network I/O cannot prevent local changes entering SQLite.
 // Exchange itself must not run concurrently with another Exchange.
 func (m *Machine) Exchange(ctx context.Context, t Transport) error {
+	// Observe first, so the status report carries this pass's verdict on the
+	// files: configRejection is present exactly while the newest content is
+	// refused.
+	s, err := m.Observe()
 	// Presence is independent of whether the local configuration can currently
 	// be parsed. An invalid edit must not make a reachable box appear offline.
 	// Status is informational too: a refused report must not hold the queue.
 	if m.SampleStatus != nil {
+		status := m.SampleStatus()
+		status.ConfigRejection = m.Rejection()
 		var result syncwire.StatusResult
-		err := exchange(ctx, t, "status", m.SampleStatus(), "StatusResult", &result)
+		err := exchange(ctx, t, "status", status, "StatusResult", &result)
 		if errors.Is(err, ErrTransportEnded) {
 			return err
 		}
@@ -100,7 +106,6 @@ func (m *Machine) Exchange(ctx context.Context, t Transport) error {
 		}
 		m.warn("status", err)
 	}
-	s, err := m.Observe()
 	if err != nil {
 		// Still answer pending work against the last good snapshot. Apply will
 		// refuse invalid current files rather than replacing them.

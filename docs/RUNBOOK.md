@@ -219,7 +219,12 @@ Record each before the upgrade and compare after; any failure means roll back.
 
 1. **Identity:** every copy prints exactly the release version, and its
    SHA-256 matches `checksums.txt`.
-2. **Configuration:** `doorman check` passes on the live files.
+2. **Configuration:** `doorman check` passes on the live files. Worth running
+   the *new* binary's `doorman check --policy-only` before restarting: a
+   release can tighten validation. If it refuses the live files, the daemon
+   still starts — on the last good copy it saved, or on the first upgrade
+   under the previous release's rules (see *An invalid policy must never take
+   the phone down*) — but it says so loudly until the files pass.
 3. **Services:** the four units are active with no restarts; only the units you
    restarted have new PIDs.
 4. **Phone network:** the trunk shows `Registered` (`pjsip show
@@ -941,9 +946,10 @@ It prints the settings you *didn't* write too, as `(none — ...)`. That is
 deliberate and it is how you catch a misspelled key: `voicmail = "kids"` is a
 legal TOML key that no field claims, so before it was reported the mailbox
 simply never existed and the file looked fine. Check now rejects a key it
-does not recognise and suggests the nearest real one; if you would rather see
-it than be stopped by it, that is what the daemon's log does — it warns and
-keeps the phone up (see *An invalid policy must never take the phone down*).
+does not recognise and suggests the nearest real one. The daemon's reload and
+sync refuse the same file — one validator for all three — and the daemon keeps
+the last good policy in service while they do (see *An invalid policy must
+never take the phone down*).
 
 ### Home Assistant Assist (optional)
 
@@ -1426,10 +1432,36 @@ A file that fails validation is rejected and the previous version stays live,
 so a typo cannot take the phone down — but check the log to confirm the reload
 actually happened rather than silently failing.
 
-Also worth a look: `unrecognised key in config, ignoring it`. The daemon warns
-rather than refusing, so an edit that misspelled a key *does* reload — it just
-does not do what you meant. `doorman check` turns the same warning into an
-error and tells you which key it should have been.
+Also worth a look: `unrecognised key in config`. A misspelled key is refused
+like any other invalid edit — the reload fails, the previous policy stays live,
+and `doorman check` says which key it should have been. `doorman check`, the
+daemon's reload and the sync observer apply one validator, so they always agree
+on whether a file is valid. The reload failure is logged with numbers and PINs
+redacted; a box enrolled in sync also reports it to the account as the file it
+rejected and why.
+
+**Across a restart, too.** Each time a line's files are accepted, at startup
+or on reload, the daemon saves an exact copy beside them in
+`policy.last-good/<line>/` (`policy.toml`, `handsets.toml`, `trunks.toml` when
+there is one; mode 0600, same owner as the originals, swapped in atomically).
+If the current files are refused at startup — a bad edit made while doorman
+was stopped, or a release whose validation is stricter — it runs that copy
+and logs one line you cannot miss:
+`POLICY REFUSED AT STARTUP — running the last good configuration until the
+files are fixed`, with the redacted reason. Fix the files and the ordinary
+reload picks them up. The copies hold PINs, like the files they copy; leave
+them where they are and never commit them.
+
+With no usable copy — the first start after upgrading from a release that
+never wrote one — the daemon runs the current files under the previous
+release's rules, so an upgrade never leaves a box worse off than before:
+unknown keys and handset models are warnings again, `[line] trunk` goes
+unchecked, the new size bounds and disabled-schedule checks do not apply. It
+logs `POLICY REFUSED BY THE CURRENT RULES — running it under the previous
+release's rules until the files are fixed`, and sync still reports the
+rejection. Nothing loaded that way becomes the last good copy; the first edit
+the current rules accept does. Only a file the previous release refused too
+stops the daemon starting.
 
 ### Add a handset
 
@@ -2825,7 +2857,7 @@ Not everything here is a matter of discipline. These are checked by machine:
 | Concurrent calls are capped | admission control in the event router |
 | Config cross-references resolve | `doorman check`, the LSP, and the daemon share one validator |
 | The provider API key stays out of the daemon | `internal/provider` is reachable only from `doorman balance`; tests assert nothing on the call path imports it and no other file in `cmd/doorman` reads the credential |
-| Every config key is one the schema names | `doorman check` and the LSP reject an unknown key; the daemon warns and keeps running |
+| Every config key is one the schema names | `doorman check`, the LSP, the daemon's reload and sync reject an unknown key; the daemon keeps its last good policy |
 
 
 ## Event journal and consumer recovery

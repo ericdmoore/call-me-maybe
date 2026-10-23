@@ -552,6 +552,9 @@ func Policy() *Schema {
 			"One file per phone number. A box answering several numbers puts each extra line in policy.<line>.toml beside policy.toml, and the dialplan names the line with Stasis(app,line,<name>). Bare policy.toml is the default line and serves every call that names none. The schema is the same for all of them; handsets.toml is shared.",
 			"Extensions are credentials. Treat a PIN like a password and prefer `doorman rotate` over choosing one.",
 			"Allow-listed numbers may be written in any format; they normalise to E.164 at load time. An unparseable number is a load error, not a silent never-match.",
+			"`doorman check`, the daemon's reload and sync apply one validator, so they accept and refuse the same files. Unknown keys are errors in all three.",
+			"Bounds: ids at most 60 characters; handset, extension and line labels at most 128; a person's name at most 256 and at most 32 numbers; at most 100 handsets, 100 schedules per policy and 100 handsets in any one list; any other value at most 2048 characters and any list at most 1000 entries. A ladder step's rings is 1-1000 and seconds 1-86400 when set.",
+			"At startup the daemon falls back to its last good copy (policy.last-good/ beside policy.toml) when the current files are refused, or, with none, runs the current files under the previous release's rules; it refuses to start only on a file that release refused too.",
 		},
 		Properties: map[string]*Schema{
 			"line":       line(),
@@ -796,14 +799,17 @@ func schedule() *Schema {
 				Default:     true,
 				Description: "False makes every reference inert without deleting the definition — one edit turns bedtime off for a school holiday.",
 			},
-			"start": {Type: "string", Pattern: `^\d{1,2}:\d{2}$`, Description: "Local time, HH:MM."},
-			"end":   {Type: "string", Pattern: `^\d{1,2}:\d{2}$`, Description: "Local time, HH:MM. May be earlier than start, which means the window crosses midnight."},
+			"start": {Type: "string", Pattern: `^([01]?[0-9]|2[0-3]):[0-5][0-9]$`, Description: "Local time, HH:MM from 00:00 to 23:59. A one-digit hour (7:00) means the same as 07:00."},
+			"end":   {Type: "string", Pattern: `^([01]?[0-9]|2[0-3]):[0-5][0-9]$`, Description: "Local time, HH:MM from 00:00 to 23:59. May be earlier than start, which means the window crosses midnight."},
 			"days": {
 				Type:        "array",
 				Items:       &Schema{Type: "string", Enum: []any{"SU", "MO", "TU", "WE", "TH", "FR", "SA"}},
 				Description: "Days the window STARTS on. Empty means every day.",
 				Rules:       []string{"A window crossing midnight belongs to the day it starts: 20:30-07:00 on MO covers Monday night into Tuesday morning."},
 			},
+		},
+		Rules: []string{
+			"Validated whether or not it is enabled: a disabled schedule with an impossible time fails `doorman check`, is refused by the daemon's reload and by sync, exactly as an enabled one is.",
 		},
 		AdditionalProperties: falsy,
 	}
