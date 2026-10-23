@@ -272,3 +272,24 @@ func TestLoginClearsTheRemovedNoteFromTheLastBackup(t *testing.T) {
 	}
 	forgetRemovedBackup(state) // a record with no note is left alone
 }
+
+// Only a 400 tells the sync machine the service refused the body as invalid,
+// which is what lets a status report drop the box name and go again; every
+// other error keeps its identity and is not marked.
+func TestSyncTransportMarksOnlyABadRequest(t *testing.T) {
+	for _, test := range []struct {
+		err error
+		bad bool
+	}{
+		{&account.ServiceError{Status: 400, Code: "bad_request"}, true},
+		{&account.ServiceError{Status: 409, Code: "generation_conflict"}, false},
+		{&account.ServiceError{Status: 500, Code: "service_error"}, false},
+		{account.ErrNetwork, false},
+	} {
+		send := func(context.Context, account.SyncEndpoint, []byte) ([]byte, error) { return nil, test.err }
+		_, err := syncTransport(send)(context.Background(), "status", nil)
+		if errors.Is(err, syncmachine.ErrBadRequest) != test.bad || !errors.Is(err, test.err) {
+			t.Fatalf("%v: bad request=%t", test.err, errors.Is(err, syncmachine.ErrBadRequest))
+		}
+	}
+}

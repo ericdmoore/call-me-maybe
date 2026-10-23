@@ -872,6 +872,9 @@ type SnapshotResultStatus string
 
 // Status defines model for Status.
 type Status struct {
+	// BoxName The name the box suggests for itself: BOX_NAME, otherwise its hostname. Sent until one status report carrying it has been accepted for the box's current enrolment, then omitted, so a box enrolled before enrolment carried a name still supplies one. A suggestion only: the name the household sets on the account wins.
+	BoxName *string `json:"boxName,omitempty"`
+
 	// ConfigRejection Present while the newest configuration on the box's disk is rejected by its validator; the box keeps its last good revision. Omitted once a valid configuration is accepted.
 	ConfigRejection  *ConfigRejection  `json:"configRejection,omitempty"`
 	ContentInventory *ContentInventory `json:"contentInventory,omitempty"`

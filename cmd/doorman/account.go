@@ -11,11 +11,13 @@ import (
 	"time"
 
 	"callmemaybe/internal/account"
+	"callmemaybe/internal/config"
 )
 
 func runLogin(args []string) int {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	state := fs.String("state", "/var/lib/doorman", "state directory (run as the backup service user)")
+	envPath := fs.String("env", "/opt/call-me-maybe/.env", "where BOX_NAME is read from when the environment does not set it")
 	if fs.Parse(args) != nil || fs.NArg() != 0 {
 		return 2
 	}
@@ -24,6 +26,7 @@ func runLogin(args []string) int {
 	ctx, cancel := context.WithTimeout(ctx, 16*time.Minute)
 	defer cancel()
 	client := account.New(*state)
+	client.Name = suggestedBoxName(*envPath)
 	before, _ := client.Status()
 	result, err := client.Login(ctx, func(code string) {
 		fmt.Println("Open", account.ApprovalURL)
@@ -93,6 +96,20 @@ func runAccount(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: doorman account status|rotate")
 		return 2
 	}
+}
+
+// suggestedBoxName is the name the box offers its account: BOX_NAME from the
+// environment, else from the .env the units read (an interactive login does
+// not load it), else the hostname. Only ever sent to the account; never
+// printed or logged.
+func suggestedBoxName(envPath string) string {
+	dotenv := loadDotEnv(envPath)
+	return config.BoxName(func(key string) string {
+		if v, ok := os.LookupEnv(key); ok && v != "" {
+			return v
+		}
+		return dotenv[key]
+	}, os.Hostname)
 }
 
 // removedLine says what happened, that the phone is unaffected, and the one

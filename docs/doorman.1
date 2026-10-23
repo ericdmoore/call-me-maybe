@@ -410,12 +410,18 @@ sets
 in .env; \fBnone\fR clears it. Only the phonebook job reads it, on its next
 run, so no restart.
 .TP
-.B doorman login \fR[\fB\-\-state\fR \fIdirectory\fR]
+.B doorman login \fR[\fB\-\-state\fR \fIdirectory\fR] [\fB\-\-env\fR \fIfile\fR]
 Enrol this device through a browser/passkey approval. Run as the backup
 service user. The device generates its own transport key and checks the
 displayed code against it. Scoped credentials are saved atomically with
 mode 0600 under the state directory's account subdirectory, excluded from
 backups. Set \fBBACKUP_CLOUD=true\fR to opt in to encrypted uploads.
+The request suggests a name for the box:
+.B BOX_NAME
+from the environment or the \fB\-\-env\fR file (default
+/opt/call\-me\-maybe/.env), otherwise the hostname; none for
+.IR localhost .
+The household can rename it on the account.
 .TP
 .B doorman account \fBstatus\fR|\fBrotate\fR
 Show identifiers, capabilities and enrolment time, never credential values.
@@ -433,6 +439,10 @@ snapshots, and receive typed changes with durable receipts. Requires account
 enrolment. \fBrun\fR observes every second and polls every five seconds,
 backing off with jitter to five minutes (or the service's Retry\-After) while
 passes fail; an unchanged snapshot is not re\-sent.
+The status report carries the suggested box name
+.RB ( BOX_NAME ,
+otherwise the hostname) until one report carrying it has been accepted for the
+enrolment, recorded in the sync state directory, and never again after that.
 With the sync capability, \fBrun\fR also keeps the \fIbell\fR: an outbound,
 normally quiet WebSocket on which the service only says "sync now". A ring
 runs the ordinary pass at once (rings during a pass merge into one more pass);
@@ -874,6 +884,17 @@ application named in
 .TP
 .BR POLICY_PATH ", " HANDSETS_PATH ", " TRUNKS_PATH ", " CONTACTS_PATH ", " POLICY_WATCH
 Where the config files are, and whether to reload them on change.
+.TP
+.B BOX_NAME
+The name this box suggests to its connected account; unset suggests the
+hostname, and
+.I localhost
+or an empty name suggests none. Trimmed and cut on a character boundary to at
+most 64 characters. Sent by
+.B doorman login
+at enrolment and once in a sync status report; after it is accepted the
+account owns the name, so changing this renames nothing. Only ever sent to the
+household's own connected account; never logged.
 .TP
 .BR SYNC_BELL ", " SYNC_BELL_POLL_S
 Read by

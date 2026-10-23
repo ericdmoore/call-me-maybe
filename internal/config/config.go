@@ -109,6 +109,10 @@ type Config struct {
 	// ignores them, as with BACKUP_*.
 	SyncBell     bool
 	SyncBellPoll time.Duration
+	// BoxName is BOX_NAME as written, read by `doorman login` and `doorman
+	// sync run` through BoxName (which falls back to the hostname); the
+	// daemon parses and ignores it.
+	BoxName string
 
 	// WebhookURL enables the event webhook. Empty — the default — means no
 	// webhook at all. Treat the value as a secret: a Home Assistant webhook
@@ -238,6 +242,7 @@ func load(get func(string) string, requireSecrets bool) (Config, error) {
 		WebhookMode:           str("WEBHOOK_MODE", "legacy"),
 		SyncBell:              boolean("SYNC_BELL", true),
 		SyncBellPoll:          time.Duration(integer("SYNC_BELL_POLL_S", 300)) * time.Second,
+		BoxName:               str("BOX_NAME", ""),
 
 		WebhookURL:            str("WEBHOOK_URL", ""),
 		WebhookToken:          str("WEBHOOK_TOKEN", ""),

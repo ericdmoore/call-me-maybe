@@ -21,6 +21,17 @@ var ErrReceiptConflict = errors.New("sync: the service holds a different receipt
 // clear line instead of a warning followed by the same refusal.
 var ErrTransportEnded = errors.New("sync: the account transport has ended")
 
+// ErrBadRequest marks a transport error that is the service refusing the
+// request as malformed (HTTP 400): retrying the same body cannot succeed.
+// The transport wraps it; reportStatus uses it to tell "the service does not
+// accept the box name" from a network failure.
+var ErrBadRequest = errors.New("sync: the service refused the request as invalid")
+
+// nameRetryAfter is how long the box waits to offer its name again after a
+// status report carrying it was refused as invalid: long enough that a
+// service that does not know the field yet costs one extra request a day.
+const nameRetryAfter = 24 * time.Hour
+
 // republishAfter re-sends an unchanged snapshot occasionally, so a service that
 // lost its copy recovers without waiting for a local edit or a restart.
 const republishAfter = 15 * time.Minute
@@ -82,6 +93,42 @@ func (m *Machine) publish(ctx context.Context, t Transport, s syncwire.Snapshot)
 	return nil
 }
 
+// reportStatus sends one status report, carrying the suggested box name until
+// the service has accepted a report with it for this enrolment. Acceptance is
+// recorded in the sync state directory, so a restart does not offer it again.
+//
+// The name must never cost the rest of the report: a service that refuses the
+// report carrying it as invalid (one that does not know the field yet, say)
+// gets the same report again without it at once, and is offered the name
+// again only after nameRetryAfter. Any other failure is the report's, not the
+// name's, and the next pass offers it again.
+func (m *Machine) reportStatus(ctx context.Context, t Transport, status syncwire.Status) error {
+	name := m.BoxName
+	if name == "" || m.nameAccepted || m.now().Before(m.nameRetryAt) {
+		name = ""
+	} else {
+		status.BoxName = &name
+	}
+	var result syncwire.StatusResult
+	err := exchange(ctx, t, "status", status, "StatusResult", &result)
+	if name == "" {
+		return err
+	}
+	if err == nil {
+		// Decode admits only {"status":"accepted"}. A failed write only means
+		// one more offer after a restart.
+		m.nameAccepted = true
+		_, _ = m.db.Exec("INSERT OR IGNORE INTO box_name VALUES (?,?)", m.box, m.now().UnixMilli())
+		return nil
+	}
+	if !errors.Is(err, ErrBadRequest) || ctx.Err() != nil {
+		return err
+	}
+	m.nameRetryAt = m.now().Add(nameRetryAfter)
+	status.BoxName = nil
+	return exchange(ctx, t, "status", status, "StatusResult", &result)
+}
+
 // Exchange makes one bounded, reconnectable round trip. The watcher runs
 // independently; slow network I/O cannot prevent local changes entering SQLite.
 // Exchange itself must not run concurrently with another Exchange.
@@ -96,8 +143,7 @@ func (m *Machine) Exchange(ctx context.Context, t Transport) error {
 	if m.SampleStatus != nil {
 		status := m.SampleStatus()
 		status.ConfigRejection = m.Rejection()
-		var result syncwire.StatusResult
-		err := exchange(ctx, t, "status", status, "StatusResult", &result)
+		err := m.reportStatus(ctx, t, status)
 		if errors.Is(err, ErrTransportEnded) {
 			return err
 		}
