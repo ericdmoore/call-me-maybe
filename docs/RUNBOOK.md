@@ -636,6 +636,16 @@ box polls only every `SYNC_BELL_POLL_S` seconds (default 300) as a safety net;
 while it is down it polls every five seconds, exactly as without a bell. So a
 blocked bell costs speed of delivery at worst, never correctness.
 
+A command's receipt says `saved` once the file is written and `applied` once
+the daemon is running that exact revision. Between passes, while a `saved`
+receipt is outstanding, sync asks the daemon's local activation socket
+(`active.sock` in the sync state directory) every half second whether the
+revision is loaded, and runs one pass as soon as it is, so the app shows
+`applied` within a second or two of `policy reloaded`. After 30 seconds the
+checks slow down, doubling to one every 30 seconds, until the receipt is
+applied or the command expires. They are local reads only; with nothing
+outstanding there are none.
+
 ```bash
 $ journalctl -u doorman-sync --no-pager | grep 'bell:'
 ```

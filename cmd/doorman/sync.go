@@ -90,20 +90,7 @@ func runSync(args []string) int {
 		sample.ContentInventory = inventory.Sample()
 		return sample
 	}
-	m.Applied = func(paths syncmachine.Paths, files map[string][]byte) bool {
-		current, err := activation.Read(dir)
-		if err != nil {
-			return false
-		}
-		lines, _ := policy.DiscoverLines(paths.Policy)
-		for _, line := range lines {
-			data, ok := files[line.Path]
-			if !ok || current[line.Name] != policy.SourceDigest(data, files[paths.Handsets]) {
-				return false
-			}
-		}
-		return true
-	}
+	m.Applied = activationApplied(dir)
 	if mode == "snapshot" {
 		s, err := m.Observe()
 		if err != nil {
@@ -127,15 +114,24 @@ func runSync(args []string) int {
 	} else {
 		go inventory.Run(ctx)
 	}
+	var follow *applyFollow
 	exchange := func(ctx context.Context) error {
 		bounded, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		return m.Exchange(bounded, syncTransport(client.Sync))
+		err := m.Exchange(bounded, syncTransport(client.Sync))
+		if follow != nil {
+			follow.kick()
+		}
+		return err
 	}
 	if mode == "once" {
 		return syncLoop(ctx, exchange, nil, true)
 	}
 	wake := newSyncWake()
+	follow = newApplyFollow(m.AwaitingApply, wake.ring)
+	followDone := make(chan struct{})
+	go func() { defer close(followDone); follow.run(ctx) }()
+	defer func() { stop(); <-followDone }()
 	enabled, slow, issue := config.SyncBellSettings(os.Getenv)
 	if issue != "" {
 		fmt.Fprintln(os.Stderr, "sync: "+issue+"; using the default")
@@ -158,6 +154,25 @@ func runSync(args []string) int {
 		defer func() { stopBell(); <-bellDone }()
 	}
 	return syncLoop(ctx, exchange, wake, false)
+}
+
+// activationApplied proves a revision is running: the daemon's activation
+// socket reports, for every line, the digest of exactly these files.
+func activationApplied(dir string) func(syncmachine.Paths, map[string][]byte) bool {
+	return func(paths syncmachine.Paths, files map[string][]byte) bool {
+		current, err := activation.Read(dir)
+		if err != nil {
+			return false
+		}
+		lines, _ := policy.DiscoverLines(paths.Policy)
+		for _, line := range lines {
+			data, ok := files[line.Path]
+			if !ok || current[line.Name] != policy.SourceDigest(data, files[paths.Handsets]) {
+				return false
+			}
+		}
+		return true
+	}
 }
 
 // bellError reads the account's answers in the bell's terms. The bell
