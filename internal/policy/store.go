@@ -20,7 +20,8 @@ type Store struct {
 	policyPath   string
 	handsetsPath string
 	opts         Options
-	trunks       string // trunksStamp at the initial load
+	initial      string // the stamp the poller starts from
+	fallback     error  // why startup is running the last good copy, if it is
 	onReload     func(*Policy)
 	onError      func(error)
 
@@ -44,22 +45,37 @@ func OpenStore(policyPath, handsetsPath string, watch bool, onReload func(*Polic
 // The daemon passes configcheck.Options, the same rules `doorman check` and
 // sync apply. A reload those rules refuse is reported through onError and the
 // previous good policy stays in service (invariant 4).
+//
+// With Options.LastGood set, every accepted load is copied there, and a
+// startup whose current files are refused runs that copy instead: Fallback
+// says why. Only when there is no usable copy does OpenStoreWith fail.
 func OpenStoreWith(policyPath, handsetsPath string, watch bool, o Options, onReload func(*Policy), onError func(error)) (*Store, error) {
-	trunks := trunksStamp(o.TrunksPath)
-	p, err := LoadSplitWith(policyPath, handsetsPath, o)
-	if err != nil {
-		return nil, err
-	}
 	s := &Store{
-		policy:       p,
 		policyPath:   policyPath,
 		handsetsPath: handsetsPath,
 		opts:         o,
-		trunks:       trunks,
 		onReload:     onReload,
 		onError:      onError,
 		stop:         make(chan struct{}),
 		done:         make(chan struct{}),
+	}
+	before := s.stamp()
+	trunks := trunksStamp(o.TrunksPath)
+	p, err := LoadSplitWith(policyPath, handsetsPath, o)
+	switch {
+	case err == nil:
+		s.policy, s.initial = p, p.SourceDigest()+trunks
+		s.keepLastGood(p)
+	case o.LastGood != "":
+		last, lastErr := loadLastGood(o.LastGood, handsetsPath != "", o.TrunksPath != "", o)
+		if lastErr != nil {
+			return nil, err // no usable copy: refused, as without one
+		}
+		// The poller starts from the refused files, so they are not
+		// reported a second time; an edit to them is tried at once.
+		s.policy, s.initial, s.fallback = last, before, err
+	default:
+		return nil, err
 	}
 	if watch {
 		go s.poll()
@@ -77,29 +93,45 @@ func (s *Store) Current() *Policy {
 	return s.policy
 }
 
-func (s *Store) poll() {
-	defer close(s.done)
+// Fallback is the refusal that put this store on its last good copy at
+// startup, or nil when it is running the current files.
+func (s *Store) Fallback() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.fallback
+}
 
-	stamp := func() string {
-		p, err := os.ReadFile(s.policyPath)
-		if err != nil {
+// stamp identifies the current bytes of every file a load reads. The trunk
+// inventory is part of it because [line] trunk is checked against it: an
+// edit there can make a policy valid or invalid.
+func (s *Store) stamp() string {
+	p, err := os.ReadFile(s.policyPath)
+	if err != nil {
+		return "unread"
+	}
+	var h []byte
+	if s.handsetsPath != "" {
+		h, err = os.ReadFile(s.handsetsPath)
+		if err != nil && !os.IsNotExist(err) {
 			return "unread"
 		}
-		var h []byte
-		if s.handsetsPath != "" {
-			h, err = os.ReadFile(s.handsetsPath)
-			if err != nil && !os.IsNotExist(err) {
-				return "unread"
-			}
-		}
-		return SourceDigest(p, h) + trunksStamp(s.opts.TrunksPath)
 	}
+	return SourceDigest(p, h) + trunksStamp(s.opts.TrunksPath)
+}
+
+func (s *Store) keepLastGood(p *Policy) {
+	if err := s.saveLastGood(p); err != nil && s.opts.OnLastGoodError != nil {
+		s.opts.OnLastGoodError(err)
+	}
+}
+
+func (s *Store) poll() {
+	defer close(s.done)
+	stamp := s.stamp
 
 	// Start with the loaded bytes, not a second read that could hide an edit
-	// made between OpenStore's initial compilation and this goroutine. The
-	// trunk inventory is part of the stamp because [line] trunk is checked
-	// against it: an edit there can make a policy valid or invalid.
-	last := s.policy.SourceDigest() + s.trunks
+	// made between OpenStore's initial compilation and this goroutine.
+	last := s.initial
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -128,8 +160,9 @@ func (s *Store) poll() {
 			}
 			last = next.SourceDigest() + trunks
 			s.mu.Lock()
-			s.policy = next
+			s.policy, s.fallback = next, nil
 			s.mu.Unlock()
+			s.keepLastGood(next)
 			if s.onReload != nil {
 				s.onReload(next)
 			}

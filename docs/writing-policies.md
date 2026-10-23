@@ -249,8 +249,8 @@ days = ["SU", "MO", "TU", "WE", "TH"]
 | Key | Type | Meaning |
 |---|---|---|
 | `id` | string | Referenced by extensions. Lowercase alphanumeric, dash, underscore, at most 60 characters. Required. |
-| `start`, `end` | `HH:MM` | Local time, `00:00` to `23:59`, with both hour digits (`07:00`, not `7:00`). Required. |
-| `days` | list | `SU MO TU WE TH FR SA`, each at most once. Empty means every day. |
+| `start`, `end` | `HH:MM` | Local time, `00:00` to `23:59`. `7:00` means `07:00`. Required. |
+| `days` | list | `SU MO TU WE TH FR SA`. Empty means every day. |
 | `enabled` | bool | Defaults true. False makes every reference inert **without deleting the definition**. A disabled schedule is still validated: an impossible time is refused whether or not the schedule is on. |
 
 Two things worth knowing.

@@ -130,9 +130,31 @@ func TestCheckDaemonAndSyncRefuseTheSameInvalidTime(t *testing.T) {
 	if r := m.Rejection(); r == nil || r.File != "policy.toml" || !strings.Contains(r.Message, "25:99") {
 		t.Fatalf("observer rejection = %+v", r)
 	}
-	// and the daemon refuses it at startup too, as check does
+	// A restart now: the current files are refused, so the daemon runs the
+	// last good copy it saved when 03:05 was accepted, and says so loudly.
+	var restartLogs lockedBuffer
+	restarted, err := openLines(files, handsetsPath, trunksPath, false, slog.New(slog.NewTextHandler(&restartLogs, nil)), nil)
+	if err != nil {
+		t.Fatalf("a box with a last good copy did not start: %v", err)
+	}
+	if restarted[0].store.Fallback() == nil || restarted[0].store.Current().SourceDigest() != before.SourceDigest() {
+		t.Fatal("startup is not running the last good configuration")
+	}
+	out = restartLogs.String()
+	if !strings.Contains(out, "POLICY REFUSED AT STARTUP") || !strings.Contains(out, "25:99") || strings.Contains(out, "428917") {
+		t.Fatalf("startup fallback not reported (or not redacted): %s", out)
+	}
+	restarted[0].store.Close()
+	// ... and a connected account is told, through the observer.
+	if _, err := m.Observe(); err == nil || m.Rejection() == nil || m.Rejection().File != "policy.toml" {
+		t.Fatal("observer does not report the file the daemon refused")
+	}
+	// Without a usable copy it refuses, as it always has.
+	if err := os.RemoveAll(filepath.Join(dir, "policy.last-good")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := openLines(files, handsetsPath, trunksPath, false, slog.New(slog.DiscardHandler), nil); err == nil {
-		t.Fatal("the daemon started on a file check refuses")
+		t.Fatal("started on a refused file with no last good copy")
 	}
 
 	write("03:05")
@@ -141,5 +163,43 @@ func TestCheckDaemonAndSyncRefuseTheSameInvalidTime(t *testing.T) {
 	}
 	if s, err := m.Observe(); err != nil || s.Revision != good.Revision || m.Rejection() != nil {
 		t.Fatalf("observer did not accept the fix: %v %+v", err, m.Rejection())
+	}
+}
+
+// "7:00" has always loaded and means 07:00: check, the daemon and sync all
+// accept it, and the wire carries 07:00.
+func TestOneDigitHourIsAcceptedEverywhere(t *testing.T) {
+	dir := policyDir(t, map[string]string{"policy.toml": oneValidatorPolicy("7:00")})
+	policyPath, handsetsPath := filepath.Join(dir, "policy.toml"), filepath.Join(dir, "handsets.toml")
+	trunksPath := filepath.Join(dir, "trunks.toml")
+	var rc int
+	captureStderr(t, func() {
+		capture(t, func() {
+			rc = runCheck([]string{"--policy-only", "--handsets", handsetsPath, "--trunks", trunksPath,
+				"--contacts", filepath.Join(dir, "contacts.toml"), "--messages", filepath.Join(dir, "messages.toml"),
+				"--env", filepath.Join(dir, ".env"), policyPath})
+		})
+	})
+	if rc != 0 {
+		t.Fatalf("check refused 7:00 (rc %d)", rc)
+	}
+	files, _ := policy.DiscoverLines(policyPath)
+	opened, err := openLines(files, handsetsPath, trunksPath, false, slog.New(slog.DiscardHandler), nil)
+	if err != nil || opened[0].store.Fallback() != nil {
+		t.Fatalf("daemon refused 7:00: %v", err)
+	}
+	opened[0].store.Close()
+	m, err := syncmachine.Open(filepath.Join(dir, "sync"), "ac409cd3-8105-4200-9a32-42a064a98bb0",
+		syncmachine.Paths{Policy: policyPath, Handsets: handsetsPath, Trunks: trunksPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	s, err := m.Observe()
+	if err != nil {
+		t.Fatalf("sync refused 7:00: %v", err)
+	}
+	if got := s.Configuration.Policies[0].Schedules[0].Start; got != "07:00" {
+		t.Fatalf("wire start = %q, want 07:00", got)
 	}
 }

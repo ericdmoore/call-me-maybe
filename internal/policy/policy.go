@@ -258,10 +258,11 @@ var (
 	endpointPattern = regexp.MustCompile(`^[A-Za-z0-9]+/\S+$`)
 	pinPattern      = regexp.MustCompile(`^\d+$`)
 	mailboxPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
-	// clockPattern is HH:MM with both hours digits: 07:00, never 7:00. The
+	// clockPattern is H:MM or HH:MM: "7:00" has always loaded and means
+	// 07:00, so it stays valid everywhere (sync carries it as 07:00). The
 	// range is checked separately so "25:99" is told it is not a time of day
 	// rather than that it is shaped wrongly.
-	clockPattern = regexp.MustCompile(`^(\d{2}):(\d{2})$`)
+	clockPattern = regexp.MustCompile(`^(\d{1,2}):(\d{2})$`)
 )
 
 var dayIndex = map[string]int{"SU": 0, "MO": 1, "TU": 2, "WE": 3, "TH": 4, "FR": 5, "SA": 6}
@@ -454,6 +455,16 @@ type Options struct {
 	// policy: the daemon answers calls without reading that file, and check
 	// and sync already refuse the trunks.toml itself, by name.
 	TrunksPath string
+
+	// LastGood, when set, is where a Store keeps the last good copy of this
+	// line's files (see LastGoodPath): written each time a load is accepted,
+	// and loaded at startup when the current files are refused. Only stores
+	// use it.
+	LastGood string
+
+	// OnLastGoodError is told when a last good copy could not be written.
+	// The policy is in service regardless; only the safety net is missing.
+	OnLastGoodError func(error)
 }
 
 // decode is the single TOML entry point for both config files: it fills a
@@ -1218,10 +1229,7 @@ func compileWindow(where, startStr, endStr string, dayList []string, fail func(s
 			fail("%s day %q must be one of SU MO TU WE TH FR SA", where, truncateForMessage(d))
 			continue
 		}
-		if days[i] {
-			fail("%s lists day %s twice", where, strings.ToUpper(d))
-		}
-		days[i] = true
+		days[i] = true // a repeated day is harmless, and has always loaded
 	}
 	return &Afterhours{StartMin: start, EndMin: end, Days: days}
 }

@@ -278,15 +278,26 @@ func observe(paths Paths) (*observed, error) {
 			return nil, j.reject(line.Path, "not valid TOML")
 		}
 		for _, s := range rows(raw, "schedules") {
-			// Day codes are case-insensitive to every reader on the box.
-			days := list(s, "days")
-			for i, d := range days {
-				if d, ok := d.(string); ok {
-					days[i] = strings.ToUpper(d)
-				}
-			}
+			// Day codes are case-insensitive to every reader on the box, and a
+			// repeated day means nothing more than the day once.
 			if _, ok := s["days"]; ok {
+				days, seen := []any{}, map[string]bool{}
+				for _, d := range list(s, "days") {
+					if d, ok := d.(string); ok {
+						d = strings.ToUpper(d)
+						if !seen[d] {
+							seen[d] = true
+							days = append(days, d)
+						}
+					}
+				}
 				s["days"] = days
+			}
+			// "7:00" is 07:00 to the validator; the wire carries the latter.
+			for _, field := range []string{"start", "end"} {
+				if v := str(s, field); len(v) == 4 && v[1] == ':' {
+					s[field] = "0" + v
+				}
 			}
 		}
 		out.files[line.Path], out.policies[line.Name] = data, line.Path

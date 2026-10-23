@@ -26,10 +26,12 @@ type openLine struct {
 // sections of one. Invariant 4 says an invalid policy must never take the
 // phone down; per-line stores generalise it to *an invalid policy must never
 // take down a line it does not belong to*, at startup and on every reload
-// after it. A named line that will not load is reported and dropped — calls
-// arriving on it are served by the default line, the same place an unknown
-// name lands. A default line that will not load is returned as an error,
-// because that is the whole phone rather than one number.
+// after it. A line whose current files are refused at startup runs its last
+// good copy (policy.last-good/<line>, written each time a load is accepted)
+// and says so loudly. Only without a usable copy is a named line dropped —
+// calls arriving on it are served by the default line, the same place an
+// unknown name lands — and a default line returned as an error, because that
+// is the whole phone rather than one number.
 //
 // Every line is validated by configcheck.Options, the rules `doorman check`
 // and sync apply, with [line] trunk checked against trunksPath at every load.
@@ -57,6 +59,11 @@ func openLines(files []policy.LineFile, handsetsPath, trunksPath string, watch b
 			lineLog.Warn("unrecognised key in config",
 				"file", u.File, "key", u.Path, "didYouMean", u.Suggest,
 				"hint", "run `doorman check` for the full report")
+		}
+		opts.LastGood = policy.LastGoodPath(lf.Path, lf.Name)
+		opts.OnLastGoodError = func(err error) {
+			lineLog.Warn("cannot save the last good copy of the policy; the policy is in service, but a restart after a bad edit has nothing to fall back to",
+				"lastGood", opts.LastGood, "problem", policy.RedactProblem(err.Error(), 0))
 		}
 
 		store, err := policy.OpenStoreWith(lf.Path, handsetsPath, watch, opts,
@@ -91,6 +98,18 @@ func openLines(files []policy.LineFile, handsetsPath, trunksPath string, watch b
 			continue
 		}
 		opened = append(opened, openLine{lf.Name, store, lineLog})
+		if refused := store.Fallback(); refused != nil {
+			// One line that cannot be missed: the box is answering calls, but
+			// not with the files on disk.
+			if journal != nil {
+				e := events.System(events.ConfigReloadFailed, "running-last-good-policy", 0)
+				e.Line = lf.Name
+				journal.Post(e)
+			}
+			lineLog.Error("POLICY REFUSED AT STARTUP — running the last good configuration until the files are fixed",
+				"path", lf.Path, "lastGood", opts.LastGood, "problem", policy.RedactProblem(refused.Error(), 0),
+				"hint", "run `doorman check` for the full report")
+		}
 
 		pol := store.Current()
 		// onNoInput is on the startup line because it is the one policy value

@@ -26,9 +26,11 @@ func TestScheduleTimesAreValidatedEvenWhenDisabled(t *testing.T) {
 		{"start = \"25:99\"\nend = \"07:00\"", `start "25:99" is not a time of day`},
 		{"enabled = false\nstart = \"21:00\"\nend = \"24:00\"", `end "24:00" is not a time of day`},
 		{"enabled = false\nstart = \"21:60\"\nend = \"07:00\"", `"21:60" is not a time of day`},
-		{"enabled = false\nstart = \"7:00\"\nend = \"08:00\"", `"7:00" must be HH:MM`},
+		{"enabled = false\nstart = \"7:00\"\nend = \"8:30\"", ""},
+		{"enabled = false\nstart = \"7:60\"\nend = \"08:00\"", `"7:60" is not a time of day`},
+		{"enabled = false\nstart = \"7\"\nend = \"08:00\"", `"7" must be HH:MM`},
 		{"enabled = false\nend = \"08:00\"", `start "" must be HH:MM`},
-		{"enabled = false\nstart = \"21:00\"\nend = \"07:00\"\ndays = [\"MO\", \"mo\"]", "lists day MO twice"},
+		{"enabled = false\nstart = \"21:00\"\nend = \"07:00\"\ndays = [\"MO\", \"mo\"]", ""},
 		{"enabled = false\nstart = \"00:00\"\nend = \"23:59\"\ndays = [\"mo\", \"TU\"]", ""},
 		{"enabled = false\nstart = \"03:05\"\nend = \"07:00\"", ""},
 	} {

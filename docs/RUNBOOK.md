@@ -219,10 +219,12 @@ Record each before the upgrade and compare after; any failure means roll back.
 
 1. **Identity:** every copy prints exactly the release version, and its
    SHA-256 matches `checksums.txt`.
-2. **Configuration:** `doorman check` passes on the live files. Run the *new*
-   binary's `doorman check --policy-only` before restarting anything: a release
-   can tighten validation, and the daemon refuses at startup a default-line
-   policy that check refuses.
+2. **Configuration:** `doorman check` passes on the live files. Worth running
+   the *new* binary's `doorman check --policy-only` before restarting: a
+   release can tighten validation. If it refuses the live files, the daemon
+   still starts — on the last good copy it saved (see *An invalid policy must
+   never take the phone down*) — but your edits since then are not in service
+   until the files pass.
 3. **Services:** the four units are active with no restarts; only the units you
    restarted have new PIDs.
 4. **Phone network:** the trunk shows `Registered` (`pjsip show
@@ -1437,6 +1439,19 @@ daemon's reload and the sync observer apply one validator, so they always agree
 on whether a file is valid. The reload failure is logged with numbers and PINs
 redacted; a box enrolled in sync also reports it to the account as the file it
 rejected and why.
+
+**Across a restart, too.** Each time a line's files are accepted, at startup
+or on reload, the daemon saves an exact copy beside them in
+`policy.last-good/<line>/` (`policy.toml`, `handsets.toml`, `trunks.toml` when
+there is one; mode 0600, same owner as the originals, swapped in atomically).
+If the current files are refused at startup — a bad edit made while doorman
+was stopped, or a release whose validation is stricter — it runs that copy
+and logs one line you cannot miss:
+`POLICY REFUSED AT STARTUP — running the last good configuration until the
+files are fixed`, with the redacted reason. Fix the files and the ordinary
+reload picks them up. Only when there is no usable copy does a refused
+default line stop the daemon starting. The copies hold PINs, like the files
+they copy; leave them where they are and never commit them.
 
 ### Add a handset
 

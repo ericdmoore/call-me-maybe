@@ -216,9 +216,11 @@ Break these and the phone fails in ways that look like working software.
    in the state machine selects on `ctx.Done()`. Do not add state flags, and
    do not add an exit path that skips the defer.
 4. **An invalid `policy.toml` must never take the phone down.** The store
-   keeps the last good policy on a failed reload, and `RotatePins` validates
-   before writing and writes atomically. Preserve both properties on any
-   change to those paths.
+   keeps the last good policy on a failed reload, at startup it runs the last
+   good copy (`policy.last-good/<line>`, saved atomically on every accepted
+   load) when the current files are refused, and `RotatePins` validates
+   before writing and writes atomically. Preserve all three on any change to
+   those paths.
 5. **PIN comparison stays exact-match against a map.** No prefix matching, no
    fuzzy fallback. Extensions are credentials; `RotatePins` generates them
    with crypto/rand for the same reason.

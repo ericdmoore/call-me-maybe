@@ -113,12 +113,12 @@ func TestRejectedFileIsLoggedOnceReportedInStatusAndCleared(t *testing.T) {
 	}
 
 	// A different broken content is a new rejection, logged once more.
-	if err := os.WriteFile(p.Policy, []byte(disabledSchedule("7:00")), 0o600); err != nil {
+	if err := os.WriteFile(p.Policy, []byte(disabledSchedule("7:60")), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	m.Observe()
 	m.Observe()
-	if len(logged) != 2 || !strings.Contains(m.Rejection().Message, `"7:00" must be HH:MM`) {
+	if len(logged) != 2 || !strings.Contains(m.Rejection().Message, `"7:60" is not a time of day`) {
 		t.Fatalf("logged %q, rejection %+v", logged, m.Rejection())
 	}
 
@@ -245,10 +245,12 @@ func TestObserverAcceptsExactlyWhatTheSharedValidatorAccepts(t *testing.T) {
 		{"disabled schedule 25:99", sched("enabled = false\nstart = \"25:99\"\nend = \"07:00\""), false},
 		{"enabled schedule 25:99", sched("start = \"25:99\"\nend = \"07:00\""), false},
 		{"disabled schedule missing start", sched("enabled = false\nend = \"07:00\""), false},
-		{"one-digit hour", sched("start = \"7:00\"\nend = \"08:00\""), false},
+		{"one-digit hour", sched("start = \"7:00\"\nend = \"8:30\""), true},
+		{"one-digit hour, bad minutes", sched("start = \"7:60\"\nend = \"08:00\""), false},
+		{"three-digit hour", sched("start = \"007:00\"\nend = \"08:00\""), false},
 		{"midnight and 23:59", sched("start = \"00:00\"\nend = \"23:59\""), true},
 		{"lower-case day", sched("start = \"21:00\"\nend = \"07:00\"\ndays = [\"mo\", \"Tu\"]"), true},
-		{"repeated day", sched("start = \"21:00\"\nend = \"07:00\"\ndays = [\"MO\", \"MO\"]"), false},
+		{"repeated day", sched("start = \"21:00\"\nend = \"07:00\"\ndays = [\"MO\", \"mo\", \"MO\", \"TU\", \"WE\", \"TH\", \"FR\", \"SA\", \"SU\"]"), true},
 		{"unknown day", sched("start = \"21:00\"\nend = \"07:00\"\ndays = [\"XX\"]"), false},
 		{"schedule id of 61", pol("[[schedules]]\nid = \"" + long(61) + "\"\nstart = \"21:00\"\nend = \"07:00\""), false},
 		{"schedule id of 60", pol("[[schedules]]\nid = \"" + long(60) + "\"\nstart = \"21:00\"\nend = \"07:00\""), true},
