@@ -20,6 +20,7 @@ type Store struct {
 	policyPath   string
 	handsetsPath string
 	opts         Options
+	trunks       string // trunksStamp at the initial load
 	onReload     func(*Policy)
 	onError      func(error)
 
@@ -40,9 +41,11 @@ func OpenStore(policyPath, handsetsPath string, watch bool, onReload func(*Polic
 // load and to every reload, so a typo introduced at 2am is reported then and
 // not only at the next restart.
 //
-// Do not set Options.StrictUnknownKeys here: this is the call path invariant
-// 4 protects, and refusing a file that loaded yesterday takes the phone down.
+// The daemon passes configcheck.Options, the same rules `doorman check` and
+// sync apply. A reload those rules refuse is reported through onError and the
+// previous good policy stays in service (invariant 4).
 func OpenStoreWith(policyPath, handsetsPath string, watch bool, o Options, onReload func(*Policy), onError func(error)) (*Store, error) {
+	trunks := trunksStamp(o.TrunksPath)
 	p, err := LoadSplitWith(policyPath, handsetsPath, o)
 	if err != nil {
 		return nil, err
@@ -52,6 +55,7 @@ func OpenStoreWith(policyPath, handsetsPath string, watch bool, o Options, onRel
 		policyPath:   policyPath,
 		handsetsPath: handsetsPath,
 		opts:         o,
+		trunks:       trunks,
 		onReload:     onReload,
 		onError:      onError,
 		stop:         make(chan struct{}),
@@ -88,12 +92,14 @@ func (s *Store) poll() {
 				return "unread"
 			}
 		}
-		return SourceDigest(p, h)
+		return SourceDigest(p, h) + trunksStamp(s.opts.TrunksPath)
 	}
 
 	// Start with the loaded bytes, not a second read that could hide an edit
-	// made between OpenStore's initial compilation and this goroutine.
-	last := s.policy.SourceDigest()
+	// made between OpenStore's initial compilation and this goroutine. The
+	// trunk inventory is part of the stamp because [line] trunk is checked
+	// against it: an edit there can make a policy valid or invalid.
+	last := s.policy.SourceDigest() + s.trunks
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -108,6 +114,7 @@ func (s *Store) poll() {
 			}
 			last = now
 
+			trunks := trunksStamp(s.opts.TrunksPath)
 			next, err := LoadSplitWith(s.policyPath, s.handsetsPath, s.opts)
 			if err != nil {
 				if s.onError != nil {
@@ -115,11 +122,11 @@ func (s *Store) poll() {
 				}
 				continue // previous good policy stays in service
 			}
-			if stamp() != next.SourceDigest() {
+			if stamp() != next.SourceDigest()+trunks {
 				last = "" // related files changed during compilation; retry
 				continue
 			}
-			last = next.SourceDigest()
+			last = next.SourceDigest() + trunks
 			s.mu.Lock()
 			s.policy = next
 			s.mu.Unlock()
@@ -138,4 +145,20 @@ func (s *Store) Close() {
 		close(s.stop)
 	}
 	<-s.done
+}
+
+// trunksStamp identifies the trunk inventory's bytes for change detection.
+// Empty when there is no path to watch.
+func trunksStamp(path string) string {
+	if path == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "|absent"
+		}
+		return "|unread"
+	}
+	return "|" + SourceDigest(data, nil)
 }

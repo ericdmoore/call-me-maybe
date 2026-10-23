@@ -219,7 +219,10 @@ Record each before the upgrade and compare after; any failure means roll back.
 
 1. **Identity:** every copy prints exactly the release version, and its
    SHA-256 matches `checksums.txt`.
-2. **Configuration:** `doorman check` passes on the live files.
+2. **Configuration:** `doorman check` passes on the live files. Run the *new*
+   binary's `doorman check --policy-only` before restarting anything: a release
+   can tighten validation, and the daemon refuses at startup a default-line
+   policy that check refuses.
 3. **Services:** the four units are active with no restarts; only the units you
    restarted have new PIDs.
 4. **Phone network:** the trunk shows `Registered` (`pjsip show
@@ -941,9 +944,10 @@ It prints the settings you *didn't* write too, as `(none — ...)`. That is
 deliberate and it is how you catch a misspelled key: `voicmail = "kids"` is a
 legal TOML key that no field claims, so before it was reported the mailbox
 simply never existed and the file looked fine. Check now rejects a key it
-does not recognise and suggests the nearest real one; if you would rather see
-it than be stopped by it, that is what the daemon's log does — it warns and
-keeps the phone up (see *An invalid policy must never take the phone down*).
+does not recognise and suggests the nearest real one. The daemon's reload and
+sync refuse the same file — one validator for all three — and the daemon keeps
+the last good policy in service while they do (see *An invalid policy must
+never take the phone down*).
 
 ### Home Assistant Assist (optional)
 
@@ -1426,10 +1430,13 @@ A file that fails validation is rejected and the previous version stays live,
 so a typo cannot take the phone down — but check the log to confirm the reload
 actually happened rather than silently failing.
 
-Also worth a look: `unrecognised key in config, ignoring it`. The daemon warns
-rather than refusing, so an edit that misspelled a key *does* reload — it just
-does not do what you meant. `doorman check` turns the same warning into an
-error and tells you which key it should have been.
+Also worth a look: `unrecognised key in config`. A misspelled key is refused
+like any other invalid edit — the reload fails, the previous policy stays live,
+and `doorman check` says which key it should have been. `doorman check`, the
+daemon's reload and the sync observer apply one validator, so they always agree
+on whether a file is valid. The reload failure is logged with numbers and PINs
+redacted; a box enrolled in sync also reports it to the account as the file it
+rejected and why.
 
 ### Add a handset
 
@@ -2825,7 +2832,7 @@ Not everything here is a matter of discipline. These are checked by machine:
 | Concurrent calls are capped | admission control in the event router |
 | Config cross-references resolve | `doorman check`, the LSP, and the daemon share one validator |
 | The provider API key stays out of the daemon | `internal/provider` is reachable only from `doorman balance`; tests assert nothing on the call path imports it and no other file in `cmd/doorman` reads the credential |
-| Every config key is one the schema names | `doorman check` and the LSP reject an unknown key; the daemon warns and keeps running |
+| Every config key is one the schema names | `doorman check`, the LSP, the daemon's reload and sync reject an unknown key; the daemon keeps its last good policy |
 
 
 ## Event journal and consumer recovery

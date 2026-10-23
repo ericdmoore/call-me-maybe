@@ -34,9 +34,10 @@ type Config struct {
 	PolicyPath   string
 	HandsetsPath string
 	// TrunksPath is the provider inventory. The file is optional and its
-	// absence is the compatibility gate; the daemon reads it for exactly one
-	// thing, which is to announce at startup which trunk carries 911. Nothing
-	// on the call path routes on a trunk.
+	// absence is the compatibility gate. The daemon reads it to announce at
+	// startup which trunk carries 911, and to check each policy's [line] trunk
+	// against it on every load, as `doorman check` and sync do. Nothing on the
+	// call path routes on a trunk.
 	TrunksPath string
 	// ContactsPath is the address-book inventory. Optional, and absent is the
 	// state every install is in: no file, no lookup, and the lobby admits

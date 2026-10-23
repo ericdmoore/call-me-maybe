@@ -35,6 +35,7 @@ import (
 	"callmemaybe/internal/ari"
 	"callmemaybe/internal/calls"
 	"callmemaybe/internal/config"
+	"callmemaybe/internal/configcheck"
 	"callmemaybe/internal/contacts"
 	"callmemaybe/internal/events"
 	"callmemaybe/internal/host"
@@ -486,15 +487,11 @@ func runCheck(args []string) (code int) {
 		return 1
 	}
 
-	// StrictUnknownKeys is set here and nowhere else that loads a policy. An
-	// operator is reading this output and a typo is exactly what they came to
-	// find; the daemon, which cannot afford to refuse a file, only warns.
-	opts := policy.Options{
-		AllowPlaceholders: *allowPlaceholders,
-		StrictUnknownKeys: true,
-		Trunks:            trunks,
-		ModelKnown:        provision.Known,
-	}
+	// The same rules the daemon's reload and sync apply (configcheck), so a
+	// file this passes is one both of them accept. AllowPlaceholders is the
+	// one difference, and only CI sets it.
+	opts := configcheck.Options(trunks)
+	opts.AllowPlaceholders = *allowPlaceholders
 
 	files, ignored := policy.DiscoverLines(path)
 	results := make([]checkedLine, 0, len(files))
@@ -1602,7 +1599,7 @@ func serve() error {
 			"path", ig.Path, "reason", ig.Reason)
 	}
 
-	opened, err := openLines(lineFiles, cfg.HandsetsPath, cfg.PolicyWatch, log, journal)
+	opened, err := openLines(lineFiles, cfg.HandsetsPath, cfg.TrunksPath, cfg.PolicyWatch, log, journal)
 	if err != nil {
 		log.Error("cannot load policy", "path", cfg.PolicyPath, "err", err)
 		return fmt.Errorf("service startup failed: %w", err)

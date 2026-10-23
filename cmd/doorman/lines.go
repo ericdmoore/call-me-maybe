@@ -1,10 +1,12 @@
 package main
 
 import (
+	"errors"
 	"log/slog"
 	"sort"
 	"strings"
 
+	"callmemaybe/internal/configcheck"
 	"callmemaybe/internal/events"
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/policy"
@@ -28,7 +30,12 @@ type openLine struct {
 // arriving on it are served by the default line, the same place an unknown
 // name lands. A default line that will not load is returned as an error,
 // because that is the whole phone rather than one number.
-func openLines(files []policy.LineFile, handsetsPath string, watch bool, log *slog.Logger, journal *events.Writer) ([]openLine, error) {
+//
+// Every line is validated by configcheck.Options, the rules `doorman check`
+// and sync apply, with [line] trunk checked against trunksPath at every load.
+// Validation problems are logged through policy.RedactProblem: a message may
+// quote a number or a PIN from the file, and neither belongs in a log.
+func openLines(files []policy.LineFile, handsetsPath, trunksPath string, watch bool, log *slog.Logger, journal *events.Writer) ([]openLine, error) {
 
 	var opened []openLine
 	for _, lf := range files {
@@ -40,17 +47,16 @@ func openLines(files []policy.LineFile, handsetsPath string, watch bool, log *sl
 			lineLog = log.With("line", lf.Name)
 		}
 
-		// Unknown keys warn here and refuse in `doorman check`. The daemon
-		// must keep answering the phone (invariant 4), so a key it does not
-		// recognise is something to say loudly and then ignore — which is what
-		// the decoder was already doing, minus the saying. Only names are
+		// Unknown keys are refused here as in `doorman check` and sync — one
+		// validator (call-me-maybe#131). Each is still named on its own line,
+		// so the reason a reload was refused is easy to find. Only names are
 		// logged; a key's value never is.
-		opts := policy.Options{
-			OnUnknownKey: func(u policy.UnknownKey) {
-				lineLog.Warn("unrecognised key in config, ignoring it",
-					"file", u.File, "key", u.Path, "didYouMean", u.Suggest,
-					"hint", "run `doorman check` for the full report")
-			},
+		opts := configcheck.Options(nil)
+		opts.TrunksPath = trunksPath
+		opts.OnUnknownKey = func(u policy.UnknownKey) {
+			lineLog.Warn("unrecognised key in config",
+				"file", u.File, "key", u.Path, "didYouMean", u.Suggest,
+				"hint", "run `doorman check` for the full report")
 		}
 
 		store, err := policy.OpenStoreWith(lf.Path, handsetsPath, watch, opts,
@@ -69,18 +75,19 @@ func openLines(files []policy.LineFile, handsetsPath string, watch bool, log *sl
 					e.Line = lf.Name
 					journal.Post(e)
 				}
-				lineLog.Error("policy reload failed, keeping previous version", "err", err)
+				lineLog.Error("policy reload failed, keeping previous version",
+					"problem", policy.RedactProblem(err.Error(), 0))
 			},
 		)
 		if err != nil {
 			if lf.Name == policy.DefaultLine {
-				// Returned unwrapped: the only error this can be is the
-				// default line's, and the caller already knows its path.
-				return opened, err
+				// The only error this can be is the default line's, and the
+				// caller already knows its path.
+				return opened, errors.New(policy.RedactProblem(err.Error(), 0))
 			}
 			// Fail loudly where an operator will see it, and keep answering.
 			lineLog.Error("line policy will not load — calls on this line are served by the default line instead",
-				"path", lf.Path, "err", err)
+				"path", lf.Path, "problem", policy.RedactProblem(err.Error(), 0))
 			continue
 		}
 		opened = append(opened, openLine{lf.Name, store, lineLog})

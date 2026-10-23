@@ -258,7 +258,10 @@ var (
 	endpointPattern = regexp.MustCompile(`^[A-Za-z0-9]+/\S+$`)
 	pinPattern      = regexp.MustCompile(`^\d+$`)
 	mailboxPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
-	clockPattern    = regexp.MustCompile(`^(\d{1,2}):(\d{2})$`)
+	// clockPattern is HH:MM with both hours digits: 07:00, never 7:00. The
+	// range is checked separately so "25:99" is told it is not a time of day
+	// rather than that it is shaped wrongly.
+	clockPattern = regexp.MustCompile(`^(\d{2}):(\d{2})$`)
 )
 
 var dayIndex = map[string]int{"SU": 0, "MO": 1, "TU": 2, "WE": 3, "TH": 4, "FR": 5, "SA": 6}
@@ -421,15 +424,13 @@ type Options struct {
 	// StrictUnknownKeys makes a key that matched no field a hard error rather
 	// than something to warn about.
 	//
-	// `doorman check` sets it and the daemon does not, and the split is the
-	// whole design. check is a linting tool with an operator reading its
-	// output, and staying quiet about a typo is precisely the defect it
-	// exists to catch. The daemon has the opposite duty: invariant 4 says an
-	// invalid policy must never take the phone down, and a reload that
-	// suddenly started refusing a file which loaded yesterday would mean an
-	// operator's edit silently stops applying after an upgrade — its own kind
-	// of confusion, and a worse one, because nobody is watching. It warns and
-	// carries on.
+	// `doorman check`, the daemon and the sync observer all set it, through
+	// configcheck.Options: one validator, so a file check passes is a file the
+	// daemon loads and sync accepts, and a file one refuses the others refuse
+	// (call-me-maybe#131). The daemon's duty under invariant 4 is met by the
+	// store, which keeps the last good policy when a reload is refused. A box
+	// that passes the upgrade smoke check (`doorman check` on the live files)
+	// already has no unknown keys, so no running box stops loading over this.
 	StrictUnknownKeys bool
 
 	// OnUnknownKey, when set, is called once per unrecognised key found,
@@ -440,18 +441,19 @@ type Options struct {
 	// Trunks is the inventory `[line] trunk` is checked against, or nil to
 	// leave the reference unchecked.
 	//
-	// The split matters. `doorman check` and `doorman render` always pass one —
-	// even an absent one, so a line naming a trunk with no trunks.toml gets
-	// told exactly that — because both have a person standing in front of them.
-	// The daemon passes nil, deliberately, and outbound routing by trunk was
-	// where that decision got revisited on purpose: the call path reads `[line]
-	// trunk` as a *string* and hands it to the dialplan, so nothing it does
-	// needs the inventory. Refusing to load a policy — and so refusing to
-	// answer that number at all — because a trunk id is unknown would be the
-	// trade invariant 4 forbids, and would take the phone down over a file the
-	// phone does not read. The daemon warns instead, at startup, where an
-	// operator sees it.
+	// `doorman check`, `doorman render` and sync always pass one — even an
+	// absent one, so a line naming a trunk with no trunks.toml gets told
+	// exactly that. The daemon passes TrunksPath instead, so the reference is
+	// checked against the file on disk at every reload, exactly as sync checks
+	// it.
 	Trunks *Trunks
+
+	// TrunksPath, when set, makes LoadSplitWith read the trunk inventory
+	// from this path on every load, in place of Trunks. A trunks.toml that
+	// does not load leaves the reference unchecked rather than refusing the
+	// policy: the daemon answers calls without reading that file, and check
+	// and sync already refuse the trunks.toml itself, by name.
+	TrunksPath string
 }
 
 // decode is the single TOML entry point for both config files: it fills a
@@ -520,6 +522,12 @@ func LoadSplit(policyPath, handsetsPath string) (*Policy, error) {
 
 // LoadSplitWith is LoadSplit with explicit options.
 func LoadSplitWith(policyPath, handsetsPath string, o Options) (*Policy, error) {
+	if o.TrunksPath != "" {
+		o.Trunks = nil
+		if t, err := LoadTrunks(o.TrunksPath); err == nil {
+			o.Trunks = t
+		}
+	}
 	pdata, err := os.ReadFile(policyPath)
 	if err != nil {
 		return nil, err
@@ -551,31 +559,49 @@ func SplitLayout(handsetsPath string) bool {
 	return err == nil
 }
 
+// decodeSplit is the one place a policy/handsets pair is decoded and the
+// files' section ownership is enforced. fromSplitTOML (the daemon and `doorman
+// check`) and LintSplitWith (the sync observer, the hosted validator and the
+// language server) both start here, so the two cannot drift on what a valid
+// pair of files is. misplaced is non-empty when a section is in the wrong file.
+func decodeSplit(policyData, handsetsData []byte) (pf File, unknown []UnknownKey, misplaced []string, err error) {
+	pf, unknown, err = decode(policyData, "policy")
+	if err != nil {
+		return File{}, nil, nil, err
+	}
+	if handsetsData == nil {
+		return pf, unknown, nil, nil
+	}
+	hf, hUnknown, err := decode(handsetsData, "handsets")
+	if err != nil {
+		return File{}, nil, nil, err
+	}
+	unknown = append(unknown, hUnknown...)
+
+	// Each file owns its sections exclusively; anything in the wrong file
+	// is an error, not a merge — silent precedence is how two sources of
+	// truth drift apart.
+	if len(pf.Handsets) > 0 || len(pf.Groups) > 0 {
+		misplaced = append(misplaced, "handsets/groups belong in handsets.toml now — move them there")
+	}
+	if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 ||
+		len(hf.House.Handsets) > 0 || !hf.Line.empty() {
+		misplaced = append(misplaced, "extensions/people/schedules/house/line belong in policy.toml — move them there")
+	}
+	pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
+	return pf, unknown, misplaced, nil
+}
+
 func fromSplitTOML(policyData, handsetsData []byte, o Options) (*Policy, error) {
-	pf, unknown, err := decode(policyData, "policy")
+	pf, unknown, misplaced, err := decodeSplit(policyData, handsetsData)
 	if err != nil {
 		return nil, err
 	}
-
-	if handsetsData != nil {
-		hf, hUnknown, err := decode(handsetsData, "handsets")
-		if err != nil {
-			return nil, err
+	if len(misplaced) > 0 {
+		if strings.HasPrefix(misplaced[0], "handsets/groups") {
+			return nil, fmt.Errorf("policy: %s", misplaced[0])
 		}
-		unknown = append(unknown, hUnknown...)
-
-		// Each file owns its sections exclusively; anything in the wrong file
-		// is an error, not a merge — silent precedence is how two sources of
-		// truth drift apart.
-		if len(pf.Handsets) > 0 || len(pf.Groups) > 0 {
-			return nil, fmt.Errorf("policy: handsets/groups belong in handsets.toml now — move them there")
-		}
-		if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 ||
-			len(hf.House.Handsets) > 0 || !hf.Line.empty() {
-			return nil, fmt.Errorf("handsets: extensions/people/schedules/house/line belong in policy.toml — move them there")
-		}
-
-		pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
+		return nil, fmt.Errorf("handsets: %s", misplaced[0])
 	}
 
 	// Reported before the strictness decision, so the daemon still hears
@@ -743,13 +769,16 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 			fail("duplicate schedule id %q", sc.ID)
 			continue
 		}
+		// Compiled whether or not it is enabled: a disabled schedule is still
+		// configuration, one edit away from being live, and every reader of
+		// the file — check, the daemon and sync — must agree that it is valid.
+		window := compileWindow("schedule "+sc.ID, sc.Start, sc.End, sc.Days, fail)
 		if sc.Enabled != nil && !*sc.Enabled {
 			// Present but off: references resolve to nil, i.e. inert. This
 			// is the holiday switch.
-			schedules[sc.ID] = nil
-			continue
+			window = nil
 		}
-		schedules[sc.ID] = compileWindow("schedule "+sc.ID, sc.Start, sc.End, sc.Days, fail)
+		schedules[sc.ID] = window
 	}
 
 	// A handset's curfew is a cross-file reference — handsets.toml naming
@@ -997,7 +1026,9 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 			}
 		}
 		if _, dup := exts[key]; dup {
-			fail("duplicate pin %q", e.PIN)
+			// Never the PIN itself: this message reaches the daemon's log and
+			// sync's status report as well as a terminal.
+			fail("duplicate pin: extension %q has the same pin as an earlier extension", e.Label)
 			continue
 		}
 		if e.Label == "" {
@@ -1081,6 +1112,8 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		}
 	}
 
+	checkBounds(f, fail)
+
 	if len(problems) > 0 {
 		return nil, problems
 	}
@@ -1140,31 +1173,13 @@ func LintSplit(policyData, handsetsData []byte) []string {
 // at the result who would rather know. Options.StrictUnknownKeys governs the
 // *load* path, where the daemon's duty to stay up cuts the other way.
 func LintSplitWith(policyData, handsetsData []byte, o Options) []string {
-	pf, unknown, err := decode(policyData, "policy")
+	pf, unknown, misplaced, err := decodeSplit(policyData, handsetsData)
 	if err != nil {
 		return []string{err.Error()}
 	}
-	if handsetsData != nil {
-		hf, hUnknown, err := decode(handsetsData, "handsets")
-		if err != nil {
-			return []string{err.Error()}
-		}
-		unknown = append(unknown, hUnknown...)
-
-		var problems []string
-		if len(pf.Handsets) > 0 || len(pf.Groups) > 0 {
-			problems = append(problems, "handsets/groups belong in handsets.toml now — move them there")
-		}
-		if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 ||
-			len(hf.House.Handsets) > 0 || !hf.Line.empty() {
-			problems = append(problems, "extensions/people/schedules/house/line belong in policy.toml — move them there")
-		}
-		if len(problems) > 0 {
-			return problems
-		}
-		pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
+	if len(misplaced) > 0 {
+		return misplaced
 	}
-
 	var problems []string
 	for _, u := range unknown {
 		problems = append(problems, u.String())
@@ -1177,13 +1192,13 @@ func compileWindow(where, startStr, endStr string, dayList []string, fail func(s
 	parse := func(field, v string) (int, bool) {
 		m := clockPattern.FindStringSubmatch(v)
 		if m == nil {
-			fail("%s %s %q must be HH:MM", where, field, v)
+			fail("%s %s %q must be HH:MM, 00:00 to 23:59", where, field, truncateForMessage(v))
 			return 0, false
 		}
 		h, _ := strconv.Atoi(m[1])
 		min, _ := strconv.Atoi(m[2])
 		if h > 23 || min > 59 {
-			fail("%s %s %q is not a time of day", where, field, v)
+			fail("%s %s %q is not a time of day (00:00 to 23:59)", where, field, v)
 			return 0, false
 		}
 		return h*60 + min, true
@@ -1200,8 +1215,11 @@ func compileWindow(where, startStr, endStr string, dayList []string, fail func(s
 	for _, d := range dayList {
 		i, ok := dayIndex[strings.ToUpper(d)]
 		if !ok {
-			fail("%s day %q must be one of SU MO TU WE TH FR SA", where, d)
+			fail("%s day %q must be one of SU MO TU WE TH FR SA", where, truncateForMessage(d))
 			continue
+		}
+		if days[i] {
+			fail("%s lists day %s twice", where, strings.ToUpper(d))
 		}
 		days[i] = true
 	}

@@ -80,7 +80,11 @@ Layout:
   whole call state machine, one goroutine per call. `fake_ari_test.go` is the
   harness that drives it without an Asterisk.
 - `internal/policy` — TOML schema, E.164 normalisation, hot reload, PIN
-  rotation.
+  rotation. `internal/configcheck` is the one rule set over it: `doorman
+  check`, the daemon's reload and the sync observer (and the hosted validator
+  built from this source) all take their options from there, so they accept
+  and refuse the same files. Validation messages leave the box or reach a log
+  only through `policy.RedactProblem`.
 - `internal/ari` — thin typed ARI client: REST + reconnecting WebSocket.
 - `internal/lsp` — language server for the config files; diagnostics
   reuse `policy.LintSplit`, one problem per squiggle. stdout is protocol —

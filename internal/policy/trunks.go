@@ -324,6 +324,8 @@ func compileTrunks(f TrunkFile) (*Trunks, []string) {
 		problems = append(problems, fmt.Sprintf(format, args...))
 	}
 
+	checkTrunkBounds(f, fail)
+
 	t := &Trunks{present: true, byID: map[string]Trunk{}, emergency: f.EmergencyTrunk}
 	if len(f.Trunks) == 0 {
 		fail("at least one [[trunks]] entry is required — " +
