@@ -98,7 +98,7 @@ If someone has one number, write one `policy.toml` and do not mention lines.
     handsets = ["kitchen"]             # simple form: one ring stage
     # steps = [...]                    # ladder form — MUTUALLY EXCLUSIVE with handsets
     voicemail = "family"               # where an unanswered call lands
-    afterhours = "quiet-hours"         # a [[schedules]] id
+    afterhours = "quiet-hours"         # a [[schedules]] id, or a list: quiet while ANY is active
     afterhours_ring = [...]            # ring these during the window instead of voicemail
     enabled = true                      # default true
 
@@ -120,7 +120,10 @@ If someone has one number, write one `policy.toml` and do not mention lines.
    simple form or the ladder form.
 2. Every handset id must exist in handsets.toml. Group ids work anywhere a
    handset id does.
-3. `afterhours` must name a `[[schedules]]` id that exists.
+3. `afterhours` must name a `[[schedules]]` id that exists, or a non-empty
+   list of them, each once. A list is a union — weekdays 9–5 is
+   `["nights", "weekend-days"]`, because one window crosses midnight at most
+   once per day it lists.
 4. PINs must be unique across extensions, and are matched exact — no prefixes,
    no fuzzy fallback.
 5. An invalid policy.toml is **rejected on reload and the last good one stays in

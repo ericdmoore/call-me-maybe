@@ -1011,7 +1011,7 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 			fmt.Printf("      rings        %s\n", describePlan(e.Plan))
 			fmt.Printf("      voicemail    %s\n", orDefault(e.Plan.Mailbox, noMailbox))
 			fmt.Printf("      afterhours   %s\n", describeAfterhours(e, now))
-			if e.AfterhoursID != "" {
+			if len(e.Afterhours) > 0 {
 				fmt.Printf("      during it    %s\n", describeAfterhoursPlan(e))
 			}
 		}
@@ -1095,21 +1095,38 @@ func describePlan(plan policy.RingPlan) string {
 	return strings.Join(stages, ", then ")
 }
 
+// describeAfterhours names every schedule the extension's afterhours lists
+// and describes the union of the ones switched on: "nights, weekend-days —
+// 17:00–09:00 every day; 09:00–17:00 SU SA". One schedule reads exactly as it
+// always has.
 func describeAfterhours(e policy.ResolvedExtension, now time.Time) string {
-	if e.AfterhoursID == "" {
+	if len(e.Afterhours) == 0 {
 		return noAfterhours
 	}
-	if e.Afterhours == nil {
-		// The schedule exists but carries enabled = false. Identical to "no
-		// schedule" at call time, and completely different to whoever is
+	if !e.Afterhours.Live() {
+		// Every schedule exists but carries enabled = false. Identical to
+		// "no schedule" at call time, and completely different to whoever is
 		// reading the file wondering why quiet hours stopped working.
-		return fmt.Sprintf("%s — switched off (enabled = false), so this line rings at any hour", e.AfterhoursID)
+		off := "switched off"
+		if len(e.Afterhours) > 1 {
+			off = "all switched off"
+		}
+		return fmt.Sprintf("%s — %s (enabled = false), so this line rings at any hour",
+			strings.Join(e.Afterhours.IDs(), ", "), off)
+	}
+	names := make([]string, 0, len(e.Afterhours))
+	for _, w := range e.Afterhours {
+		if w.Window == nil {
+			names = append(names, w.ScheduleID+" (switched off)")
+			continue
+		}
+		names = append(names, w.ScheduleID)
 	}
 	state := ""
 	if e.Afterhours.Active(now) {
 		state = "  ← ACTIVE NOW"
 	}
-	return fmt.Sprintf("%s — %s%s", e.AfterhoursID, e.Afterhours.Describe(), state)
+	return fmt.Sprintf("%s — %s%s", strings.Join(names, ", "), e.Afterhours.Describe(), state)
 }
 
 // describeCurfews prints each sleeping-capable handset with every window it

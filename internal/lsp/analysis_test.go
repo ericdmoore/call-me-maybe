@@ -160,6 +160,14 @@ func TestCompletionContexts(t *testing.T) {
 	if !contains(got, "school-night") {
 		t.Errorf("afterhours context = %v", got)
 	}
+	for _, line := range []string{`afterhours = ["`, `afterhours = ["nights", "`} {
+		if got := labels(Complete(m, line, len(line))); !contains(got, "school-night") {
+			t.Errorf("afterhours list context %q = %v", line, got)
+		}
+	}
+	if line := `afterhours_ring = ["`; contains(labels(Complete(m, line, len(line))), "school-night") {
+		t.Error("afterhours_ring rings handsets; it must not be offered schedules")
+	}
 
 	line = `  days = ["SU", "`
 	got = labels(Complete(m, line, len(line)))

@@ -13,13 +13,7 @@
 #            named below — surveying, newwork, scheduling, accounts, urgent —
 #            must exist in voicemail.conf. See docs/RUNBOOK.md.
 #
-# DOES NOT   Close at weekends. `afterhours` takes one schedule id, and one
-#            [[schedules]] window is at most a single crossing of midnight —
-#            so "shut from Friday evening until Monday morning" cannot be
-#            written here. Evenings close; Saturday morning rings. See the
-#            note above [[schedules]].
-#
-#            Apply business hours to the allow-list. [[schedules]] reach
+# DOES NOT   Apply business hours to the allow-list. [[schedules]] reach
 #            extensions only, so a client on the list rings the phones at
 #            03:00. Take the client off the list, or turn the ringer off.
 #
@@ -101,27 +95,31 @@ numbers = ["+15125550172"]
 
 # ── Business hours ───────────────────────────────────────────
 # A schedule is a CLOSED window, not an open one: an extension referencing it
-# does not ring during it. This one covers every evening and overnight, and a
-# window that crosses midnight belongs to the day it STARTS — so 17:30 Friday
-# through 08:30 Saturday is Friday's.
+# does not ring during it. A window that crosses midnight belongs to the day
+# it STARTS — so 17:30 Friday through 08:30 Saturday is Friday's — and crosses
+# it at most once, so "open weekdays 08:30–17:30" is two windows: every
+# evening and overnight, and the weekend days in between. Each extension
+# names both, `afterhours = ["nights", "weekend-days"]`, and is closed while
+# EITHER is active: the phones ring Monday to Friday, 08:30 to 17:29, and take
+# a message at every other hour.
 #
-# Which is exactly why the weekend is not closed here. A window is one
-# crossing of midnight, and `afterhours` on an extension takes one id, so
-# there is no way to write "Friday 17:30 until Monday 08:30". Saturday and
-# Sunday between 08:30 and 17:30 ring the phones like any weekday. If that is
-# wrong for you, the honest fixes today are to set `enabled = false` on the
-# schedule and leave everything on voicemail, or to keep the phones on and
-# decide by looking at the display.
-#
-# Holidays are one edit: enabled = false, and every reference goes inert
-# without deleting the definition.
+# Holidays are one edit: enabled = false on nights and weekend-days, and every
+# reference goes inert without deleting the definition. Switch off
+# weekend-days alone and Saturday and Sunday daytimes ring like a weekday.
 
 [[schedules]]
-id = "closed"
+id = "nights"
 enabled = true
 start = "17:30"
 end = "08:30"
 days = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
+
+[[schedules]]
+id = "weekend-days"
+enabled = true
+start = "08:30"
+end = "17:30"
+days = ["SA", "SU"]
 
 # ── An extension per concern ─────────────────────────────────
 # The reason to have four rather than one: each ends in a DIFFERENT mailbox.
@@ -139,7 +137,7 @@ days = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
 pin = "CHANGEME"
 label = "New work"
 voicemail = "newwork"
-afterhours = "closed"
+afterhours = ["nights", "weekend-days"]
 
   [[extensions.steps]]
   handsets = ["desk"]
@@ -156,7 +154,7 @@ pin = "CHANGEME"
 label = "Scheduling"
 handsets = ["working"]
 voicemail = "scheduling"
-afterhours = "closed"
+afterhours = ["nights", "weekend-days"]
 
 # Accounts rings briefly and then stops. An invoice question is not worth
 # chasing a phone across a house for, and the mailbox is the point.
@@ -164,7 +162,7 @@ afterhours = "closed"
 pin = "CHANGEME"
 label = "Accounts"
 voicemail = "accounts"
-afterhours = "closed"
+afterhours = ["nights", "weekend-days"]
 
   [[extensions.steps]]
   handsets = ["desk"]
@@ -181,5 +179,5 @@ pin = "CHANGEME"
 label = "Site emergency"
 handsets = ["working"]
 voicemail = "urgent"
-afterhours = "closed"
+afterhours = ["nights", "weekend-days"]
 afterhours_ring = ["cordless"]

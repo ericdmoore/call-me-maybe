@@ -14,8 +14,9 @@ What it does:
   `policy.toml` and vice versa, using open buffers first and disk siblings
   otherwise.
 - **Completions**: handset and group ids inside any `handsets = [...]`,
-  schedule ids after `afterhours = "`, day codes in `days = [...]`, and
-  mailbox names after `voicemail = "` / `mailbox = "`.
+  schedule ids after `afterhours = "` or inside `afterhours = [...]`, day
+  codes in `days = [...]`, and mailbox names after `voicemail = "` /
+  `mailbox = "`.
 
 Deliberately absent: hover, formatting (Taplo formats TOML fine), and field
 name completion (the `.example` files are the field reference). This server

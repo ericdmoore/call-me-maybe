@@ -196,9 +196,10 @@ type Extension struct {
 	// Voicemail is the mailbox when every stage goes unanswered — and the
 	// afterhours destination. Empty = dismiss with "nobody's available".
 	Voicemail string `toml:"voicemail"`
-	// Afterhours names a [[schedules]] id. (Decoded as `any` so the retired
-	// inline-table form can produce a helpful error instead of a decode
-	// failure.)
+	// Afterhours names a [[schedules]] id, or a list of them: the line is in
+	// its afterhours state while ANY named window is active. (Decoded as
+	// `any` so one id and a list both load, and the retired inline-table form
+	// can produce a helpful error instead of a decode failure.)
 	Afterhours any `toml:"afterhours"`
 	// AfterhoursRing redirects the call during the afterhours window instead
 	// of sending it straight to voicemail. Without it, quiet hours can only
@@ -345,27 +346,78 @@ func (a *Afterhours) Describe() string {
 	return fmt.Sprintf("%s–%s %s", clock(a.StartMin), clock(a.EndMin), days)
 }
 
-// CurfewWindow is one schedule a handset's curfew names, kept with its id so
-// `doorman check` can say which window put the phone to sleep. Window is nil
-// when the schedule carries enabled = false: present, inert, and shown as
-// such rather than silently dropped.
+// CurfewWindow is one schedule a handset's curfew (or an extension's
+// afterhours) names, kept with its id so `doorman check` can say which window
+// is doing the work. Window is nil when the schedule carries enabled = false:
+// present, inert, and shown as such rather than silently dropped.
 type CurfewWindow struct {
 	ScheduleID string
 	Window     *Afterhours
 }
 
+// ScheduleWindows is every schedule an extension's afterhours names, in the
+// order written, and is active while ANY of them is — the same union a
+// handset's curfew is. A list, because one window crosses midnight at most
+// once per day it lists: weekdays 9–5 needs one window for the nights and
+// another for the weekend days.
+//
+// A switched-off schedule stays in the list with a nil Window, which is how
+// `doorman check` tells "no afterhours" from "afterhours, all switched off" —
+// two states that behave identically at call time and mean very different
+// things to whoever wrote the file.
+type ScheduleWindows []CurfewWindow
+
+// Active reports whether any switched-on window contains t.
+func (s ScheduleWindows) Active(t time.Time) bool {
+	for _, w := range s {
+		if w.Window.Active(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// Live reports whether at least one named schedule is switched on, which is
+// whether the line can ever be in its afterhours state.
+func (s ScheduleWindows) Live() bool {
+	for _, w := range s {
+		if w.Window != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// IDs is the schedule ids, in the order written.
+func (s ScheduleWindows) IDs() []string {
+	out := make([]string, len(s))
+	for i, w := range s {
+		out[i] = w.ScheduleID
+	}
+	return out
+}
+
+// Describe renders the switched-on windows the way an operator wrote them,
+// joined by "; " — "17:00–09:00 every day; 09:00–17:00 SU SA". A switched-off
+// schedule contributes nothing; the caller says what that means.
+func (s ScheduleWindows) Describe() string {
+	parts := make([]string, 0, len(s))
+	for _, w := range s {
+		if w.Window != nil {
+			parts = append(parts, w.Window.Describe())
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
 // ResolvedExtension is an extension compiled into a runnable plan.
 type ResolvedExtension struct {
-	PIN        string
-	Label      string
-	Plan       RingPlan
-	Afterhours *Afterhours
-	// AfterhoursID is the schedule this extension named, retained for display
-	// only. It is set even when Afterhours is nil, which is how `doorman
-	// check` can tell "no schedule" from "a schedule that is switched off" —
-	// two states that behave identically at call time and mean very different
-	// things to whoever wrote the file.
-	AfterhoursID string
+	PIN   string
+	Label string
+	Plan  RingPlan
+	// Afterhours is the schedules the extension's afterhours names, empty
+	// when it names none.
+	Afterhours ScheduleWindows
 	// AfterhoursPlan is what rings during the window. Zero steps means the
 	// historical behaviour: straight to voicemail.
 	AfterhoursPlan RingPlan
@@ -1072,24 +1124,12 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 			fail("%s voicemail %q must be lowercase alphanumeric/dash/underscore", where, e.Voicemail)
 		}
 
-		var ah *Afterhours
-		var ahID string
-		switch ref := e.Afterhours.(type) {
-		case nil:
-		case string:
-			ahID = ref
-			window, known := schedules[ref]
-			if !known {
-				fail("%s references unknown schedule %q", where, ref)
-			}
-			ah = window // nil when the schedule is disabled: inert
-			// A caller during quiet hours needs somewhere to go: either a
-			// mailbox, or another phone to ring.
-			if known && window != nil && e.Voicemail == "" && len(e.AfterhoursRing) == 0 {
-				fail("%s has afterhours but no voicemail and no afterhours_ring — an afterhours caller needs somewhere to go", where)
-			}
-		default:
-			fail("%s: afterhours is now a named schedule — define [[schedules]] with id/start/end/days and set afterhours = \"<id>\"", where)
+		ah := compileAfterhours(where, e.Afterhours, schedules, o.previousRules, fail)
+		// A caller during quiet hours needs somewhere to go: either a
+		// mailbox, or another phone to ring. Only a window that can open
+		// asks, so the holiday switch never makes a file invalid.
+		if ah.Live() && e.Voicemail == "" && len(e.AfterhoursRing) == 0 {
+			fail("%s has afterhours but no voicemail and no afterhours_ring — an afterhours caller needs somewhere to go", where)
 		}
 
 		var plan RingPlan
@@ -1140,7 +1180,7 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		}
 		exts[key] = ResolvedExtension{
 			PIN: e.PIN, Label: e.Label, Plan: plan,
-			Afterhours: ah, AfterhoursID: ahID, AfterhoursPlan: ahPlan,
+			Afterhours: ah, AfterhoursPlan: ahPlan,
 		}
 	}
 
@@ -1220,6 +1260,63 @@ func LintSplitWith(policyData, handsetsData []byte, o Options) []string {
 	}
 	_, semantic := compileChecked(pf, o)
 	return append(problems, semantic...)
+}
+
+// retiredAfterhours is the message for any afterhours that is neither a
+// schedule id nor a list of them — the inline table above all, which is what
+// afterhours used to be.
+const retiredAfterhours = "%s: afterhours is now a named schedule — define [[schedules]] with id/start/end/days and set afterhours = \"<id>\""
+
+// compileAfterhours resolves an extension's afterhours — one schedule id or a
+// list of them — against the policy's schedules. A switched-off schedule
+// resolves to a nil window: present and inert, so the holiday switch works
+// for one schedule in a list and for all of them.
+func compileAfterhours(where string, ref any, schedules map[string]*Afterhours, previousRules bool, fail func(string, ...any)) ScheduleWindows {
+	var ids []string
+	switch ref := ref.(type) {
+	case nil:
+		return nil
+	case string:
+		ids = []string{ref}
+	case []any:
+		if previousRules {
+			// The v0.15 daemon took exactly one id, and the bootstrap
+			// fallback must be no looser than it was.
+			fail(retiredAfterhours, where)
+			return nil
+		}
+		if len(ref) == 0 {
+			fail("%s afterhours = [] names no schedule — list at least one [[schedules]] id, or leave afterhours out", where)
+			return nil
+		}
+		for _, item := range ref {
+			id, ok := item.(string)
+			if !ok {
+				fail("%s afterhours must list [[schedules]] ids, which are strings", where)
+				return nil
+			}
+			ids = append(ids, id)
+		}
+	default:
+		fail(retiredAfterhours, where)
+		return nil
+	}
+	out := make(ScheduleWindows, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			fail("%s names afterhours schedule %q twice", where, id)
+			continue
+		}
+		seen[id] = true
+		window, known := schedules[id]
+		if !known {
+			fail("%s references unknown schedule %q", where, id)
+			continue
+		}
+		out = append(out, CurfewWindow{ScheduleID: id, Window: window})
+	}
+	return out
 }
 
 func compileWindow(where, startStr, endStr string, dayList []string, fail func(string, ...any)) *Afterhours {

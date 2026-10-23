@@ -314,8 +314,9 @@ type CompletionItem struct {
 }
 
 var (
-	handsetsCtx   = regexp.MustCompile(`handsets\s*=\s*\[[^\]]*$`)
-	afterhoursCtx = regexp.MustCompile(`afterhours\s*=\s*"[^"]*$`)
+	handsetsCtx = regexp.MustCompile(`handsets\s*=\s*\[[^\]]*$`)
+	// One schedule id, or anywhere inside a list of them.
+	afterhoursCtx = regexp.MustCompile(`afterhours\s*=\s*("[^"]*|\[[^\]]*)$`)
 	daysCtx       = regexp.MustCompile(`days\s*=\s*\[[^\]]*$`)
 	mailboxCtx    = regexp.MustCompile(`(voicemail|mailbox)\s*=\s*"[^"]*$`)
 	// Matches both `trunk = "` in [line] and `emergency_trunk = "` in
