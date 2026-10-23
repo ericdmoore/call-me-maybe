@@ -25,6 +25,11 @@ caller can ask for one room rather than all of them. Pressing nothing rings
 the house the moment the prompt ends, and nothing done at the keypad can cost
 an allow\-listed caller that ring.
 .PP
+A caller in the account's lobby pass book (below) is a known caller too,
+welcomed by the contact's name, unless
+.B [[people]]
+names the number first.
+.PP
 Everyone else meets the lobby: dial a 6\-digit extension within the dial
 window, or get whatever
 .B [line] on_no_input
@@ -235,6 +240,15 @@ entry does nothing \(em a contradiction for an operator to resolve rather than
 a ranking to accept silently. That one exits non\-zero and prints the
 allow\-list name, which the operator typed themselves, beside a redacted
 number.
+.IP
+When the box holds the account's lobby pass book it reports it as counts: the
+book's id and revision, how many holders and numbers it lists, and per line
+how many of those numbers it admits, how many that line's
+.B [[people]]
+already names (which wins), and how many a block source shuts out. Never a
+name or a number. Account books the shared rules refuse \(em a pass book a
+handset selects or a book includes, a second pass book \(em exit non\-zero.
+Silent when the box holds no pass book.
 This is the authority on whether a configuration is usable.
 .TP
 .BI "doorman schema [" name ]
@@ -468,7 +482,22 @@ as directory additions; they never become call-admission rules.
 Books the account manages arrive as typed deliveries and are kept under
 <phonebooks>/account/acct\-<id>.toml: directory only, composed with the
 house when a phone's directory is rendered, never edited by hand (a changed
-copy is reported as a conflict rather than overwritten). A queue item may
+copy is reported as a conflict rather than overwritten).
+One account book may carry
+.BR "role = \(dqlobby\-pass\(dq" :
+the lobby pass book, the reverse of the others. It is never shown in a
+directory \(em no handset may select it, no book may include it, and it
+includes nothing \(em and it is the one book call admission reads: a caller
+whose number it lists skips the lobby, welcomed by the contact's name, after
+a block source and
+.B [[people]]
+have had their say. A box holds at most one, of up to 5000 contacts (other
+books keep 2000). It is delivered, echoed (with its role), replaced and
+removed exactly as any book is, and the daemon reloads it within a second,
+keeping the last good one when the books are refused (with a copy at
+<phonebooks>/account/.lobby\-pass.last\-good for a restart). Its receipt is
+applied once the daemon admits from exactly the delivered bytes.
+A queue item may
 carry an ordered list of verbs, applied together with one receipt; a refused
 verb writes nothing.
 Policy schedule edits and phonebook assignments validate the real files,
@@ -817,8 +846,9 @@ belong outside any repository, mode 0600. With one, the lobby walks a ladder
 and the first match wins: a block source (dismissed, and never hears the
 lobby), then
 .BR [[people]] ,
-then a personal contact (both straight through), then a published contact and
-everybody else (the lobby). Nothing here is authoritative:
+then the account's lobby pass book when the box holds one, then a personal
+contact (all straight through), then a published contact and everybody else
+(the lobby). Nothing here is authoritative:
 .B [[people]]
 in
 .I policy.toml

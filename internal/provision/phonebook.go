@@ -18,7 +18,8 @@ import (
 //	people  — the allow-list, from [[people]]
 //	<id>    — one contacts.toml source, by its id, for a phone that opted in
 //	acct-…  — a book managed by the account the box is enrolled with, which
-//	          may include other account books and house (accountbook)
+//	          may include other account books and house (accountbook) —
+//	          never the account's lobby pass book, which no phone shows
 //
 // Absent means house and people: the rooms and the family, never a whole
 // address book. The books are rendered into one vendor file per handset

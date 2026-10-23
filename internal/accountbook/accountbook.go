@@ -4,9 +4,17 @@
 //
 // The account is authoritative for these books; the box holds a delivered
 // copy, composes it with its own `house` directory when it renders a phone's
-// directory, and never edits it. A managed book is directory only. Nothing on
-// the admission path reads it: putting someone in a phone's book makes them
-// dialable from that phone, never admitted past the lobby.
+// directory, and never edits it. An ordinary managed book is directory only.
+// Nothing on the admission path reads it: putting someone in a phone's book
+// makes them dialable from that phone, never admitted past the lobby.
+//
+// One book may carry role = "lobby-pass" instead. It is the opposite kind:
+// never shown in any directory — no handset may select it and no book may
+// include it, and it includes nothing — and the one book admission reads. A
+// caller whose number is in it skips the lobby, welcomed by the contact's
+// name, after [[people]] (the box's own list) has had its say. A pass is an
+// attribute of a contact, so a pass holder need not be in any other book.
+// Delivered, hashed, echoed and removed exactly as every book is.
 //
 // The package is pure (no files, no clock) and builds for GOOS=wasip1, so a
 // hosted validator or preview runs exactly these rules.
@@ -34,6 +42,12 @@ const (
 	MaxBooks = 200
 	// MaxContacts is how many contacts one book lists itself.
 	MaxContacts = 2000
+	// MaxPassContacts is how many contacts the lobby pass book lists. More
+	// than a directory book: it is never rendered onto a handset, so no
+	// phone's capacity bounds it, and a household's list of people who may
+	// ring straight through is everyone it trusts. The observer's 1 MiB file
+	// bound still applies.
+	MaxPassContacts = 5000
 	// MaxIncludes is how many books one book includes directly.
 	MaxIncludes = 16
 	// MaxDepth is the longest chain of include edges from any book: a book
@@ -57,6 +71,10 @@ const (
 // feature codes, so a book used in two houses shows each house's rooms.
 const House = "house"
 
+// RoleLobbyPass marks the lobby pass book. A book with no role is a
+// directory book.
+const RoleLobbyPass = "lobby-pass"
+
 // Prefix marks a managed book's id. contacts.toml may not use it for a source.
 const Prefix = "acct-"
 
@@ -68,6 +86,14 @@ const Dir = "account"
 const Header = "# Managed by doorman sync for the account this box is enrolled with.\n" +
 	"# Do not edit: the next delivery refuses to replace a changed copy and\n" +
 	"# reports the change instead. Directory only; never call admission.\n"
+
+// PassHeader opens the lobby pass book instead, because the sentence that
+// ends Header is the opposite of what this book is. A directory book keeps
+// Header byte for byte, so its hash is what it was before roles existed.
+const PassHeader = "# Managed by doorman sync for the account this box is enrolled with.\n" +
+	"# Do not edit: the next delivery refuses to replace a changed copy and\n" +
+	"# reports the change instead. Lobby pass: these callers skip the lobby;\n" +
+	"# never shown in a directory.\n"
 
 var (
 	// ulid is a lowercase Crockford base-32 ULID body.
@@ -100,13 +126,20 @@ type Contact struct {
 }
 
 // Book is one managed book: its own contacts, then the books it includes.
+// Role is empty for a directory book and RoleLobbyPass for the pass book;
+// empty is omitted from the file, so a directory book written before roles
+// existed reads, encodes and hashes exactly as it did.
 type Book struct {
 	ID       string    `toml:"id"`
 	Revision int64     `toml:"revision"`
 	Label    string    `toml:"label"`
+	Role     string    `toml:"role,omitempty"`
 	Includes []string  `toml:"includes"`
 	Contacts []Contact `toml:"contacts"`
 }
+
+// LobbyPass reports whether this is the lobby pass book.
+func (b Book) LobbyPass() bool { return b.Role == RoleLobbyPass }
 
 // Parse reads a managed file strictly: unknown keys are refused, and so is
 // any value outside the limits.
@@ -143,6 +176,14 @@ func (b Book) Problems() []string {
 	if problem := text(b.Label, MaxName); problem != "" {
 		fail("label %s", problem)
 	}
+	switch {
+	case b.Role != "" && b.Role != RoleLobbyPass:
+		fail("role must be absent or %q", RoleLobbyPass)
+	case b.LobbyPass() && len(b.Includes) > 0:
+		// What a pass book included would be admitted by being in some
+		// directory, which is the one thing a directory must never do.
+		fail("the lobby pass book includes nothing")
+	}
 	if len(b.Includes) > MaxIncludes {
 		fail("includes more than %d books", MaxIncludes)
 	}
@@ -160,8 +201,8 @@ func (b Book) Problems() []string {
 		}
 		included[inc] = true
 	}
-	if len(b.Contacts) > MaxContacts {
-		fail("lists more than %d contacts", MaxContacts)
+	if limit := b.contactLimit(); len(b.Contacts) > limit {
+		fail("lists more than %d contacts", limit)
 	}
 	ids := map[string]bool{}
 	for i, c := range b.Contacts {
@@ -195,6 +236,13 @@ func (b Book) Problems() []string {
 	return problems
 }
 
+func (b Book) contactLimit() int {
+	if b.LobbyPass() {
+		return MaxPassContacts
+	}
+	return MaxContacts
+}
+
 // maxProblems bounds one book's list: a file of 2,000 broken contacts is
 // reported by its first few problems, not 6,000 lines.
 const maxProblems = 25
@@ -223,7 +271,11 @@ func text(s string, max int) string {
 // recognised as already in place.
 func Encode(b Book) []byte {
 	var buf bytes.Buffer
-	buf.WriteString(Header)
+	if b.LobbyPass() {
+		buf.WriteString(PassHeader)
+	} else {
+		buf.WriteString(Header)
+	}
 	if b.Includes == nil {
 		b.Includes = []string{}
 	}
@@ -239,9 +291,10 @@ func Hash(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Check validates a set of books as one box holds them: every include
-// resolves, nothing includes itself through another book, and no chain is
-// deeper than MaxDepth. Each book is assumed to have passed Problems.
+// Check validates a set of books as one box holds them: at most one lobby
+// pass book, every include resolves to a directory book, nothing includes
+// itself through another book, and no chain is deeper than MaxDepth. Each
+// book is assumed to have passed Problems.
 func Check(books map[string]Book) []string {
 	var problems []string
 	if len(books) > MaxBooks {
@@ -252,11 +305,27 @@ func Check(books map[string]Book) []string {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	pass := ""
+	for _, id := range ids {
+		if !books[id].LobbyPass() {
+			continue
+		}
+		if pass != "" {
+			problems = append(problems, fmt.Sprintf("account books %s and %s are both the lobby pass book; a box holds one", pass, id))
+			continue
+		}
+		pass = id
+	}
 	missing := false
 	for _, id := range ids {
 		for _, inc := range books[id].Includes {
-			if _, ok := books[inc]; inc != House && !ok {
+			b, ok := books[inc]
+			switch {
+			case inc != House && !ok:
 				problems = append(problems, fmt.Sprintf("account book %s includes %s, which this box does not hold", id, inc))
+				missing = true
+			case ok && b.LobbyPass():
+				problems = append(problems, fmt.Sprintf("account book %s includes the lobby pass book %s, which is never shown in a directory", id, inc))
 				missing = true
 			}
 		}
@@ -309,4 +378,40 @@ func Check(books map[string]Book) []string {
 		}
 	}
 	return problems
+}
+
+// Holder is who a number belongs to in the lobby pass book, as much as
+// admission needs.
+type Holder struct {
+	// ID is the account's contact id. Not caller data.
+	ID string
+	// Name is how the caller is welcomed and recorded. Caller data.
+	Name string
+}
+
+// LobbyPassBook is the box's lobby pass book, when it holds one. The set is
+// assumed to have passed Check, so there is at most one.
+func LobbyPassBook(books map[string]Book) (Book, bool) {
+	for _, b := range books {
+		if b.LobbyPass() {
+			return b, true
+		}
+	}
+	return Book{}, false
+}
+
+// Holders is the pass book as admission asks it: by E.164 number, exact
+// match. Two contacts sharing a number is allowed (a household landline);
+// the first listed is the one a caller from it is welcomed as, so the answer
+// never depends on map order.
+func (b Book) Holders() map[string]Holder {
+	index := make(map[string]Holder)
+	for _, c := range b.Contacts {
+		for _, n := range c.Numbers {
+			if _, ok := index[n.Number]; !ok {
+				index[n.Number] = Holder{ID: c.ID, Name: c.Name}
+			}
+		}
+	}
+	return index
 }

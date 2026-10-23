@@ -125,6 +125,23 @@ type Contact struct {
 	Source string
 }
 
+// Passes is the lobby pass list the account delivers: the callers it lets
+// skip the lobby, by normalised number. One map read, exact match, of a list
+// already in memory — a call never waits on a file or the network for it.
+//
+// An interface for the reason Contacts is one: the file, its parser and its
+// reload live in cmd/doorman, and the state machine asks the one question.
+// Nil is no pass list, which is every box not enrolled with an account.
+type Passes interface {
+	Lookup(e164 string) (PassHolder, bool)
+}
+
+// PassHolder is who a pass belongs to. Name is caller data, exactly as an
+// allow-list name is.
+type PassHolder struct {
+	Name string
+}
+
 type Deps struct {
 	ARI     ARI
 	Policy  func() *policy.Policy
@@ -157,6 +174,10 @@ type Deps struct {
 	// what is behind this interface without the state machine learning that
 	// contacts are ever refetched.
 	Contacts Contacts
+	// Passes is the lobby pass list. Nil is none: the ladder is what it was
+	// before the account could let anybody in. Global, like Contacts — one
+	// household's list, so every line's Deps carries the same one.
+	Passes Passes
 	// Notify receives call events for the house to react to. Nil disables
 	// the webhook, same as Calls — absent config means the feature is off.
 	Notify Notifier
@@ -395,13 +416,15 @@ func (s *Session) callerNumberForDisplay() string {
 //
 //  1. a block source        dismissed, and never hears the lobby
 //  2. [[people]]            straight through
-//  3. a personal contact    straight through
-//  4. a published contact   the lobby: dial an extension
-//  5. anybody else          the lobby
+//  3. a lobby pass          straight through
+//  4. a personal contact    straight through
+//  5. a published contact   the lobby: dial an extension
+//  6. anybody else          the lobby
 //
-// Tiers 1, 3 and 4 exist only when there is a contacts.toml. Without one the
-// lookup is nil, the ladder is tiers 2 and 5, and this is the function it has
-// always been.
+// Tiers 1, 4 and 5 exist only when there is a contacts.toml, and tier 3 only
+// when the account has delivered a lobby pass list. Without either the
+// lookups are nil, the ladder is tiers 2 and 6, and this is the function it
+// has always been.
 func (s *Session) Run() {
 	defer s.cleanup()
 	s.observe(events.CallObserved, "")
@@ -441,7 +464,22 @@ func (s *Session) Run() {
 		return
 	}
 
-	// Tier 3. A number a stranger could not have looked up, in an address
+	// Tier 3. The account's lobby pass: somebody the household chose, by
+	// name, to let straight through — the same deliberate intent [[people]]
+	// carries, decided on the account rather than in a file on the box. After
+	// [[people]], so a number in both is welcomed by the name typed here;
+	// after a block, so the account can never open a door the box has shut.
+	// Admitted exactly as an allow-list match is.
+	if holder, ok := s.pass(); ok {
+		s.rec.Known = holder.Name
+		s.rec.Via = calls.ViaLobbyPass
+		s.observe(events.AdmissionDecided, "lobby-pass")
+		s.log.Info("known caller, welcoming", "name", holder.Name, "via", calls.ViaLobbyPass)
+		s.welcome(holder.Name)
+		return
+	}
+
+	// Tier 4. A number a stranger could not have looked up, in an address
 	// book somebody actually curates. Admitted exactly as an allow-list match
 	// is — same prompt, same dial window, same record — because "who may skip
 	// the lobby" is one question with two sources of answer.
@@ -461,7 +499,7 @@ func (s *Session) Run() {
 		return
 	}
 
-	// Tiers 4 and 5 are the same door, and deliberately so: a published
+	// Tiers 5 and 6 are the same door, and deliberately so: a published
 	// contact is somebody a stranger could impersonate by reading a website,
 	// so knowing their name buys them nothing at it. They dial an extension
 	// like anybody else, with none of the exemptions an admitted caller has —
@@ -493,6 +531,15 @@ func (s *Session) contact() (Contact, bool) {
 		return Contact{}, false
 	}
 	return s.deps.Contacts.Lookup(s.callerE164)
+}
+
+// pass resolves this caller in the lobby pass list. A withheld or
+// unparseable caller ID never holds a pass, for the reason contact gives.
+func (s *Session) pass() (PassHolder, bool) {
+	if s.deps.Passes == nil || s.callerE164 == "" {
+		return PassHolder{}, false
+	}
+	return s.deps.Passes.Lookup(s.callerE164)
 }
 
 // welcome is admission: the caller skips the lobby and reaches the house under

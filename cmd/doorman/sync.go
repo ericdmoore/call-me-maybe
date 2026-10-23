@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"callmemaybe/internal/account"
+	"callmemaybe/internal/accountbook"
 	"callmemaybe/internal/activation"
 	"callmemaybe/internal/bell"
 	"callmemaybe/internal/config"
@@ -159,7 +160,8 @@ func runSync(args []string) int {
 }
 
 // activationApplied proves a revision is running: the daemon's activation
-// socket reports, for every line, the digest of exactly these files.
+// socket reports, for every line, the digest of exactly these files, and the
+// hash of the lobby pass book it admits from.
 func activationApplied(dir string) func(syncmachine.Paths, map[string][]byte) bool {
 	return func(paths syncmachine.Paths, files map[string][]byte) bool {
 		current, err := activation.Read(dir)
@@ -170,6 +172,13 @@ func activationApplied(dir string) func(syncmachine.Paths, map[string][]byte) bo
 		for _, line := range lines {
 			data, ok := files[line.Path]
 			if !ok || current[line.Name] != policy.SourceDigest(data, files[paths.Handsets]) {
+				return false
+			}
+		}
+		// The lobby pass book is running when the daemon admits from exactly
+		// the bytes on disk ("" for none on either side).
+		if paths.Phonebooks != "" {
+			if current[passActivationKey] != passBookHash(filepath.Join(paths.Phonebooks, accountbook.Dir), files) {
 				return false
 			}
 		}

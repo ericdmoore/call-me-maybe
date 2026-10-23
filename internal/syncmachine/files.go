@@ -480,7 +480,8 @@ func observe(paths Paths) (*observed, error) {
 			}
 		}
 	}
-	// Account-managed books: directory only, validated as a set with the
+	// Account-managed books: directory only — except the one lobby pass
+	// book, which no directory shows — validated as a set with the
 	// inventory that uses them. Checked even with no phonebook directory, so
 	// a handset naming a book the box does not hold is refused here as it is
 	// by the directory.
@@ -544,9 +545,13 @@ func observe(paths Paths) (*observed, error) {
 		for _, inc := range b.Includes {
 			includes = append(includes, inc)
 		}
-		books = append(books, map[string]any{"id": id, "label": b.Label, "contacts": ids, "includes": includes,
+		echo := map[string]any{"id": id, "label": b.Label, "contacts": ids, "includes": includes,
 			"origin": "account", "revision": strconv.FormatInt(b.Revision, 10),
-			"hash": accountbook.Hash(accountFiles[accountbook.FileName(id)])})
+			"hash": accountbook.Hash(accountFiles[accountbook.FileName(id)])}
+		if b.Role != "" {
+			echo["role"] = b.Role
+		}
+		books = append(books, echo)
 	}
 	for _, row := range rows(h, "handsets") {
 		id := str(row, "id")

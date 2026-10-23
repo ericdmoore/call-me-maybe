@@ -97,3 +97,32 @@ func TestAccountBooksChecksHandsetsAndTheDirectoryLimit(t *testing.T) {
 		t.Fatalf("at the limit: %s", messages(p))
 	}
 }
+
+func passBookFile(id string) []byte {
+	return accountbook.Encode(accountbook.Book{ID: id, Revision: 1, Label: "Lobby pass", Role: accountbook.RoleLobbyPass,
+		Contacts: []accountbook.Contact{{ID: "c-01jaf000000000000000000r5e", Name: "Someone", Numbers: []accountbook.Number{{Number: "+15550100143"}}}}})
+}
+
+// The lobby pass book is held whatever selects it — nothing needs to — and
+// no handset may select it: a directory shows, the pass book admits.
+func TestAccountBooksHoldThePassBookAndRefuseSelectingIt(t *testing.T) {
+	const passes = "acct-01jaf000000000000000000pas"
+	files := map[string][]byte{family + ".toml": book(family, []string{"house"}, 1), passes + ".toml": passBookFile(passes)}
+	rooms := []policy.Handset{{ID: "kids", Endpoint: "PJSIP/kids", Number: 101, Phonebook: []string{family}}}
+	books, p := AccountBooks(files, rooms)
+	if len(p) != 0 || !books[passes].LobbyPass() {
+		t.Fatalf("pass book refused: %s", messages(p))
+	}
+	rooms[0].Phonebook = []string{family, passes}
+	_, p = AccountBooks(files, rooms)
+	if len(p) != 1 || p[0].File != "" || !strings.Contains(p[0].Message, `handset "kids" selects the lobby pass book `+passes) {
+		t.Fatalf("selecting the pass book: %s", messages(p))
+	}
+	// Including it is refused by the set rules, naming the file that does.
+	files[charlie+".toml"] = book(charlie, []string{passes}, 0)
+	rooms[0].Phonebook = []string{family}
+	_, p = AccountBooks(files, rooms)
+	if len(p) != 1 || p[0].File != charlie+".toml" || !strings.Contains(p[0].Message, "includes the lobby pass book") {
+		t.Fatalf("including the pass book: %s", messages(p))
+	}
+}
