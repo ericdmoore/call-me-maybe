@@ -14,9 +14,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf16"
 
+	"callmemaybe/internal/accountbook"
 	"callmemaybe/internal/configcheck"
 	contactbook "callmemaybe/internal/contacts"
 	"callmemaybe/internal/ownbook"
@@ -45,6 +48,11 @@ type observed struct {
 	configuration syncwire.Configuration
 	files         map[string][]byte
 	policies      map[string]string
+	// boxDigest names the configuration without the account-managed books
+	// and their contacts. A delivered book changes the snapshot revision,
+	// but an edit proposed against the box's own files is still current if
+	// nothing else moved.
+	boxDigest string
 }
 
 var (
@@ -472,6 +480,74 @@ func observe(paths Paths) (*observed, error) {
 			}
 		}
 	}
+	// Account-managed books: directory only, validated as a set with the
+	// inventory that uses them. Checked even with no phonebook directory, so
+	// a handset naming a book the box does not hold is refused here as it is
+	// by the directory.
+	accountDir, accountFiles := "", map[string][]byte{}
+	if paths.Phonebooks != "" {
+		accountDir = filepath.Join(paths.Phonebooks, accountbook.Dir)
+		names, err := accountNames(accountDir)
+		if err != nil {
+			return nil, j.unreadable(accountDir, err)
+		}
+		for _, name := range names {
+			path := filepath.Join(accountDir, name)
+			data, err := j.read(path)
+			if err != nil {
+				return nil, j.unreadable(path, err)
+			}
+			out.files[path], accountFiles[name] = data, data
+		}
+	}
+	handsetList, _, err := policy.HandsetsFromTOML(hdata)
+	if err != nil {
+		return nil, j.reject(paths.Handsets, err.Error())
+	}
+	held, problems := configcheck.AccountBooks(accountFiles, handsetList)
+	if len(problems) > 0 {
+		path := paths.Handsets
+		if problems[0].File != "" {
+			path = filepath.Join(accountDir, problems[0].File)
+		}
+		messages := make([]string, 0, len(problems))
+		for _, p := range problems {
+			messages = append(messages, p.Message)
+		}
+		return nil, j.reject(path, messages...)
+	}
+	accountContacts := map[string]bool{}
+	heldIDs := make([]string, 0, len(held))
+	for id := range held {
+		heldIDs = append(heldIDs, id)
+	}
+	sort.Strings(heldIDs)
+	for _, id := range heldIDs {
+		b := held[id]
+		ids := []any{}
+		for _, c := range b.Contacts {
+			ids = append(ids, c.ID)
+			if accountContacts[c.ID] {
+				// One contact in several books is one contact. Copies of
+				// different revisions may differ for a moment; the first
+				// book's copy is the one echoed.
+				continue
+			}
+			accountContacts[c.ID] = true
+			numbers := []any{}
+			for _, n := range c.Numbers {
+				numbers = append(numbers, map[string]any{"label": n.Label, "number": n.Number})
+			}
+			contacts = append(contacts, map[string]any{"id": c.ID, "name": c.Name, "numbers": numbers})
+		}
+		includes := []any{}
+		for _, inc := range b.Includes {
+			includes = append(includes, inc)
+		}
+		books = append(books, map[string]any{"id": id, "label": b.Label, "contacts": ids, "includes": includes,
+			"origin": "account", "revision": strconv.FormatInt(b.Revision, 10),
+			"hash": accountbook.Hash(accountFiles[accountbook.FileName(id)])})
+	}
 	for _, row := range rows(h, "handsets") {
 		id := str(row, "id")
 		selected := list(row, "phonebook")
@@ -482,6 +558,27 @@ func observe(paths Paths) (*observed, error) {
 		books = append(books, map[string]any{"id": bookID, "label": str(row, "label"), "contacts": []any{}, "includes": selected})
 		handsets = append(handsets, map[string]any{"id": id, "label": str(row, "label"), "phonebook": bookID, "pinSet": false})
 	}
+	boxBooks := []any{}
+	for _, b := range books {
+		book := b.(map[string]any)
+		if _, ok := book["origin"]; !ok {
+			book["origin"] = "box"
+		}
+		if book["origin"] == "box" {
+			boxBooks = append(boxBooks, book)
+		}
+	}
+	boxContacts := []any{}
+	for _, c := range contacts {
+		if !accountContacts[str(c.(map[string]any), "id")] {
+			boxContacts = append(boxContacts, c)
+		}
+	}
+	digest, err := json.Marshal(map[string]any{"handsets": handsets, "contacts": boxContacts, "phonebooks": boxBooks, "policies": policies, "validation": context})
+	if err != nil {
+		return nil, j.reject(paths.Policy, "sync cannot represent the configuration")
+	}
+	out.boxDigest = fileHash(digest)
 	configuration := map[string]any{"handsets": handsets, "contacts": contacts, "phonebooks": books, "policies": policies, "validation": context}
 	data, err := json.Marshal(configuration)
 	if err != nil {
@@ -498,6 +595,26 @@ func observe(paths Paths) (*observed, error) {
 		return nil, ErrChanged
 	}
 	return out, nil
+}
+
+// accountNames lists the managed book files in dir, sorted. A missing
+// directory holds none; dotfiles are a writer's temporary files.
+func accountNames(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, errUnreadable
+	}
+	var names []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") || !strings.HasSuffix(e.Name(), ".toml") {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	return names, nil
 }
 
 // wireLabel shortens a label the observer composes to what the wire carries.

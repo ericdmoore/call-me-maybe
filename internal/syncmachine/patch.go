@@ -3,6 +3,7 @@ package syncmachine
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -179,6 +180,75 @@ func atomicReplace(path string, before, after []byte) (renamed bool, err error) 
 		return true, ErrFiles
 	}
 	return true, nil
+}
+
+// atomicCreate writes a file that must not exist yet: a hard link from a
+// synced temporary file, which fails rather than replacing anything that
+// appeared meanwhile. created reports whether the file now exists.
+func atomicCreate(path string, after []byte) (created bool, err error) {
+	dir := filepath.Dir(path)
+	parent, err := os.Stat(filepath.Dir(dir))
+	if err != nil || !parent.IsDir() {
+		return false, ErrFiles
+	}
+	if _, err := os.Lstat(dir); errors.Is(err, os.ErrNotExist) {
+		if os.Mkdir(dir, 0o750) != nil || chownLike(dir, parent) != nil {
+			return false, ErrFiles
+		}
+	}
+	f, err := os.CreateTemp(dir, ".sync-*")
+	if err != nil {
+		return false, ErrFiles
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	if f.Chmod(0o640) != nil || chownLike(f.Name(), parent) != nil {
+		return false, ErrFiles
+	}
+	if _, err = f.Write(after); err != nil || f.Sync() != nil || f.Close() != nil {
+		return false, ErrFiles
+	}
+	if err := os.Link(f.Name(), path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return false, ErrChanged
+		}
+		return false, ErrFiles
+	}
+	return true, syncDir(dir)
+}
+
+// atomicRemove deletes a file only while it still holds exactly before.
+// removed reports whether it is gone.
+func atomicRemove(path string, before []byte) (removed bool, err error) {
+	current, err := readFile(path)
+	if err != nil || !bytes.Equal(before, current) {
+		return false, ErrChanged
+	}
+	if os.Remove(path) != nil {
+		return false, ErrFiles
+	}
+	return true, syncDir(filepath.Dir(path))
+}
+
+// chownLike gives a file the owner of the directory it serves: an operator
+// running sync as root must not leave the directory's reader locked out.
+func chownLike(path string, like os.FileInfo) error {
+	if stat, ok := like.Sys().(*syscall.Stat_t); ok && os.Geteuid() == 0 {
+		return os.Chown(path, int(stat.Uid), int(stat.Gid))
+	}
+	return nil
+}
+
+func syncDir(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return ErrFiles
+	}
+	defer dir.Close()
+	if dir.Sync() != nil {
+		return ErrFiles
+	}
+	return nil
 }
 
 func verbName(data []byte) string {

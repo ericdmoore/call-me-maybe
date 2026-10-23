@@ -16,7 +16,7 @@ else
 GOFLAGS := -trimpath -ldflags '-s -w -X main.version=$(VERSION)'
 endif
 
-.PHONY: build test vet check cross run clean fmt fmt-check cover hooks release-tag lint lint-test man schema
+.PHONY: build test vet check cross run clean fmt fmt-check cover hooks release-tag lint lint-test man schema wasm
 
 build:
 	go build $(GOFLAGS) -o $(BIN) ./cmd/doorman
@@ -86,7 +86,14 @@ site-assets: build
 	@echo "✓ site/public: llms.txt, llms-policy.txt, install.sh, schema/{policy,handsets,trunks,contacts,messages,env}.json, examples/"
 
 ## check: everything that must be green before a commit
-check: fmt-check vet lint test build
+check: fmt-check vet lint test build wasm
+
+## wasm: the shared rules a hosted validator and phonebook preview run must
+## keep building for WebAssembly, so the box and the service share one
+## implementation of validation and composition.
+WASM_PACKAGES := ./internal/accountbook ./internal/configcheck ./internal/policy ./internal/provision ./internal/syncwire
+wasm:
+	GOOS=wasip1 GOARCH=wasm go build $(WASM_PACKAGES)
 
 ## cover: tests with -race plus the per-package coverage floors
 cover:

@@ -1,6 +1,7 @@
 # Coverage floors, in whole percent — scripts/coverage.sh reads these and CI
 # fails below them. Raised by `make cover-ratchet`, never edited down.
 callmemaybe/cmd/doorman                  48
+callmemaybe/internal/accountbook        100
 callmemaybe/internal/ari                 30
 callmemaybe/internal/awssig              97
 callmemaybe/internal/bell                96

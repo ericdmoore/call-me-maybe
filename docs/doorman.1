@@ -465,6 +465,12 @@ Policy, handset, trunk and contact inventory paths accept explicit flags.
 The \fB\-\-phonebooks\fR directory defaults to PHONEBOOK_DIR or
 <state>/phonebook. Handset-filed and shared imported cards enter the snapshot
 as directory additions; they never become call-admission rules.
+Books the account manages arrive as typed deliveries and are kept under
+<phonebooks>/account/acct\-<id>.toml: directory only, composed with the
+house when a phone's directory is rendered, never edited by hand (a changed
+copy is reported as a conflict rather than overwritten). A queue item may
+carry an ordered list of verbs, applied together with one receipt; a refused
+verb writes nothing.
 Policy schedule edits and phonebook assignments validate the real files,
 preserve unrelated TOML and comments, and use ordinary automatic hot reload.
 Invalid or conflicting input leaves the working files unchanged.

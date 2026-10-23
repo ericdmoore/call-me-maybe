@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"callmemaybe/internal/accountbook"
 	"callmemaybe/internal/policy"
 )
 
@@ -16,13 +17,18 @@ import (
 //	house   — the other rooms and the feature codes, from handsets.toml
 //	people  — the allow-list, from [[people]]
 //	<id>    — one contacts.toml source, by its id, for a phone that opted in
+//	acct-…  — a book managed by the account the box is enrolled with, which
+//	          may include other account books and house (accountbook)
 //
 // Absent means house and people: the rooms and the family, never a whole
 // address book. The books are rendered into one vendor file per handset
 // beside its configuration, and served by the always-on directory.
 
-// Contact is one entry in a book.
+// Contact is one entry in a book. ID is set only for account contacts: the
+// same id reached through two books is one person, shown once. Box entries
+// have none and are never merged.
 type Contact struct {
+	ID      string
 	Name    string
 	Numbers []Number
 }
@@ -34,11 +40,38 @@ type Number struct {
 	Dial string
 }
 
-// Book is a named group of contacts, in display order.
+// Book is a named group of contacts, in display order. Includes are the
+// books an account book composes after its own contacts.
 type Book struct {
 	ID       string
 	Name     string
 	Contacts []Contact
+	Includes []string
+}
+
+// AccountBook is a managed account book as the phone shows it.
+func AccountBook(b accountbook.Book) Book {
+	out := Book{ID: b.ID, Name: b.Label, Includes: append([]string(nil), b.Includes...)}
+	for _, c := range b.Contacts {
+		contact := Contact{ID: c.ID, Name: c.Name}
+		for _, n := range c.Numbers {
+			contact.Numbers = append(contact.Numbers, Number{Kind: numberKind(n.Label), Dial: DialString(n.Number)})
+		}
+		out.Contacts = append(out.Contacts, contact)
+	}
+	return out
+}
+
+// numberKind maps an account number's free-text label onto the three kinds
+// a phone distinguishes.
+func numberKind(label string) string {
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "home":
+		return "home"
+	case "mobile", "cell", "iphone":
+		return "cell"
+	}
+	return "work"
 }
 
 // Books is every book this house can render, by id.
@@ -132,19 +165,77 @@ func DialString(e164 string) string {
 	return e164
 }
 
-// Select picks a handset's books in the order it named them. An unknown id
-// is an error rather than an empty group: a phone quietly showing nothing
-// is the failure the inventory exists to prevent.
+// Select picks a handset's books in the order it named them, composing
+// account books: a book's own contacts first, then each include depth-first
+// in listed order, one group per contributing book. A book reached twice is
+// shown once, where it is first reached, and an account contact reached
+// through two books is shown once, in the first group that reaches it.
+// Different contacts sharing a number are both shown: a shared landline is
+// not proof that two people are one. A group that composition reaches but
+// that contributes nothing is left out; a book named directly keeps its
+// group, as it always has.
+//
+// An unknown id is an error rather than an empty group: a phone quietly
+// showing nothing is the failure the inventory exists to prevent.
 func Select(h policy.Handset, books Books) ([]Book, error) {
 	var out []Book
-	for _, id := range h.Books() {
+	reached := map[string]bool{}
+	shown := map[string]bool{}
+	var walk func(id string, composed bool, depth int) error
+	walk = func(id string, composed bool, depth int) error {
+		if reached[id] {
+			return nil
+		}
 		b, ok := books[id]
 		if !ok {
-			return nil, fmt.Errorf("handset %q: phonebook %q is not house, people, or a contacts.toml source id", h.ID, id)
+			if composed {
+				return fmt.Errorf("handset %q: a book it uses includes %q, which this box does not hold", h.ID, id)
+			}
+			return fmt.Errorf("handset %q: phonebook %q is not house, people, a contacts.toml source id or an account book this box holds", h.ID, id)
 		}
-		out = append(out, b)
+		// The validator refuses cycles and deep chains; this only keeps a
+		// directory render from looping on files that bypassed it.
+		if depth > accountbook.MaxDepth {
+			return fmt.Errorf("handset %q: its books nest includes more than %d deep", h.ID, accountbook.MaxDepth)
+		}
+		reached[id] = true
+		group := Book{ID: b.ID, Name: b.Name}
+		for _, c := range b.Contacts {
+			if c.ID != "" {
+				if shown[c.ID] {
+					continue
+				}
+				shown[c.ID] = true
+			}
+			group.Contacts = append(group.Contacts, c)
+		}
+		composed = composed || strings.HasPrefix(id, accountbook.Prefix)
+		if !composed || len(group.Contacts) > 0 {
+			out = append(out, group)
+		}
+		for _, inc := range b.Includes {
+			if err := walk(inc, true, depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, id := range h.Books() {
+		if err := walk(id, false, 0); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
+}
+
+// DirectoryLimit is the most contacts a handset's account books may compose
+// to on this model: the default, or the model's measured capacity when that
+// is lower. Over it, a change is refused rather than truncated.
+func DirectoryLimit(model string) int {
+	if m, ok := Lookup(model); ok && m.DirectoryCapacity > 0 && m.DirectoryCapacity < accountbook.DefaultDirectoryLimit {
+		return m.DirectoryCapacity
+	}
+	return accountbook.DefaultDirectoryLimit
 }
 
 // PhonebookFileName is the rendered file beside the phone's configuration.
