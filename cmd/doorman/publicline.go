@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"callmemaybe/internal/books"
 	"callmemaybe/internal/lobby"
 	"callmemaybe/internal/policy"
 )
@@ -131,14 +133,109 @@ func describeChoice(p *policy.Policy, m policy.ResolvedMenu, c policy.ResolvedCh
 		out = "takes a message in mailbox " + c.Target
 	case policy.ChoiceMenu:
 		out = "goes to menu " + c.Target
+	case policy.ChoiceShelf:
+		shelf, _ := p.Shelf(c.Target)
+		out = fmt.Sprintf("browses shelf %s (%d %s)", c.Target, len(shelf.Titles), plural(len(shelf.Titles), "title"))
+	case policy.ChoiceStory:
+		shelf, _ := p.Shelf(c.Target)
+		out = fmt.Sprintf("today's story from shelf %s (%s), then goodbye", c.Target, shelf.StoryOn(time.Now()))
 	}
 	if c.Challenge {
 		return out + " — behind the challenge"
 	}
-	if c.Kind == policy.ChoiceExtension || c.Kind == policy.ChoiceVoicemail {
+	if c.Kind == policy.ChoiceExtension || c.Kind == policy.ChoiceVoicemail || c.Kind.Shelf() {
 		return out + " — no challenge"
 	}
 	return out
+}
+
+// booksLibrary is the prepared audiobook library check compares shelves
+// with, and asteriskDir where it looks for the installed books dialplan.
+// Vars so a test can point them at temporary directories. Both are only
+// read — the catalog is the books AGI's, the dialplan render's.
+var (
+	booksLibrary = books.DefaultLibrary
+	asteriskDir  = "/etc/asterisk"
+)
+
+// describeShelves prints a line's shelves and the limits its listeners are
+// held to. Silent on a line with none.
+func describeShelves(p *policy.Policy) {
+	shelves := p.Shelves()
+	if len(shelves) == 0 {
+		return
+	}
+	fmt.Printf("\n  Dial-a-Story\n")
+	fmt.Printf("      limits       %s\n", p.Listening().Describe())
+	fmt.Printf("      over the cap the caller hears \"all our listening lines are busy\" and the menu again;\n" +
+		"                   no bookmarks — an outside caller starts each title from the beginning\n")
+	for _, s := range shelves {
+		where := "offered by no menu a caller can reach"
+		if p.ShelfReachable(s.ID) {
+			where = "offered"
+		}
+		fmt.Printf("      shelf %-8s %d %s, %s: %s\n", s.ID, len(s.Titles), plural(len(s.Titles), "title"), where, strings.Join(s.Titles, ", "))
+	}
+}
+
+// printShelves checks every line's shelves against the installed catalog,
+// when check can read one, and looks for the context listeners are released
+// into, when it can see the box's dialplan. A title the catalog lacks fails
+// the check: at call time it is simply not offered, and nobody should find
+// that out from a caller. A catalog check cannot read is a warning — on a
+// workstation, or in CI, there is none to read.
+func printShelves(results []checkedLine) bool {
+	var lines []checkedLine
+	for _, r := range results {
+		if r.err == nil && len(r.pol.Shelves()) > 0 {
+			lines = append(lines, r)
+		}
+	}
+	if len(lines) == 0 {
+		return true
+	}
+	fmt.Println()
+	fmt.Println("Dial-a-Story shelves")
+	ok := true
+	c, err := books.Load(booksLibrary)
+	if err != nil {
+		fmt.Printf("  ! could not read the audiobook catalog in %s, so shelf titles were not checked\n"+
+			"    against it. On the box: `doorman books list` shows what is installed.\n", booksLibrary)
+	} else {
+		have := map[string]bool{}
+		for _, b := range c.Books {
+			have[b.ID] = true
+		}
+		missing := 0
+		for _, r := range lines {
+			for _, s := range r.pol.Shelves() {
+				for _, title := range s.Titles {
+					if !have[title] {
+						fmt.Printf("  ✗ line %s shelf %q names %q, which the catalog in %s does not have\n",
+							r.Name, s.ID, title, booksLibrary)
+						missing++
+					}
+				}
+			}
+		}
+		if missing > 0 {
+			fmt.Println("    A caller is never offered a title the catalog lacks. Prepare it (`doorman books")
+			fmt.Println("    prepare`), or take it off the shelf. `doorman books list` shows what is installed.")
+			ok = false
+		} else {
+			fmt.Printf("  ✓ every shelf title is in the catalog (%d %s installed)\n", len(c.Books), plural(len(c.Books), "book"))
+		}
+	}
+	if st, err := os.Stat(asteriskDir); err == nil && st.IsDir() {
+		conf := filepath.Join(asteriskDir, "extensions_books.conf")
+		data, err := os.ReadFile(conf)
+		if err != nil || !strings.Contains(string(data), "["+lobby.ListenContext+"]") {
+			fmt.Printf("  ! %s has no [%s], so a caller who chooses a shelf is released\n"+
+				"    into nothing and the call ends. Run `doorman render` and install\n"+
+				"    extensions_books.conf (docs/BOOKS.md).\n", conf, lobby.ListenContext)
+		}
+	}
+	return ok
 }
 
 // describeSilence is where a menu's silent caller ends up.

@@ -199,6 +199,10 @@ type Deps struct {
 	// Notify receives call events for the house to react to. Nil disables
 	// the webhook, same as Calls — absent config means the feature is off.
 	Notify Notifier
+	// Listening counts this line's Dial-a-Story listeners (#155), asked
+	// before a caller is released to a shelf. The zero value counts nothing
+	// early; the dialplan's cap still holds.
+	Listening Listening
 
 	// Quiet says whether a handset has set do-not-disturb (s12): asked
 	// before each leg is originated, by handset id, and answered by Asterisk
@@ -273,6 +277,9 @@ type Session struct {
 	// output, not state. Cancellation remains the only state there is.
 	rec       calls.Record
 	startedAt time.Time
+	// held is when the channel arrived by the real clock — startedAt may be
+	// a test's fixed one — for limits on how long a channel may be held.
+	held time.Time
 }
 
 func NewSession(channelID, callerNumber string, deps Deps) *Session {
@@ -327,6 +334,7 @@ func NewSession(channelID, callerNumber string, deps Deps) *Session {
 		// Abandoned is the zero outcome, so a caller who hangs up mid-lobby
 		// is recorded truthfully with nobody having to remember to set it.
 		startedAt: started,
+		held:      time.Now(),
 		// Direction is left at its zero value on purpose: a Session is inbound
 		// by construction, and an absent direction is what every record written
 		// before outbound calling existed says.

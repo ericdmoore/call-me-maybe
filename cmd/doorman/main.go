@@ -556,6 +556,9 @@ func runCheck(args []string) (code int) {
 		rc = 1
 	}
 	printMailboxes(results, secretLookup(*envFlag))
+	if !printShelves(results) {
+		rc = 1
+	}
 	printPageOverrides(results)
 	// Both silent without a trunks.toml: a box with one provider has nothing
 	// to choose between and should never have to read the word "trunk".
@@ -1012,6 +1015,7 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 	fmt.Printf("  actions              : %s\n", actionsSummary(p.Actions()))
 	fmt.Printf("  house voicemail      : %s\n", orDefault(p.HousePlan().Mailbox, noMailbox))
 	describeMenus(p)
+	describeShelves(p)
 	describeCurfews(p, time.Now())
 
 	// Every extension, every setting — including the ones nobody wrote down.
@@ -1829,7 +1833,13 @@ func serve() error {
 				RedactCallerID:     cfg.RedactCallerID,
 				MaxConcurrentCalls: cfg.MaxConcurrentCalls,
 			},
-			Quiet:        quietThroughARI(client, o.log),
+			Quiet: quietThroughARI(client, o.log),
+			// One listening group per line, so [listening] max_listeners is
+			// the line's; counted by Asterisk, which is where listeners are.
+			Listening: lobby.Listening{
+				Group: "line-" + o.name,
+				Count: listenersThroughARI(client),
+			},
 			OnLegCreated: reg.addLeg,
 			OnFinished:   reg.remove,
 		}
@@ -2538,6 +2548,22 @@ func quietThroughARI(client *ari.Client, log *slog.Logger) func(string) bool {
 			return false
 		}
 		return time.Now().Unix() < until
+	}
+}
+
+// listenersThroughARI counts a line's Dial-a-Story listeners (#155):
+// GROUP_COUNT, evaluated on the caller's own channel because ARI's global
+// variable endpoint answers "" for a function with arguments. Read-only, and
+// Asterisk's own count — [cmm-listen] joins the group, doorman never does.
+func listenersThroughARI(client *ari.Client) func(ctx context.Context, channelID, group string) (int, error) {
+	return func(ctx context.Context, channelID, group string) (int, error) {
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		v, err := client.ChannelVar(ctx, channelID, "GROUP_COUNT("+group+"@"+lobby.ListenGroupCategory+")")
+		if err != nil {
+			return 0, err
+		}
+		return strconv.Atoi(strings.TrimSpace(v))
 	}
 }
 

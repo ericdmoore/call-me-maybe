@@ -39,7 +39,8 @@ func isMenuKey(k string) bool {
 }
 
 // walkMenu runs the line's front menu until the caller is handed somewhere:
-// an extension's ring plan, a mailbox, a goodbye, or the line's disposition.
+// an extension's ring plan, a mailbox, a books shelf, a goodbye, or the
+// line's disposition.
 //
 // seed is a key the caller already pressed — over the welcome prompt, for an
 // admitted caller — taken as a choice at the front menu. known is the name
@@ -155,6 +156,15 @@ func (s *Session) walkMenu(seed, known string, passed bool) {
 				continue // refused at load; offered again rather than dropped
 			}
 			cur = next
+		case policy.ChoiceShelf, policy.ChoiceStory:
+			// Released to listen, or — every listening line busy, or the
+			// handoff refused — offered this menu again, a key pressed over
+			// the busy phrase being a choice here.
+			released, key := s.listen(choice)
+			if released || s.ctx.Err() != nil {
+				return
+			}
+			seed = key
 		case policy.ChoiceRecording:
 			// A recording never leaves Stasis, so it is the one leaf with a
 			// "next": the menu that offered it, or a goodbye. Back to the

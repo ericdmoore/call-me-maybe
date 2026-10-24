@@ -26,7 +26,7 @@ Flags:
   --path <file>      explicit journal or JSONL file (auto detects its format)
   --since <when>     only calls since then: a duration (24h, 7d) or a date
                      (2026-08-01). Default: everything.
-  --outcome <what>   answered | voicemail | dismissed | abandoned | placed | ended
+  --outcome <what>   answered | voicemail | listening | dismissed | abandoned | placed | ended
   --caller <digits>  match part of the number at the other end — the caller ID
                      on an inbound call, the number dialled on an outbound one
   --line <name>      only calls on one line. "default" is the line plain
@@ -62,7 +62,7 @@ func dumpCalls(args []string, out, diagnostics io.Writer) int {
 
 	var (
 		since     = fs.String("since", "", "duration or date")
-		outcome   = fs.String("outcome", "", "answered|voicemail|dismissed|abandoned|placed|ended")
+		outcome   = fs.String("outcome", "", "answered|voicemail|listening|dismissed|abandoned|placed|ended")
 		caller    = fs.String("caller", "", "substring of a number at either end")
 		line      = fs.String("line", "", "only calls on one line")
 		direction = fs.String("direction", "", "inbound|outbound")

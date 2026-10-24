@@ -65,6 +65,10 @@ const (
 	OutcomeAnswered = "answered"
 	// OutcomeVoicemail: released into the dialplan to leave a message.
 	OutcomeVoicemail = "voicemail"
+	// OutcomeListening: released into the dialplan to listen to a books
+	// shelf or a story of the day (#155). Choice says which; how long they
+	// listened is Asterisk's to know, not doorman's.
+	OutcomeListening = "listening"
 	// OutcomeDismissed: doorman ended it deliberately. Reason says why.
 	OutcomeDismissed = "dismissed"
 	// OutcomeAbandoned: the caller hung up first. The zero value, so a call
