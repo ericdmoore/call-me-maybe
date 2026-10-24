@@ -412,8 +412,9 @@ func TestBalanceRefusesAnInvalidTrunksFile(t *testing.T) {
 // reads the credential fields (trunkAPIConfig); numbers.go is the second
 // command that talks to a provider, and it is admitted for the package import
 // alone — it reaches the credentials only through balance.go's helper, so the
-// field names stay in one file. Both are subcommands that run and exit; no
-// file the daemon's own code path lives in may appear here.
+// field names stay in one file. The helper is fenced too: it returns the
+// secret, so calling it is reading the credential. Both are subcommands that
+// run and exit; no file the daemon's own code path lives in may appear here.
 func TestOnlyTheProviderCommandsTouchProviderCredentials(t *testing.T) {
 	importers := map[string]bool{
 		"balance.go": true, "balance_test.go": true,
@@ -436,6 +437,14 @@ func TestOnlyTheProviderCommandsTouchProviderCredentials(t *testing.T) {
 		if !importers[name] && strings.Contains(string(src), "internal/provider") {
 			t.Errorf("%s mentions internal/provider — the provider API is reached by "+
 				"`doorman balance` and `doorman numbers` and by nothing else, deliberately", name)
+		}
+		// The helper hands back the resolved secret itself, and it is an
+		// ordinary package-main function: calling it needs neither the import
+		// nor a field name, so without this line any daemon file could hold
+		// the key and every check above would still pass.
+		if !importers[name] && strings.Contains(string(src), "trunkAPIConfig") {
+			t.Errorf("%s mentions trunkAPIConfig — it resolves the provider API key, and only "+
+				"`doorman balance` and `doorman numbers` may call it", name)
 		}
 		if readers[name] {
 			continue
