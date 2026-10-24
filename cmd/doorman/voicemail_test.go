@@ -230,6 +230,8 @@ func TestVoicemailArgumentsAreChecked(t *testing.T) {
 	for _, args := range [][]string{
 		nil, {"bogus"}, {"notify"}, {"notify", "household"}, {"notify", "house hold", "kids"},
 		{"notify", "household", "../kids"}, {"notify", "household", "kids", "1", "2", "3", "4"},
+		// The mailbox becomes the mail's subject: no line break gets that far.
+		{"notify", "household", "kids\nBcc: x@example.com"}, {"notify", "household", "kids\r"}, {"notify", "house\nhold", "kids"},
 		{"notify", "-nope", "household", "kids"}, {"serve", "extra"},
 	} {
 		if rc := runVoicemail(args); rc != 2 {

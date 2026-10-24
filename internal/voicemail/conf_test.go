@@ -52,6 +52,9 @@ func TestLookupBoxParsesDefensively(t *testing.T) {
 	dir := t.TempDir()
 	writeConf(t, dir, "extra.conf", "[biz]\nsales = 4242,Sales Line,sales@example.com|owner@example.com,pager@example.com,attach=no\n")
 	writeConf(t, dir, "glob-a.conf", "[biz]\nglobbed => 1,Globbed,g@example.com\n")
+	// Asterisk resolves an absolute #include as written, outside its config
+	// directory; so does this, or a box declared there would mail MAIL_TO.
+	elsewhere := writeConf(t, t.TempDir(), "elsewhere.conf", "[biz]\nabsolute => 1,Absolute,abs@example.com\n")
 	conf := writeConf(t, dir, "voicemail.conf", strings.Join([]string{
 		"[general]",
 		"format = wav49|wav",
@@ -73,6 +76,7 @@ func TestLookupBoxParsesDefensively(t *testing.T) {
 		"#tryinclude missing.conf",
 		"#include glob-*.conf",
 		"#include voicemail.conf",
+		"#include " + elsewhere,
 	}, "\n"))
 
 	cases := []struct {
@@ -88,6 +92,7 @@ func TestLookupBoxParsesDefensively(t *testing.T) {
 		{"household", "spaces", true, nil, "Spaces"},
 		{"biz", "sales", true, []string{"sales@example.com", "owner@example.com"}, "Sales Line"},
 		{"biz", "globbed", true, []string{"g@example.com"}, "Globbed"},
+		{"biz", "absolute", true, []string{"abs@example.com"}, "Absolute"},
 		{"general", "family", true, []string{"general@example.com"}, "not a mailbox"},
 	}
 	for _, c := range cases {
