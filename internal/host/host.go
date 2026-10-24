@@ -206,8 +206,11 @@ func Build(ctx context.Context, x Exec, lay Layout, w Wants) (*Plan, error) {
 
 	// Directories, each with its owner. The spool is the one place asterisk
 	// and doorman meet: asterisk-owned, doorman group, setgid so what
-	// asterisk writes is doorman's to remove. If there is no asterisk user
-	// (a box without Asterisk yet) the spool waits for the next run.
+	// asterisk writes is doorman's to remove. The voicemail state directory
+	// is the asterisk user's own, made only when the layout names one. Both
+	// need the asterisk user to own them, so on a box without Asterisk yet
+	// neither is planned — install cannot chown to a user that does not
+	// exist — and both wait for the next run.
 	for _, d := range []string{lay.StateDir, filepath.Join(lay.StateDir, "journal"), filepath.Join(lay.StateDir, "provision"),
 		filepath.Join(lay.StateDir, "inbox"), filepath.Join(lay.StateDir, "phonebook"), filepath.Join(lay.StateDir, "phonebook", "own")} {
 		p.Steps = append(p.Steps, Step{Describe: "directory " + d + " (" + lay.DoormanUser + ", 0700)",
@@ -221,7 +224,11 @@ func Build(ctx context.Context, x Exec, lay Layout, w Wants) (*Plan, error) {
 				Argv: []string{"install", "-d", "-o", lay.AsteriskUser, "-g", lay.AsteriskUser, "-m", "0750", lay.VoicemailState}})
 		}
 	} else {
-		p.Steps = append(p.Steps, Step{Describe: "skip " + lay.Spool + ": no user " + lay.AsteriskUser + " yet (install Asterisk, rerun)"})
+		skipped := lay.Spool
+		if lay.VoicemailState != "" {
+			skipped += " and " + lay.VoicemailState
+		}
+		p.Steps = append(p.Steps, Step{Describe: "skip " + skipped + ": no user " + lay.AsteriskUser + " yet (install Asterisk, rerun)"})
 	}
 
 	// What the nightly backup reads as doorman but Asterisk owns: the

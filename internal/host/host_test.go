@@ -353,6 +353,14 @@ func TestTheVoicemailDirectoryAndUnit(t *testing.T) {
 	}
 	if p, _ := Build(context.Background(), &fakeExec{users: map[string]bool{}}, lay, Wants{Why: map[string]string{}}); has(p) {
 		t.Error("voicemail directory planned on a box with no asterisk user")
+	} else {
+		said := false
+		for _, s := range p.Steps {
+			said = said || (strings.HasPrefix(s.Describe, "skip ") && strings.Contains(s.Describe, lay.VoicemailState))
+		}
+		if !said {
+			t.Error("the plan does not say the voicemail directory waits for an asterisk user")
+		}
 	}
 	units, _ := Units()
 	for _, u := range units {
@@ -360,7 +368,9 @@ func TestTheVoicemailDirectoryAndUnit(t *testing.T) {
 			continue
 		}
 		c := string(u.Content)
-		for _, line := range []string{"User=asterisk", "ExecStart=/opt/call-me-maybe/bin/doorman voicemail serve", "ReadWritePaths=/var/lib/asterisk/cmm-voicemail", "ProtectSystem=strict",
+		// The unit may write only where the layout makes the directory: a
+		// mismatch is a listener that cannot keep its links.
+		for _, line := range []string{"User=asterisk", "ExecStart=/opt/call-me-maybe/bin/doorman voicemail serve", "ReadWritePaths=" + DefaultLayout().VoicemailState, "ProtectSystem=strict",
 			// The listener answers the network as the asterisk user; it must
 			// not see what that user can read: SIP/ARI passwords in
 			// /etc/asterisk, the recordings, the mail token.
@@ -373,8 +383,8 @@ func TestTheVoicemailDirectoryAndUnit(t *testing.T) {
 		if strings.Contains(c, "EnvironmentFile") || strings.Contains(c, "/opt/call-me-maybe/.env") {
 			t.Error("the voicemail listener must not load doorman's .env")
 		}
-		if DefaultLayout().VoicemailState != "/var/lib/asterisk/cmm-voicemail" {
-			t.Error("the unit's ReadWritePaths and the layout disagree")
+		if n := strings.Count(c, "ReadWritePaths="); n != 1 {
+			t.Errorf("unit has %d ReadWritePaths lines; the layout's directory must be the only writable one", n)
 		}
 	}
 }
