@@ -103,9 +103,24 @@ numbers = ["+15125550172"]
 # EITHER is active: the phones ring Monday to Friday, 08:30 to 17:29, and take
 # a message at every other hour.
 #
-# Holidays are one edit: enabled = false on nights and weekend-days, and every
-# reference goes inert without deleting the definition. Switch off
-# weekend-days alone and Saturday and Sunday daytimes ring like a weekday.
+# `enabled = false` OPENS hours, because these are closed windows: switch off
+# weekend-days alone and Saturday and Sunday daytimes ring like a weekday;
+# switch off both and the line rings at any hour, 03:00 included. Either way
+# the definition stays, one edit from coming back.
+#
+# A day off is the opposite edit. Add a third closed window, kept off, and
+# name it beside the other two on every extension:
+#
+#   [[schedules]]
+#   id = "day-off"
+#   enabled = false            # true for the day the office is shut
+#   start = "08:30"
+#   end = "17:30"
+#
+#   afterhours = ["nights", "weekend-days", "day-off"]
+#
+# Switched on, it closes the daytime as well, so nights stay closed and the
+# day takes messages too.
 
 [[schedules]]
 id = "nights"
