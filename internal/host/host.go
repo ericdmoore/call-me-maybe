@@ -54,6 +54,10 @@ type Layout struct {
 	// AsteriskDir and VoicemailDir are what the backup reads as doorman;
 	// init services grants the ACLs. Empty skips them.
 	AsteriskDir, VoicemailDir string
+	// VoicemailState is the asterisk user's own directory for the voicemail
+	// links and the list of messages already mailed: made here because
+	// doorman-voicemail.service may write only inside it. Empty skips it.
+	VoicemailState string
 }
 
 // asteriskFiles are the hand-written files the backup carries; the same
@@ -66,6 +70,7 @@ func DefaultLayout() Layout {
 		UnitDir: "/etc/systemd/system", StateDir: "/var/lib/doorman", Spool: "/var/spool/call-me-maybe",
 		DoormanUser: "doorman", DoormanGroup: "doorman", AsteriskUser: "asterisk",
 		AsteriskDir: "/etc/asterisk", VoicemailDir: "/var/spool/asterisk/voicemail",
+		VoicemailState: "/var/lib/asterisk/cmm-voicemail",
 	}
 }
 
@@ -79,6 +84,7 @@ type Wants struct {
 	Balance   bool // trunks.toml
 	Backup    bool // BACKUP_RECIPIENT and at least one destination
 	Sync      bool // this installation has enrolled account credentials
+	Voicemail bool // VOICEMAIL_LINK_BASE in /etc/asterisk/cmm-mail.env
 	// Why records the reason for each decision, by unit, for the plan.
 	Why map[string]string
 }
@@ -112,6 +118,7 @@ func Units() ([]Unit, error) {
 		"doorman-backup.service":    {},
 		"doorman-backup.timer":      {wanted: func(w Wants) bool { return w.Backup }},
 		"doorman-sync.service":      {wanted: func(w Wants) bool { return w.Sync }},
+		"doorman-voicemail.service": {wanted: func(w Wants) bool { return w.Voicemail }},
 	}
 	entries, err := fs.ReadDir(unitFS, "units")
 	if err != nil {
@@ -199,8 +206,11 @@ func Build(ctx context.Context, x Exec, lay Layout, w Wants) (*Plan, error) {
 
 	// Directories, each with its owner. The spool is the one place asterisk
 	// and doorman meet: asterisk-owned, doorman group, setgid so what
-	// asterisk writes is doorman's to remove. If there is no asterisk user
-	// (a box without Asterisk yet) the spool waits for the next run.
+	// asterisk writes is doorman's to remove. The voicemail state directory
+	// is the asterisk user's own, made only when the layout names one. Both
+	// need the asterisk user to own them, so on a box without Asterisk yet
+	// neither is planned — install cannot chown to a user that does not
+	// exist — and both wait for the next run.
 	for _, d := range []string{lay.StateDir, filepath.Join(lay.StateDir, "journal"), filepath.Join(lay.StateDir, "provision"),
 		filepath.Join(lay.StateDir, "inbox"), filepath.Join(lay.StateDir, "phonebook"), filepath.Join(lay.StateDir, "phonebook", "own")} {
 		p.Steps = append(p.Steps, Step{Describe: "directory " + d + " (" + lay.DoormanUser + ", 0700)",
@@ -209,8 +219,16 @@ func Build(ctx context.Context, x Exec, lay Layout, w Wants) (*Plan, error) {
 	if userExists(ctx, x, lay.AsteriskUser) {
 		p.Steps = append(p.Steps, Step{Describe: "directory " + lay.Spool + " (" + lay.AsteriskUser + ":" + lay.DoormanGroup + ", 2770 — the *88 spool)",
 			Argv: []string{"install", "-d", "-o", lay.AsteriskUser, "-g", lay.DoormanGroup, "-m", "2770", lay.Spool}})
+		if lay.VoicemailState != "" {
+			p.Steps = append(p.Steps, Step{Describe: "directory " + lay.VoicemailState + " (" + lay.AsteriskUser + ", 0750 — the voicemail links)",
+				Argv: []string{"install", "-d", "-o", lay.AsteriskUser, "-g", lay.AsteriskUser, "-m", "0750", lay.VoicemailState}})
+		}
 	} else {
-		p.Steps = append(p.Steps, Step{Describe: "skip " + lay.Spool + ": no user " + lay.AsteriskUser + " yet (install Asterisk, rerun)"})
+		skipped := lay.Spool
+		if lay.VoicemailState != "" {
+			skipped += " and " + lay.VoicemailState
+		}
+		p.Steps = append(p.Steps, Step{Describe: "skip " + skipped + ": no user " + lay.AsteriskUser + " yet (install Asterisk, rerun)"})
 	}
 
 	// What the nightly backup reads as doorman but Asterisk owns: the
