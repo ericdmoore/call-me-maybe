@@ -1088,8 +1088,17 @@ func TemplateFormat() *Schema {
 						Items: &Schema{Type: "object", Description: "Same shape as policy.toml [[schedules]]. A colliding id is suffixed and references are rewritten."},
 					},
 					"extensions": {
-						Type:  "array",
-						Items: &Schema{Type: "object", Description: "Same shape as policy.toml [[extensions]], except pin must be \"$generate.pin\"."},
+						Type: "array",
+						Items: &Schema{
+							Type:        "object",
+							Description: "Same shape as policy.toml [[extensions]], except pin must be \"$generate.pin\" and afterhours names one schedule.",
+							Properties: map[string]*Schema{
+								// policy.toml takes a list here; a template does
+								// not, and saying so is what stops a template that
+								// validates against this schema failing in the CLI.
+								"afterhours": {Type: "string", Description: "One [[schedules]] id, emitted or already in the policy. A template names a single schedule; a list of them is written in policy.toml."},
+							},
+						},
 					},
 				},
 			},
