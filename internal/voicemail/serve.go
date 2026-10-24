@@ -2,6 +2,7 @@ package voicemail
 
 import (
 	"fmt"
+	"html"
 	"log/slog"
 	"net"
 	"net/http"
@@ -166,8 +167,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !r.URL.Query().Has("audio") && wantsHTML(r) {
 		h.Set("Content-Type", "text/html; charset=utf-8")
 		h.Set("Content-Security-Policy", "default-src 'none'; media-src 'self'; style-src 'unsafe-inline'")
-		// rest passed ValidToken: 22 characters of [A-Za-z0-9_-], nothing to escape.
-		fmt.Fprintf(w, page, rest, rest)
+		// rest passed ValidToken (22 characters of [A-Za-z0-9_-]), so escaping
+		// changes nothing today; it is here so that a wider token alphabet
+		// later cannot turn this page into markup somebody else wrote.
+		t := html.EscapeString(rest)
+		fmt.Fprintf(w, page, t, t)
 		return
 	}
 	h.Set("Content-Type", "audio/wav")
