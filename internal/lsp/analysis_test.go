@@ -72,6 +72,37 @@ func TestUnknownHandsetIsPlacedOnItsLine(t *testing.T) {
 	}
 }
 
+// A schedule named twice in one extension's afterhours is that extension's
+// mistake. The id also appears where the schedule is defined, in another
+// extension that names it once, and in a handset's curfew — all earlier in
+// the usual layout — and none of those is where the squiggle belongs.
+func TestAfterhoursProblemIsPlacedOnThatExtensionsLine(t *testing.T) {
+	policy := strings.Replace(policyDoc, `afterhours = "school-night"`, `afterhours = "school-night"
+
+[[extensions]]
+pin = "428918"
+label = "Study"
+handsets = ["kids-room"]
+voicemail = "kids"
+afterhours = ["school-night", "school-night"]`, 1)
+	handsets := strings.Replace(handsetsDoc, `number = 105`, "number = 105\ncurfew = [\"school-night\"]", 1)
+	pDiags, hDiags := Analyse(policy, &handsets)
+	if len(pDiags) != 1 || len(hDiags) != 0 {
+		t.Fatalf("diagnostics: policy=%v handsets=%v", pDiags, hDiags)
+	}
+	d := pDiags[0]
+	if !strings.Contains(d.Message, `"Study" names afterhours schedule "school-night" twice`) {
+		t.Fatalf("message = %q", d.Message)
+	}
+	lines := strings.Split(policy, "\n")
+	if got := lines[d.Range.Start.Line]; got != `afterhours = ["school-night", "school-night"]` {
+		t.Errorf("diagnostic on line %d %q, want Study's afterhours line", d.Range.Start.Line, got)
+	}
+	if got := lines[d.Range.Start.Line][d.Range.Start.Character:d.Range.End.Character]; got != "school-night" {
+		t.Errorf("range covers %q, want the schedule id", got)
+	}
+}
+
 func TestUnknownKeyIsSquiggledOnTheTypoNotTheCorrectSpelling(t *testing.T) {
 	// policyDoc already contains two correctly spelled `voicemail` keys, which
 	// is the trap: the diagnostic has to land on the misspelling, so only the
@@ -159,6 +190,14 @@ func TestCompletionContexts(t *testing.T) {
 	got = labels(Complete(m, line, len(line)))
 	if !contains(got, "school-night") {
 		t.Errorf("afterhours context = %v", got)
+	}
+	for _, line := range []string{`afterhours = ["`, `afterhours = ["nights", "`} {
+		if got := labels(Complete(m, line, len(line))); !contains(got, "school-night") {
+			t.Errorf("afterhours list context %q = %v", line, got)
+		}
+	}
+	if line := `afterhours_ring = ["`; contains(labels(Complete(m, line, len(line))), "school-night") {
+		t.Error("afterhours_ring rings handsets; it must not be offered schedules")
 	}
 
 	line = `  days = ["SU", "`

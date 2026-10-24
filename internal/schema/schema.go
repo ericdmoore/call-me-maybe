@@ -35,6 +35,9 @@ type Schema struct {
 	Type  string `json:"type,omitempty"`
 	Enum  []any  `json:"enum,omitempty"`
 	Const any    `json:"const,omitempty"`
+	// OneOf is for the keys that take more than one shape — afterhours, one
+	// schedule id or a list of them.
+	OneOf []*Schema `json:"oneOf,omitempty"`
 
 	// Strings
 	Pattern   string `json:"pattern,omitempty"`
@@ -51,8 +54,9 @@ type Schema struct {
 	AdditionalProperties *bool              `json:"additionalProperties,omitempty"`
 
 	// Arrays
-	Items    *Schema `json:"items,omitempty"`
-	MinItems *int    `json:"minItems,omitempty"`
+	Items       *Schema `json:"items,omitempty"`
+	MinItems    *int    `json:"minItems,omitempty"`
+	UniqueItems bool    `json:"uniqueItems,omitempty"`
 
 	Default any `json:"default,omitempty"`
 
@@ -793,7 +797,7 @@ func schedule() *Schema {
 		Type:     "object",
 		Required: []string{"id", "start", "end"},
 		Properties: map[string]*Schema{
-			"id": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Referenced as afterhours = \"<id>\" from an extension, or in curfew = [\"<id>\", …] on a handset in handsets.toml."},
+			"id": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Referenced as afterhours = \"<id>\" (or afterhours = [\"<id>\", …]) from an extension, or in curfew = [\"<id>\", …] on a handset in handsets.toml."},
 			"enabled": {
 				Type:        "boolean",
 				Default:     true,
@@ -854,10 +858,19 @@ func extension() *Schema {
 				CrossRefs:   []string{"asterisk/voicemail.conf [household] context"},
 			},
 			"afterhours": {
-				Type:        "string",
-				Description: "Id of a [[schedules]] entry. During the window the line does not ring normally: it either redirects to afterhours_ring, or goes to voicemail.",
+				OneOf: []*Schema{
+					{Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "One [[schedules]] id."},
+					{Type: "array", MinItems: one, UniqueItems: true, Items: &Schema{Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$"}, Description: "Several [[schedules]] ids, in any order."},
+				},
+				Description: "Id of a [[schedules]] entry, or a list of them. While a named window is active the line does not ring normally: it either redirects to afterhours_ring, or goes to voicemail. A list because one window crosses midnight at most once per day it lists: weekdays 9–5 is afterhours = [\"nights\", \"weekend-days\"], with nights 17:00–09:00 every day and weekend-days 09:00–17:00 SA SU.",
 				CrossRefs:   []string{"policy.toml [[schedules]].id"},
-				Rules:       []string{"The inline-table form is retired; use a named schedule id.", "Requires either voicemail or afterhours_ring, so the caller has somewhere to go."},
+				Rules: []string{
+					"The inline-table form is retired; use a named schedule id.",
+					"A list is a union: the line is in its afterhours state while ANY named schedule is active.",
+					"Every id must name a [[schedules]] entry, and only once; an empty list fails `doorman check`.",
+					"A schedule with enabled = false is inert, alone or in a list; with every named schedule off the line rings at any hour, and `doorman check` says so.",
+					"Requires either voicemail or afterhours_ring, so the caller has somewhere to go.",
+				},
 			},
 			"afterhours_ring": {
 				Type:        "array",
@@ -1075,8 +1088,17 @@ func TemplateFormat() *Schema {
 						Items: &Schema{Type: "object", Description: "Same shape as policy.toml [[schedules]]. A colliding id is suffixed and references are rewritten."},
 					},
 					"extensions": {
-						Type:  "array",
-						Items: &Schema{Type: "object", Description: "Same shape as policy.toml [[extensions]], except pin must be \"$generate.pin\"."},
+						Type: "array",
+						Items: &Schema{
+							Type:        "object",
+							Description: "Same shape as policy.toml [[extensions]], except pin must be \"$generate.pin\" and afterhours names one schedule.",
+							Properties: map[string]*Schema{
+								// policy.toml takes a list here; a template does
+								// not, and saying so is what stops a template that
+								// validates against this schema failing in the CLI.
+								"afterhours": {Type: "string", Description: "One [[schedules]] id, emitted or already in the policy. A template names a single schedule; a list of them is written in policy.toml."},
+							},
+						},
 					},
 				},
 			},

@@ -697,9 +697,24 @@
                   "type": "boolean"
                 },
                 "afterhours": {
-                  "type": "string",
-                  "maxLength": 64,
-                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+                      },
+                      "minItems": 2,
+                      "maxItems": 100
+                    }
+                  ],
+                  "description": "The schedule id an extension's afterhours names, or every id when it names several; the extension is quiet while any is active. One id is always sent as a string."
                 }
               },
               "required": ["id", "label", "handsets", "pinSet", "enabled"]
@@ -1269,8 +1284,22 @@
               "type": "object",
               "properties": {
                 "afterhours": {
-                  "type": "string",
-                  "maxLength": 2048
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 2048
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "maxLength": 2048
+                      },
+                      "minItems": 2,
+                      "maxItems": 1000
+                    }
+                  ],
+                  "description": "One schedule id, or several; a list of one is sent as the string it means."
                 },
                 "afterhours_ring": {
                   "type": "array",

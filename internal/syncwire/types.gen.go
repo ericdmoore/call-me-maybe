@@ -741,18 +741,30 @@ type PhonebookRole string
 // Policy defines model for Policy.
 type Policy struct {
 	Extensions []struct {
-		Afterhours *string  `json:"afterhours,omitempty"`
-		Enabled    bool     `json:"enabled"`
-		Handsets   []string `json:"handsets"`
-		Id         string   `json:"id"`
-		Label      string   `json:"label"`
-		PinSet     bool     `json:"pinSet"`
+		// Afterhours The schedule id an extension's afterhours names, or every id when it names several; the extension is quiet while any is active. One id is always sent as a string.
+		Afterhours *Policy_Extensions_Afterhours `json:"afterhours,omitempty"`
+		Enabled    bool                          `json:"enabled"`
+		Handsets   []string                      `json:"handsets"`
+		Id         string                        `json:"id"`
+		Label      string                        `json:"label"`
+		PinSet     bool                          `json:"pinSet"`
 	} `json:"extensions"`
 	HouseHandsets []string   `json:"houseHandsets"`
 	Id            string     `json:"id"`
 	Label         string     `json:"label"`
 	People        []Contact  `json:"people"`
 	Schedules     []Schedule `json:"schedules"`
+}
+
+// PolicyExtensionsAfterhours0 defines model for Policy.Extensions.Afterhours.0.
+type PolicyExtensionsAfterhours0 = string
+
+// PolicyExtensionsAfterhours1 defines model for Policy.Extensions.Afterhours.1.
+type PolicyExtensionsAfterhours1 = []string
+
+// Policy_Extensions_Afterhours The schedule id an extension's afterhours names, or every id when it names several; the extension is quiet while any is active. One id is always sent as a string.
+type Policy_Extensions_Afterhours struct {
+	union json.RawMessage
 }
 
 // PolicyValues defines model for PolicyValues.
@@ -768,12 +780,13 @@ type PolicyValues struct {
 		WebhookSet *bool                       `json:"webhookSet,omitempty"`
 	} `json:"actions,omitempty"`
 	Extensions *[]struct {
-		Afterhours     *string   `json:"afterhours,omitempty"`
-		AfterhoursRing *[]string `json:"afterhours_ring,omitempty"`
-		Enabled        *bool     `json:"enabled,omitempty"`
-		Handsets       *[]string `json:"handsets,omitempty"`
-		Label          string    `json:"label"`
-		PinSet         bool      `json:"pinSet"`
+		// Afterhours One schedule id, or several; a list of one is sent as the string it means.
+		Afterhours     *PolicyValues_Extensions_Afterhours `json:"afterhours,omitempty"`
+		AfterhoursRing *[]string                           `json:"afterhours_ring,omitempty"`
+		Enabled        *bool                               `json:"enabled,omitempty"`
+		Handsets       *[]string                           `json:"handsets,omitempty"`
+		Label          string                              `json:"label"`
+		PinSet         bool                                `json:"pinSet"`
 		Steps          *[]struct {
 			Handsets []string `json:"handsets"`
 			Rings    *int64   `json:"rings,omitempty"`
@@ -813,6 +826,17 @@ type PolicyValues struct {
 
 // PolicyValuesActionsConfirm defines model for PolicyValues.Actions.Confirm.
 type PolicyValuesActionsConfirm string
+
+// PolicyValuesExtensionsAfterhours0 defines model for PolicyValues.Extensions.Afterhours.0.
+type PolicyValuesExtensionsAfterhours0 = string
+
+// PolicyValuesExtensionsAfterhours1 defines model for PolicyValues.Extensions.Afterhours.1.
+type PolicyValuesExtensionsAfterhours1 = []string
+
+// PolicyValues_Extensions_Afterhours One schedule id, or several; a list of one is sent as the string it means.
+type PolicyValues_Extensions_Afterhours struct {
+	union json.RawMessage
+}
 
 // PolicyValuesLineOnNoInput defines model for PolicyValues.Line.OnNoInput.
 type PolicyValuesLineOnNoInput string
@@ -1090,6 +1114,130 @@ type SyncSnapshotJSONRequestBody = Snapshot
 
 // SyncStatusJSONRequestBody defines body for SyncStatus for application/json ContentType.
 type SyncStatusJSONRequestBody = Status
+
+// AsPolicyExtensionsAfterhours0 returns the union data inside the Policy_Extensions_Afterhours as a PolicyExtensionsAfterhours0
+func (t Policy_Extensions_Afterhours) AsPolicyExtensionsAfterhours0() (PolicyExtensionsAfterhours0, error) {
+	var body PolicyExtensionsAfterhours0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPolicyExtensionsAfterhours0 overwrites any union data inside the Policy_Extensions_Afterhours as the provided PolicyExtensionsAfterhours0
+func (t *Policy_Extensions_Afterhours) FromPolicyExtensionsAfterhours0(v PolicyExtensionsAfterhours0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePolicyExtensionsAfterhours0 performs a merge with any union data inside the Policy_Extensions_Afterhours, using the provided PolicyExtensionsAfterhours0
+func (t *Policy_Extensions_Afterhours) MergePolicyExtensionsAfterhours0(v PolicyExtensionsAfterhours0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPolicyExtensionsAfterhours1 returns the union data inside the Policy_Extensions_Afterhours as a PolicyExtensionsAfterhours1
+func (t Policy_Extensions_Afterhours) AsPolicyExtensionsAfterhours1() (PolicyExtensionsAfterhours1, error) {
+	var body PolicyExtensionsAfterhours1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPolicyExtensionsAfterhours1 overwrites any union data inside the Policy_Extensions_Afterhours as the provided PolicyExtensionsAfterhours1
+func (t *Policy_Extensions_Afterhours) FromPolicyExtensionsAfterhours1(v PolicyExtensionsAfterhours1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePolicyExtensionsAfterhours1 performs a merge with any union data inside the Policy_Extensions_Afterhours, using the provided PolicyExtensionsAfterhours1
+func (t *Policy_Extensions_Afterhours) MergePolicyExtensionsAfterhours1(v PolicyExtensionsAfterhours1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t Policy_Extensions_Afterhours) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *Policy_Extensions_Afterhours) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsPolicyValuesExtensionsAfterhours0 returns the union data inside the PolicyValues_Extensions_Afterhours as a PolicyValuesExtensionsAfterhours0
+func (t PolicyValues_Extensions_Afterhours) AsPolicyValuesExtensionsAfterhours0() (PolicyValuesExtensionsAfterhours0, error) {
+	var body PolicyValuesExtensionsAfterhours0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPolicyValuesExtensionsAfterhours0 overwrites any union data inside the PolicyValues_Extensions_Afterhours as the provided PolicyValuesExtensionsAfterhours0
+func (t *PolicyValues_Extensions_Afterhours) FromPolicyValuesExtensionsAfterhours0(v PolicyValuesExtensionsAfterhours0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePolicyValuesExtensionsAfterhours0 performs a merge with any union data inside the PolicyValues_Extensions_Afterhours, using the provided PolicyValuesExtensionsAfterhours0
+func (t *PolicyValues_Extensions_Afterhours) MergePolicyValuesExtensionsAfterhours0(v PolicyValuesExtensionsAfterhours0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPolicyValuesExtensionsAfterhours1 returns the union data inside the PolicyValues_Extensions_Afterhours as a PolicyValuesExtensionsAfterhours1
+func (t PolicyValues_Extensions_Afterhours) AsPolicyValuesExtensionsAfterhours1() (PolicyValuesExtensionsAfterhours1, error) {
+	var body PolicyValuesExtensionsAfterhours1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPolicyValuesExtensionsAfterhours1 overwrites any union data inside the PolicyValues_Extensions_Afterhours as the provided PolicyValuesExtensionsAfterhours1
+func (t *PolicyValues_Extensions_Afterhours) FromPolicyValuesExtensionsAfterhours1(v PolicyValuesExtensionsAfterhours1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePolicyValuesExtensionsAfterhours1 performs a merge with any union data inside the PolicyValues_Extensions_Afterhours, using the provided PolicyValuesExtensionsAfterhours1
+func (t *PolicyValues_Extensions_Afterhours) MergePolicyValuesExtensionsAfterhours1(v PolicyValuesExtensionsAfterhours1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t PolicyValues_Extensions_Afterhours) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *PolicyValues_Extensions_Afterhours) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // AsVerb0 returns the union data inside the Verb as a Verb0
 func (t Verb) AsVerb0() (Verb0, error) {
