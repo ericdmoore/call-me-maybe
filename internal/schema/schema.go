@@ -563,6 +563,7 @@ func Policy() *Schema {
 			"actions":    {Type: "array", Description: "The registry of things the house can do (s13): what each does, who may, what it says back, whether it confirms. A text word (messages.toml), a lobby digit and a passkey all name an action by id; the action owns the webhook.", Items: action()},
 			"schedules":  {Type: "array", Description: "Named time windows, defined once and referenced by id from extensions.", Items: schedule()},
 			"extensions": {Type: "array", Description: "What an unknown caller may dial in the lobby.", Items: extension()},
+			"challenge":  challenge(),
 		},
 		AdditionalProperties: falsy,
 	}
@@ -665,6 +666,43 @@ func line() *Schema {
 					"ring-house lets anyone patient enough to say nothing reach the house, which makes the allow-list a shortcut rather than a gate. Choose it deliberately.",
 					"This governs an empty dial window only. A caller who exhausts their PIN attempts is still dismissed.",
 				},
+			},
+			"challenge_no_input": {
+				Type:    "boolean",
+				Default: false,
+				Description: "Ask the arithmetic challenge (\"what is three times six\") before on_no_input applies: a caller who dialled nothing must answer a sum before the mailbox records or the house rings. " +
+					"A filter for dialers that press nothing or press keys at random, and for very young children — not age verification, and no defence against an automated caller that understands speech. " +
+					"It closes the line to anybody who cannot press keys (a rotary phone, a car, a smart speaker) unless the ladder already admits them, which is why it is off unless written.",
+				CrossRefs: []string{"policy.toml [challenge]", "MAX_PIN_ATTEMPTS and RATELIMIT_* in the environment", "the bundled challenge clips, /var/lib/asterisk/sounds/call-me-maybe/challenge/"},
+				Rules: []string{
+					"Refused beside on_no_input = \"dismiss\" (or no on_no_input): a caller who is dismissed anyway has nothing to be guarded from.",
+					"Answered: on_no_input applies exactly as it would have. Silent at the question: dismissed, and neither rate limiter is charged. Wrong: a new question, MAX_PIN_ATTEMPTS retries, then dismissed.",
+					"Wrong answers count against the line's own challenge budget — a second rate limiter with the RATELIMIT_* knobs — never against the PIN budget, and a right answer forgives nothing in either.",
+					"Callers the ladder admits ([[people]], a lobby pass, a personal contact) never meet it, and neither does a caller who dialled a valid PIN.",
+					"The clips are the bundled challenge set, whatever prompts says: a pack supplies the six lobby prompts and nothing else.",
+				},
+			},
+		},
+		AdditionalProperties: falsy,
+	}
+}
+
+func challenge() *Schema {
+	return &Schema{
+		Type:        "object",
+		Description: "How the spoken arithmetic challenge is built, for the routes on this line that ask one ([line] challenge_no_input). Optional; every key has a default.",
+		Rules: []string{
+			"The challenge attaches to a route, never to an extension, and never to the PIN path: a caller who dialled a valid PIN is never asked a sum.",
+			"Operands are spoken from the bundled digit clips, zero to nine, in the house voice, whatever [line] prompts says.",
+		},
+		Properties: map[string]*Schema{
+			"factors": {
+				Type:        "array",
+				Items:       &Schema{Type: "integer", Minimum: ptr(0), Maximum: ptr(9)},
+				MinItems:    ptr(2),
+				Default:     []any{2, 9},
+				Description: "[low, high]: the inclusive range both operands of \"what is A times B\" are drawn from. A new pair on every try. The default leaves out zero and one, because \"what is one times seven\" sounds like a trick.",
+				Rules:       []string{"Exactly two integers, low ≤ high, both within 0–9 — there is one bundled clip per digit."},
 			},
 		},
 		AdditionalProperties: falsy,

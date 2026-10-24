@@ -986,6 +986,10 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 	fmt.Printf("  outbound caller id   : %s\n", orDefault(line.OutboundCID, noOutboundCID))
 	fmt.Printf("  prompt pack          : %s\n", orDefault(line.Prompts, noLinePrompts))
 	fmt.Printf("  no-input disposition : %s\n", describeNoInput(line, p.HousePlan().Mailbox))
+	if line.ChallengeNoInput {
+		fmt.Printf("  challenge            : %s\n", describeChallenge(p))
+		warnChallengeClips()
+	}
 	fmt.Printf("  allow-listed numbers : %d\n", p.AllowListCount())
 	fmt.Printf("  extensions           : %d\n", p.ExtensionCount())
 	fmt.Printf("  pin length           : %s\n", pinLen)
@@ -1036,6 +1040,21 @@ const (
 // decides who reaches the house, and nobody should discover that from a phone
 // call.
 func describeNoInput(line policy.LineIdentity, houseMailbox string) string {
+	// challenge_no_input is said in the same breath as the disposition it
+	// guards, and so is what it costs: the people it shuts out are exactly the
+	// ones nobody notices are missing.
+	if line.ChallengeNoInput {
+		where := fmt.Sprintf("they land in the %q mailbox", houseMailbox)
+		if line.OnNoInput == policy.NoInputRingHouse {
+			where = "the house rings"
+		}
+		return fmt.Sprintf("%s, behind the challenge — a caller who dialled nothing is asked\n"+
+			"                         a sum first; answered, %s.\n"+
+			"                         A caller who cannot press keys (a rotary phone, a car, a smart\n"+
+			"                         speaker) cannot get past it on this line unless they are on\n"+
+			"                         the allow-list, hold a pass, or are a personal contact.",
+			line.OnNoInput, where)
+	}
 	switch line.OnNoInput {
 	case policy.NoInputVoicemail:
 		return fmt.Sprintf("%s — they land in the %q mailbox", line.OnNoInput, houseMailbox)
@@ -1761,15 +1780,21 @@ func serve() error {
 	var limiters []*lobby.RateLimiter
 	for _, o := range opened {
 		limiter := lobby.NewRateLimiter(cfg.RateLimitEnabled, cfg.RateLimitMaxFailures, cfg.RateLimitWindow)
-		limiters = append(limiters, limiter)
+		// The challenge's budget is a second instance with the same knobs, so
+		// wrong sums and wrong PINs never spend each other's: a child who
+		// fails three sums cannot lock their number out of the PIN lobby,
+		// and a redialler cannot close "two for our hours".
+		challengeLimiter := lobby.NewRateLimiter(cfg.RateLimitEnabled, cfg.RateLimitMaxFailures, cfg.RateLimitWindow)
+		limiters = append(limiters, limiter, challengeLimiter)
 
 		deps := lobby.Deps{
-			ARI:     ariAdapter{client},
-			Policy:  o.store.Current,
-			Limiter: limiter,
-			Prompts: prompts,
-			Log:     o.log,
-			Line:    recordedLine(o.name),
+			ARI:              ariAdapter{client},
+			Policy:           o.store.Current,
+			Limiter:          limiter,
+			ChallengeLimiter: challengeLimiter,
+			Prompts:          prompts,
+			Log:              o.log,
+			Line:             recordedLine(o.name),
 			// Nil without a contacts.toml, which is what makes the ladder
 			// collapse to [[people]] and the lobby. openContacts returns an
 			// untyped nil for exactly this assignment.

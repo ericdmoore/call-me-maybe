@@ -294,6 +294,9 @@ func detail(r calls.Record) string {
 	if r.PIN == "invalid" {
 		parts = append(parts, fmt.Sprintf("%d bad attempt(s)", r.Attempts))
 	}
+	if r.Challenge != "" {
+		parts = append(parts, "challenge "+r.Challenge)
+	}
 	if n := len(r.Stages); n > 1 {
 		parts = append(parts, fmt.Sprintf("%d rungs", n))
 	}

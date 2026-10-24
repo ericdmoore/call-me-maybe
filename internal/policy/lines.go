@@ -49,6 +49,12 @@ type Line struct {
 	Number    string `toml:"number"`
 	Prompts   string `toml:"prompts"`
 	OnNoInput string `toml:"on_no_input"`
+	// ChallengeNoInput puts the arithmetic challenge in front of on_no_input:
+	// a caller who dialled nothing must answer a sum before the mailbox
+	// records or the house rings. Off unless written, because turning it on
+	// closes this line to everybody who cannot press keys — a rotary phone, a
+	// car, a smart speaker — unless the ladder already knows them.
+	ChallengeNoInput bool `toml:"challenge_no_input"`
 	// Trunk names the provider this line's number lives at — an id from
 	// trunks.toml. Inbound it is what `doorman render` needs to put the DID's
 	// route in the right provider's context; outbound it is how a call as this
@@ -118,6 +124,10 @@ type LineIdentity struct {
 	Prompts string
 	// OnNoInput is never empty once compiled; unset resolves to NoInputDismiss.
 	OnNoInput NoInput
+	// ChallengeNoInput is true when a silent caller must pass the arithmetic
+	// challenge before OnNoInput applies. Never true beside NoInputDismiss:
+	// a caller who is dismissed anyway has nothing to be guarded from.
+	ChallengeNoInput bool
 	// Trunk is the trunks.toml id this line's number arrives on and leaves by,
 	// or "" when the line names none — which is every install with one
 	// provider. It travels with OutboundCID everywhere the two go: a provider
@@ -181,6 +191,15 @@ func compileLine(l Line, houseMailbox string, handsetIDs func(where string, ids 
 	default:
 		fail("[line] on_no_input %q must be one of %s, %s or %s",
 			l.OnNoInput, NoInputDismiss, NoInputRingHouse, NoInputVoicemail)
+	}
+
+	if l.ChallengeNoInput {
+		if out.OnNoInput == NoInputDismiss {
+			fail("[line] challenge_no_input = true but on_no_input is %q — there is nothing to guard: "+
+				"a caller who dials nothing is already dismissed. Set on_no_input to %q or %q, or remove the key",
+				NoInputDismiss, NoInputVoicemail, NoInputRingHouse)
+		}
+		out.ChallengeNoInput = true
 	}
 
 	if out.OnNoInput == NoInputVoicemail && houseMailbox == "" {

@@ -97,6 +97,14 @@ const (
 	ViaLobbyPass = "lobby-pass"
 )
 
+// Challenge verdicts: what Record.Challenge may say.
+const (
+	ChallengePassed      = "passed"
+	ChallengeFailed      = "failed"
+	ChallengeNoAnswer    = "no-answer"
+	ChallengeRateLimited = "rate-limited"
+)
+
 type Record struct {
 	ID    string    `json:"id"` // channel id; ties back to the slog lines
 	Start time.Time `json:"start"`
@@ -153,6 +161,12 @@ type Record struct {
 	Extension string `json:"extension,omitempty"`
 	PIN       string `json:"pin,omitempty"`
 	Attempts  int    `json:"attempts,omitempty"`
+
+	// Challenge is the arithmetic challenge's verdict on this call — one of
+	// the Challenge* values — and empty when none was asked. Never the
+	// question and never what was typed: the answer is entered digits, and
+	// invariant 1 has no exception for digits that are not a PIN.
+	Challenge string `json:"challenge,omitempty"`
 
 	// Stages is the ladder as actually walked. The most useful field here:
 	// it is what tells you a stage times out before anyone can cross a room.

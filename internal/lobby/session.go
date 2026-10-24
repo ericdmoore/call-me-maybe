@@ -146,6 +146,18 @@ type Deps struct {
 	ARI     ARI
 	Policy  func() *policy.Policy
 	Limiter *RateLimiter
+	// ChallengeLimiter counts wrong answers to the arithmetic challenge
+	// across calls, per line, exactly as Limiter counts wrong PINs — and is a
+	// separate instance on purpose. A child's wrong sums must never lock a
+	// number out of the PIN lobby, and PIN guesses must never close a
+	// harmless recording. Nil is no cross-call budget: the per-call attempt
+	// limit still applies.
+	ChallengeLimiter *RateLimiter
+	// Rand draws the challenge's operands: a uniform int in [0, n). Nil is
+	// math/rand/v2. Not crypto/rand, because a sum is not a credential — the
+	// answer is spoken aloud to whoever calls — and injected so a test can
+	// fix the question.
+	Rand    func(n int) int
 	Prompts *Prompts
 	Log     *slog.Logger
 	Cfg     Config
@@ -581,15 +593,37 @@ func (s *Session) welcome(name string) {
 // digits during playback are ignored. Returns "" when the prompt completed
 // (or failed, or the session ended) without a barge.
 func (s *Session) play(name Prompt, bargeIn bool) string {
+	return s.playMedia(s.prompts.URI(name), bargeIn)
+}
+
+// say plays a sequence of media URIs in order — the composite prompt, the
+// console's helper lifted for the lobby's own use. With bargeIn the first
+// digit stops the sequence and is returned; otherwise digits are dropped.
+// One playback per URI, so a clip Asterisk cannot find costs that clip only.
+func (s *Session) say(bargeIn bool, media ...string) string {
+	for _, m := range media {
+		if key := s.playMedia(m, bargeIn); key != "" {
+			return key
+		}
+		if s.ctx.Err() != nil {
+			return ""
+		}
+	}
+	return ""
+}
+
+// playMedia is play for a media URI that is not one of the six pack prompts:
+// the challenge clips, a line's menu, a recording.
+func (s *Session) playMedia(media string, bargeIn bool) string {
 	if s.ctx.Err() != nil {
 		return ""
 	}
 	s.pbSeq++
 	pbID := fmt.Sprintf("pb-%s-%d", s.ID, s.pbSeq)
 
-	if err := s.deps.ARI.Play(s.ctx, s.ChannelID, s.prompts.URI(name), pbID); err != nil {
+	if err := s.deps.ARI.Play(s.ctx, s.ChannelID, media, pbID); err != nil {
 		// A missing prompt file should degrade to silence, not a stuck call.
-		s.log.Warn("playback failed", "prompt", string(name), "err", err)
+		s.log.Warn("playback failed", "media", media, "err", err)
 		return ""
 	}
 
@@ -724,8 +758,22 @@ const lobbyLabel = "Lobby"
 // ring they would have had before any of this existed.
 //
 // Everyone else gets the line's disposition, which defaults to the dismissal
-// this has always been.
+// this has always been — behind the arithmetic challenge when the line says
+// so ([line] challenge_no_input).
 func (s *Session) noInput(known string) {
+	s.disposition(known, "no-digits", false)
+}
+
+// disposition is the line's on_no_input, reached by a caller who chose
+// nothing. reason is what the record says about why — "no-digits" for an
+// empty dial window — and passed says the challenge has already been
+// answered on this call, so it is not asked twice.
+//
+// The challenge runs before the switch and not inside any branch of it, so
+// every place a silent caller can end up — the house mailbox, the ringing
+// house — sits behind it with no change of its own. A dismiss line has
+// nothing to guard: compileLine refuses challenge_no_input there.
+func (s *Session) disposition(known, reason string, passed bool) {
 	if known != "" {
 		s.runPlan(s.pol.HousePlan(), known)
 		return
@@ -735,7 +783,13 @@ func (s *Session) noInput(known string) {
 	house := s.pol.HousePlan()
 	// The record still says why they got where they got: outcome alone cannot
 	// tell a caller who dialled an extension from one who simply waited.
-	s.rec.Reason = "no-digits"
+	s.rec.Reason = reason
+
+	if line.ChallengeNoInput && line.OnNoInput != policy.NoInputDismiss && !passed {
+		if !s.challenge() {
+			return
+		}
+	}
 
 	switch line.OnNoInput {
 	case policy.NoInputRingHouse:
@@ -751,7 +805,7 @@ func (s *Session) noInput(known string) {
 		s.log.Info("nobody dialled, taking a message", "onNoInput", line.OnNoInput)
 		s.sendToVoicemail(house.Mailbox)
 	default:
-		s.dismiss("no-digits")
+		s.dismiss(reason)
 	}
 }
 

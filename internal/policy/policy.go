@@ -28,6 +28,9 @@ type File struct {
 	Schedules  []Schedule  `toml:"schedules"`
 	People     []Person    `toml:"people"`
 	Extensions []Extension `toml:"extensions"`
+	// Challenge is how the spoken arithmetic question is built, for the
+	// routes on this line that ask one.
+	Challenge Challenge `toml:"challenge"`
 	// Actions are the things a word, a lobby digit or a passkey can make
 	// the house do (s13). One registry; every transport names an id.
 	Actions []Action `toml:"actions"`
@@ -381,6 +384,7 @@ type Policy struct {
 	house          RingPlan
 	callerIDFormat string
 	line           LineIdentity
+	challenge      ChallengeRange
 
 	// Retained for tooling rather than call handling: filling in a template
 	// needs to know what handsets exist and which ids are already taken.
@@ -606,8 +610,8 @@ func decodeSplit(policyData, handsetsData []byte) (pf File, unknown []UnknownKey
 		misplaced = append(misplaced, "handsets/groups belong in handsets.toml now — move them there")
 	}
 	if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 ||
-		len(hf.House.Handsets) > 0 || !hf.Line.empty() {
-		misplaced = append(misplaced, "extensions/people/schedules/house/line belong in policy.toml — move them there")
+		len(hf.House.Handsets) > 0 || !hf.Line.empty() || !hf.Challenge.empty() {
+		misplaced = append(misplaced, "extensions/people/schedules/house/line/challenge belong in policy.toml — move them there")
 	}
 	pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
 	return pf, unknown, misplaced, nil
@@ -925,6 +929,7 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 	// After the house, because on_no_input = "voicemail" is only meaningful
 	// with a house mailbox to land in.
 	line := compileLine(f.Line, f.House.Voicemail, expandIDs, o.Trunks, fail)
+	challenge := compileChallenge(f.Challenge, fail)
 
 	allow := make(map[string]KnownCaller)
 	personIDs := map[string]string{}
@@ -1182,6 +1187,7 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		house:          house,
 		callerIDFormat: format,
 		line:           line,
+		challenge:      challenge,
 		PinLength:      pinLength,
 		MinPinLength:   minPin, MaxPinLength: maxPin,
 		handsets:    handsets,
@@ -1302,6 +1308,10 @@ func (p *Policy) HousePlan() RingPlan { return p.house }
 // A file without one resolves to the zero label and number and to
 // NoInputDismiss, so every caller of this gets a usable answer.
 func (p *Policy) Line() LineIdentity { return p.line }
+
+// Challenge is the compiled [challenge] section: the range the arithmetic
+// question's operands come from. Always usable; absent is the default range.
+func (p *Policy) Challenge() ChallengeRange { return p.challenge }
 
 // HouseEndpoints flattens the house plan's first stage — kept for display.
 func (p *Policy) HouseEndpoints() []string {
