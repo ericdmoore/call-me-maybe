@@ -107,7 +107,10 @@ credit is running low, it is down to about"* — live in the bundled pack's
 `system/` directory (`prompts/manifest.json` under `"system"`) and are
 played from there whatever `PROMPT_MEDIA_PREFIX` says. A pack does not
 supply them and cannot silence them; the lobby's voice is the pack's, the
-house's is its own.
+house's is its own. Dial-a-Story's limits speak from there too, to a caller
+on a public line — *"this call will end in one minute"*, the goodbye at the
+limit, *"all our listening lines are busy"* — because they belong to a
+mechanism every pack must leave working, not to a pack.
 
 **Nor is the arithmetic challenge.** A public line that asks "what is three
 times six" before a phone rings speaks it from the bundled pack's

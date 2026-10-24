@@ -143,6 +143,57 @@ announcements all use the chosen voice. Bookmarks and audiobook PCM revisions
 are unchanged. To revert, restore the previous `menus.json`, or remove it to
 return to the original prepared prompts.
 
+## Dial-a-Story: a shelf for outside callers
+
+A public line can offer callers from outside the house a **shelf** of this
+library ([#155](https://github.com/ericdmoore/call-me-maybe/issues/155)):
+the titles its policy file lists in `[[shelves]]`, never the whole library.
+A front-menu choice browses the shelf (`shelf = "<id>"`) or plays its story
+of the day (`story_of_the_day = "<id>"`), one title from the beginning and
+then goodbye. The keys are in `docs/writing-policies.md`; the procedure is
+RUNBOOK, "A public line".
+
+There is one books menu. doorman releases the caller into `[cmm-listen]`,
+generated in `extensions_books.conf` beside `*2665`, which runs `doorman
+books listen`: the same pages, book menu and player a handset gets, with
+three differences.
+
+- **The list is the shelf.** It is built from the titles doorman hands over
+  in a channel variable, in the shelf's order, and every key selects an
+  index into it. A title that is not on the shelf has no key and no page; a
+  shelf title the catalog lacks is left out, never substituted. Nothing
+  includes `[cmm-listen]` and no handset can dial it, and it refuses rather
+  than defaults when doorman's variables are missing.
+- **No bookmarks.** There is no handset to key them by, so a position lasts
+  as long as the call and each title starts from the beginning. The house's
+  own bookmarks are not read or touched.
+- **A time limit.** `[listening] max_minutes`, counted from when the call
+  arrived. One minute before it the caller hears "This call will end in one
+  minute", cutting into the playback window it falls in so it comes on time;
+  five seconds before the end a short goodbye; at the end Asterisk's own
+  `TIMEOUT(absolute)` hangs up whatever is still playing. The phrases are
+  bundled system clips (`prompts/manifest.json`), rendered by
+  `prompts/build.sh` with the rest of the pack.
+
+`[listening] max_listeners` is counted by Asterisk: `[cmm-listen]` joins the
+line's `GROUP` before it counts it, so two callers arriving together never
+both take the last place. doorman asks the same count before releasing a
+caller, so one over the cap hears "All our listening lines are busy" and is
+offered the menu again; a caller who loses a race in that instant hears the
+same phrase from the dialplan and is hung up.
+
+Shelf pages are announced with the compatibility prompts unless the menu
+bundle carries them. Add `--shelf id,id` (once per shelf, in its order) to
+`books prompts` to render them in the chosen voice too:
+
+```sh
+./bin/doorman books prompts --library /path/to/staging --voice Samantha \
+  --shelf the-little-red-hen,the-gingerbread-man,stone-soup
+```
+
+A shelf page is keyed by its exact titles and order, so it is never used for
+another list.
+
 ## Install and verify
 
 Install the binary at `/opt/call-me-maybe/bin/doorman` (the generated AGI path),

@@ -550,6 +550,8 @@ say = "Thanks for calling Blue Door Bakery. For orders, press 1. For our hours, 
 | `choices.menu` | string | Another menu. Back to one above is fine ("0 for the main menu"); to itself is refused. |
 | `choices.recording` | string | A clip at `<prefix>/recordings/<id>` — "our hours are…". |
 | `choices.voicemail` | string | A mailbox: take a message. |
+| `choices.shelf` | string | A `[[shelves]]` id: browse that shelf of the audiobook library. See "`[[shelves]]`". |
+| `choices.story_of_the_day` | string | A `[[shelves]]` id: hear one title from it, then goodbye. |
 | `choices.then` | enum | After a recording: `menu` (default) or `goodbye`. |
 | `choices.challenge` | bool | Ask the arithmetic challenge before following this choice. Once a call at most. |
 
@@ -584,6 +586,78 @@ not keep the house line from getting a call in.
 
 **The call log** records the menu heard and the target chosen
 (`extension:orders`), never the key pressed.
+
+---
+
+## `[[shelves]]` and `[listening]` — Dial-a-Story
+
+A public line can let callers listen to the box's audiobook library by
+phone, the way a library's Dial-a-Story line does. A **shelf** is the part of
+the library this number may offer; a menu choice browses it (`shelf`) or
+plays its **story of the day** (`story_of_the_day`) and hangs up.
+
+```toml
+[[menus]]
+id = "front"
+
+  [[menus.choices]]
+  digit            = "5"
+  story_of_the_day = "story-time"   # one title, from the beginning, then goodbye
+
+  [[menus.choices]]
+  digit     = "6"
+  shelf     = "story-time"          # browse the shelf
+  challenge = true                  # a sum before the caller is released to it
+
+[[shelves]]
+id     = "story-time"
+titles = ["the-little-red-hen", "the-gingerbread-man", "stone-soup"]
+
+[listening]            # optional; these are the defaults but for max_listeners
+max_minutes   = 20     # the longest such a call may last, from when it rang
+max_listeners = 1      # how many may listen on this line at once
+```
+
+| Key | Type | Meaning |
+|---|---|---|
+| `[[shelves]] id` | string | Named by a choice's `shelf` or `story_of_the_day`. |
+| `[[shelves]] titles` | list | Catalog book ids (`doorman books list`), in the order the shelf is announced. 1 to 128, none twice. |
+| `[listening] max_minutes` | int | 5 to 240, default 20. Counted from when the call arrived, menu time included. |
+| `[listening] max_listeners` | int | 1 to 10, default 1. |
+
+**A shelf is a list, never the library.** Privately imported audio reaches an
+outside caller only by being written on a shelf. The books menu a caller is
+released to is built from the shelf's titles alone — a key selects an index
+into that list — so a title that is not on an offered shelf cannot be reached
+from the line at all. `doorman check`, on the box, refuses a title the
+installed catalog does not have; elsewhere it says it could not check. At
+call time a title missing from the catalog is simply not offered.
+
+**The story of the day** is one title. A one-title shelf is a fixed story;
+with several, they take turns a day each in the order written, turning over at
+the box's midnight. Nothing is remembered between calls.
+
+**The limits.** One minute before `max_minutes` the caller hears "This call
+will end in one minute", and at the limit a goodbye; Asterisk enforces the
+limit too. The lead is fixed at one minute because the bundled phrase says
+so. Over `max_listeners`, a caller hears "All our listening lines are busy"
+and the menu again, so orders still get through. A provider plan may carry
+two simultaneous calls: every listener holds one of them. Released listeners
+do not count against `MAX_CONCURRENT_CALLS`, exactly as a caller leaving a
+message does not.
+
+**No bookmarks.** An outside caller has no handset, so each title starts from
+the beginning; the house's own bookmarks are untouched. Bookmarks keyed by
+caller ID are not offered — caller ID can be spoofed.
+
+**What stands in front.** Everything a menu choice already has: the line's
+rate limiter, and the challenge when the choice says `challenge = true`. A
+caller the ladder admits skips the challenge, as for any choice. Once
+released, the caller is the books menu's: zero at the shelf, or three
+unanswered tries, says goodbye and ends the call.
+
+The books menu, its keys and its player are the ones `*2665` uses; see
+[BOOKS.md](BOOKS.md) "Dial-a-Story".
 
 ---
 

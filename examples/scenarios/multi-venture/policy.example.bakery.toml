@@ -14,12 +14,23 @@
 #     2  our hours         a recording, then the menu again
 #     3  the baker         the kitchen phone, behind the arithmetic challenge
 #     4  wholesale         rings the counter and the office
+#     5  today's story     Dial-a-Story: one title from the story-time shelf,
+#                          then goodbye
+#     6  all our stories   the story-time shelf to browse, behind the
+#                          challenge
 #
 # NEEDS      Two clips beside the bakery's prompt pack, recorded or rendered
 #            by you: menus/front and recordings/hours (RUNBOOK, "A front
 #            menu"). The challenge's clips, built with the bundled pack by
 #            prompts/build.sh (RUNBOOK, "The arithmetic challenge").
 #            `doorman check`, run on the box, names any that are missing.
+#
+#            For 5 and 6: the stories prepared into the box's audiobook
+#            library under the ids below (`doorman books prepare`,
+#            docs/BOOKS.md), the generated extensions_books.conf installed
+#            (it holds [cmm-listen]), and the bundled listen-* phrases, which
+#            prompts/build.sh renders with the rest. `doorman check`, on the
+#            box, refuses a shelf title the catalog does not have.
 #
 # DOES NOT   Stop a voice agent that understands speech, or verify anybody's
 #            age: the challenge is a filter for robodialers and very young
@@ -32,7 +43,12 @@
 #            below, and is the owner's call.
 #
 #            Edit the menu from the account's web view. Sync accepts this
-#            file and does not carry its menus yet.
+#            file and does not carry its menus or shelves yet.
+#
+#            Remember where a caller stopped listening. An outside caller has
+#            no handset, so no bookmark: each title starts from the beginning.
+#            Nor does it offer the whole library: only the titles listed on
+#            the shelf can be reached from this number.
 # ─────────────────────────────────────────────────────────────
 
 # The counter phone presents the bakery. It is claimed here and nowhere
@@ -133,7 +149,7 @@ afterhours = "closed"
 # (repeat = 1), then on_no_input. A call gets six plays or three minutes.
 [[menus]]
 id = "front"
-say = "Thanks for calling Blue Door Bakery. For orders, press 1. For our opening hours, press 2. To reach the baker, press 3. For wholesale, press 4."
+say = "Thanks for calling Blue Door Bakery. For orders, press 1. For our opening hours, press 2. To reach the baker, press 3. For wholesale, press 4. For today's story, press 5. For all our stories, press 6."
 repeat = 1
 
   [[menus.choices]]
@@ -154,3 +170,39 @@ repeat = 1
   [[menus.choices]]
   digit = "4"
   extension = "wholesale"
+
+  # Dial-a-Story. The bakery reads to the neighbourhood on Saturday
+  # mornings, and the recordings live on the box. 5 is today's story from
+  # the shelf below — one title, from the beginning, then goodbye — and asks
+  # nothing first, because a story harms nobody. 6 browses the whole shelf
+  # and sits behind the challenge: a robodialer that presses keys at random
+  # must not hold the line's one listening channel for twenty minutes.
+  [[menus.choices]]
+  digit = "5"
+  story_of_the_day = "story-time"
+
+  [[menus.choices]]
+  digit = "6"
+  shelf = "story-time"
+  challenge = true
+
+# ── Dial-a-Story ─────────────────────────────────────────────
+# A shelf is the titles from the box's audiobook library this number may
+# offer, by their catalog ids (`doorman books list`), in the order they are
+# announced. Never the whole library: the household's own recordings stay
+# out unless they are written here. The story of the day takes turns through
+# them, a title a day, turning over at the box's midnight.
+[[shelves]]
+id = "story-time"
+titles = ["the-little-red-hen", "the-gingerbread-man", "stone-soup"]
+
+# The limits that suit strangers. A call that reaches a story may last
+# twenty minutes from when it rang, menu included; at nineteen the caller
+# hears "This call will end in one minute", and at twenty a goodbye. One
+# listener at a time: this number shares a provider account with the
+# surveying line, and a box whose every channel is a story cannot ring the
+# counter. A second caller hears that the listening lines are busy and the
+# menu again — orders still get through.
+[listening]
+max_minutes = 20
+max_listeners = 1

@@ -788,7 +788,7 @@ valid **transfer target**.
 | *4 | **Outbound console**: call as another one of your numbers. Only interesting with more than one line, and it refuses 911 — see "Outbound caller ID" below. This is the one that goes through doorman |
 | *(none)* | **Bedtime** — a `curfew` on the handset in `handsets.toml` names `[[schedules]]`; while one is active the phone skips ordinary incoming calls, cannot call out (911 and the reminder apps excepted), is left out of pages and ring-all, and has ordinary calls dropped at the hour. Nothing to dial: it is the house's rule, not the phone's. See "Bedtime" below |
 | *80 | **Call back today at** an AM/PM time. Past times are refused with a suggestion to use *81. See “Scheduled calls” below |
-| *2665 (*BOOK) | **Books.** Browse prepared local recordings and chapters, resume, seek, pause and change playback speed. See [Books](BOOKS.md). Respects handset curfew. |
+| *2665 (*BOOK) | **Books.** Browse prepared local recordings and chapters, resume, seek, pause and change playback speed. See [Books](BOOKS.md). Respects handset curfew. A public line can offer outside callers a shelf of the same library: "Dial-a-Story" under "A public line" below |
 | *81 | **Call back in** 0–9 hours and 0–99 minutes. Extra minutes carry into hours; the total must be positive |
 | *82 | **Wake up call** at an AM/PM time tomorrow, once |
 | *88 | **Add a number to this phone.** Key the number, `#`, say the name after the beep. The number is in this phone's directory within a minute (named by its number), and under the spoken name once the box has had it transcribed. This phone's book only — never the allow-list. See "Add a number from a handset" |
@@ -2079,6 +2079,77 @@ $ doorman calls --line biz --json | jq -r '[.reason, .challenge] | @tsv' | sort 
    again, then `on_no_input`); and from an allow-listed phone, which should
    ring the house with no menu at all. `doorman calls` records the choice as
    `extension:orders`, never the key.
+
+#### Dial-a-Story: a shelf of the audiobook library
+
+A menu choice can lead a caller to a **shelf** of the box's audiobook
+library — the titles you list, never the whole library — to browse it, or to
+hear its story of the day and hang up. doorman plays no audio: it releases
+the caller, as it does to take a message, into the generated `[cmm-listen]`
+context, which runs the same books menu `*2665` does with the shelf's titles
+alone, counts listeners per line, and enforces the time limit itself.
+
+1. **Prepare the recordings** into the library, as for handsets
+   ([BOOKS.md](BOOKS.md), "Prepare recordings already on the box"), and note
+   their ids:
+
+   ```bash
+   $ sudo -u asterisk doorman books list | jq -r '.books[].id'
+   ```
+
+2. **Write the shelf** in the line's file, and a choice that offers it
+   (`docs/writing-policies.md`, "`[[shelves]]`"):
+
+   ```toml
+   [[shelves]]
+   id     = "story-time"
+   titles = ["the-little-red-hen", "the-gingerbread-man"]
+
+   [listening]
+   max_minutes   = 20
+   max_listeners = 1
+
+     # in [[menus]] "front"
+     [[menus.choices]]
+     digit            = "5"
+     story_of_the_day = "story-time"
+   ```
+
+   Put `challenge = true` on a browsing choice if a robodialer pressing keys
+   must not hold the line's listening channel for the whole limit.
+
+3. **Render and install `extensions_books.conf`** — it now holds
+   `[cmm-listen]` beside `*2665` — and reload the dialplan (BOOKS.md,
+   "Install and verify"). Build and install the bundled pack so
+   `system/listen-warning`, `listen-ended` and `listen-busy` exist
+   (`prompts/build.sh`, as for the challenge clips above).
+
+   ```bash
+   $ sudo asterisk -rx 'dialplan show s@cmm-listen'
+   ```
+
+4. **`doorman check` on the box** prints each shelf and the limits, fails for
+   a shelf title the installed catalog does not have, and warns when the
+   installed `extensions_books.conf` has no `[cmm-listen]` — a caller would be
+   released into nothing.
+
+5. **Optional: shelf pages in the menu voice.** Without this a shelf is
+   announced with the compatibility prompts, which work but are plainer:
+
+   ```bash
+   $ ./bin/doorman books prompts --library /path/to/staging \
+       --shelf the-little-red-hen,the-gingerbread-man
+   ```
+
+6. **Trial it** from a phone that is not on the allow-list: the story of the
+   day (plays from the beginning, then goodbye); the shelf (a key past the
+   end of the list is refused; zero says goodbye); a second caller while one
+   listens (hears "all our listening lines are busy" and the menu again, with
+   `max_listeners = 1`); and a call left listening to the limit (a warning
+   one minute before, then a goodbye). A short trial needs a short limit:
+   `max_minutes = 5` is the floor. `doorman calls` shows outcome `listening`,
+   `chose shelf:story-time`; how long they listened is Asterisk's to know
+   (`asterisk -rx 'group show channels'` lists who is listening now).
 
 ### Add a second provider
 

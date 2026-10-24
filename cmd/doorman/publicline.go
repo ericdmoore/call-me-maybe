@@ -174,7 +174,7 @@ func describeShelves(p *policy.Policy) {
 		if p.ShelfReachable(s.ID) {
 			where = "offered"
 		}
-		fmt.Printf("      shelf %-8s %d %s, %s: %s\n", s.ID, len(s.Titles), plural(len(s.Titles), "title"), where, strings.Join(s.Titles, ", "))
+		fmt.Printf("      shelf %s: %d %s, %s — %s\n", s.ID, len(s.Titles), plural(len(s.Titles), "title"), where, strings.Join(s.Titles, ", "))
 	}
 }
 

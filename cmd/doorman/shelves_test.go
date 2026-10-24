@@ -72,8 +72,8 @@ func TestCheckDescribesShelvesAndLimits(t *testing.T) {
 		"calls end at 15m0s, warned 1m0s before; 1 listener at once",
 		"all our listening lines are busy",
 		"no bookmarks",
-		"shelf stories  3 titles, offered: little-red-hen, three-billy-goats, the-gingerbread-man",
-		"shelf vault    1 title, offered by no menu a caller can reach",
+		"shelf stories: 3 titles, offered — little-red-hen, three-billy-goats, the-gingerbread-man",
+		"shelf vault: 1 title, offered by no menu a caller can reach",
 		`! shelf "vault" is not offered by any menu`,
 	} {
 		if !strings.Contains(out, want) {
