@@ -16,5 +16,10 @@
   "devDependencies": {
     "astro": "^7.2.8",
     "wrangler": "^4.147.0"
+  },
+  "overrides": {
+    "miniflare": {
+      "undici": "7.30.1"
+    }
   }
 }

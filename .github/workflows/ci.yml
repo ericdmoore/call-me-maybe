@@ -212,7 +212,9 @@ jobs:
           ref: ${{ inputs.expected_head || github.ref }}
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          # npm 10 (Node 22) rejects the lockfile's nested miniflare>undici
+          # override in `npm ci`; npm 11 honours it. Matches site-preview.
+          node-version: 24
           cache: npm
           cache-dependency-path: site/package-lock.json
       - run: npm ci
