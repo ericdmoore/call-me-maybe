@@ -1055,11 +1055,15 @@ Both are pure `policy.toml`; see the `Kids` extension in
 `examples/policy.example.toml` for the shape. A ladder is `[[extensions.steps]]`
 blocks — each rings its handsets/groups for `rings` cycles (~6s each, or
 `seconds = N` exactly) before escalating; exhausting the ladder lands in the
-extension's `voicemail`. Afterhours (`[extensions.afterhours]`) is a window
-during which the line skips ringing entirely and goes straight to voicemail —
-`start`/`end` in local time (crossing midnight is fine and belongs to the
-start day), `days` lists the nights it *begins*. Flip `enabled = false` for
-holidays; hot reload applies it within a second.
+extension's `voicemail`. Afterhours is `afterhours = "<id>"` on the
+extension, naming a `[[schedules]]` window during which the line skips
+ringing and goes to `afterhours_ring` or straight to voicemail — `start`/`end`
+in local time (crossing midnight is fine and belongs to the start day), `days`
+lists the days it *begins*. One window crosses midnight at most once per day,
+so hours that need two name a list, quiet while any is active: weekdays 9–5 is
+`afterhours = ["nights", "weekend-days"]` (see `examples/scenarios/solo-business`).
+Flip `enabled = false` on the `[[schedules]]` entry to make it inert — the
+holiday switch; hot reload applies it within a second.
 
 `./bin/doorman check` prints each extension's ladder, mailbox, and — the
 important one — whether afterhours is **ACTIVE NOW**, which is the first

@@ -153,8 +153,8 @@ voicemail = "family"
 # Callers who dial the kids' extension ring the kids' room for 3 ring
 # cycles (~6s each), escalate to the adult handsets for 4 more, then land
 # in the kids mailbox. On school nights the line doesn't ring at all —
-# straight to voicemail between 20:30 and 07:00. Flip `enabled` under
-# [extensions.afterhours] to false for holidays.
+# straight to voicemail between 20:30 and 07:00. Flip `enabled` on the
+# school-night [[schedules]] entry to false for holidays.
 
 [[extensions]]
 pin = "CHANGEME"
