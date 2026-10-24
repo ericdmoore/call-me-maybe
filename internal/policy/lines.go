@@ -55,6 +55,10 @@ type Line struct {
 	// closes this line to everybody who cannot press keys — a rotary phone, a
 	// car, a smart speaker — unless the ladder already knows them.
 	ChallengeNoInput bool `toml:"challenge_no_input"`
+	// Menu names the [[menus]] id this line answers with: "press 1 for …".
+	// Empty is the PIN lobby, exactly as every line had before menus. A line
+	// with a menu never runs the PIN lobby at all.
+	Menu string `toml:"menu"`
 	// Trunk names the provider this line's number lives at — an id from
 	// trunks.toml. Inbound it is what `doorman render` needs to put the DID's
 	// route in the right provider's context; outbound it is how a call as this
@@ -128,6 +132,9 @@ type LineIdentity struct {
 	// challenge before OnNoInput applies. Never true beside NoInputDismiss:
 	// a caller who is dismissed anyway has nothing to be guarded from.
 	ChallengeNoInput bool
+	// Menu is the front menu's id, or "" for the PIN lobby. Validated against
+	// [[menus]] by compileMenus, which is the one place that knows them.
+	Menu string
 	// Trunk is the trunks.toml id this line's number arrives on and leaves by,
 	// or "" when the line names none — which is every install with one
 	// provider. It travels with OutboundCID everywhere the two go: a provider
@@ -164,7 +171,7 @@ var promptPrefix = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*(/[A-Za-z0-9][A
 // checked against, or nil to leave the reference unchecked — see
 // Options.Trunks for which callers pass which, and why.
 func compileLine(l Line, houseMailbox string, handsetIDs func(where string, ids []string) []string, trunks *Trunks, fail func(string, ...any)) LineIdentity {
-	out := LineIdentity{Label: l.Label, Prompts: l.Prompts, OnNoInput: NoInputDismiss, Trunk: l.Trunk}
+	out := LineIdentity{Label: l.Label, Prompts: l.Prompts, OnNoInput: NoInputDismiss, Trunk: l.Trunk, Menu: l.Menu}
 
 	if l.Number != "" {
 		// Same treatment as an allow-listed number: unparseable is a load

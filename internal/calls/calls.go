@@ -168,6 +168,14 @@ type Record struct {
 	// invariant 1 has no exception for digits that are not a PIN.
 	Challenge string `json:"challenge,omitempty"`
 
+	// Menu is the id of the last [[menus]] entry this caller heard, on a line
+	// that answers with one. Choice is what they chose there, as kind:id —
+	// "extension:orders", "recording:hours" — the target and never the key
+	// pressed: a key is an entered digit, and the target answers "which
+	// choice do callers use" just as well.
+	Menu   string `json:"menu,omitempty"`
+	Choice string `json:"choice,omitempty"`
+
 	// Stages is the ladder as actually walked. The most useful field here:
 	// it is what tells you a stage times out before anyone can cross a room.
 	Stages []Stage `json:"stages,omitempty"`

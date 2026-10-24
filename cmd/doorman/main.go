@@ -491,6 +491,11 @@ func runCheck(args []string) (code int) {
 	// The same rules the daemon's reload and sync apply (configcheck), so a
 	// file this passes is one both of them accept. AllowPlaceholders is the
 	// one difference, and only CI sets it.
+	// The pack prefix a line without [line] prompts speaks from, which is
+	// where its menu clips are looked for on the box.
+	if v, ok := secretLookup(*envFlag)("PROMPT_MEDIA_PREFIX"); ok {
+		checkMediaPrefix = v
+	}
 	opts := configcheck.Options(trunks)
 	opts.AllowPlaceholders = *allowPlaceholders
 
@@ -946,8 +951,10 @@ func printSharedPINs(results []checkedLine) {
 			continue
 		}
 		for _, e := range r.pol.Extensions() {
-			if e.PIN == policy.PlaceholderPIN {
-				continue // every example shares this one; that is the sentinel, not a clash
+			if e.PIN == policy.PlaceholderPIN || e.PIN == "" {
+				// The sentinel every example shares, and the no-PIN of an
+				// extension only a menu reaches: neither is a PIN to clash.
+				continue
 			}
 			if prev, ok := seen[e.PIN]; ok {
 				clashes = append(clashes, fmt.Sprintf("  %s %q and %s %q share a PIN",
@@ -986,7 +993,7 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 	fmt.Printf("  outbound caller id   : %s\n", orDefault(line.OutboundCID, noOutboundCID))
 	fmt.Printf("  prompt pack          : %s\n", orDefault(line.Prompts, noLinePrompts))
 	fmt.Printf("  no-input disposition : %s\n", describeNoInput(line, p.HousePlan().Mailbox))
-	if line.ChallengeNoInput {
+	if line.ChallengeNoInput || menusAsk(p) {
 		fmt.Printf("  challenge            : %s\n", describeChallenge(p))
 		warnChallengeClips()
 	}
@@ -999,6 +1006,7 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 	fmt.Printf("  provisioning         : %s\n", provisioningSummary(p.HandsetList()))
 	fmt.Printf("  actions              : %s\n", actionsSummary(p.Actions()))
 	fmt.Printf("  house voicemail      : %s\n", orDefault(p.HousePlan().Mailbox, noMailbox))
+	describeMenus(p)
 	describeCurfews(p, time.Now())
 
 	// Every extension, every setting — including the ones nobody wrote down.
@@ -1011,6 +1019,9 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 		now := time.Now()
 		for _, e := range exts {
 			fmt.Printf("\n  %s\n", e.Label)
+			if e.ID != "" {
+				fmt.Printf("      id           %s\n", e.ID)
+			}
 			fmt.Printf("      pin          %s\n", maskedPIN(e.PIN))
 			fmt.Printf("      rings        %s\n", describePlan(e.Plan))
 			fmt.Printf("      voicemail    %s\n", orDefault(e.Plan.Mailbox, noMailbox))
@@ -1085,6 +1096,9 @@ func withDefault(value string, isDefault bool) string {
 // maskedPIN shows that a PIN exists and how long it is, never what it is —
 // invariant 1. `doorman rotate` remains the only thing that prints one.
 func maskedPIN(pin string) string {
+	if pin == "" {
+		return "(none — reached only through a menu)"
+	}
 	if pin == policy.PlaceholderPIN {
 		return "(placeholder — run `doorman init` to generate a real one)"
 	}
@@ -2386,6 +2400,13 @@ func printMailboxes(results []checkedLine, env func(string) (string, bool)) {
 		note(r.pol.HousePlan().Mailbox, r.Name, "[house]")
 		for _, e := range r.pol.Extensions() {
 			note(e.Plan.Mailbox, r.Name, "extension "+e.Label)
+		}
+		for _, m := range r.pol.Menus() {
+			for _, c := range m.Choices {
+				if c.Kind == policy.ChoiceVoicemail {
+					note(c.Target, r.Name, "menu "+m.ID+" choice "+c.Digit)
+				}
+			}
 		}
 	}
 	for _, m := range boxes {

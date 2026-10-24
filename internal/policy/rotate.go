@@ -75,7 +75,18 @@ func RotatePinsSplit(path, handsetsPath string, labels []string) (*Rotation, err
 
 	rotateAll := len(want) == 0
 	var selected []Extension
+	var pinless []string
 	for _, e := range f.Extensions {
+		// An extension only a menu reaches has no PIN to rotate, and must
+		// survive rotation byte for byte: giving it one would open a door
+		// on a line that was built not to have one.
+		if e.PIN == "" {
+			if want[strings.ToLower(e.Label)] {
+				pinless = append(pinless, e.Label)
+				delete(want, strings.ToLower(e.Label))
+			}
+			continue
+		}
 		if rotateAll || want[strings.ToLower(e.Label)] {
 			selected = append(selected, e)
 			delete(want, strings.ToLower(e.Label))
@@ -87,6 +98,9 @@ func RotatePinsSplit(path, handsetsPath string, labels []string) (*Rotation, err
 			missing = append(missing, l)
 		}
 		return nil, fmt.Errorf("no extension labelled %q", strings.Join(missing, ", "))
+	}
+	if len(pinless) > 0 && len(selected) == 0 {
+		return nil, fmt.Errorf("extension %q has no PIN to rotate — it is reached only through a menu", strings.Join(pinless, ", "))
 	}
 	if len(selected) == 0 {
 		return nil, fmt.Errorf("no extensions to rotate")

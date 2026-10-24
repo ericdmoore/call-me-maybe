@@ -73,7 +73,7 @@ func TestChallengeFactorsAreValidated(t *testing.T) {
 func TestChallengeSectionInTheWrongFileIsRefused(t *testing.T) {
 	_, err := fromSplitTOML([]byte("[house]\nhandsets = [\"kitchen\"]\n"),
 		[]byte("[challenge]\nfactors = [2, 9]\n[[handsets]]\nid = \"kitchen\"\nendpoint = \"PJSIP/kitchen\"\n"), Options{})
-	if err == nil || !strings.Contains(err.Error(), "challenge belong in policy.toml") {
+	if err == nil || !strings.Contains(err.Error(), "/challenge") || !strings.Contains(err.Error(), "belong in policy.toml") {
 		t.Fatalf("[challenge] in handsets.toml: err = %v", err)
 	}
 	if problems := LintSplit([]byte("[house]\nhandsets = [\"kitchen\"]\n"),

@@ -164,6 +164,17 @@
               "handsets.toml [[groups]].id"
             ]
           },
+          "id": {
+            "description": "Optional short handle — \"orders\" — for a menu choice to name this extension by. Never the PIN (rotation would break every reference) and never a position that moves when the list is edited.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-cross-references": [
+              "policy.toml [[menus.choices]] extension"
+            ],
+            "x-rules": [
+              "Unique among this file's [[extensions]]."
+            ]
+          },
           "label": {
             "description": "Human name, used by `doorman rotate \u003clabel\u003e` and shown in `doorman check`.",
             "type": "string"
@@ -174,6 +185,7 @@
             "pattern": "^\\d+$",
             "x-rules": [
               "Must be unique across extensions.",
+              "Required, except on an extension with an id that a menu reachable from [line] menu names. `doorman rotate` never gives such an extension one.",
               "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer. With mixed lengths, `#` ends the PIN and so does a pause (INTER_DIGIT_TIMEOUT_MS) once at least the shortest PIN's worth of digits is in; the longest PIN's length is the only count that fires on its own."
             ]
           },
@@ -226,14 +238,14 @@
           }
         },
         "required": [
-          "pin",
           "label"
         ],
         "additionalProperties": false,
         "x-rules": [
           "handsets and steps are mutually exclusive: use handsets for a single ring stage, steps for an escalating ladder.",
           "Exactly one of them must be present.",
-          "afterhours requires voicemail — an afterhours caller needs somewhere to go."
+          "afterhours requires voicemail — an afterhours caller needs somewhere to go.",
+          "pin is required unless the extension has an id that a menu reachable from [line] menu names. A PIN-less extension is never in the PIN lookup, so no keypad entry — a bare # included — can reach it."
         ]
       }
     },
@@ -314,6 +326,19 @@
         "label": {
           "description": "Human name for this number — \"Mertaugh Enterprises\". Shown by `doorman check`, and displayed on the ringing handset when a caller reaches the house without dialling an extension, so whoever picks up knows which line to answer as.",
           "type": "string"
+        },
+        "menu": {
+          "description": "The [[menus]] id this line answers with. Absent is the PIN lobby, exactly as before menus existed. A line with a menu never runs the PIN lobby: a stranger hears the menu and presses one key, and the extensions it names may go without a PIN.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "x-cross-references": [
+            "policy.toml [[menus]].id"
+          ],
+          "x-rules": [
+            "Must name a [[menus]] id in this file.",
+            "Callers the ladder admits ([[people]], a lobby pass, a personal contact) skip the menu and ring [house]; a key they press over the welcome prompt is a choice at this menu, with the challenge already satisfied.",
+            "A caller who chooses nothing — after the menu's repeats, or at the per-call ceilings of 6 plays or 3 minutes — gets on_no_input, behind the challenge when challenge_no_input says so."
+          ]
         },
         "number": {
           "description": "The DID this line answers. Any format; normalised to E.164 at load. Probe a value with `doorman e164 \u003cnumber\u003e`.",
@@ -402,6 +427,130 @@
         "Nothing routes on number. The dialplan already named the line — this is identity, for `doorman check` and for the handset display.",
         "outbound_cid and outbound_handsets are the outbound half. A handset no line claims presents policy.toml's outbound_cid — the primary line, which is also 911's route, so there is one answer to \"which line am I on when I have not said\"."
       ]
+    },
+    "menus": {
+      "description": "A public line's front menu and the menus it leads to: \"press 1 for orders, 2 for our hours\". Named from [line] menu; a line that names none answers with the PIN lobby as before.",
+      "type": "array",
+      "items": {
+        "description": "One menu: the keys a caller may press and where each leads. The wording is operator content, a pre-rendered clip at \u003cline prefix\u003e/menus/\u003cid\u003e under Asterisk's sounds directory — never synthesised at call time.",
+        "type": "object",
+        "properties": {
+          "choices": {
+            "type": "array",
+            "items": {
+              "description": "One key and where it leads: exactly one of extension, menu, recording or voicemail.",
+              "type": "object",
+              "properties": {
+                "challenge": {
+                  "description": "Ask the arithmetic challenge before following this choice — before the extension rings, and before its mailbox records out of hours. Asked at most once a call.",
+                  "type": "boolean",
+                  "default": false,
+                  "x-rules": [
+                    "Same budget and rules as [line] challenge_no_input: MAX_PIN_ATTEMPTS retries, its own rate limiter, a right answer forgives no PIN failure. Admitted callers never meet it."
+                  ]
+                },
+                "digit": {
+                  "description": "The key, 0 to 9.",
+                  "type": "string",
+                  "pattern": "^[0-9]$",
+                  "x-rules": [
+                    "Unique within its menu.",
+                    "* and # are reserved: * repeats the menu."
+                  ]
+                },
+                "extension": {
+                  "description": "An [[extensions]] id in this file: its afterhours, then its ring plan, then its mailbox, exactly as a valid PIN reaches it.",
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "x-cross-references": [
+                    "policy.toml [[extensions]].id"
+                  ],
+                  "x-rules": [
+                    "A disabled extension keeps the reference valid; its key plays the menu again."
+                  ]
+                },
+                "menu": {
+                  "description": "Another [[menus]] id.",
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "x-cross-references": [
+                    "policy.toml [[menus]].id"
+                  ]
+                },
+                "recording": {
+                  "description": "A clip at \u003cline prefix\u003e/recordings/\u003cid\u003e — \"our hours are…\". Operator content, pre-rendered. A key pressed over it is a choice at the menu that offered it.",
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "x-cross-references": [
+                    "/var/lib/asterisk/sounds/\u003cprefix\u003e/recordings/\u003cid\u003e"
+                  ]
+                },
+                "then": {
+                  "description": "What follows a recording: the menu that offered it again, or the parting prompt and a hangup.",
+                  "type": "string",
+                  "enum": [
+                    "menu",
+                    "goodbye"
+                  ],
+                  "default": "menu",
+                  "x-rules": [
+                    "Only with recording."
+                  ]
+                },
+                "voicemail": {
+                  "description": "A mailbox: the caller is released to take a message.",
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "x-cross-references": [
+                    "asterisk/voicemail.conf [household] context"
+                  ]
+                }
+              },
+              "required": [
+                "digit"
+              ],
+              "additionalProperties": false,
+              "x-rules": [
+                "Exactly one target. `doorman check` refuses none, or more than one.",
+                "An extension, voicemail or recording leaf hands the caller off; a menu leaf moves them; a recording returns them to the menu that offered it unless then = \"goodbye\".",
+                "The call record stores the target chosen (\"extension:orders\"), never the key pressed."
+              ]
+            },
+            "minItems": 1
+          },
+          "id": {
+            "description": "Named by [line] menu and by other menus' choices; also the clip menus/\u003cid\u003e.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-rules": [
+              "Unique among [[menus]]."
+            ]
+          },
+          "repeat": {
+            "description": "How many more times a caller who presses nothing hears the menu before on_no_input applies.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5,
+            "default": 1
+          },
+          "say": {
+            "description": "The words the clip menus/\u003cid\u003e speaks, kept beside the reference so they can be reviewed, printed by `doorman check`, and recorded or rendered from. doorman never synthesises them.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "choices"
+        ],
+        "additionalProperties": false,
+        "x-rules": [
+          "At most two levels: the front menu and the menus it names. A menu may lead back to one already above it (\"0 for the main menu\"), but never to itself — * already repeats a menu.",
+          "Played with barge-in: a key stops the clip and is the choice.",
+          "* repeats the menu; # is reserved and ignored; a key with no choice plays the menu again. None of them is a guess at anything, so no rate limiter hears of them.",
+          "An unreachable menu is valid and `doorman check` warns about it.",
+          "`doorman check`, on the box, warns when a reachable menu's clip or a recording is missing under the line's prefix: a caller who hears silence presses nothing."
+        ]
+      }
     },
     "people": {
       "description": "The allow-list. These callers hear the welcome prompt and ring the house.",

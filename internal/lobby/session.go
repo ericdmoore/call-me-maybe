@@ -57,7 +57,13 @@ type Config struct {
 	// step was written as "rings = N". Production: 6s. Tests: milliseconds.
 	RingCycle      time.Duration
 	MaxPinAttempts int
-	RedactCallerID bool
+	// MenuMaxPlays and MenuMaxDuration override the per-call menu ceilings
+	// (MenuMaxPlays and MenuMaxDuration, the constants) when non-zero. Not
+	// environment variables: they exist so a test can reach a ceiling in
+	// milliseconds, and nobody has needed to tune them.
+	MenuMaxPlays    int
+	MenuMaxDuration time.Duration
+	RedactCallerID  bool
 	// MaxConcurrentCalls is read by the event router, not the state machine,
 	// but lives here so there is one Config the daemon threads through.
 	MaxConcurrentCalls int
@@ -516,6 +522,21 @@ func (s *Session) Run() {
 	// so knowing their name buys them nothing at it. They dial an extension
 	// like anybody else, with none of the exemptions an admitted caller has —
 	// the name is logged and goes no further.
+	//
+	// On a line that answers with a menu, that door is the menu and the PIN
+	// lobby never runs. Nothing above changes: the ladder is the same ladder,
+	// and the menu replaces only its last rung.
+	if s.pol.Line().Menu != "" {
+		if inBook {
+			s.observe(events.AdmissionDecided, "published-contact-menu")
+			s.log.Info("published contact, offering the menu", "name", contact.Name)
+		} else {
+			s.observe(events.AdmissionDecided, "menu")
+			s.log.Info("unknown caller, offering the menu")
+		}
+		s.walkMenu("", "", false)
+		return
+	}
 	if inBook {
 		s.observe(events.AdmissionDecided, "published-contact-lobby")
 		s.log.Info("published contact, opening lobby", "name", contact.Name)
@@ -582,6 +603,13 @@ func (s *Session) welcome(name string) {
 		return
 	}
 	if seed != "" {
+		// On a menu line that key is a menu choice, not the first digit of
+		// a PIN — the line has no PIN lobby — taken with the challenge
+		// already satisfied, because this caller was admitted at the door.
+		if s.pol.Line().Menu != "" {
+			s.walkMenu(seed, name, true)
+			return
+		}
 		s.collect(seed, name)
 		return
 	}
@@ -822,24 +850,7 @@ func (s *Session) evaluate(digits *string, attempts *int, reset func(time.Durati
 		// The label and the verdict, never `entered`.
 		s.rec.Extension, s.rec.PIN = ext.Label, "valid"
 		s.observe(events.AdmissionDecided, "valid-extension")
-		if ext.Afterhours.Active(s.now()) {
-			// Quiet hours. Either the call is redirected somewhere that is
-			// awake — homework hours sending the kids' line to the adults, a
-			// rotating night shift — or, with no redirect configured, it goes
-			// straight to voicemail, which is the historical behaviour.
-			if len(ext.AfterhoursPlan.Steps) > 0 {
-				s.log.Info("extension in afterhours, redirecting",
-					"extension", ext.Label)
-				s.runPlan(ext.AfterhoursPlan, ext.Label)
-				return true
-			}
-			s.log.Info("extension in afterhours, sending to voicemail",
-				"extension", ext.Label)
-			s.sendToVoicemail(ext.Plan.Mailbox)
-			return true
-		}
-		s.log.Info("extension accepted", "extension", ext.Label)
-		s.runPlan(ext.Plan, ext.Label)
+		s.reach(ext)
 		return true
 	}
 
@@ -872,6 +883,30 @@ func (s *Session) evaluate(digits *string, attempts *int, reset func(time.Durati
 	}
 	reset(s.deps.Cfg.FirstDigitTimeout)
 	return false
+}
+
+// reach is what happens once a caller has got to an extension, by its PIN or
+// by a menu choice: its afterhours, then its ring plan. The two routes differ
+// only in how they got here.
+func (s *Session) reach(ext policy.ResolvedExtension) {
+	if ext.Afterhours.Active(s.now()) {
+		// Quiet hours. Either the call is redirected somewhere that is
+		// awake — homework hours sending the kids' line to the adults, a
+		// rotating night shift — or, with no redirect configured, it goes
+		// straight to voicemail, which is the historical behaviour.
+		if len(ext.AfterhoursPlan.Steps) > 0 {
+			s.log.Info("extension in afterhours, redirecting",
+				"extension", ext.Label)
+			s.runPlan(ext.AfterhoursPlan, ext.Label)
+			return
+		}
+		s.log.Info("extension in afterhours, sending to voicemail",
+			"extension", ext.Label)
+		s.sendToVoicemail(ext.Plan.Mailbox)
+		return
+	}
+	s.log.Info("extension accepted", "extension", ext.Label)
+	s.runPlan(ext.Plan, ext.Label)
 }
 
 // runPlan executes a ring plan: each step rings its endpoints for its

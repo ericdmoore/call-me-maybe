@@ -564,6 +564,7 @@ func Policy() *Schema {
 			"schedules":  {Type: "array", Description: "Named time windows, defined once and referenced by id from extensions.", Items: schedule()},
 			"extensions": {Type: "array", Description: "What an unknown caller may dial in the lobby.", Items: extension()},
 			"challenge":  challenge(),
+			"menus":      {Type: "array", Description: "A public line's front menu and the menus it leads to: \"press 1 for orders, 2 for our hours\". Named from [line] menu; a line that names none answers with the PIN lobby as before.", Items: menu()},
 		},
 		AdditionalProperties: falsy,
 	}
@@ -667,6 +668,18 @@ func line() *Schema {
 					"This governs an empty dial window only. A caller who exhausts their PIN attempts is still dismissed.",
 				},
 			},
+			"menu": {
+				Type:    "string",
+				Pattern: "^[a-z0-9][a-z0-9_-]*$",
+				Description: "The [[menus]] id this line answers with. Absent is the PIN lobby, exactly as before menus existed. " +
+					"A line with a menu never runs the PIN lobby: a stranger hears the menu and presses one key, and the extensions it names may go without a PIN.",
+				CrossRefs: []string{"policy.toml [[menus]].id"},
+				Rules: []string{
+					"Must name a [[menus]] id in this file.",
+					"Callers the ladder admits ([[people]], a lobby pass, a personal contact) skip the menu and ring [house]; a key they press over the welcome prompt is a choice at this menu, with the challenge already satisfied.",
+					"A caller who chooses nothing — after the menu's repeats, or at the per-call ceilings of 6 plays or 3 minutes — gets on_no_input, behind the challenge when challenge_no_input says so.",
+				},
+			},
 			"challenge_no_input": {
 				Type:    "boolean",
 				Default: false,
@@ -681,6 +694,69 @@ func line() *Schema {
 					"Callers the ladder admits ([[people]], a lobby pass, a personal contact) never meet it, and neither does a caller who dialled a valid PIN.",
 					"The clips are the bundled challenge set, whatever prompts says: a pack supplies the six lobby prompts and nothing else.",
 				},
+			},
+		},
+		AdditionalProperties: falsy,
+	}
+}
+
+func menu() *Schema {
+	return &Schema{
+		Type:        "object",
+		Required:    []string{"id", "choices"},
+		Description: "One menu: the keys a caller may press and where each leads. The wording is operator content, a pre-rendered clip at <line prefix>/menus/<id> under Asterisk's sounds directory — never synthesised at call time.",
+		Rules: []string{
+			"At most two levels: the front menu and the menus it names. A menu may lead back to one already above it (\"0 for the main menu\"), but never to itself — * already repeats a menu.",
+			"Played with barge-in: a key stops the clip and is the choice.",
+			"* repeats the menu; # is reserved and ignored; a key with no choice plays the menu again. None of them is a guess at anything, so no rate limiter hears of them.",
+			"An unreachable menu is valid and `doorman check` warns about it.",
+			"`doorman check`, on the box, warns when a reachable menu's clip or a recording is missing under the line's prefix: a caller who hears silence presses nothing.",
+		},
+		Properties: map[string]*Schema{
+			"id": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Named by [line] menu and by other menus' choices; also the clip menus/<id>.", Rules: []string{"Unique among [[menus]]."}},
+			"say": {
+				Type:        "string",
+				Description: "The words the clip menus/<id> speaks, kept beside the reference so they can be reviewed, printed by `doorman check`, and recorded or rendered from. doorman never synthesises them.",
+			},
+			"repeat": {
+				Type:        "integer",
+				Minimum:     ptr(0),
+				Maximum:     ptr(5),
+				Default:     1,
+				Description: "How many more times a caller who presses nothing hears the menu before on_no_input applies.",
+			},
+			"choices": {
+				Type:     "array",
+				MinItems: one,
+				Items:    menuChoice(),
+			},
+		},
+		AdditionalProperties: falsy,
+	}
+}
+
+func menuChoice() *Schema {
+	return &Schema{
+		Type:        "object",
+		Required:    []string{"digit"},
+		Description: "One key and where it leads: exactly one of extension, menu, recording or voicemail.",
+		Rules: []string{
+			"Exactly one target. `doorman check` refuses none, or more than one.",
+			"An extension, voicemail or recording leaf hands the caller off; a menu leaf moves them; a recording returns them to the menu that offered it unless then = \"goodbye\".",
+			"The call record stores the target chosen (\"extension:orders\"), never the key pressed.",
+		},
+		Properties: map[string]*Schema{
+			"digit":     {Type: "string", Pattern: "^[0-9]$", Description: "The key, 0 to 9.", Rules: []string{"Unique within its menu.", "* and # are reserved: * repeats the menu."}},
+			"extension": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "An [[extensions]] id in this file: its afterhours, then its ring plan, then its mailbox, exactly as a valid PIN reaches it.", CrossRefs: []string{"policy.toml [[extensions]].id"}, Rules: []string{"A disabled extension keeps the reference valid; its key plays the menu again."}},
+			"menu":      {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Another [[menus]] id.", CrossRefs: []string{"policy.toml [[menus]].id"}},
+			"recording": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "A clip at <line prefix>/recordings/<id> — \"our hours are…\". Operator content, pre-rendered. A key pressed over it is a choice at the menu that offered it.", CrossRefs: []string{"/var/lib/asterisk/sounds/<prefix>/recordings/<id>"}},
+			"voicemail": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "A mailbox: the caller is released to take a message.", CrossRefs: []string{"asterisk/voicemail.conf [household] context"}},
+			"then":      {Type: "string", Enum: []any{"menu", "goodbye"}, Default: "menu", Description: "What follows a recording: the menu that offered it again, or the parting prompt and a hangup.", Rules: []string{"Only with recording."}},
+			"challenge": {
+				Type:        "boolean",
+				Default:     false,
+				Description: "Ask the arithmetic challenge before following this choice — before the extension rings, and before its mailbox records out of hours. Asked at most once a call.",
+				Rules:       []string{"Same budget and rules as [line] challenge_no_input: MAX_PIN_ATTEMPTS retries, its own rate limiter, a right answer forgives no PIN failure. Admitted callers never meet it."},
 			},
 		},
 		AdditionalProperties: falsy,
@@ -856,19 +932,27 @@ func schedule() *Schema {
 func extension() *Schema {
 	return &Schema{
 		Type:        "object",
-		Required:    []string{"pin", "label"},
+		Required:    []string{"label"},
 		Description: "One dialable destination. The PIN is the credential; there is no separate username.",
 		Rules: []string{
 			"handsets and steps are mutually exclusive: use handsets for a single ring stage, steps for an escalating ladder.",
 			"Exactly one of them must be present.",
 			"afterhours requires voicemail — an afterhours caller needs somewhere to go.",
+			"pin is required unless the extension has an id that a menu reachable from [line] menu names. A PIN-less extension is never in the PIN lookup, so no keypad entry — a bare # included — can reach it.",
 		},
 		Properties: map[string]*Schema{
+			"id": {
+				Type:        "string",
+				Pattern:     "^[a-z0-9][a-z0-9_-]*$",
+				Description: "Optional short handle — \"orders\" — for a menu choice to name this extension by. Never the PIN (rotation would break every reference) and never a position that moves when the list is edited.",
+				Rules:       []string{"Unique among this file's [[extensions]]."},
+				CrossRefs:   []string{"policy.toml [[menus.choices]] extension"},
+			},
 			"pin": {
 				Type:        "string",
 				Pattern:     `^\d+$`,
 				Description: "Digits only, minimum 4. Choose one you will remember — a number nobody can recite is a number nobody gives out. Guessable ones are refused at load: all-same digits, runs (including in twos), repeated blocks, palindromes, the handful everyone tries, and — at six digits and up — anything one digit away from all-same or from a run, since a guessing list is the patterns plus one typo. That is 0.31% of the six-digit space; everything else, dates included, is allowed. `doorman rotate` generates one when you would rather not choose.",
-				Rules:       []string{"Must be unique across extensions.", "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer. With mixed lengths, `#` ends the PIN and so does a pause (INTER_DIGIT_TIMEOUT_MS) once at least the shortest PIN's worth of digits is in; the longest PIN's length is the only count that fires on its own."},
+				Rules:       []string{"Must be unique across extensions.", "Required, except on an extension with an id that a menu reachable from [line] menu names. `doorman rotate` never gives such an extension one.", "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer. With mixed lengths, `#` ends the PIN and so does a pause (INTER_DIGIT_TIMEOUT_MS) once at least the shortest PIN's worth of digits is in; the longest PIN's length is the only count that fires on its own."},
 			},
 			"label":   {Type: "string", Description: "Human name, used by `doorman rotate <label>` and shown in `doorman check`."},
 			"enabled": {Type: "boolean", Default: true, Description: "False disables the extension without deleting it."},

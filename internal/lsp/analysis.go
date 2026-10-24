@@ -248,6 +248,10 @@ type Model struct {
 	Schedules  []string
 	Mailboxes  []string
 	TrunkIDs   []string
+	// ExtensionIDs and MenuIDs are what a [[menus.choices]] entry — and
+	// [line] menu — may name.
+	ExtensionIDs []string
+	MenuIDs      []string
 }
 
 func BuildModel(policyText string, handsetsText *string) Model {
@@ -298,7 +302,20 @@ func BuildModelWith(policyText string, handsetsText, trunksText *string) Model {
 	addMailbox(pf.House.Voicemail)
 	for _, e := range pf.Extensions {
 		addMailbox(e.Voicemail)
+		if e.ID != "" {
+			m.ExtensionIDs = append(m.ExtensionIDs, e.ID)
+		}
 	}
+	for _, menu := range pf.Menus {
+		if menu.ID != "" {
+			m.MenuIDs = append(m.MenuIDs, menu.ID)
+		}
+		for _, c := range menu.Choices {
+			addMailbox(c.Voicemail)
+		}
+	}
+	sort.Strings(m.ExtensionIDs)
+	sort.Strings(m.MenuIDs)
 	sort.Strings(m.HandsetIDs)
 	sort.Strings(m.GroupIDs)
 	sort.Strings(m.Schedules)
@@ -322,6 +339,10 @@ var (
 	// trunks.toml: the same vocabulary, and getting either wrong has the same
 	// invisible consequence.
 	trunkCtx = regexp.MustCompile(`(^|\s)(emergency_)?trunk\s*=\s*"[^"]*$`)
+	// A menu choice's targets, and [line] menu. Anchored on a word boundary
+	// so `on_no_input = "` is not mistaken for anything.
+	extensionCtx = regexp.MustCompile(`(^|\s)extension\s*=\s*"[^"]*$`)
+	menuCtx      = regexp.MustCompile(`(^|\s)menu\s*=\s*"[^"]*$`)
 )
 
 var allDays = []string{"SU", "MO", "TU", "WE", "TH", "FR", "SA"}
@@ -337,6 +358,10 @@ func Complete(m Model, line string, col int) []CompletionItem {
 	switch {
 	case trunkCtx.MatchString(prefix):
 		return items(6, "trunk (trunks.toml)", m.TrunkIDs)
+	case extensionCtx.MatchString(prefix):
+		return items(6, "extension id", m.ExtensionIDs)
+	case menuCtx.MatchString(prefix):
+		return items(6, "menu id", m.MenuIDs)
 	case afterhoursCtx.MatchString(prefix):
 		return items(6, "schedule", m.Schedules)
 	case daysCtx.MatchString(prefix):
@@ -360,6 +385,7 @@ func items(kind int, detail string, labels []string) []CompletionItem {
 
 // Describe is used by tests and debug logging.
 func (m Model) Describe() string {
-	return fmt.Sprintf("handsets=%d groups=%d schedules=%d mailboxes=%d trunks=%d",
-		len(m.HandsetIDs), len(m.GroupIDs), len(m.Schedules), len(m.Mailboxes), len(m.TrunkIDs))
+	return fmt.Sprintf("handsets=%d groups=%d schedules=%d mailboxes=%d trunks=%d extensions=%d menus=%d",
+		len(m.HandsetIDs), len(m.GroupIDs), len(m.Schedules), len(m.Mailboxes), len(m.TrunkIDs),
+		len(m.ExtensionIDs), len(m.MenuIDs))
 }

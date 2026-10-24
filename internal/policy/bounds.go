@@ -145,7 +145,13 @@ func checkBounds(f File, fail func(string, ...any)) {
 	for _, a := range f.Actions {
 		id("action", a.ID)
 	}
+	for _, m := range f.Menus {
+		id("menu", m.ID)
+	}
 	for _, e := range f.Extensions {
+		if e.ID != "" {
+			id("extension", e.ID)
+		}
 		where := fmt.Sprintf("extension %q", truncateForMessage(e.Label))
 		label(where, e.Label)
 		handsetList(where, e.Handsets)
