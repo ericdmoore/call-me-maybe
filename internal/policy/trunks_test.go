@@ -16,6 +16,15 @@ username = "123456_home"
 password_env = "TRUNK_VOIPMS_PASSWORD"
 `
 
+const telnyxTrunk = `
+[[trunks]]
+id = "telnyx"
+provider = "telnyx"
+host = "sip.telnyx.com"
+username = "cmm-home"
+password_env = "TRUNK_TELNYX_PASSWORD"
+`
+
 func mustTrunks(t *testing.T, body string) *Trunks {
 	t.Helper()
 	tr, err := TrunksFromTOML([]byte(body))
@@ -106,6 +115,18 @@ balance_min = 25
 	}
 }
 
+// Telnyx authenticates with one bearer key, so a key alone is a trunk the
+// provider commands can ask — and balance_min may be set against it.
+func TestTrunkAPIKeyAloneIsConfigured(t *testing.T) {
+	tr := mustTrunks(t, telnyxTrunk+`
+api_key_env = "TRUNK_TELNYX_API_KEY"
+balance_min = 10
+`).All()[0]
+	if !tr.BalanceConfigured() || tr.APIKeyEnv != "TRUNK_TELNYX_API_KEY" {
+		t.Errorf("a key alone must be configured: %+v", tr)
+	}
+}
+
 func TestTrunkProblems(t *testing.T) {
 	cases := []struct {
 		name, body, want string
@@ -128,6 +149,14 @@ func TestTrunkProblems(t *testing.T) {
 		{"api username alone", oneTrunk + "api_username = \"a@b.invalid\"\n", "no api_password_env"},
 		{"api password alone", oneTrunk + "api_password_env = \"TRUNK_VOIPMS_API_PASSWORD\"\n", "no api_username"},
 		{"threshold nothing can check", oneTrunk + "balance_min = 20.0\n", "nothing can ever check it"},
+		{"api key env pasted", oneTrunk + "api_key_env = \"KEY0123-live\"\n", "never the key itself"},
+		{"api key beside a login", oneTrunk + "api_key_env = \"TRUNK_VOIPMS_API_KEY\"\napi_username = \"a@b.invalid\"\napi_password_env = \"K\"\n", "one or the other"},
+		{"api key beside a password", oneTrunk + "api_key_env = \"TRUNK_VOIPMS_API_KEY\"\napi_password_env = \"K\"\n", "one or the other"},
+		// A trunk with the other provider's credential shape looks watched and
+		// is not: `doorman balance` would report its balance_min as unchecked.
+		{"key on a login provider", oneTrunk + "api_key_env = \"TRUNK_VOIPMS_API_KEY\"\nbalance_min = 10\n", "signs in with a login"},
+		{"login on a key provider", telnyxTrunk + "api_username = \"a@b.invalid\"\napi_password_env = \"TRUNK_TELNYX_API_PASSWORD\"\n", "takes one key"},
+		{"key on a login provider, other spelling", strings.Replace(oneTrunk, `"voip.ms"`, `"VoIP-MS"`, 1) + "api_key_env = \"TRUNK_VOIPMS_API_KEY\"\n", "signs in with a login"},
 		{"negative threshold", oneTrunk + "api_username = \"a@b.invalid\"\napi_password_env = \"K\"\nbalance_min = -1.0\n", "must not be negative"},
 	}
 	for _, c := range cases {

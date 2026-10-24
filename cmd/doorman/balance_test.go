@@ -407,24 +407,52 @@ func TestBalanceRefusesAnInvalidTrunksFile(t *testing.T) {
 // M1 is CLI-only, and this is what makes that structural rather than a
 // promise. A provider API key manages DIDs, sub-accounts and billing; keeping
 // it out of the long-running process keeps it off the call path entirely.
-func TestOnlyTheBalanceCommandTouchesProviderCredentials(t *testing.T) {
+//
+// The allow-list is deliberate and short. balance.go is the one file that
+// reads the credential fields (trunkAPIConfig); numbers.go is the second
+// command that talks to a provider, and it is admitted for the package import
+// alone — it reaches the credentials only through balance.go's helper, so the
+// field names stay in one file. The helper is fenced too: it returns the
+// secret, so calling it is reading the credential. Both are subcommands that
+// run and exit; no file the daemon's own code path lives in may appear here.
+func TestOnlyTheProviderCommandsTouchProviderCredentials(t *testing.T) {
+	importers := map[string]bool{
+		"balance.go": true, "balance_test.go": true,
+		"numbers.go": true, "numbers_test.go": true,
+	}
+	readers := map[string]bool{"balance.go": true, "balance_test.go": true}
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasSuffix(name, ".go") || name == "balance.go" || name == "balance_test.go" {
+		if !strings.HasSuffix(name, ".go") || name == "balance_test.go" {
 			continue
 		}
 		src, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, forbidden := range []string{"internal/provider", "APIPasswordEnv", "APIUsername"} {
+		if !importers[name] && strings.Contains(string(src), "internal/provider") {
+			t.Errorf("%s mentions internal/provider — the provider API is reached by "+
+				"`doorman balance` and `doorman numbers` and by nothing else, deliberately", name)
+		}
+		// The helper hands back the resolved secret itself, and it is an
+		// ordinary package-main function: calling it needs neither the import
+		// nor a field name, so without this line any daemon file could hold
+		// the key and every check above would still pass.
+		if !importers[name] && strings.Contains(string(src), "trunkAPIConfig") {
+			t.Errorf("%s mentions trunkAPIConfig — it resolves the provider API key, and only "+
+				"`doorman balance` and `doorman numbers` may call it", name)
+		}
+		if readers[name] {
+			continue
+		}
+		for _, forbidden := range []string{"APIPasswordEnv", "APIUsername", "APIKeyEnv"} {
 			if strings.Contains(string(src), forbidden) {
-				t.Errorf("%s mentions %s — the provider API credential is read by "+
-					"`doorman balance` and by nothing else, deliberately", name, forbidden)
+				t.Errorf("%s mentions %s — the provider API credential is read in "+
+					"balance.go's trunkAPIConfig and nowhere else, deliberately", name, forbidden)
 			}
 		}
 	}
