@@ -810,7 +810,8 @@ names it. Each claim is reported as on the account and assigned to the
 connection the trunk registers as; on the account but assigned to no
 connection, or to one another SIP username registers as; not active yet; or
 not on the account at all. Numbers on the account that no policy file names
-are listed too. A number a line only presents needs to be held, not routed.
+are listed too, and one claimed for another trunk on the same account names
+that trunk. A number a line only presents needs to be held, not routed.
 .PP
 Telnyx today, through
 .B api_key_env
@@ -826,7 +827,9 @@ Flags:
 Exit status as for
 .BR "doorman balance" :
 1 when a claimed number is not where the policy says, 3 when a trunk could not
-be checked.
+be checked \(em including one whose API credentials are not the kind its
+provider takes. A missing policy file is exit 2: with no claims, every number
+would otherwise read as unclaimed and the run would pass.
 .PP
 .BI "doorman e164 " number
 Show how a raw caller ID normalises to E.164. Use this when a known caller
@@ -1087,7 +1090,8 @@ use the same 0, 1 and 2 and add one:
 .B 3
 Nothing was below its threshold (or, for
 .BR numbers ,
-out of place), but at least one trunk could not be checked at all. Separate from 1 on purpose \(em an expired API key and an empty account
+out of place), but at least one trunk could not be checked at all.
+Separate from 1 on purpose \(em an expired API key and an empty account
 look identical from here, and treating one as the other is how a real outage
 gets dismissed as a broken cron job. 1 wins when both happen, because a balance
 known to be low is more actionable than one that is unknown.

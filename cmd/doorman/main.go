@@ -240,7 +240,7 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -env path                 secrets file holding the API keys (default ./.env)
       -json                     machine-readable
       -timeout d                how long to wait on one provider (default 30s)
-  doorman schema [name]        print the configuration surface as JSON Schema:
+  doorman schema [name]         print the configuration surface as JSON Schema:
                                 every key, type, default, and cross-file
                                 reference for policy.toml, handsets.toml,
                                 trunks.toml, contacts.toml, and the environment.
