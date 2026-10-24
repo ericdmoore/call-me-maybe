@@ -1014,10 +1014,12 @@ arguments and starts `doorman voicemail notify` detached (its own session,
 output to syslog as `cmm-voicemail`), so Asterisk never waits on a
 transcription. Asterisk runs `externnotify` whenever a box's counts change —
 a message left, and a message listened to — so notify keeps a list of what
-it has mailed (`/var/lib/asterisk/cmm-voicemail/notified`, message ids, no
-numbers) and mails each message once; a message more than an hour old when
-it is first seen is never news, so the first run after an upgrade does not
-mail the backlog.
+it has mailed (`/var/lib/asterisk/cmm-voicemail/notified`, box and message
+ids, no numbers) and mails each message once per box. The first time a box
+is seen, a message more than an hour old is never news, so the first run
+after an upgrade or a restore does not mail the backlog; after that,
+anything new to the box is mailed however old it is — a message forwarded
+from `*97` keeps the original's time, and goes to its new box's address.
 
 **What this puts on the box:** a token that can send as the house, in
 `/var/lib/asterisk/.bullmoose/`, and the address in a root-owned file. No

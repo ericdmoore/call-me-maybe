@@ -172,6 +172,89 @@ func TestARunMailsEachNewMessageOnce(t *testing.T) {
 	}
 }
 
+// app_voicemail copies a message — forwarded from *97, or left with
+// VoiceMail(a&b) — by copying its .txt verbatim: the copy carries the
+// original's msg_id and origtime. It is still news to the box it lands in.
+func TestACopiedMessageIsMailedToItsNewBox(t *testing.T) {
+	spool := t.TempDir()
+	now := time.Date(2026, 10, 23, 9, 30, 0, 0, time.UTC)
+	var out []sentMail
+	var logs []string
+	n := notifier(t, spool, &out, &logs)
+	n.Now = func() time.Time { return now }
+	run := func(box string) {
+		t.Helper()
+		if err := n.Run(context.Background(), "household", box); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Both boxes are seen once with an old message already in them: the
+	// backlog rule still holds for each, and baselines it.
+	spoolMessage(t, spool, "kids", 0, now.Add(-48*time.Hour).Unix(), "backlog-kids", "wav")
+	spoolMessage(t, spool, "adults", 0, now.Add(-48*time.Hour).Unix(), "backlog-adults", "wav")
+	run("kids")
+	run("adults")
+	if len(out) != 0 {
+		t.Fatalf("the backlog was mailed: %+v", out)
+	}
+
+	// VoiceMail(kids&adults): one recording, the same id in both boxes.
+	spoolMessage(t, spool, "kids", 1, now.Add(-time.Minute).Unix(), "1697040000-00000001", "wav")
+	spoolMessage(t, spool, "adults", 1, now.Add(-time.Minute).Unix(), "1697040000-00000001", "wav")
+	run("kids")
+	run("adults")
+	if len(out) != 2 || !strings.Contains(out[0].subject, "kids") || !strings.Contains(out[1].subject, "adults") {
+		t.Fatalf("one id in two boxes sent %+v", out)
+	}
+
+	// A parent forwards yesterday's message from kids to adults.
+	out = nil
+	spoolMessage(t, spool, "adults", 2, now.Add(-26*time.Hour).Unix(), "1697000000-00000009", "wav")
+	run("adults")
+	if len(out) != 1 || !strings.Contains(out[0].body, "msg0002.wav") {
+		t.Fatalf("a forwarded day-old message sent %+v; logs %q", out, logs)
+	}
+	run("adults")
+	if len(out) != 1 {
+		t.Errorf("the forwarded message was mailed again: %d", len(out))
+	}
+
+	// A box never seen before keeps the backlog rule.
+	out = nil
+	spoolMessage(t, spool, "family", 0, now.Add(-26*time.Hour).Unix(), "1697000000-00000009", "wav")
+	run("family")
+	if len(out) != 0 {
+		t.Errorf("a new box's backlog was mailed: %+v", out)
+	}
+}
+
+func TestTheSentListKeepsEveryBoxMarker(t *testing.T) {
+	dir := t.TempDir()
+	s, unlock, err := openSent(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.add(boxKey("household", "kids"))
+	for i := 0; i < keepSent+10; i++ {
+		s.add(fmt.Sprintf("%skey-%d", boxKey("household", "kids"), i))
+	}
+	if err := s.save(); err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	s, unlock, err = openSent(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if !s.has(boxKey("household", "kids")) || s.has(boxKey("household", "kids")+"key-0") || !s.has(fmt.Sprintf("%skey-%d", boxKey("household", "kids"), keepSent+9)) {
+		t.Errorf("trimmed list: marker %v, oldest %v", s.has(boxKey("household", "kids")), s.has(boxKey("household", "kids")+"key-0"))
+	}
+	if len(s.keys) != keepSent+1 {
+		t.Errorf("kept %d keys, want %d", len(s.keys), keepSent+1)
+	}
+}
+
 func TestWithoutStateTheNewestMessageIsMailedAsBefore(t *testing.T) {
 	spool := t.TempDir()
 	spoolMessage(t, spool, "kids", 0, 1, "a", "wav")

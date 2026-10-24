@@ -37,11 +37,15 @@ type Notifier struct {
 	// StateDir holds links/ and the list of messages already mailed. Empty
 	// keeps the old behaviour exactly: the newest message, every run.
 	StateDir string
-	// Window is how old a message may be and still count as new. Asterisk
-	// runs externnotify whenever a box's counts change — a message left,
-	// and a message listened to — so without the list and the window a
-	// mailbox checked from a phone would mail its newest message again, and
-	// a first run after an upgrade would mail the whole INBOX.
+	// Window is how old a message may be and still count as new the first
+	// time a box is seen. Asterisk runs externnotify whenever a box's counts
+	// change — a message left, and a message listened to — so without the
+	// list a mailbox checked from a phone would mail its newest message
+	// again, and without the window a first run after an upgrade (or after
+	// a restore, which does not carry the list) would mail the whole INBOX.
+	// After that first run a box is baselined and anything not on its list
+	// is new however old it is: a message forwarded from another box keeps
+	// the original's origtime, and is news to this one.
 	Window time.Duration
 	Now    func() time.Time
 	Rand   io.Reader
@@ -51,7 +55,7 @@ type Notifier struct {
 const (
 	defaultWindow   = time.Hour
 	defaultLinkDays = 14
-	keepSent        = 500
+	keepSent        = 5000     // ids are ~40 bytes; every box at maxmsg many times over
 	maxAudio        = 32 << 20 // 180 s of 8 kHz PCM is under 3 MiB; this is a fence, not a budget
 	maxTranscript   = 4000     // characters; a three-minute message is well under
 )
@@ -114,12 +118,22 @@ func (n *Notifier) Run(ctx context.Context, vmContext, mailbox string) error {
 		if window <= 0 {
 			window = defaultWindow
 		}
+		box := boxKey(vmContext, mailbox)
+		baselined := sent.has(box)
 		for _, m := range msgs {
-			if sent.has(m.Key()) || n.now().Sub(m.When()) > window {
+			k := box + m.Key()
+			if sent.has(k) {
+				continue
+			}
+			if !baselined && n.now().Sub(m.When()) > window {
+				// In the box before the box was first seen: listed without a
+				// mail, so it is never news later either.
+				sent.add(k)
 				continue
 			}
 			todo = append(todo, m)
 		}
+		sent.add(box)
 	}
 	if len(todo) == 0 {
 		n.logf("nothing new in %s to mail", inbox)
@@ -138,7 +152,7 @@ func (n *Notifier) Run(ctx context.Context, vmContext, mailbox string) error {
 		// Recorded whether or not the hook managed it: a retry on the next
 		// count change would arrive at a time nobody could predict.
 		if sent != nil {
-			sent.add(m.Key())
+			sent.add(boxKey(vmContext, mailbox) + m.Key())
 		}
 	}
 	if sent != nil {
@@ -354,6 +368,14 @@ func isDigits(s string) bool {
 
 // ── the list of messages already mailed ─────────────────────────────────
 
+// boxKey prefixes a message's key with its box, and on its own is the box's
+// baseline marker. The box is in the key because app_voicemail copies a
+// message — forwarded from *97, or left with VoiceMail(a&b) — by copying its
+// .txt verbatim, msg_id and origtime included: one id, two boxes, two mails.
+func boxKey(vmContext, mailbox string) string { return vmContext + "/" + mailbox + "/" }
+
+func isBoxMarker(k string) bool { return strings.HasSuffix(k, "/") }
+
 type sentList struct {
 	path string
 	keys []string
@@ -398,10 +420,20 @@ func (s *sentList) add(k string) {
 }
 
 func (s *sentList) save() error {
-	keys := s.keys
-	if len(keys) > keepSent {
-		keys = keys[len(keys)-keepSent:]
+	// Markers always stay — one per box, and dropping one would baseline its
+	// box again — and message keys are trimmed oldest first.
+	var keys, msgs []string
+	for _, k := range s.keys {
+		if isBoxMarker(k) {
+			keys = append(keys, k)
+		} else {
+			msgs = append(msgs, k)
+		}
 	}
+	if len(msgs) > keepSent {
+		msgs = msgs[len(msgs)-keepSent:]
+	}
+	keys = append(keys, msgs...)
 	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".notified-*")
 	if err != nil {
 		return err
