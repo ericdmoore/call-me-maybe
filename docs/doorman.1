@@ -35,6 +35,29 @@ window, or get whatever
 .B [line] on_no_input
 says \(em by default the bouncer says "Good day" and hangs up.
 .PP
+A public line answers with a front menu instead:
+.B [line] menu
+names a
+.B [[menus]]
+entry, and each
+.B [[menus.choices]]
+key leads to an extension (by its
+.BR id ,
+when it may have no PIN and is never in the PIN lookup), a recording, a
+second menu or a mailbox. The PIN lobby never runs on such a line. A choice
+with
+.BR "challenge = true" ,
+and
+.B [line] challenge_no_input
+in front of
+.BR on_no_input ,
+ask a spoken sum before anything rings or records: a filter for
+robodialers and very young children, not age verification, and closed to a
+caller who cannot press keys. Wrong answers spend the line's own challenge
+budget, never the PIN one, and a right answer forgives nothing. Menus nest
+two deep; a call gets six plays or three minutes, then what silence gets.
+Callers the ladder admits skip both.
+.PP
 Outbound, a handset presents the caller ID of the line it belongs to:
 .B [line] outbound_cid
 on the policy file whose
@@ -871,7 +894,19 @@ is
 .BR PROMPT_MEDIA_PREFIX .
 Prompts are built once with piper on a workstation and committed as WAVs, so
 the Pi never synthesises speech. Pointing the prefix at another directory is
-how a prompt pack is swapped in.
+how a prompt pack is swapped in. A line's own words sit beneath its prefix
+in
+.I menus/<id>
+and
+.IR recordings/<id> ,
+operator content outside any pack; run on the box,
+.B doorman check
+warns about the ones that are missing.
+.TP
+.I /var/lib/asterisk/sounds/call\-me\-maybe/challenge/
+The arithmetic challenge's clips, rendered on a Mac by
+.I prompts/challenge.sh
+and played whatever pack a line speaks with.
 .SH UPDATE NOTICES
 Successful interactive operator commands may print a newer-release notice on
 stderr after command output, at most once per 24 hours. Both stdout and stderr

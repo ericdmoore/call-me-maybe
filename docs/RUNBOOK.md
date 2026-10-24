@@ -366,7 +366,8 @@ $ rm -rf /tmp/cmm-prompts
 prompts: the house's own phrases, such as the low-balance call, which live
 outside the pack contract so that swapping the lobby's voice never silences
 an alert. A box provisioned before v0.8.0 has the six and not the directory;
-copy it the same way.
+copy it the same way. A line that asks the arithmetic challenge also needs
+`challenge/`, built separately on a Mac — see "A public line".
 
 ### Services
 
@@ -1968,6 +1969,113 @@ deleting `policy.biz.toml`. There is no migration and no stored state.
 
 That covers calls coming *in*. Calls going out still present the trunk's
 default until you set an outbound caller ID — next section.
+
+### A public line
+
+A number on a flyer or a website gets two kinds of caller the PIN lobby does
+not serve: people choosing a department, and robodialers and button-mashing
+toddlers. Two features, usable apart or together, both in the line's own
+policy file. `docs/writing-policies.md` has every key; this is the doing.
+
+**What the arithmetic question is for.** It stops dialers that press nothing
+or press keys at random, and very young children. It is not age
+verification: an eight-year-old can answer it. It is not a defence against
+automated callers that understand speech, which can answer it as easily as a
+person. And it shuts out some people: anyone calling from a phone that cannot
+send tones, and anyone who cannot hear or work out the question. Put the
+people who must always get through on the allow-list. If silence on this
+line must still reach a mailbox, leave `challenge_no_input` off.
+
+**Measure before and after.** The call log already separates the cases. On
+the business line, count `reason` (`no-digits`, `challenge-failed`,
+`menu-ceiling`) and `challenge` (`passed`, `failed`, `no-answer`) for a week
+either side of turning it on:
+
+```bash
+$ doorman calls --line biz --json | jq -r '[.reason, .challenge] | @tsv' | sort | uniq -c
+```
+
+#### The arithmetic challenge
+
+1. **Build the clips once, on a Mac** — the same macOS `say` voice the Books
+   menus use, normalised like every bundled clip:
+
+   ```bash
+   $ bash prompts/challenge.sh              # SAY_VOICE=Daniel to choose another
+   $ rsync -av prompts/build/challenge/ pi@raspberrypi:/tmp/cmm-challenge/
+   ```
+
+   They are the house's clips, not a pack's: `challenge/` beside the bundled
+   prompts, outside the six-name contract, played whatever `[line] prompts`
+   says. Apple's terms cover what its voices say, so they are rendered for
+   your own box and never published.
+
+2. **Install them on the box**:
+
+   ```bash
+   $ sudo mkdir -p /var/lib/asterisk/sounds/call-me-maybe/challenge
+   $ sudo cp /tmp/cmm-challenge/* /var/lib/asterisk/sounds/call-me-maybe/challenge/
+   $ sudo chown -R asterisk:asterisk /var/lib/asterisk/sounds/call-me-maybe/challenge
+   ```
+
+3. **Turn it on** in front of silence, on a line whose `on_no_input` is
+   `voicemail` or `ring-house`:
+
+   ```toml
+   # policy.biz.toml
+   [line]
+   on_no_input        = "voicemail"
+   challenge_no_input = true
+   ```
+
+4. **`doorman check` on the box** says what it costs, and warns if any clip
+   is missing: a caller asked a question they cannot hear presses nothing and
+   is dismissed.
+
+5. **Trial it.** From a phone that is not on the allow-list: wait out the dial
+   window, answer right (the mailbox should record), wrong three times (a new
+   question each time, then "Good day"), and say nothing (dismissed). Then
+   `doorman calls` shows `challenge passed` / `failed` / `no-answer`.
+
+#### A front menu
+
+1. **Write it**, in the line's file: `[line] menu`, the `[[menus]]`, and an
+   `id` on each extension a choice names. Those extensions may drop their
+   `pin` — on a menu line nobody dials one — and `doorman rotate` leaves them
+   alone. The worked example is the bakery line in
+   `examples/scenarios/multi-venture/`.
+
+2. **Supply the words.** The menu clip and every recording are yours, played
+   from the line's prefix (`[line] prompts`, else `PROMPT_MEDIA_PREFIX`):
+   `menus/<id>` and `recordings/<id>`, as `.wav` (8 kHz) and `.wav16`
+   (16 kHz), mono 16-bit. Record them, or render the `say` text on a Mac the
+   way `prompts/challenge.sh` does:
+
+   ```bash
+   $ say -v Samantha -r 170 -o front.aiff "Thanks for calling Blue Door Bakery. For orders, press 1."
+   $ ffmpeg -i front.aiff -af loudnorm=I=-18:TP=-2:LRA=7 -ar 8000 -ac 1 -acodec pcm_s16le front.wav
+   $ ffmpeg -i front.aiff -af loudnorm=I=-18:TP=-2:LRA=7 -ar 16000 -ac 1 -acodec pcm_s16le -f wav front.wav16
+   # on the box, for a line with prompts = "bluedoor":
+   $ sudo mkdir -p /var/lib/asterisk/sounds/bluedoor/menus /var/lib/asterisk/sounds/bluedoor/recordings
+   $ sudo cp front.wav front.wav16 /var/lib/asterisk/sounds/bluedoor/menus/
+   ```
+
+   A line with its own `prompts` also needs the six pack prompts there (the
+   welcome a known caller hears); copying the bundled ones is fine.
+
+3. **`doorman check` on the box** prints every key, which choices are behind
+   the challenge and which are not, and names any clip that is missing.
+
+4. **A menu that never hears a digit is invariant 9.** Every caller falling
+   through to `on_no_input` means the trunk is not sending RFC 4733 — check
+   `dtmf_mode` on the trunk before the menu. A generated trunk has it; a
+   hand-written one may not.
+
+5. **Trial it**: each key from a stranger's phone; `*` (repeats); a key with
+   no choice (replays); a recording (back to the menu); silence (the menu
+   again, then `on_no_input`); and from an allow-listed phone, which should
+   ring the house with no menu at all. `doorman calls` records the choice as
+   `extension:orders`, never the key.
 
 ### Add a second provider
 

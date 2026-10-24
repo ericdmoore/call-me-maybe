@@ -978,8 +978,13 @@ func printSharedPINs(results []checkedLine) {
 // describeLine prints what one policy file resolves to.
 func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 	pinLen := "mixed (inter-digit timeout decides)"
-	if p.PinLength > 0 {
+	switch {
+	case p.Line().Menu != "":
+		pinLen = "(not asked — this line answers with a menu)"
+	case p.PinLength > 0:
 		pinLen = fmt.Sprintf("%d", p.PinLength)
+	case len(p.PINs()) == 0:
+		pinLen = "(none — no extension has a PIN)"
 	}
 	fmt.Printf("✓ %s is valid\n\n", path)
 	if allowPlaceholders {

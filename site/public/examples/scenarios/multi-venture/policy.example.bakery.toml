@@ -5,22 +5,61 @@
 # a trunk is an account, not a number, and render routes each DID arriving
 # on it to its own line. policy.example.toml beside this one is the home
 # line and explains the whole arrangement — read it first.
+#
+# This is also the PUBLIC LINE example. The bakery's number is on the shop
+# window and the website, so a stranger does not dial a PIN here — they hear
+# a front menu:
+#
+#     1  orders            rings the counter, then the kitchen
+#     2  our hours         a recording, then the menu again
+#     3  the baker         the kitchen phone, behind the arithmetic challenge
+#     4  wholesale         rings the counter and the office
+#
+# NEEDS      Two clips beside the bakery's prompt pack, recorded or rendered
+#            by you: menus/front and recordings/hours (RUNBOOK, "A front
+#            menu"). The challenge's clips, built once with
+#            prompts/challenge.sh (RUNBOOK, "The arithmetic challenge").
+#            `doorman check`, run on the box, names any that are missing.
+#
+# DOES NOT   Stop a voice agent that understands speech, or verify anybody's
+#            age: the challenge is a filter for robodialers and very young
+#            children, and an eight-year-old can answer it.
+#
+#            Take a message from a silent caller behind the challenge. On
+#            purpose: on_no_input still takes a message from a caller who
+#            presses nothing, because a caller from a rotary phone or a car
+#            cannot press anything. challenge_no_input = true closes that,
+#            below, and is the owner's call.
+#
+#            Edit the menu from the account's web view. Sync accepts this
+#            file and does not carry its menus yet.
 # ─────────────────────────────────────────────────────────────
 
 # The counter phone presents the bakery. It is claimed here and nowhere
 # else: claim it from the surveying line too and `doorman check` refuses.
+#
+# menu is what makes this a public line: a stranger hears [[menus]] "front"
+# and the PIN lobby never runs on this number. prompts names the bakery's
+# own voice, under which its menu and recordings live.
 [line]
 label = "Blue Door Bakery"
 number = "+15125550188"
+prompts = "bluedoor"
+menu = "front"
 trunk = "telnyx"
 failover = ["voipms"]         # presents the house number when Telnyx cannot carry the call
 on_no_input = "voicemail"
+# challenge_no_input = true   # a sum before a silent caller reaches the mailbox
 outbound_cid = "+15125550188"
 outbound_handsets = ["counter"]
 
 # An order is worth two phones: the counter, and the kitchen, where the
 # baker actually is at 06:00. The bedrooms are never in a bakery's ring
 # group, on any step, at any hour.
+#
+# An allow-listed caller skips the menu and the challenge and rings this
+# group, exactly as they would skip the PIN lobby; one who presses 4 over
+# the welcome reaches wholesale with no question asked.
 [house]
 handsets = ["counter", "kitchen"]
 voicemail = "bakery"
@@ -44,10 +83,15 @@ start = "14:00"
 end = "05:30"
 days = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
 
-# PINs: the CHANGEME sentinel, replaced by
-# `doorman rotate -policy policy.bakery.toml`.
+# ── The extensions the menu reaches ──────────────────────────
+# Each has an id, which is what a menu choice names — never a label, never a
+# PIN — and none has a PIN. That is allowed only because a menu names every
+# one of them: on a menu line nobody dials a PIN, and a PIN guarding nothing
+# is a credential with no door. They are kept out of the PIN lookup
+# entirely, and `doorman rotate` leaves them alone.
+
 [[extensions]]
-pin = "CHANGEME"
+id = "orders"
 label = "Orders"
 voicemail = "orders"
 afterhours = "closed"
@@ -60,10 +104,53 @@ afterhours = "closed"
   handsets = ["counter", "kitchen"]
   rings = 4
 
+# The baker, in the kitchen, up to the elbows in dough: worth interrupting
+# for a person, not for a robot. Behind the challenge (choice 3 below), and
+# out of hours straight to the mailbox — which the challenge guards too,
+# because it runs before the afterhours check.
+[[extensions]]
+id = "baker"
+label = "The baker"
+handsets = ["kitchen"]
+voicemail = "bakery"
+afterhours = "closed"
+
 # Wholesale accounts ring the office too: the paperwork lives there.
 [[extensions]]
-pin = "CHANGEME"
+id = "wholesale"
 label = "Wholesale"
 handsets = ["counter", "office"]
 voicemail = "wholesale"
 afterhours = "closed"
+
+# ── The front menu ───────────────────────────────────────────
+# `say` is the wording of the clip bluedoor/menus/front — kept here so it is
+# reviewed with the rest, and printed by `doorman check`. doorman never
+# speaks it; you record or render the clip (RUNBOOK, "A front menu").
+#
+# The clip barges in: a regular who knows "1" need not sit through it. * plays
+# it again; a key with no choice plays it again; silence plays it once more
+# (repeat = 1), then on_no_input. A call gets six plays or three minutes.
+[[menus]]
+id = "front"
+say = "Thanks for calling Blue Door Bakery. For orders, press 1. For our opening hours, press 2. To reach the baker, press 3. For wholesale, press 4."
+repeat = 1
+
+  [[menus.choices]]
+  digit = "1"
+  extension = "orders"
+
+  # bluedoor/recordings/hours, then this menu again. A key pressed over the
+  # recording is a choice here.
+  [[menus.choices]]
+  digit = "2"
+  recording = "hours"
+
+  [[menus.choices]]
+  digit = "3"
+  extension = "baker"
+  challenge = true
+
+  [[menus.choices]]
+  digit = "4"
+  extension = "wholesale"

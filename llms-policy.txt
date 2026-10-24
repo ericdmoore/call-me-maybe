@@ -77,6 +77,8 @@ If someone has one number, write one `policy.toml` and do not mention lines.
     number      = "+15125550142"           # the DID; any format, stored E.164
     prompts     = "concierge"              # prompt pack, overrides PROMPT_MEDIA_PREFIX
     on_no_input = "voicemail"              # dismiss | ring-house | voicemail
+    challenge_no_input = true              # a spoken sum before on_no_input; default false
+    menu        = "front"                  # a [[menus]] id: answer with a front menu, never the PIN lobby
     trunk       = "voipms"                 # id from trunks.toml; ONLY with one
     outbound_cid      = "+15125550142"     # what a call placed as this line shows
     outbound_handsets = ["office"]         # phones that call as it without asking
@@ -94,7 +96,9 @@ If someone has one number, write one `policy.toml` and do not mention lines.
 
     [[extensions]]                     # what a stranger can dial to get in
     label = "Kitchen"                  # human name; used by `doorman rotate`
-    pin = "428917"                     # a credential — see PIN rules below
+    id = "kitchen"                     # optional; what a [[menus]] choice names it by
+    pin = "428917"                     # a credential — see PIN rules below; optional ONLY
+                                       #   when a reachable menu names this id
     handsets = ["kitchen"]             # simple form: one ring stage
     # steps = [...]                    # ladder form — MUTUALLY EXCLUSIVE with handsets
     voicemail = "family"               # where an unanswered call lands
@@ -113,6 +117,23 @@ If someone has one number, write one `policy.toml` and do not mention lines.
     end = "07:00"                      # wraps midnight correctly
     days = ["SU","MO","TU","WE","TH"]  # start-day semantics for a wrapping window
     enabled = true
+
+    [challenge]                        # optional; how the arithmetic question is built
+    factors = [2, 9]                   # "what is A times B", A and B from 2 to 9 (0-9 at most)
+
+    [[menus]]                          # a public line's front menu, named by [line] menu
+    id = "front"                       # also the clip <line prefix>/menus/front
+    say = "For orders, press 1. ..."   # what that clip says; never synthesised
+    repeat = 1                         # replays for a silent caller (0-5, default 1)
+
+    [[menus.choices]]                  # one per key; EXACTLY ONE target each
+    digit = "1"                        # "0" to "9"; * repeats, # is reserved
+    extension = "kitchen"              # an [[extensions]] id in this file
+    # menu = "more"                    # or another menu (two levels at most)
+    # recording = "hours"              # or a clip <line prefix>/recordings/hours
+    # voicemail = "family"             # or a mailbox
+    # then = "goodbye"                 # after a recording: "menu" (default) | "goodbye"
+    challenge = true                   # ask the sum before following it; default false
 
 ## Rules a schema cannot express
 
@@ -173,6 +194,23 @@ If someone has one number, write one `policy.toml` and do not mention lines.
     sees a different number; `doorman check` prints which. Busy, no answer
     and a caller hanging up never climb the ladder. 911 has its own ladder
     and ignores this key.
+19. `[line] menu` must name a `[[menus]]` id in the same file, and a line
+    with a menu **never runs the PIN lobby**. Every menu choice names exactly
+    one of `extension`, `menu`, `recording`, `voicemail`; an `extension`
+    target is an `[[extensions]] id`, never a label and never a PIN.
+20. **A PIN is optional only on an extension with an `id` that a menu
+    reachable from `[line] menu` names.** Anything else without a PIN is
+    refused, because nothing could ever ring it. A PIN-less extension is kept
+    out of the PIN lookup entirely, so no keypad entry reaches it.
+21. Menus nest **two levels** at most. A choice back to a menu above it is
+    fine ("0 for the main menu"); a choice to its own menu is refused, since
+    `*` already repeats. Keys are unique per menu and `*`/`#` are reserved.
+22. `challenge_no_input = true` is refused beside `on_no_input = "dismiss"`
+    (or none): there is nothing to guard. `[challenge] factors` is two
+    integers, low ≤ high, within 0-9.
+23. The challenge attaches to a **route** — the no-input disposition, or a
+    menu choice — and never to the PIN path or an extension. Callers the
+    ladder admits never meet it, nor the menu.
 
 ## `on_no_input` — the difference between a doorman and a concierge
 
@@ -193,6 +231,36 @@ choice some households want and nobody should discover it from a phone call.
 
 A silent caller is never rate-limited for it. The limiter counts wrong PINs,
 and saying nothing is not a guess.
+
+## A public line — a front menu, and the arithmetic challenge
+
+For a number on a flyer: `[line] menu` answers with "press 1 for orders, 2
+for our hours, 3 for the baker" instead of the PIN lobby, and a choice with
+`challenge = true` asks "what is three times six" before the phone rings or
+its mailbox records. `challenge_no_input = true` puts the same question in
+front of `on_no_input`, which is where a robodialer that presses nothing
+otherwise lands. A worked example is the bakery line of the multi-venture
+scenario below.
+
+- The menu's words are **operator content**: WAVs at
+  `<line prefix>/menus/<id>` and `<line prefix>/recordings/<id>` under
+  Asterisk's sounds directory. Never suggest runtime speech. `doorman check`,
+  on the box, warns about missing clips.
+- The challenge speaks from a bundled clip set (`prompts/challenge.sh`),
+  outside the six-prompt pack contract, so it works with any pack.
+- Wrong answers have their own rate limiter and never cost the PIN budget;
+  a right answer never forgives a PIN failure. `MAX_PIN_ATTEMPTS` retries,
+  a new question each time; silence is dismissed and charged nothing.
+- Per call: at most six menu plays or three minutes, then the same ending
+  as silence.
+
+**Say this when suggesting the challenge:** it is a filter for robocalls
+and very young children, **not age verification** — an eight-year-old can
+answer it — and no defence against automated callers that understand
+speech. It shuts out anyone who cannot press keys (a rotary phone, a car, a
+smart speaker) unless they are on the allow-list; with `challenge_no_input`
+on, they cannot even leave a message. It is off unless written, and that is
+the person's choice to make.
 
 ## PIN rules
 
@@ -245,7 +313,8 @@ https://callmemaybe.cc/examples/policy.example.toml and siblings.
 
 Every PIN in every example is the `CHANGEME` sentinel and `doorman check`
 refuses the file until `doorman init` replaces them; that is the point, not
-a defect to repair by hand. Every number is `555-01xx`.
+a defect to repair by hand. (A menu line's extensions have no PIN at all,
+which is the one place an example carries none.) Every number is `555-01xx`.
 
 ## A second line beside the first
 
@@ -264,7 +333,10 @@ need stated in the header:
   https://callmemaybe.cc/examples/scenarios/home-and-business/handsets.example.toml
 - **The multi-venture operator** — one home line and two businesses at
   two providers. Three policy files and a `trunks.example.toml`, so
-  `doorman render` writes every route and nothing is hand-edited.
+  `doorman render` writes every route and nothing is hand-edited. The
+  bakery line is the public-line example: a front menu where 1 rings
+  orders, 2 plays the opening hours and 3 reaches the baker behind the
+  arithmetic challenge, with extensions that have ids and no PINs.
   https://callmemaybe.cc/examples/scenarios/multi-venture/policy.example.toml
   https://callmemaybe.cc/examples/scenarios/multi-venture/policy.example.surveying.toml
   https://callmemaybe.cc/examples/scenarios/multi-venture/policy.example.bakery.toml
@@ -500,6 +572,12 @@ Rules a schema cannot express:
 - Putting `outbound_handsets` in handsets.toml. It is a `[line]` key — the
   inventory is shared by every line and cannot say something true of one.
 - Setting both `handsets` and `steps` on one extension.
+- A menu choice naming an extension by its label or its PIN. It names the
+  extension's `id`.
+- Leaving `pin` off an extension no reachable menu names, or writing a PIN on
+  every extension of a menu line — valid, and guarding nothing.
+- Putting `[[menus]]` or `[challenge]` in handsets.toml. They are per line.
+- `challenge_no_input = true` on a line that dismisses silent callers anyway.
 - Naming a handset that does not exist, or a schedule id that does not exist.
 - Reusing a PIN across two extensions.
 - Choosing a memorable-but-refused PIN (`123456`, `111111`, `121212`).
@@ -528,7 +606,10 @@ These appear in the project's planning documents. They are not implemented, and
 - `ring` on `[[people]]` (per-person routing overrides).
 - `[house.afterhours]` — afterhours exists per-extension only.
 - `[[schedules]]` at line scope. A schedule is referenced from an extension.
-- Conference rooms, DND, queues, IVR menus, SMS.
+- Conference rooms, DND, queues, SMS. A front menu one or two levels deep IS
+  available (`[[menus]]`, above); deeper trees are not, and are not planned.
+- Menus on the account's web view. Sync accepts a file with `[[menus]]` but
+  does not carry them yet, so editing a menu is done in the file.
 
 If someone asks for one of these, say it is planned rather than writing config
 that appears to deliver it. `docs/TASKS.md` has the current state.
