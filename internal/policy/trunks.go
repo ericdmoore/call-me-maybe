@@ -129,6 +129,37 @@ func (t Trunk) BalanceConfigured() bool {
 	return (t.APIUsername != "" && t.APIPasswordEnv != "") || t.APIKeyEnv != ""
 }
 
+// APIAuth is the credential shape a provider's account API takes.
+type APIAuth int
+
+const (
+	// APIAuthUnknown is a provider this package does not know the API of, or
+	// one whose client needs no credentials: whatever the trunk gives it is
+	// not checked here.
+	APIAuthUnknown APIAuth = iota
+	// APIAuthLogin is api_username + api_password_env.
+	APIAuthLogin
+	// APIAuthKey is api_key_env.
+	APIAuthKey
+)
+
+// providerAPIAuth is keyed by the flattened provider name. It lives here, not
+// beside the clients, because nothing under internal/ may import
+// internal/provider; that package's tests build every client with each shape
+// and fail if this table disagrees with what the client accepts.
+var providerAPIAuth = map[string]APIAuth{
+	"voipms": APIAuthLogin,
+	"telnyx": APIAuthKey,
+}
+
+// ProviderAPIAuth is the credential shape the named provider's API takes,
+// however the name was spelled ("VoIP.ms", "voipms", "voip-ms").
+func ProviderAPIAuth(provider string) APIAuth {
+	flat := strings.NewReplacer(" ", "", "-", "", ".", "", "_", "").
+		Replace(strings.ToLower(strings.TrimSpace(provider)))
+	return providerAPIAuth[flat]
+}
+
 // DefaultTrunkCodecs is what a trunk allows when it says nothing. ulaw first
 // because every provider speaks it, g722 second because it is free quality on
 // a call that never leaves the box's own codec.
@@ -409,6 +440,24 @@ func compileTrunks(f TrunkFile) (*Trunks, []string) {
 			fail("%s api_key_env %q must be the NAME of a .env variable such as "+
 				"TRUNK_%s_API_KEY — never the key itself",
 				where, tr.APIKeyEnv, strings.ToUpper(strings.NewReplacer("-", "_").Replace(tr.ID)))
+		}
+		// Credentials of the other provider's shape are a trunk that looks
+		// watched and is not: `doorman balance` and `doorman numbers` can
+		// only refuse it when they run, and `doorman check` is where the
+		// person writing the file is looking.
+		if tr.BalanceConfigured() {
+			switch ProviderAPIAuth(tr.Provider) {
+			case APIAuthLogin:
+				if tr.APIKeyEnv != "" {
+					fail("%s sets api_key_env, but the %s API signs in with a login — "+
+						"use api_username and api_password_env instead", where, tr.Provider)
+				}
+			case APIAuthKey:
+				if tr.APIKeyEnv == "" {
+					fail("%s sets api_username/api_password_env, but the %s API takes one key — "+
+						"use api_key_env instead", where, tr.Provider)
+				}
+			}
 		}
 		switch {
 		case tr.BalanceMin < 0:

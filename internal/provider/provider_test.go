@@ -5,7 +5,35 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"callmemaybe/internal/policy"
 )
+
+// policy refuses a trunk whose API credentials are not the shape its provider
+// takes, from a table of its own because nothing under internal/ may import
+// this package. This holds the table to the clients: each is built with only a
+// login and with only a key, and the shape it accepts is the one the table
+// must name. A client that takes neither, or both, is one the table leaves
+// unchecked.
+func TestPolicyKnowsWhichCredentialsEachClientTakes(t *testing.T) {
+	for _, name := range Backends() {
+		_, loginErr := New(name, Config{Username: "a@example.invalid", Password: "x"})
+		_, keyErr := New(name, Config{Key: "KEY-fiction"})
+		login := !errors.Is(loginErr, ErrNoCredentials)
+		key := !errors.Is(keyErr, ErrNoCredentials)
+		want := policy.APIAuthUnknown
+		switch {
+		case login && !key:
+			want = policy.APIAuthLogin
+		case key && !login:
+			want = policy.APIAuthKey
+		}
+		if got := policy.ProviderAPIAuth(name); got != want {
+			t.Errorf("%s: policy.ProviderAPIAuth = %v, but the client accepts login=%v key=%v",
+				name, got, login, key)
+		}
+	}
+}
 
 func TestBalanceIsOptional(t *testing.T) {
 	prepaid, err := New("voip.ms", Config{Username: "a@example.invalid", Password: "x"})

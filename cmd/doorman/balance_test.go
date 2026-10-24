@@ -458,52 +458,6 @@ func TestOnlyTheProviderCommandsTouchProviderCredentials(t *testing.T) {
 	}
 }
 
-// A trunk that declares credentials its provider cannot use asked to be
-// watched, usually with a balance_min. Reporting it as merely unconfigured
-// exited 0 and said "no threshold set" about a threshold that was set — the
-// silent failure balance_min exists to remove. It is a failure to check.
-func TestCredentialsOfTheWrongShapeAreAFailureNotUnconfigured(t *testing.T) {
-	results := checkBalances(context.Background(), balanceCheck{
-		trunks: trunksFor(t, `
-[[trunks]]
-id = "voipms"
-provider = "voip.ms"
-host = "chicago.voip.ms"
-username = "123456_home"
-password_env = "TRUNK_VOIPMS_PASSWORD"
-api_key_env = "TRUNK_VOIPMS_API_KEY"
-balance_min = 10
-
-[[trunks]]
-id = "telnyx"
-provider = "telnyx"
-host = "sip.telnyx.com"
-username = "cmm-home"
-password_env = "TRUNK_TELNYX_PASSWORD"
-api_username = "owner@example.invalid"
-api_password_env = "TRUNK_TELNYX_API_PASSWORD"
-balance_min = 10
-`),
-		secret: secretsFrom(map[string]string{
-			"TRUNK_VOIPMS_API_KEY": "fiction", "TRUNK_TELNYX_API_PASSWORD": "fiction",
-		}),
-		timeout: time.Second,
-	})
-	for _, r := range results {
-		if r.State != balanceError || !strings.Contains(r.Detail, "not how the") || r.Threshold == nil {
-			t.Errorf("%s: state %q detail %q threshold %v — want an error naming the shape, threshold kept",
-				r.Trunk, r.State, r.Detail, r.Threshold)
-		}
-	}
-	if got := balanceExit(results); got != 3 {
-		t.Errorf("exit = %d, want 3: nothing is evaluating either threshold", got)
-	}
-	out := capture(t, func() { printBalances(results, "./trunks.toml", 0) })
-	if strings.Contains(out, "No threshold set") {
-		t.Errorf("both trunks set balance_min:\n%s", out)
-	}
-}
-
 // And the import direction, which is the same rule one level up: nothing the
 // daemon links can reach the provider package at all.
 func TestNothingOnTheCallPathImportsTheProviderPackage(t *testing.T) {

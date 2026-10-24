@@ -390,7 +390,8 @@ Rules a schema cannot express:
   VoIP.ms and Telnyx.
 - **Telnyx takes `api_key_env`, not `api_username` + `api_password_env`** —
   its API authenticates with one bearer key. The two shapes are mutually
-  exclusive on one trunk. The key has the same high privilege (it can buy and
+  exclusive on one trunk, and `doorman check` refuses the shape the
+  trunk's provider does not take (a key on VoIP.ms, a login on Telnyx). The key has the same high privilege (it can buy and
   release numbers) and the same rule: read by `doorman balance` and `doorman
   numbers`, never by the daemon. It is not the SIP connection's password,
   which stays in `password_env`.

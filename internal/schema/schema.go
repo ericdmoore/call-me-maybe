@@ -427,6 +427,7 @@ func trunkItem() *Schema {
 					"HIGHER PRIVILEGE THAN THE SIP PASSWORD, exactly like api_password_env: a Telnyx API key can buy and release numbers and reconfigure every connection on the account. The daemon never reads it.",
 					"Names a variable; never put the key here. The pattern is enforced so a pasted key fails the load rather than reaching a commit.",
 					"Convention: TRUNK_<ID>_API_KEY.",
+					"Must match the provider: `doorman check` refuses api_key_env on a provider whose API signs in with a login (VoIP.ms), and api_username/api_password_env on one that takes a key (Telnyx). A provider doorman has no API client for is not checked.",
 					"Mutually exclusive with api_username and api_password_env.",
 					"On Telnyx it is a key from the API Keys page of the Mission Control portal — not the SIP connection's password, which is password_env.",
 				},
