@@ -16,7 +16,7 @@ household actually needs. Start here if one of them resembles you.
 | [`scenarios/solo-business/`](scenarios/solo-business/) | One person, one number, working from home. Business hours, clients on the allow-list, an extension per concern ending in a mailbox rather than a dismissal | today |
 | [`scenarios/family-line/`](scenarios/family-line/) | A household with one number and eight phones. Known callers ring everything; strangers get the lobby and then "good day" | today |
 | [`scenarios/home-and-business/`](scenarios/home-and-business/) | The two above on one box: two numbers, two policy files, one phone plant. The office phone dials out as the business without being asked; every other phone is the house, and so is 911 | today |
-| [`scenarios/multi-venture/`](scenarios/multi-venture/) | One home line and two businesses at two providers: three policy files and a `trunks.example.toml`. Each venture claims the phone in its workspace; `doorman render` writes the registrations, the routes and the 911 ladder | today |
+| [`scenarios/multi-venture/`](scenarios/multi-venture/) | One home line and two businesses at two providers: three policy files and a `trunks.example.toml`. Each venture claims the phone in its workspace; `doorman render` writes the registrations, the routes and the 911 ladder. The bakery is a public line: a front menu — 1 orders, 2 a recording of the hours, 3 the baker behind the arithmetic challenge, 5 today's story and 6 a shelf of the audiobook library (Dial-a-Story) — with no PINs | today |
 
 An out-of-hours answering flow — "is this number good for a callback?" — is
 planned and waits on two primitives that do not exist; see

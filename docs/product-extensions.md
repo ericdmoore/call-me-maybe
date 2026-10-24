@@ -92,6 +92,13 @@ and `docs/roadmap.md`):
 mailbox, `3` conference join, `0` attendant. Policy-driven prompts; deeper
 menus are a different product.
 
+*Shipped as a line's front menu (#150):* `[line] menu` and `[[menus]]`, two
+levels at most, each choice an extension, a recording, a submenu or a
+mailbox, optionally behind the spoken arithmetic challenge. The open/closed
+half above is still per extension (`afterhours`), not per line. A choice can
+also lead to a shelf of the audiobook library, or its story of the day
+(Dial-a-Story, #155), with a call-length limit and a listener cap.
+
 ---
 
 ## 5. Desk-phone hygiene (mostly documentation + small mechanisms)

@@ -268,6 +268,20 @@ func TestObserverAcceptsExactlyWhatTheSharedValidatorAccepts(t *testing.T) {
 		{"person name of 257", pol("[[people]]\nname = \"" + long(257) + "\"\nnumbers = [\"+15550100009\"]"), false},
 		{"line label of 129", files{policy: "[line]\nlabel = \"" + long(129) + "\"\n" + policyFixture, handsets: handsetsFixture}, false},
 		{"unknown key", pol("[house.extra]\nx = 1"), false},
+		// #150: sync carries menus read-only later; until then it must not
+		// refuse a file that has them, and refuses exactly what check does.
+		{"menu with a PIN-less extension", files{policy: "[line]\nmenu = \"front\"\non_no_input = \"voicemail\"\nchallenge_no_input = true\n" +
+			strings.Replace(policyFixture, "[house]\nhandsets = [\"kitchen\"]\n", "[house]\nhandsets = [\"kitchen\"]\nvoicemail = \"family\"\n", 1) +
+			"\n[challenge]\nfactors = [2, 9]\n" + menuFixture, handsets: handsetsFixture}, true},
+		// #155: shelves ride the same way — projected away, never refused.
+		{"menu offering a shelf", files{policy: "[line]\nmenu = \"front\"\n" + policyFixture + menuFixture + shelfFixture, handsets: handsetsFixture}, true},
+		{"menu naming an unknown shelf", files{policy: "[line]\nmenu = \"front\"\n" + policyFixture + menuFixture +
+			strings.Replace(shelfFixture, `shelf = "stories"`, `shelf = "ghost"`, 1), handsets: handsetsFixture}, false},
+		{"empty shelf", files{policy: "[line]\nmenu = \"front\"\n" + policyFixture + menuFixture +
+			strings.Replace(shelfFixture, `titles = ["little-red-hen"]`, `titles = []`, 1), handsets: handsetsFixture}, false},
+		{"menu naming an unknown extension", files{policy: "[line]\nmenu = \"front\"\n" + policyFixture +
+			strings.Replace(menuFixture, `extension = "orders"`, `extension = "ghost"`, 1), handsets: handsetsFixture}, false},
+		{"PIN-less extension no menu names", files{policy: policyFixture + "\n[[extensions]]\nid = \"orders\"\nlabel = \"Orders\"\nhandsets = [\"kitchen\"]\n", handsets: handsetsFixture}, false},
 		{"string of 2049", pol("[[people]]\nname = \"Note\"\nnumbers = [\"+15550100009\"]\nnotes = \"" + long(2049) + "\""), false},
 		{"line trunk without trunks.toml", files{policy: "[line]\ntrunk = \"voipms\"\n" + policyFixture, handsets: handsetsFixture}, false},
 		{"handset number 0", files{policy: policyFixture, handsets: handsetsFixture + "number = 0\n"}, true},

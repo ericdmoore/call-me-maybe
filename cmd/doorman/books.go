@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"callmemaybe/internal/books"
@@ -16,10 +17,15 @@ import (
 func runBooks(args []string) int {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	if len(args) == 1 && args[0] == "menu" {
+	// menu is a household handset's *2665; listen is an outside caller a
+	// public line released into [cmm-listen] (#155). Both are AGIs Asterisk
+	// runs, and neither has the daemon's credentials.
+	if len(args) == 1 && (args[0] == "menu" || args[0] == "listen") {
 		a, err := books.Connect(os.Stdin, os.Stdout)
-		if err == nil {
+		if err == nil && args[0] == "menu" {
 			err = books.Run(ctx, a)
+		} else if err == nil {
+			err = books.RunListen(ctx, a)
 		}
 		if err != nil && !errors.Is(err, books.ErrHangup) {
 			fmt.Fprintln(os.Stderr, "books: request failed; check prepared library, FFmpeg and private spool access")
@@ -28,18 +34,25 @@ func runBooks(args []string) int {
 		return 0
 	}
 	if len(args) == 0 || (args[0] != "prepare" && args[0] != "list" && args[0] != "prompts") {
-		fmt.Fprintln(os.Stderr, "usage: doorman books prepare --source catalog.json [--library directory] | books list [--library directory] | books prompts --library directory [--voice Samantha]")
+		fmt.Fprintln(os.Stderr, "usage: doorman books prepare --source catalog.json [--library directory] | books list [--library directory] | books prompts --library directory [--voice Samantha] [--shelf id,id ...]")
 		return 2
 	}
 	fs := flag.NewFlagSet("books "+args[0], flag.ContinueOnError)
 	library := fs.String("library", books.DefaultLibrary, "prepared library directory")
 	voice := fs.String("voice", "Samantha", "installed macOS say voice (prompts only)")
 	source := fs.String("source", "", "local recording catalog JSON (prepare only)")
+	// A public line's [[shelves]] titles, so its shelf pages are rendered in
+	// the same voice (#155). Repeat it once per shelf.
+	var shelves [][]string
+	fs.Func("shelf", "a shelf's title ids, comma-separated, in its order (prompts only; repeatable)", func(v string) error {
+		shelves = append(shelves, strings.Split(v, ","))
+		return nil
+	})
 	if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
 		return 2
 	}
 	if args[0] == "prompts" {
-		if err := books.PrepareMenus(ctx, *library, *voice); err != nil {
+		if err := books.PrepareMenus(ctx, *library, *voice, shelves...); err != nil {
 			fmt.Fprintln(os.Stderr, "books prompts:", err)
 			return 1
 		}

@@ -28,6 +28,18 @@ type File struct {
 	Schedules  []Schedule  `toml:"schedules"`
 	People     []Person    `toml:"people"`
 	Extensions []Extension `toml:"extensions"`
+	// Challenge is how the spoken arithmetic question is built, for the
+	// routes on this line that ask one.
+	Challenge Challenge `toml:"challenge"`
+	// Menus are the line's front menu and the menus it leads to, named from
+	// [line] menu. They live here, in the line's own file, beside the
+	// extensions they lead to.
+	Menus []Menu `toml:"menus"`
+	// Shelves are the titles of the box's audiobook library a menu choice
+	// may offer callers on this line (#155), and Listening the limits every
+	// listener on it is held to.
+	Shelves   []Shelf   `toml:"shelves"`
+	Listening Listening `toml:"listening"`
 	// Actions are the things a word, a lobby digit or a passkey can make
 	// the house do (s13). One registry; every transport names an id.
 	Actions []Action `toml:"actions"`
@@ -185,6 +197,15 @@ type Person struct {
 }
 
 type Extension struct {
+	// ID is an optional short handle — "orders" — for a menu to name this
+	// extension by. Never the PIN (rotation would break every reference) and
+	// never an index that moves when the list is edited, the same rule
+	// [[people]] id follows.
+	ID string `toml:"id"`
+	// PIN is the credential the lobby compares against. Optional only for an
+	// extension with an id that a menu reachable from [line] menu names: on a
+	// menu line nobody dials a PIN, and a PIN guarding nothing is a credential
+	// with no door.
 	PIN   string `toml:"pin"`
 	Label string `toml:"label"`
 	// Handsets is the simple form: one ring stage using the default timeout.
@@ -356,6 +377,10 @@ type CurfewWindow struct {
 
 // ResolvedExtension is an extension compiled into a runnable plan.
 type ResolvedExtension struct {
+	// ID is the extension's [[extensions]] id, or "" when it has none.
+	ID string
+	// PIN is "" for an extension only a menu reaches. Such an extension is
+	// never in the PIN map.
 	PIN        string
 	Label      string
 	Plan       RingPlan
@@ -373,14 +398,25 @@ type ResolvedExtension struct {
 
 // Policy is a validated policy file compiled into lookups.
 type Policy struct {
-	sourceDigest   string
-	actions        map[string]Action
-	actionOrder    []string
-	allow          map[string]KnownCaller
-	exts           map[string]ResolvedExtension
+	sourceDigest string
+	actions      map[string]Action
+	actionOrder  []string
+	allow        map[string]KnownCaller
+	exts         map[string]ResolvedExtension
+	// byID is every enabled extension that has an id, PIN or not — the menu
+	// walker's lookup. Separate from exts so a PIN-less extension can never
+	// be keyed under the empty string a bare # submits.
+	byID           map[string]ResolvedExtension
 	house          RingPlan
 	callerIDFormat string
 	line           LineIdentity
+	challenge      ChallengeRange
+	menus          map[string]ResolvedMenu
+	menuOrder      []string
+	shelves        map[string]ResolvedShelf
+	shelfOrder     []string
+	listening      ListenLimits
+	warnings       []string
 
 	// Retained for tooling rather than call handling: filling in a template
 	// needs to know what handsets exist and which ids are already taken.
@@ -606,8 +642,9 @@ func decodeSplit(policyData, handsetsData []byte) (pf File, unknown []UnknownKey
 		misplaced = append(misplaced, "handsets/groups belong in handsets.toml now — move them there")
 	}
 	if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 ||
-		len(hf.House.Handsets) > 0 || !hf.Line.empty() {
-		misplaced = append(misplaced, "extensions/people/schedules/house/line belong in policy.toml — move them there")
+		len(hf.House.Handsets) > 0 || !hf.Line.empty() || !hf.Challenge.empty() || len(hf.Menus) > 0 ||
+		len(hf.Shelves) > 0 || !hf.Listening.empty() {
+		misplaced = append(misplaced, "extensions/people/schedules/house/line/challenge/menus/shelves/listening belong in policy.toml — move them there")
 	}
 	pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
 	return pf, unknown, misplaced, nil
@@ -925,6 +962,7 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 	// After the house, because on_no_input = "voicemail" is only meaningful
 	// with a house mailbox to land in.
 	line := compileLine(f.Line, f.House.Voicemail, expandIDs, o.Trunks, fail)
+	challenge := compileChallenge(f.Challenge, fail)
 
 	allow := make(map[string]KnownCaller)
 	personIDs := map[string]string{}
@@ -1014,9 +1052,71 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		actionOrder = append(actionOrder, a.ID)
 	}
 
+	// Extension ids first, because menus name extensions by them and whether
+	// an extension may go without a PIN depends on a menu naming it.
+	extensionIDs := make(map[string]bool)
+	for _, e := range f.Extensions {
+		if e.ID == "" {
+			continue
+		}
+		switch {
+		case !handsetIDPattern.MatchString(e.ID):
+			fail("extension %q: id %q must be lowercase alphanumeric/dash/underscore", e.Label, e.ID)
+		case extensionIDs[e.ID]:
+			fail("extension %q: id %q is already another extension's", e.Label, e.ID)
+		default:
+			extensionIDs[e.ID] = true
+		}
+	}
+	shelves, shelfOrder := compileShelves(f.Shelves, fail)
+	listening := compileListening(f.Listening, fail)
+	// Every shelf id written, compiled or not, so a shelf refused for its
+	// titles is reported once, there, and not again at every choice naming it.
+	shelfIDs := make(map[string]bool, len(f.Shelves))
+	for _, s := range f.Shelves {
+		shelfIDs[s.ID] = s.ID != ""
+	}
+	menus := compileMenus(f.Menus, line.Menu, extensionIDs, shelfIDs, fail)
+	warnings := menus.warnings
+	if line.Menu != "" {
+		for _, id := range shelfOrder {
+			if !menus.shelves[id] {
+				warnings = append(warnings, fmt.Sprintf("shelf %q is not offered by any menu reachable from [line] menu %q, so no caller hears it", id, line.Menu))
+			}
+		}
+	} else if len(shelfOrder) > 0 {
+		warnings = append(warnings, "[[shelves]] are defined but [line] menu names no menu, so no caller hears them")
+	}
+	if !f.Listening.empty() && len(menus.shelves) == 0 {
+		warnings = append(warnings, "[listening] is set but no menu a caller can reach leads to a shelf, so it limits nothing")
+	}
+
 	exts := make(map[string]ResolvedExtension)
+	byID := make(map[string]ResolvedExtension)
 	lengths := make(map[int]bool)
 	for _, e := range f.Extensions {
+		// No PIN is allowed for one kind of extension only: one with an id
+		// that a menu callers can actually reach names. Anything else without
+		// a PIN could never ring, and saying so here beats finding out from a
+		// silent phone. A PIN-less extension is never put in the PIN map —
+		// see byID.
+		pinless := e.PIN == ""
+		if pinless {
+			name := e.Label
+			if name == "" {
+				name = e.ID
+			}
+			switch {
+			case e.ID == "":
+				fail("extension %q has no pin — an extension is dialled by its PIN, unless it has an id and a menu names it", name)
+				continue
+			case !menus.reachable[e.ID]:
+				fail("extension %q has no pin and no menu reachable from [line] menu names %q — nothing could ever ring it. "+
+					"Give it a pin, or name it from a menu", name, e.ID)
+				continue
+			}
+		}
+
 		// A placeholder PIN is diagnosed rather than described as a syntax
 		// error: "must be digits only" is true and unhelpful. When placeholders
 		// are permitted the PIN checks are skipped but everything structural —
@@ -1034,18 +1134,18 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 			key = PlaceholderPIN + "\x00" + e.Label
 		}
 
-		if !placeholder && !pinPattern.MatchString(e.PIN) {
+		if !pinless && !placeholder && !pinPattern.MatchString(e.PIN) {
 			fail("extension %q pin must be digits only", e.Label)
 			continue
 		}
-		if !placeholder && len(e.PIN) < MinPINLength {
+		if !pinless && !placeholder && len(e.PIN) < MinPINLength {
 			// Never echo the PIN itself, even a bad one — it is still a
 			// credential someone chose, and may be reused elsewhere.
 			fail("extension %q pin is %d digits; the minimum is %d — pick a longer one, or run `doorman rotate %q`",
 				e.Label, len(e.PIN), MinPINLength, e.Label)
 			continue
 		}
-		if !placeholder {
+		if !pinless && !placeholder {
 			// Choosing your own extension is fine and good — a number you
 			// remember is a number you actually give out. What cannot be
 			// allowed is the handful anyone would try first: the rate limiter
@@ -1057,14 +1157,23 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 				continue
 			}
 		}
-		if _, dup := exts[key]; dup {
+		if _, dup := exts[key]; dup && !pinless {
 			// Never the PIN itself: this message reaches the daemon's log and
 			// sync's status report as well as a terminal.
 			fail("duplicate pin: extension %q has the same pin as an earlier extension", e.Label)
 			continue
 		}
 		if e.Label == "" {
-			fail("extension with pin ending %q is missing a label", tail(e.PIN))
+			if pinless {
+				fail("extension %q is missing a label", e.ID)
+			} else {
+				fail("extension with pin ending %q is missing a label", tail(e.PIN))
+			}
+		}
+		if !pinless && line.Menu != "" {
+			// Valid, and dead weight: a menu line never runs the PIN lobby, so
+			// this credential guards nothing a caller can reach by it.
+			warnings = append(warnings, fmt.Sprintf("extension %q has a pin, but this line answers with menu %q and never asks for one", e.Label, line.Menu))
 		}
 		where := fmt.Sprintf("extension %q", e.Label)
 
@@ -1135,12 +1244,18 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		if e.Enabled != nil && !*e.Enabled {
 			continue
 		}
-		if !placeholder {
-			lengths[len(e.PIN)] = true
-		}
-		exts[key] = ResolvedExtension{
-			PIN: e.PIN, Label: e.Label, Plan: plan,
+		resolved := ResolvedExtension{
+			ID: e.ID, PIN: e.PIN, Label: e.Label, Plan: plan,
 			Afterhours: ah, AfterhoursID: ahID, AfterhoursPlan: ahPlan,
+		}
+		if !pinless {
+			if !placeholder {
+				lengths[len(e.PIN)] = true
+			}
+			exts[key] = resolved
+		}
+		if e.ID != "" && extensionIDs[e.ID] {
+			byID[e.ID] = resolved
 		}
 	}
 
@@ -1179,9 +1294,17 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 	return &Policy{
 		actions: actions, actionOrder: actionOrder, allow: allow,
 		exts:           exts,
+		byID:           byID,
 		house:          house,
 		callerIDFormat: format,
 		line:           line,
+		challenge:      challenge,
+		menus:          menus.menus,
+		menuOrder:      menus.order,
+		shelves:        shelves,
+		shelfOrder:     shelfOrder,
+		listening:      listening,
+		warnings:       warnings,
 		PinLength:      pinLength,
 		MinPinLength:   minPin, MaxPinLength: maxPin,
 		handsets:    handsets,
@@ -1303,6 +1426,10 @@ func (p *Policy) HousePlan() RingPlan { return p.house }
 // NoInputDismiss, so every caller of this gets a usable answer.
 func (p *Policy) Line() LineIdentity { return p.line }
 
+// Challenge is the compiled [challenge] section: the range the arithmetic
+// question's operands come from. Always usable; absent is the default range.
+func (p *Policy) Challenge() ChallengeRange { return p.challenge }
+
 // HouseEndpoints flattens the house plan's first stage — kept for display.
 func (p *Policy) HouseEndpoints() []string {
 	if len(p.house.Steps) == 0 {
@@ -1311,11 +1438,17 @@ func (p *Policy) HouseEndpoints() []string {
 	return p.house.Steps[0].Endpoints
 }
 
-// Extensions returns every enabled extension, sorted by label, for display.
+// Extensions returns every enabled extension, sorted by label, for display —
+// the PIN-less ones a menu reaches included, with an empty PIN.
 func (p *Policy) Extensions() []ResolvedExtension {
 	out := make([]ResolvedExtension, 0, len(p.exts))
 	for _, e := range p.exts {
 		out = append(out, e)
+	}
+	for _, e := range p.byID {
+		if e.PIN == "" {
+			out = append(out, e)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Label < out[j].Label })
 	return out
@@ -1371,7 +1504,7 @@ func (p *Policy) Callers() []KnownCaller {
 	})
 	return out
 }
-func (p *Policy) ExtensionCount() int { return len(p.exts) }
+func (p *Policy) ExtensionCount() int { return len(p.Extensions()) }
 
 // CallerIDFormat is the resolved format string — the configured one, or
 // DefaultCallerIDFormat when [house] left it out. For display.

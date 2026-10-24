@@ -86,6 +86,34 @@
         "additionalProperties": false
       }
     },
+    "challenge": {
+      "description": "How the spoken arithmetic challenge is built, for the routes on this line that ask one ([line] challenge_no_input). Optional; every key has a default.",
+      "type": "object",
+      "properties": {
+        "factors": {
+          "description": "[low, high]: the inclusive range both operands of \"what is A times B\" are drawn from. A new pair on every try. The default leaves out zero and one, because \"what is one times seven\" sounds like a trick.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9
+          },
+          "minItems": 2,
+          "default": [
+            2,
+            9
+          ],
+          "x-rules": [
+            "Exactly two integers, low ≤ high, both within 0–9 — there is one bundled clip per digit."
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "x-rules": [
+        "The challenge attaches to a route, never to an extension, and never to the PIN path: a caller who dialled a valid PIN is never asked a sum.",
+        "Operands are spoken from the bundled digit clips, zero to nine, in the house voice, whatever [line] prompts says."
+      ]
+    },
     "extensions": {
       "description": "What an unknown caller may dial in the lobby.",
       "type": "array",
@@ -136,6 +164,17 @@
               "handsets.toml [[groups]].id"
             ]
           },
+          "id": {
+            "description": "Optional short handle — \"orders\" — for a menu choice to name this extension by. Never the PIN (rotation would break every reference) and never a position that moves when the list is edited.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-cross-references": [
+              "policy.toml [[menus.choices]] extension"
+            ],
+            "x-rules": [
+              "Unique among this file's [[extensions]]."
+            ]
+          },
           "label": {
             "description": "Human name, used by `doorman rotate \u003clabel\u003e` and shown in `doorman check`.",
             "type": "string"
@@ -146,6 +185,7 @@
             "pattern": "^\\d+$",
             "x-rules": [
               "Must be unique across extensions.",
+              "Required, except on an extension with an id that a menu reachable from [line] menu names. `doorman rotate` never gives such an extension one.",
               "When every PIN shares a length, the lobby accepts on the final digit instead of waiting out the inter-digit timer. With mixed lengths, `#` ends the PIN and so does a pause (INTER_DIGIT_TIMEOUT_MS) once at least the shortest PIN's worth of digits is in; the longest PIN's length is the only count that fires on its own."
             ]
           },
@@ -198,14 +238,14 @@
           }
         },
         "required": [
-          "pin",
           "label"
         ],
         "additionalProperties": false,
         "x-rules": [
           "handsets and steps are mutually exclusive: use handsets for a single ring stage, steps for an escalating ladder.",
           "Exactly one of them must be present.",
-          "afterhours requires voicemail — an afterhours caller needs somewhere to go."
+          "afterhours requires voicemail — an afterhours caller needs somewhere to go.",
+          "pin is required unless the extension has an id that a menu reachable from [line] menu names. A PIN-less extension is never in the PIN lookup, so no keypad entry — a bare # included — can reach it."
         ]
       }
     },
@@ -248,6 +288,23 @@
       "description": "What this number is, and how it treats a caller who dials nothing. Every key is optional and a file with no [line] section behaves exactly as it did before lines existed, so this is what you add to make one number a curt doorman and another a courteous concierge on the same binary.",
       "type": "object",
       "properties": {
+        "challenge_no_input": {
+          "description": "Ask the arithmetic challenge (\"what is three times six\") before on_no_input applies: a caller who dialled nothing must answer a sum before the mailbox records or the house rings. A filter for dialers that press nothing or press keys at random, and for very young children — not age verification, and no defence against an automated caller that understands speech. It closes the line to anybody who cannot press keys (a rotary phone, a car, a smart speaker) unless the ladder already admits them, which is why it is off unless written.",
+          "type": "boolean",
+          "default": false,
+          "x-cross-references": [
+            "policy.toml [challenge]",
+            "MAX_PIN_ATTEMPTS and RATELIMIT_* in the environment",
+            "the bundled challenge clips, /var/lib/asterisk/sounds/call-me-maybe/challenge/"
+          ],
+          "x-rules": [
+            "Refused beside on_no_input = \"dismiss\" (or no on_no_input): a caller who is dismissed anyway has nothing to be guarded from.",
+            "Answered: on_no_input applies exactly as it would have. Silent at the question: dismissed, and neither rate limiter is charged. Wrong: a new question, MAX_PIN_ATTEMPTS retries, then dismissed.",
+            "Wrong answers count against the line's own challenge budget — a second rate limiter with the RATELIMIT_* knobs — never against the PIN budget, and a right answer forgives nothing in either.",
+            "Callers the ladder admits ([[people]], a lobby pass, a personal contact) never meet it, and neither does a caller who dialled a valid PIN.",
+            "The clips are the bundled challenge set, whatever prompts says: a pack supplies the six lobby prompts and nothing else."
+          ]
+        },
         "failover": {
           "description": "The trunks a call placed as this line falls over to, in order, when its own trunk cannot carry it — ids from trunks.toml. Off unless written. A fallback presents that trunk's own number (the number of the first line that lives there), never this line's, because a provider will not carry a number its account does not own; `doorman check` prints which number each step presents. Only CHANUNAVAIL and CONGESTION climb the ladder — a lost registration, a provider outage, an exhausted balance and a dead network all look like those — while busy, no answer and a caller hanging up are answers from the far end and are never retried down another provider. When nothing can carry the call the caller hears \"all circuits are busy now\". A call that fell over ends in the fallback trunk's own generated context, so the CEL journal records which trunk carried it.",
           "type": "array",
@@ -269,6 +326,19 @@
         "label": {
           "description": "Human name for this number — \"Mertaugh Enterprises\". Shown by `doorman check`, and displayed on the ringing handset when a caller reaches the house without dialling an extension, so whoever picks up knows which line to answer as.",
           "type": "string"
+        },
+        "menu": {
+          "description": "The [[menus]] id this line answers with. Absent is the PIN lobby, exactly as before menus existed. A line with a menu never runs the PIN lobby: a stranger hears the menu and presses one key, and the extensions it names may go without a PIN.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "x-cross-references": [
+            "policy.toml [[menus]].id"
+          ],
+          "x-rules": [
+            "Must name a [[menus]] id in this file.",
+            "Callers the ladder admits ([[people]], a lobby pass, a personal contact) skip the menu and ring [house]; a key they press over the welcome prompt is a choice at this menu, with the challenge already satisfied.",
+            "A caller who chooses nothing — after the menu's repeats, or at the per-call ceilings of 6 plays or 3 minutes — gets on_no_input, behind the challenge when challenge_no_input says so."
+          ]
         },
         "number": {
           "description": "The DID this line answers. Any format; normalised to E.164 at load. Probe a value with `doorman e164 \u003cnumber\u003e`.",
@@ -357,6 +427,180 @@
         "Nothing routes on number. The dialplan already named the line — this is identity, for `doorman check` and for the handset display.",
         "outbound_cid and outbound_handsets are the outbound half. A handset no line claims presents policy.toml's outbound_cid — the primary line, which is also 911's route, so there is one answer to \"which line am I on when I have not said\"."
       ]
+    },
+    "listening": {
+      "description": "The limits for outside callers who reach a shelf or a story of the day on this line. Optional; every key has a default, and they apply whenever a menu leads to a shelf.",
+      "type": "object",
+      "properties": {
+        "max_listeners": {
+          "description": "How many callers may listen on this line at once. Every listener holds a provider channel the house could otherwise ring on.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "max_minutes": {
+          "description": "The longest a call that reaches a shelf may last, counted from when the call arrived — menu time included.",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 240,
+          "default": 20
+        }
+      },
+      "additionalProperties": false,
+      "x-rules": [
+        "One minute before the limit the caller hears \"This call will end in one minute\" (a bundled system phrase); at the limit, a short goodbye and the call ends. Asterisk enforces the limit as well, so a listener can never outstay it.",
+        "Listeners are counted by Asterisk (GROUP_COUNT) per line, and do not count against MAX_CONCURRENT_CALLS once released — exactly as a caller leaving a message does not.",
+        "The lobby's rate limiter and the challenge still stand in front: a choice with challenge = true asks it before the caller is released."
+      ]
+    },
+    "menus": {
+      "description": "A public line's front menu and the menus it leads to: \"press 1 for orders, 2 for our hours\". Named from [line] menu; a line that names none answers with the PIN lobby as before.",
+      "type": "array",
+      "items": {
+        "description": "One menu: the keys a caller may press and where each leads. The wording is operator content, a pre-rendered clip at \u003cline prefix\u003e/menus/\u003cid\u003e under Asterisk's sounds directory — never synthesised at call time.",
+        "type": "object",
+        "properties": {
+          "choices": {
+            "type": "array",
+            "items": {
+              "description": "One key and where it leads: exactly one of extension, menu, recording, voicemail, shelf or story_of_the_day.",
+              "type": "object",
+              "properties": {
+                "challenge": {
+                  "description": "Ask the arithmetic challenge before following this choice — before the extension rings, and before its mailbox records out of hours. Asked at most once a call.",
+                  "type": "boolean",
+                  "default": false,
+                  "x-rules": [
+                    "Same budget and rules as [line] challenge_no_input: MAX_PIN_ATTEMPTS retries, its own rate limiter, a right answer forgives no PIN failure. Admitted callers never meet it."
+                  ]
+                },
+                "digit": {
+                  "description": "The key, 0 to 9.",
+                  "type": "string",
+                  "pattern": "^[0-9]$",
+                  "x-rules": [
+                    "Unique within its menu.",
+                    "* and # are reserved: * repeats the menu."
+                  ]
+                },
+                "extension": {
+                  "description": "An [[extensions]] id in this file: its afterhours, then its ring plan, then its mailbox, exactly as a valid PIN reaches it.",
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "x-cross-references": [
+                    "policy.toml [[extensions]].id"
+                  ],
+                  "x-rules": [
+                    "A disabled extension keeps the reference valid; its key plays the menu again."
+                  ]
+                },
+                "menu": {
+                  "description": "Another [[menus]] id.",
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "x-cross-references": [
+                    "policy.toml [[menus]].id"
+                  ]
+                },
+                "recording": {
+                  "description": "A clip at \u003cline prefix\u003e/recordings/\u003cid\u003e — \"our hours are…\". Operator content, pre-rendered. A key pressed over it is a choice at the menu that offered it.",
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "x-cross-references": [
+                    "/var/lib/asterisk/sounds/\u003cprefix\u003e/recordings/\u003cid\u003e"
+                  ]
+                },
+                "shelf": {
+                  "description": "A [[shelves]] id in this file: the caller is released to the books menu, restricted to that shelf's titles, under the line's [listening] limits. No bookmarks: an outside caller starts each title from the beginning.",
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "x-cross-references": [
+                    "policy.toml [[shelves]].id",
+                    "extensions_books.conf [cmm-listen] (doorman render)"
+                  ],
+                  "x-rules": [
+                    "Over [listening] max_listeners, the caller hears that the listening lines are busy and is offered this menu again.",
+                    "Zero at the shelf, or three unanswered tries, says goodbye and ends the call: once released, the caller does not return to this menu."
+                  ]
+                },
+                "story_of_the_day": {
+                  "description": "A [[shelves]] id in this file: the caller hears one title from it, from the beginning, and the call ends — no browsing. A one-title shelf is a fixed story; with several, the titles take turns a day each, in the order written, turning over at the box's midnight.",
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "x-cross-references": [
+                    "policy.toml [[shelves]].id"
+                  ],
+                  "x-rules": [
+                    "Same [listening] limits, listener cap and handoff as shelf."
+                  ]
+                },
+                "then": {
+                  "description": "What follows a recording: the menu that offered it again, or the parting prompt and a hangup.",
+                  "type": "string",
+                  "enum": [
+                    "menu",
+                    "goodbye"
+                  ],
+                  "default": "menu",
+                  "x-rules": [
+                    "Only with recording."
+                  ]
+                },
+                "voicemail": {
+                  "description": "A mailbox: the caller is released to take a message.",
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "x-cross-references": [
+                    "asterisk/voicemail.conf [household] context"
+                  ]
+                }
+              },
+              "required": [
+                "digit"
+              ],
+              "additionalProperties": false,
+              "x-rules": [
+                "Exactly one target. `doorman check` refuses none, or more than one.",
+                "An extension, voicemail, shelf or story leaf hands the caller off; a menu leaf moves them; a recording returns them to the menu that offered it unless then = \"goodbye\".",
+                "The call record stores the target chosen (\"extension:orders\"), never the key pressed."
+              ]
+            },
+            "minItems": 1
+          },
+          "id": {
+            "description": "Named by [line] menu and by other menus' choices; also the clip menus/\u003cid\u003e.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-rules": [
+              "Unique among [[menus]]."
+            ]
+          },
+          "repeat": {
+            "description": "How many more times a caller who presses nothing hears the menu before on_no_input applies.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5,
+            "default": 1
+          },
+          "say": {
+            "description": "The words the clip menus/\u003cid\u003e speaks, kept beside the reference so they can be reviewed, printed by `doorman check`, and recorded or rendered from. doorman never synthesises them.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "choices"
+        ],
+        "additionalProperties": false,
+        "x-rules": [
+          "At most two levels: the front menu and the menus it names. A menu may lead back to one already above it (\"0 for the main menu\"), but never to itself — * already repeats a menu.",
+          "Played with barge-in: a key stops the clip and is the choice.",
+          "* repeats the menu; # is reserved and ignored; a key with no choice plays the menu again. None of them is a guess at anything, so no rate limiter hears of them.",
+          "An unreachable menu is valid and `doorman check` warns about it.",
+          "`doorman check`, on the box, warns when a reachable menu's clip or a recording is missing under the line's prefix: a caller who hears silence presses nothing."
+        ]
+      }
     },
     "people": {
       "description": "The allow-list. These callers hear the welcome prompt and ring the house.",
@@ -457,6 +701,49 @@
         "additionalProperties": false,
         "x-rules": [
           "Validated whether or not it is enabled: a disabled schedule with an impossible time fails `doorman check`, is refused by the daemon's reload and by sync, exactly as an enabled one is."
+        ]
+      }
+    },
+    "shelves": {
+      "description": "Dial-a-Story: the titles of the box's audiobook library a menu choice may offer callers on this line, to browse (shelf) or as the story of the day (story_of_the_day). Never the whole library — a title reaches an outside caller only by being written here.",
+      "type": "array",
+      "items": {
+        "description": "One shelf: an explicit list of title ids from the box's prepared audiobook catalog (`doorman books list`).",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Named by a menu choice's shelf or story_of_the_day.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-rules": [
+              "Unique among [[shelves]]."
+            ]
+          },
+          "titles": {
+            "description": "Catalog book ids, in the order the shelf announces them (and a story of the day takes turns through them).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+            },
+            "minItems": 1,
+            "x-cross-references": [
+              "/var/spool/asterisk/cmm-books/library/catalog.json books[].id"
+            ],
+            "x-rules": [
+              "At least one, at most 128, no id twice. Never the whole library by default: privately imported audio is exposed only by being listed."
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "titles"
+        ],
+        "additionalProperties": false,
+        "x-rules": [
+          "A title not on a shelf a menu offers cannot be reached from this line: the books menu a caller is released to is built from the shelf's titles alone.",
+          "`doorman check` refuses a title the installed catalog does not have, when it can read the catalog, and warns that it could not check when it cannot. At call time a title missing from the catalog is simply not offered.",
+          "A shelf no reachable menu offers is valid and `doorman check` warns about it."
         ]
       }
     }

@@ -34,7 +34,11 @@ mkdir -p "${OUT}"
 # Read dir/name/text triples out of manifest.json without needing jq. The
 # six lobby prompts land in build/; the house's own phrases ("system") land
 # in build/system/, beside them and outside the pack contract, so a pack that
-# replaces the lobby's voice never silences an announcement.
+# replaces the lobby's voice never silences an announcement. The arithmetic
+# challenge's parts ("challenge") land in build/challenge/ for the same
+# reason: a public line's challenge must work with whatever pack it plays,
+# and in the same open voice as the rest of the bundled pack, so any
+# workstation that can build the lobby can build the challenge.
 python3 - "$MANIFEST" <<'PY' > /tmp/cmm-prompts.tsv
 import json, sys
 m = json.load(open(sys.argv[1]))
@@ -42,6 +46,8 @@ for name, text in m["prompts"].items():
     print(f".\t{name}\t{text}")
 for name, text in m.get("system", {}).items():
     print(f"system\t{name}\t{text}")
+for name, text in m.get("challenge", {}).items():
+    print(f"challenge\t{name}\t{text}")
 PY
 
 while IFS=$'\t' read -r dir name text; do

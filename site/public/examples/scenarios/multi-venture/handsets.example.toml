@@ -12,7 +12,9 @@
 #   cp examples/scenarios/multi-venture/policy.example.bakery.toml    policy.bakery.toml
 #   ./bin/doorman init                                # the home line's PINs
 #   ./bin/doorman rotate -policy policy.surveying.toml
-#   ./bin/doorman rotate -policy policy.bakery.toml
+#
+# The bakery has no PINs to rotate: it answers with a front menu, and an
+# extension only a menu reaches has none.
 #
 # One phone plant, three numbers. A phone is a fact about the house and is
 # written once, here; which number it presents when somebody dials out is

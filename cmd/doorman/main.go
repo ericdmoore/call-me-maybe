@@ -491,6 +491,11 @@ func runCheck(args []string) (code int) {
 	// The same rules the daemon's reload and sync apply (configcheck), so a
 	// file this passes is one both of them accept. AllowPlaceholders is the
 	// one difference, and only CI sets it.
+	// The pack prefix a line without [line] prompts speaks from, which is
+	// where its menu clips are looked for on the box.
+	if v, ok := secretLookup(*envFlag)("PROMPT_MEDIA_PREFIX"); ok {
+		checkMediaPrefix = v
+	}
 	opts := configcheck.Options(trunks)
 	opts.AllowPlaceholders = *allowPlaceholders
 
@@ -551,6 +556,9 @@ func runCheck(args []string) (code int) {
 		rc = 1
 	}
 	printMailboxes(results, secretLookup(*envFlag))
+	if !printShelves(results) {
+		rc = 1
+	}
 	printPageOverrides(results)
 	// Both silent without a trunks.toml: a box with one provider has nothing
 	// to choose between and should never have to read the word "trunk".
@@ -946,8 +954,10 @@ func printSharedPINs(results []checkedLine) {
 			continue
 		}
 		for _, e := range r.pol.Extensions() {
-			if e.PIN == policy.PlaceholderPIN {
-				continue // every example shares this one; that is the sentinel, not a clash
+			if e.PIN == policy.PlaceholderPIN || e.PIN == "" {
+				// The sentinel every example shares, and the no-PIN of an
+				// extension only a menu reaches: neither is a PIN to clash.
+				continue
 			}
 			if prev, ok := seen[e.PIN]; ok {
 				clashes = append(clashes, fmt.Sprintf("  %s %q and %s %q share a PIN",
@@ -971,8 +981,13 @@ func printSharedPINs(results []checkedLine) {
 // describeLine prints what one policy file resolves to.
 func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 	pinLen := "mixed (inter-digit timeout decides)"
-	if p.PinLength > 0 {
+	switch {
+	case p.Line().Menu != "":
+		pinLen = "(not asked — this line answers with a menu)"
+	case p.PinLength > 0:
 		pinLen = fmt.Sprintf("%d", p.PinLength)
+	case len(p.PINs()) == 0:
+		pinLen = "(none — no extension has a PIN)"
 	}
 	fmt.Printf("✓ %s is valid\n\n", path)
 	if allowPlaceholders {
@@ -986,6 +1001,10 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 	fmt.Printf("  outbound caller id   : %s\n", orDefault(line.OutboundCID, noOutboundCID))
 	fmt.Printf("  prompt pack          : %s\n", orDefault(line.Prompts, noLinePrompts))
 	fmt.Printf("  no-input disposition : %s\n", describeNoInput(line, p.HousePlan().Mailbox))
+	if line.ChallengeNoInput || menusAsk(p) {
+		fmt.Printf("  challenge            : %s\n", describeChallenge(p))
+		warnChallengeClips()
+	}
 	fmt.Printf("  allow-listed numbers : %d\n", p.AllowListCount())
 	fmt.Printf("  extensions           : %d\n", p.ExtensionCount())
 	fmt.Printf("  pin length           : %s\n", pinLen)
@@ -995,6 +1014,8 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 	fmt.Printf("  provisioning         : %s\n", provisioningSummary(p.HandsetList()))
 	fmt.Printf("  actions              : %s\n", actionsSummary(p.Actions()))
 	fmt.Printf("  house voicemail      : %s\n", orDefault(p.HousePlan().Mailbox, noMailbox))
+	describeMenus(p)
+	describeShelves(p)
 	describeCurfews(p, time.Now())
 
 	// Every extension, every setting — including the ones nobody wrote down.
@@ -1007,6 +1028,9 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 		now := time.Now()
 		for _, e := range exts {
 			fmt.Printf("\n  %s\n", e.Label)
+			if e.ID != "" {
+				fmt.Printf("      id           %s\n", e.ID)
+			}
 			fmt.Printf("      pin          %s\n", maskedPIN(e.PIN))
 			fmt.Printf("      rings        %s\n", describePlan(e.Plan))
 			fmt.Printf("      voicemail    %s\n", orDefault(e.Plan.Mailbox, noMailbox))
@@ -1036,6 +1060,21 @@ const (
 // decides who reaches the house, and nobody should discover that from a phone
 // call.
 func describeNoInput(line policy.LineIdentity, houseMailbox string) string {
+	// challenge_no_input is said in the same breath as the disposition it
+	// guards, and so is what it costs: the people it shuts out are exactly the
+	// ones nobody notices are missing.
+	if line.ChallengeNoInput {
+		where := fmt.Sprintf("they land in the %q mailbox", houseMailbox)
+		if line.OnNoInput == policy.NoInputRingHouse {
+			where = "the house rings"
+		}
+		return fmt.Sprintf("%s, behind the challenge — a caller who dialled nothing is asked\n"+
+			"                         a sum first; answered, %s.\n"+
+			"                         A caller who cannot press keys (a rotary phone, a car, a smart\n"+
+			"                         speaker) cannot get past it on this line unless they are on\n"+
+			"                         the allow-list, hold a pass, or are a personal contact.",
+			line.OnNoInput, where)
+	}
 	switch line.OnNoInput {
 	case policy.NoInputVoicemail:
 		return fmt.Sprintf("%s — they land in the %q mailbox", line.OnNoInput, houseMailbox)
@@ -1066,6 +1105,9 @@ func withDefault(value string, isDefault bool) string {
 // maskedPIN shows that a PIN exists and how long it is, never what it is —
 // invariant 1. `doorman rotate` remains the only thing that prints one.
 func maskedPIN(pin string) string {
+	if pin == "" {
+		return "(none — reached only through a menu)"
+	}
 	if pin == policy.PlaceholderPIN {
 		return "(placeholder — run `doorman init` to generate a real one)"
 	}
@@ -1761,15 +1803,21 @@ func serve() error {
 	var limiters []*lobby.RateLimiter
 	for _, o := range opened {
 		limiter := lobby.NewRateLimiter(cfg.RateLimitEnabled, cfg.RateLimitMaxFailures, cfg.RateLimitWindow)
-		limiters = append(limiters, limiter)
+		// The challenge's budget is a second instance with the same knobs, so
+		// wrong sums and wrong PINs never spend each other's: a child who
+		// fails three sums cannot lock their number out of the PIN lobby,
+		// and a redialler cannot close "two for our hours".
+		challengeLimiter := lobby.NewRateLimiter(cfg.RateLimitEnabled, cfg.RateLimitMaxFailures, cfg.RateLimitWindow)
+		limiters = append(limiters, limiter, challengeLimiter)
 
 		deps := lobby.Deps{
-			ARI:     ariAdapter{client},
-			Policy:  o.store.Current,
-			Limiter: limiter,
-			Prompts: prompts,
-			Log:     o.log,
-			Line:    recordedLine(o.name),
+			ARI:              ariAdapter{client},
+			Policy:           o.store.Current,
+			Limiter:          limiter,
+			ChallengeLimiter: challengeLimiter,
+			Prompts:          prompts,
+			Log:              o.log,
+			Line:             recordedLine(o.name),
 			// Nil without a contacts.toml, which is what makes the ladder
 			// collapse to [[people]] and the lobby. openContacts returns an
 			// untyped nil for exactly this assignment.
@@ -1785,7 +1833,13 @@ func serve() error {
 				RedactCallerID:     cfg.RedactCallerID,
 				MaxConcurrentCalls: cfg.MaxConcurrentCalls,
 			},
-			Quiet:        quietThroughARI(client, o.log),
+			Quiet: quietThroughARI(client, o.log),
+			// One listening group per line, so [listening] max_listeners is
+			// the line's; counted by Asterisk, which is where listeners are.
+			Listening: lobby.Listening{
+				Group: "line-" + o.name,
+				Count: listenersThroughARI(client),
+			},
 			OnLegCreated: reg.addLeg,
 			OnFinished:   reg.remove,
 		}
@@ -2362,6 +2416,13 @@ func printMailboxes(results []checkedLine, env func(string) (string, bool)) {
 		for _, e := range r.pol.Extensions() {
 			note(e.Plan.Mailbox, r.Name, "extension "+e.Label)
 		}
+		for _, m := range r.pol.Menus() {
+			for _, c := range m.Choices {
+				if c.Kind == policy.ChoiceVoicemail {
+					note(c.Target, r.Name, "menu "+m.ID+" choice "+c.Digit)
+				}
+			}
+		}
 	}
 	for _, m := range boxes {
 		if _, seen := uses[m.ID]; !seen {
@@ -2487,6 +2548,22 @@ func quietThroughARI(client *ari.Client, log *slog.Logger) func(string) bool {
 			return false
 		}
 		return time.Now().Unix() < until
+	}
+}
+
+// listenersThroughARI counts a line's Dial-a-Story listeners (#155):
+// GROUP_COUNT, evaluated on the caller's own channel because ARI's global
+// variable endpoint answers "" for a function with arguments. Read-only, and
+// Asterisk's own count — [cmm-listen] joins the group, doorman never does.
+func listenersThroughARI(client *ari.Client) func(ctx context.Context, channelID, group string) (int, error) {
+	return func(ctx context.Context, channelID, group string) (int, error) {
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		v, err := client.ChannelVar(ctx, channelID, "GROUP_COUNT("+group+"@"+lobby.ListenGroupCategory+")")
+		if err != nil {
+			return 0, err
+		}
+		return strconv.Atoi(strings.TrimSpace(v))
 	}
 }
 

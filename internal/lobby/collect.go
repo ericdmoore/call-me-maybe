@@ -40,6 +40,10 @@ const (
 	// endGone: the call ended underneath us. Cancellation is the state here as
 	// everywhere else — there is no flag, only ctx.Done.
 	endGone endReason = "call-ended"
+	// endRepeat: the caller pressed * where it means "say that again" rather
+	// than "clear" (collectSpec.StarRepeats). Whatever was entered is
+	// discarded: a caller asking to hear the question has not answered it.
+	endRepeat endReason = "repeat"
 )
 
 // collectSpec is one variable-length collection.
@@ -55,6 +59,10 @@ type collectSpec struct {
 	Max int
 	// Seed is a digit already captured by barge-in over the prompt.
 	Seed string
+	// StarRepeats makes * end the entry with endRepeat instead of clearing
+	// it — the arithmetic challenge, where a caller who misheard the question
+	// needs it again and has nothing worth clearing.
+	StarRepeats bool
 }
 
 // collectDigits gathers digits until the caller finishes, the entry fills, or
@@ -87,6 +95,8 @@ func collectDigits(ctx context.Context, events <-chan event, spec collectSpec) (
 		switch {
 		case d == "#":
 			return endHash
+		case d == "*" && spec.StarRepeats:
+			return endRepeat
 		case d == "*":
 			digits = ""
 			// Back to the generous window: someone who cleared an entry is
@@ -106,6 +116,9 @@ func collectDigits(ctx context.Context, events <-chan event, spec collectSpec) (
 
 	if spec.Seed != "" {
 		if reason := handle(spec.Seed); reason != "" {
+			if reason == endRepeat {
+				return "", reason
+			}
 			return digits, reason
 		}
 	}
@@ -117,6 +130,9 @@ func collectDigits(ctx context.Context, events <-chan event, spec collectSpec) (
 				continue
 			}
 			if reason := handle(ev.value); reason != "" {
+				if reason == endRepeat {
+					return "", reason
+				}
 				return digits, reason
 			}
 		case <-timer.C:

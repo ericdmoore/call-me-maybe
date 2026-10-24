@@ -57,7 +57,13 @@ type Config struct {
 	// step was written as "rings = N". Production: 6s. Tests: milliseconds.
 	RingCycle      time.Duration
 	MaxPinAttempts int
-	RedactCallerID bool
+	// MenuMaxPlays and MenuMaxDuration override the per-call menu ceilings
+	// (MenuMaxPlays and MenuMaxDuration, the constants) when non-zero. Not
+	// environment variables: they exist so a test can reach a ceiling in
+	// milliseconds, and nobody has needed to tune them.
+	MenuMaxPlays    int
+	MenuMaxDuration time.Duration
+	RedactCallerID  bool
 	// MaxConcurrentCalls is read by the event router, not the state machine,
 	// but lives here so there is one Config the daemon threads through.
 	MaxConcurrentCalls int
@@ -146,6 +152,18 @@ type Deps struct {
 	ARI     ARI
 	Policy  func() *policy.Policy
 	Limiter *RateLimiter
+	// ChallengeLimiter counts wrong answers to the arithmetic challenge
+	// across calls, per line, exactly as Limiter counts wrong PINs — and is a
+	// separate instance on purpose. A child's wrong sums must never lock a
+	// number out of the PIN lobby, and PIN guesses must never close a
+	// harmless recording. Nil is no cross-call budget: the per-call attempt
+	// limit still applies.
+	ChallengeLimiter *RateLimiter
+	// Rand draws the challenge's operands: a uniform int in [0, n). Nil is
+	// math/rand/v2. Not crypto/rand, because a sum is not a credential — the
+	// answer is spoken aloud to whoever calls — and injected so a test can
+	// fix the question.
+	Rand    func(n int) int
 	Prompts *Prompts
 	Log     *slog.Logger
 	Cfg     Config
@@ -181,6 +199,10 @@ type Deps struct {
 	// Notify receives call events for the house to react to. Nil disables
 	// the webhook, same as Calls — absent config means the feature is off.
 	Notify Notifier
+	// Listening counts this line's Dial-a-Story listeners (#155), asked
+	// before a caller is released to a shelf. The zero value counts nothing
+	// early; the dialplan's cap still holds.
+	Listening Listening
 
 	// Quiet says whether a handset has set do-not-disturb (s12): asked
 	// before each leg is originated, by handset id, and answered by Asterisk
@@ -255,6 +277,9 @@ type Session struct {
 	// output, not state. Cancellation remains the only state there is.
 	rec       calls.Record
 	startedAt time.Time
+	// held is when the channel arrived by the real clock — startedAt may be
+	// a test's fixed one — for limits on how long a channel may be held.
+	held time.Time
 }
 
 func NewSession(channelID, callerNumber string, deps Deps) *Session {
@@ -309,6 +334,7 @@ func NewSession(channelID, callerNumber string, deps Deps) *Session {
 		// Abandoned is the zero outcome, so a caller who hangs up mid-lobby
 		// is recorded truthfully with nobody having to remember to set it.
 		startedAt: started,
+		held:      time.Now(),
 		// Direction is left at its zero value on purpose: a Session is inbound
 		// by construction, and an absent direction is what every record written
 		// before outbound calling existed says.
@@ -504,6 +530,21 @@ func (s *Session) Run() {
 	// so knowing their name buys them nothing at it. They dial an extension
 	// like anybody else, with none of the exemptions an admitted caller has —
 	// the name is logged and goes no further.
+	//
+	// On a line that answers with a menu, that door is the menu and the PIN
+	// lobby never runs. Nothing above changes: the ladder is the same ladder,
+	// and the menu replaces only its last rung.
+	if s.pol.Line().Menu != "" {
+		if inBook {
+			s.observe(events.AdmissionDecided, "published-contact-menu")
+			s.log.Info("published contact, offering the menu", "name", contact.Name)
+		} else {
+			s.observe(events.AdmissionDecided, "menu")
+			s.log.Info("unknown caller, offering the menu")
+		}
+		s.walkMenu("", "", false)
+		return
+	}
 	if inBook {
 		s.observe(events.AdmissionDecided, "published-contact-lobby")
 		s.log.Info("published contact, opening lobby", "name", contact.Name)
@@ -570,6 +611,13 @@ func (s *Session) welcome(name string) {
 		return
 	}
 	if seed != "" {
+		// On a menu line that key is a menu choice, not the first digit of
+		// a PIN — the line has no PIN lobby — taken with the challenge
+		// already satisfied, because this caller was admitted at the door.
+		if s.pol.Line().Menu != "" {
+			s.walkMenu(seed, name, true)
+			return
+		}
 		s.collect(seed, name)
 		return
 	}
@@ -581,15 +629,37 @@ func (s *Session) welcome(name string) {
 // digits during playback are ignored. Returns "" when the prompt completed
 // (or failed, or the session ended) without a barge.
 func (s *Session) play(name Prompt, bargeIn bool) string {
+	return s.playMedia(s.prompts.URI(name), bargeIn)
+}
+
+// say plays a sequence of media URIs in order — the composite prompt, the
+// console's helper lifted for the lobby's own use. With bargeIn the first
+// digit stops the sequence and is returned; otherwise digits are dropped.
+// One playback per URI, so a clip Asterisk cannot find costs that clip only.
+func (s *Session) say(bargeIn bool, media ...string) string {
+	for _, m := range media {
+		if key := s.playMedia(m, bargeIn); key != "" {
+			return key
+		}
+		if s.ctx.Err() != nil {
+			return ""
+		}
+	}
+	return ""
+}
+
+// playMedia is play for a media URI that is not one of the six pack prompts:
+// the challenge clips, a line's menu, a recording.
+func (s *Session) playMedia(media string, bargeIn bool) string {
 	if s.ctx.Err() != nil {
 		return ""
 	}
 	s.pbSeq++
 	pbID := fmt.Sprintf("pb-%s-%d", s.ID, s.pbSeq)
 
-	if err := s.deps.ARI.Play(s.ctx, s.ChannelID, s.prompts.URI(name), pbID); err != nil {
+	if err := s.deps.ARI.Play(s.ctx, s.ChannelID, media, pbID); err != nil {
 		// A missing prompt file should degrade to silence, not a stuck call.
-		s.log.Warn("playback failed", "prompt", string(name), "err", err)
+		s.log.Warn("playback failed", "media", media, "err", err)
 		return ""
 	}
 
@@ -724,8 +794,22 @@ const lobbyLabel = "Lobby"
 // ring they would have had before any of this existed.
 //
 // Everyone else gets the line's disposition, which defaults to the dismissal
-// this has always been.
+// this has always been — behind the arithmetic challenge when the line says
+// so ([line] challenge_no_input).
 func (s *Session) noInput(known string) {
+	s.disposition(known, "no-digits", false)
+}
+
+// disposition is the line's on_no_input, reached by a caller who chose
+// nothing. reason is what the record says about why — "no-digits" for an
+// empty dial window — and passed says the challenge has already been
+// answered on this call, so it is not asked twice.
+//
+// The challenge runs before the switch and not inside any branch of it, so
+// every place a silent caller can end up — the house mailbox, the ringing
+// house — sits behind it with no change of its own. A dismiss line has
+// nothing to guard: compileLine refuses challenge_no_input there.
+func (s *Session) disposition(known, reason string, passed bool) {
 	if known != "" {
 		s.runPlan(s.pol.HousePlan(), known)
 		return
@@ -735,7 +819,13 @@ func (s *Session) noInput(known string) {
 	house := s.pol.HousePlan()
 	// The record still says why they got where they got: outcome alone cannot
 	// tell a caller who dialled an extension from one who simply waited.
-	s.rec.Reason = "no-digits"
+	s.rec.Reason = reason
+
+	if line.ChallengeNoInput && line.OnNoInput != policy.NoInputDismiss && !passed {
+		if !s.challenge() {
+			return
+		}
+	}
 
 	switch line.OnNoInput {
 	case policy.NoInputRingHouse:
@@ -751,7 +841,7 @@ func (s *Session) noInput(known string) {
 		s.log.Info("nobody dialled, taking a message", "onNoInput", line.OnNoInput)
 		s.sendToVoicemail(house.Mailbox)
 	default:
-		s.dismiss("no-digits")
+		s.dismiss(reason)
 	}
 }
 
@@ -768,24 +858,7 @@ func (s *Session) evaluate(digits *string, attempts *int, reset func(time.Durati
 		// The label and the verdict, never `entered`.
 		s.rec.Extension, s.rec.PIN = ext.Label, "valid"
 		s.observe(events.AdmissionDecided, "valid-extension")
-		if ext.Afterhours.Active(s.now()) {
-			// Quiet hours. Either the call is redirected somewhere that is
-			// awake — homework hours sending the kids' line to the adults, a
-			// rotating night shift — or, with no redirect configured, it goes
-			// straight to voicemail, which is the historical behaviour.
-			if len(ext.AfterhoursPlan.Steps) > 0 {
-				s.log.Info("extension in afterhours, redirecting",
-					"extension", ext.Label)
-				s.runPlan(ext.AfterhoursPlan, ext.Label)
-				return true
-			}
-			s.log.Info("extension in afterhours, sending to voicemail",
-				"extension", ext.Label)
-			s.sendToVoicemail(ext.Plan.Mailbox)
-			return true
-		}
-		s.log.Info("extension accepted", "extension", ext.Label)
-		s.runPlan(ext.Plan, ext.Label)
+		s.reach(ext)
 		return true
 	}
 
@@ -818,6 +891,30 @@ func (s *Session) evaluate(digits *string, attempts *int, reset func(time.Durati
 	}
 	reset(s.deps.Cfg.FirstDigitTimeout)
 	return false
+}
+
+// reach is what happens once a caller has got to an extension, by its PIN or
+// by a menu choice: its afterhours, then its ring plan. The two routes differ
+// only in how they got here.
+func (s *Session) reach(ext policy.ResolvedExtension) {
+	if ext.Afterhours.Active(s.now()) {
+		// Quiet hours. Either the call is redirected somewhere that is
+		// awake — homework hours sending the kids' line to the adults, a
+		// rotating night shift — or, with no redirect configured, it goes
+		// straight to voicemail, which is the historical behaviour.
+		if len(ext.AfterhoursPlan.Steps) > 0 {
+			s.log.Info("extension in afterhours, redirecting",
+				"extension", ext.Label)
+			s.runPlan(ext.AfterhoursPlan, ext.Label)
+			return
+		}
+		s.log.Info("extension in afterhours, sending to voicemail",
+			"extension", ext.Label)
+		s.sendToVoicemail(ext.Plan.Mailbox)
+		return
+	}
+	s.log.Info("extension accepted", "extension", ext.Label)
+	s.runPlan(ext.Plan, ext.Label)
 }
 
 // runPlan executes a ring plan: each step rings its endpoints for its
