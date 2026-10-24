@@ -35,6 +35,11 @@ type File struct {
 	// [line] menu. They live here, in the line's own file, beside the
 	// extensions they lead to.
 	Menus []Menu `toml:"menus"`
+	// Shelves are the titles of the box's audiobook library a menu choice
+	// may offer callers on this line (#155), and Listening the limits every
+	// listener on it is held to.
+	Shelves   []Shelf   `toml:"shelves"`
+	Listening Listening `toml:"listening"`
 	// Actions are the things a word, a lobby digit or a passkey can make
 	// the house do (s13). One registry; every transport names an id.
 	Actions []Action `toml:"actions"`
@@ -408,6 +413,9 @@ type Policy struct {
 	challenge      ChallengeRange
 	menus          map[string]ResolvedMenu
 	menuOrder      []string
+	shelves        map[string]ResolvedShelf
+	shelfOrder     []string
+	listening      ListenLimits
 	warnings       []string
 
 	// Retained for tooling rather than call handling: filling in a template
@@ -634,8 +642,9 @@ func decodeSplit(policyData, handsetsData []byte) (pf File, unknown []UnknownKey
 		misplaced = append(misplaced, "handsets/groups belong in handsets.toml now — move them there")
 	}
 	if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 ||
-		len(hf.House.Handsets) > 0 || !hf.Line.empty() || !hf.Challenge.empty() || len(hf.Menus) > 0 {
-		misplaced = append(misplaced, "extensions/people/schedules/house/line/challenge/menus belong in policy.toml — move them there")
+		len(hf.House.Handsets) > 0 || !hf.Line.empty() || !hf.Challenge.empty() || len(hf.Menus) > 0 ||
+		len(hf.Shelves) > 0 || !hf.Listening.empty() {
+		misplaced = append(misplaced, "extensions/people/schedules/house/line/challenge/menus/shelves/listening belong in policy.toml — move them there")
 	}
 	pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
 	return pf, unknown, misplaced, nil
@@ -1059,8 +1068,28 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 			extensionIDs[e.ID] = true
 		}
 	}
-	menus := compileMenus(f.Menus, line.Menu, extensionIDs, fail)
+	shelves, shelfOrder := compileShelves(f.Shelves, fail)
+	listening := compileListening(f.Listening, fail)
+	// Every shelf id written, compiled or not, so a shelf refused for its
+	// titles is reported once, there, and not again at every choice naming it.
+	shelfIDs := make(map[string]bool, len(f.Shelves))
+	for _, s := range f.Shelves {
+		shelfIDs[s.ID] = s.ID != ""
+	}
+	menus := compileMenus(f.Menus, line.Menu, extensionIDs, shelfIDs, fail)
 	warnings := menus.warnings
+	if line.Menu != "" {
+		for _, id := range shelfOrder {
+			if !menus.shelves[id] {
+				warnings = append(warnings, fmt.Sprintf("shelf %q is not offered by any menu reachable from [line] menu %q, so no caller hears it", id, line.Menu))
+			}
+		}
+	} else if len(shelfOrder) > 0 {
+		warnings = append(warnings, "[[shelves]] are defined but [line] menu names no menu, so no caller hears them")
+	}
+	if !f.Listening.empty() && len(menus.shelves) == 0 {
+		warnings = append(warnings, "[listening] is set but no menu a caller can reach leads to a shelf, so it limits nothing")
+	}
 
 	exts := make(map[string]ResolvedExtension)
 	byID := make(map[string]ResolvedExtension)
@@ -1272,6 +1301,9 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		challenge:      challenge,
 		menus:          menus.menus,
 		menuOrder:      menus.order,
+		shelves:        shelves,
+		shelfOrder:     shelfOrder,
+		listening:      listening,
 		warnings:       warnings,
 		PinLength:      pinLength,
 		MinPinLength:   minPin, MaxPinLength: maxPin,

@@ -252,6 +252,8 @@ type Model struct {
 	// [line] menu — may name.
 	ExtensionIDs []string
 	MenuIDs      []string
+	// ShelfIDs are what a choice's shelf or story_of_the_day may name.
+	ShelfIDs []string
 }
 
 func BuildModel(policyText string, handsetsText *string) Model {
@@ -315,7 +317,13 @@ func BuildModelWith(policyText string, handsetsText, trunksText *string) Model {
 		}
 	}
 	sort.Strings(m.ExtensionIDs)
+	for _, s := range pf.Shelves {
+		if s.ID != "" {
+			m.ShelfIDs = append(m.ShelfIDs, s.ID)
+		}
+	}
 	sort.Strings(m.MenuIDs)
+	sort.Strings(m.ShelfIDs)
 	sort.Strings(m.HandsetIDs)
 	sort.Strings(m.GroupIDs)
 	sort.Strings(m.Schedules)
@@ -343,6 +351,7 @@ var (
 	// so `on_no_input = "` is not mistaken for anything.
 	extensionCtx = regexp.MustCompile(`(^|\s)extension\s*=\s*"[^"]*$`)
 	menuCtx      = regexp.MustCompile(`(^|\s)menu\s*=\s*"[^"]*$`)
+	shelfCtx     = regexp.MustCompile(`(^|\s)(shelf|story_of_the_day)\s*=\s*"[^"]*$`)
 )
 
 var allDays = []string{"SU", "MO", "TU", "WE", "TH", "FR", "SA"}
@@ -362,6 +371,8 @@ func Complete(m Model, line string, col int) []CompletionItem {
 		return items(6, "extension id", m.ExtensionIDs)
 	case menuCtx.MatchString(prefix):
 		return items(6, "menu id", m.MenuIDs)
+	case shelfCtx.MatchString(prefix):
+		return items(6, "shelf id", m.ShelfIDs)
 	case afterhoursCtx.MatchString(prefix):
 		return items(6, "schedule", m.Schedules)
 	case daysCtx.MatchString(prefix):
@@ -385,7 +396,7 @@ func items(kind int, detail string, labels []string) []CompletionItem {
 
 // Describe is used by tests and debug logging.
 func (m Model) Describe() string {
-	return fmt.Sprintf("handsets=%d groups=%d schedules=%d mailboxes=%d trunks=%d extensions=%d menus=%d",
+	return fmt.Sprintf("handsets=%d groups=%d schedules=%d mailboxes=%d trunks=%d extensions=%d menus=%d shelves=%d",
 		len(m.HandsetIDs), len(m.GroupIDs), len(m.Schedules), len(m.Mailboxes), len(m.TrunkIDs),
-		len(m.ExtensionIDs), len(m.MenuIDs))
+		len(m.ExtensionIDs), len(m.MenuIDs), len(m.ShelfIDs))
 }

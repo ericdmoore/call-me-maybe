@@ -29,6 +29,40 @@ say = "For orders, press 1."
   challenge = true
 `
 
+// shelfFixture is #155's addition: a shelf, a choice that browses it, and the
+// line's listening limits. Appended after menuFixture, its choice joins the
+// front menu.
+const shelfFixture = `
+  [[menus.choices]]
+  digit = "5"
+  shelf = "stories"
+
+[[shelves]]
+id = "stories"
+titles = ["little-red-hen"]
+
+[listening]
+max_minutes = 15
+max_listeners = 2
+`
+
+// Shelves are projected away like menus, and the file is still snapshotted.
+func TestObserverSnapshotsAPolicyWithShelves(t *testing.T) {
+	m, p, _ := fixture(t)
+	src := "[line]\nmenu = \"front\"\n" + policyFixture + menuFixture + shelfFixture
+	if err := os.WriteFile(p.Policy, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := m.Observe()
+	if err != nil {
+		t.Fatalf("the observer refused a policy with shelves: %v", err)
+	}
+	data, _ := json.Marshal(snap)
+	if bytes.Contains(data, []byte(`little-red-hen`)) || bytes.Contains(data, []byte(`max_listeners`)) {
+		t.Fatalf("shelves reached a wire that has no schema for them: %s", data)
+	}
+}
+
 // The sync wire does not carry menus yet (read-only sync is a later change),
 // so the observer projects them away — and must still snapshot the file, not
 // refuse it, and must say a PIN-less extension has no PIN rather than drop it.

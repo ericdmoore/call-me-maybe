@@ -148,6 +148,9 @@ func checkBounds(f File, fail func(string, ...any)) {
 	for _, m := range f.Menus {
 		id("menu", m.ID)
 	}
+	for _, s := range f.Shelves {
+		id("shelf", s.ID)
+	}
 	for _, e := range f.Extensions {
 		if e.ID != "" {
 			id("extension", e.ID)

@@ -30,9 +30,9 @@ type Menu struct {
 }
 
 // MenuChoice is one key on a menu and where it leads. Exactly one target key
-// is set. Adding a kind of target — #155's books shelf is the next — is a
-// field here, an entry in targets below, a reference check in compileMenus,
-// and a case in the lobby's walker; nothing else in the shape changes.
+// is set. Adding a kind of target is a field here, an entry in targets below,
+// a reference check in compileMenus, and a case in the lobby's walker; nothing
+// else in the shape changes. #155's books shelf joined exactly that way.
 type MenuChoice struct {
 	// Digit is the key, "0" to "9". * repeats the menu and # is reserved, so
 	// neither can be a choice.
@@ -43,6 +43,12 @@ type MenuChoice struct {
 	Menu      string `toml:"menu"`      // another [[menus]] id
 	Recording string `toml:"recording"` // a clip, <line prefix>/recordings/<id>
 	Voicemail string `toml:"voicemail"` // a mailbox
+	// A [[shelves]] id in this file: the caller browses that shelf of the
+	// audiobook library (#155).
+	Shelf string `toml:"shelf"`
+	// A [[shelves]] id in this file: the caller hears that shelf's story of
+	// the day — one title, from the beginning — and the call ends.
+	StoryOfTheDay string `toml:"story_of_the_day"`
 
 	// Then is what follows a recording: "menu" (the default) offers the menu
 	// that led to it again; "goodbye" says the parting prompt and hangs up.
@@ -63,7 +69,14 @@ const (
 	ChoiceMenu      ChoiceKind = "menu"
 	ChoiceRecording ChoiceKind = "recording"
 	ChoiceVoicemail ChoiceKind = "voicemail"
+	ChoiceShelf     ChoiceKind = "shelf"
+	ChoiceStory     ChoiceKind = "story_of_the_day"
 )
+
+// Shelf reports whether the kind leads to a books shelf, to browse it or to
+// hear its story of the day: the two that release a caller to listen, under
+// the line's [listening] limits.
+func (k ChoiceKind) Shelf() bool { return k == ChoiceShelf || k == ChoiceStory }
 
 // What follows a recording.
 const (
@@ -94,6 +107,8 @@ func (c MenuChoice) targets() []targetKey {
 		{ChoiceMenu, c.Menu},
 		{ChoiceRecording, c.Recording},
 		{ChoiceVoicemail, c.Voicemail},
+		{ChoiceShelf, c.Shelf},
+		{ChoiceStory, c.StoryOfTheDay},
 	} {
 		if t.id != "" {
 			out = append(out, t)
@@ -136,14 +151,17 @@ type compiledMenus struct {
 	// reachable is every extension id a menu reachable from [line] menu
 	// names: the only extensions that may go without a PIN.
 	reachable map[string]bool
-	warnings  []string
+	// shelves is every shelf a menu reachable from [line] menu leads to.
+	shelves  map[string]bool
+	warnings []string
 }
 
 // compileMenus validates and compiles [[menus]]. root is [line] menu;
 // extensionIDs is every [[extensions]] id in this file, enabled or not, so
-// switching an extension off never invalidates a menu that names it.
-func compileMenus(raw []Menu, root string, extensionIDs map[string]bool, fail func(string, ...any)) compiledMenus {
-	out := compiledMenus{menus: map[string]ResolvedMenu{}, reachable: map[string]bool{}}
+// switching an extension off never invalidates a menu that names it; shelfIDs
+// is every [[shelves]] id in this file that compiled.
+func compileMenus(raw []Menu, root string, extensionIDs, shelfIDs map[string]bool, fail func(string, ...any)) compiledMenus {
+	out := compiledMenus{menus: map[string]ResolvedMenu{}, reachable: map[string]bool{}, shelves: map[string]bool{}}
 
 	for _, m := range raw {
 		if !handsetIDPattern.MatchString(m.ID) {
@@ -182,7 +200,7 @@ func compileMenus(raw []Menu, root string, extensionIDs map[string]bool, fail fu
 			}
 			targets := c.targets()
 			if len(targets) != 1 {
-				fail("%s must lead to exactly one of extension, menu, recording or voicemail (it names %d)", where, len(targets))
+				fail("%s must lead to exactly one of extension, menu, recording, voicemail, shelf or story_of_the_day (it names %d)", where, len(targets))
 				continue
 			}
 			t := targets[0]
@@ -204,6 +222,10 @@ func compileMenus(raw []Menu, root string, extensionIDs map[string]bool, fail fu
 			case ChoiceVoicemail:
 				if !mailboxPattern.MatchString(t.id) {
 					fail("%s voicemail %q must be lowercase alphanumeric/dash/underscore", where, t.id)
+				}
+			case ChoiceShelf, ChoiceStory:
+				if !shelfIDs[t.id] {
+					fail("%s names shelf %q, which no [[shelves]] entry in this file carries as its id", where, t.id)
 				}
 			}
 			switch {
@@ -262,6 +284,8 @@ func compileMenus(raw []Menu, root string, extensionIDs map[string]bool, fail fu
 			switch c.Kind {
 			case ChoiceExtension:
 				out.reachable[c.Target] = true
+			case ChoiceShelf, ChoiceStory:
+				out.shelves[c.Target] = true
 			case ChoiceMenu:
 				if _, seen := depth[c.Target]; seen {
 					continue

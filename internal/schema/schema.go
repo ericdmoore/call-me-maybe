@@ -565,6 +565,8 @@ func Policy() *Schema {
 			"extensions": {Type: "array", Description: "What an unknown caller may dial in the lobby.", Items: extension()},
 			"challenge":  challenge(),
 			"menus":      {Type: "array", Description: "A public line's front menu and the menus it leads to: \"press 1 for orders, 2 for our hours\". Named from [line] menu; a line that names none answers with the PIN lobby as before.", Items: menu()},
+			"shelves":    {Type: "array", Description: "Dial-a-Story: the titles of the box's audiobook library a menu choice may offer callers on this line, to browse (shelf) or as the story of the day (story_of_the_day). Never the whole library — a title reaches an outside caller only by being written here.", Items: shelf()},
+			"listening":  listening(),
 		},
 		AdditionalProperties: falsy,
 	}
@@ -739,10 +741,10 @@ func menuChoice() *Schema {
 	return &Schema{
 		Type:        "object",
 		Required:    []string{"digit"},
-		Description: "One key and where it leads: exactly one of extension, menu, recording or voicemail.",
+		Description: "One key and where it leads: exactly one of extension, menu, recording, voicemail, shelf or story_of_the_day.",
 		Rules: []string{
 			"Exactly one target. `doorman check` refuses none, or more than one.",
-			"An extension, voicemail or recording leaf hands the caller off; a menu leaf moves them; a recording returns them to the menu that offered it unless then = \"goodbye\".",
+			"An extension, voicemail, shelf or story leaf hands the caller off; a menu leaf moves them; a recording returns them to the menu that offered it unless then = \"goodbye\".",
 			"The call record stores the target chosen (\"extension:orders\"), never the key pressed.",
 		},
 		Properties: map[string]*Schema{
@@ -751,12 +753,83 @@ func menuChoice() *Schema {
 			"menu":      {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Another [[menus]] id.", CrossRefs: []string{"policy.toml [[menus]].id"}},
 			"recording": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "A clip at <line prefix>/recordings/<id> — \"our hours are…\". Operator content, pre-rendered. A key pressed over it is a choice at the menu that offered it.", CrossRefs: []string{"/var/lib/asterisk/sounds/<prefix>/recordings/<id>"}},
 			"voicemail": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "A mailbox: the caller is released to take a message.", CrossRefs: []string{"asterisk/voicemail.conf [household] context"}},
-			"then":      {Type: "string", Enum: []any{"menu", "goodbye"}, Default: "menu", Description: "What follows a recording: the menu that offered it again, or the parting prompt and a hangup.", Rules: []string{"Only with recording."}},
+			"shelf": {
+				Type:        "string",
+				Pattern:     "^[a-z0-9][a-z0-9_-]*$",
+				Description: "A [[shelves]] id in this file: the caller is released to the books menu, restricted to that shelf's titles, under the line's [listening] limits. No bookmarks: an outside caller starts each title from the beginning.",
+				CrossRefs:   []string{"policy.toml [[shelves]].id", "extensions_books.conf [cmm-listen] (doorman render)"},
+				Rules: []string{
+					"Over [listening] max_listeners, the caller hears that the listening lines are busy and is offered this menu again.",
+					"Zero at the shelf, or three unanswered tries, says goodbye and ends the call: once released, the caller does not return to this menu.",
+				},
+			},
+			"story_of_the_day": {
+				Type:        "string",
+				Pattern:     "^[a-z0-9][a-z0-9_-]*$",
+				Description: "A [[shelves]] id in this file: the caller hears one title from it, from the beginning, and the call ends — no browsing. A one-title shelf is a fixed story; with several, the titles take turns a day each, in the order written, turning over at the box's midnight.",
+				CrossRefs:   []string{"policy.toml [[shelves]].id"},
+				Rules:       []string{"Same [listening] limits, listener cap and handoff as shelf."},
+			},
+			"then": {Type: "string", Enum: []any{"menu", "goodbye"}, Default: "menu", Description: "What follows a recording: the menu that offered it again, or the parting prompt and a hangup.", Rules: []string{"Only with recording."}},
 			"challenge": {
 				Type:        "boolean",
 				Default:     false,
 				Description: "Ask the arithmetic challenge before following this choice — before the extension rings, and before its mailbox records out of hours. Asked at most once a call.",
 				Rules:       []string{"Same budget and rules as [line] challenge_no_input: MAX_PIN_ATTEMPTS retries, its own rate limiter, a right answer forgives no PIN failure. Admitted callers never meet it."},
+			},
+		},
+		AdditionalProperties: falsy,
+	}
+}
+
+func shelf() *Schema {
+	return &Schema{
+		Type:        "object",
+		Required:    []string{"id", "titles"},
+		Description: "One shelf: an explicit list of title ids from the box's prepared audiobook catalog (`doorman books list`).",
+		Rules: []string{
+			"A title not on a shelf a menu offers cannot be reached from this line: the books menu a caller is released to is built from the shelf's titles alone.",
+			"`doorman check` refuses a title the installed catalog does not have, when it can read the catalog, and warns that it could not check when it cannot. At call time a title missing from the catalog is simply not offered.",
+			"A shelf no reachable menu offers is valid and `doorman check` warns about it.",
+		},
+		Properties: map[string]*Schema{
+			"id": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Named by a menu choice's shelf or story_of_the_day.", Rules: []string{"Unique among [[shelves]]."}},
+			"titles": {
+				Type:        "array",
+				MinItems:    one,
+				Items:       &Schema{Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]{0,63}$"},
+				Description: "Catalog book ids, in the order the shelf announces them (and a story of the day takes turns through them).",
+				CrossRefs:   []string{"/var/spool/asterisk/cmm-books/library/catalog.json books[].id"},
+				Rules:       []string{"At least one, at most 128, no id twice. Never the whole library by default: privately imported audio is exposed only by being listed."},
+			},
+		},
+		AdditionalProperties: falsy,
+	}
+}
+
+func listening() *Schema {
+	return &Schema{
+		Type:        "object",
+		Description: "The limits for outside callers who reach a shelf or a story of the day on this line. Optional; every key has a default, and they apply whenever a menu leads to a shelf.",
+		Rules: []string{
+			"One minute before the limit the caller hears \"This call will end in one minute\" (a bundled system phrase); at the limit, a short goodbye and the call ends. Asterisk enforces the limit as well, so a listener can never outstay it.",
+			"Listeners are counted by Asterisk (GROUP_COUNT) per line, and do not count against MAX_CONCURRENT_CALLS once released — exactly as a caller leaving a message does not.",
+			"The lobby's rate limiter and the challenge still stand in front: a choice with challenge = true asks it before the caller is released.",
+		},
+		Properties: map[string]*Schema{
+			"max_minutes": {
+				Type:        "integer",
+				Minimum:     ptr(5),
+				Maximum:     ptr(240),
+				Default:     20,
+				Description: "The longest a call that reaches a shelf may last, counted from when the call arrived — menu time included.",
+			},
+			"max_listeners": {
+				Type:        "integer",
+				Minimum:     ptr(1),
+				Maximum:     ptr(10),
+				Default:     1,
+				Description: "How many callers may listen on this line at once. Every listener holds a provider channel the house could otherwise ring on.",
 			},
 		},
 		AdditionalProperties: falsy,

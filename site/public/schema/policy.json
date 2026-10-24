@@ -428,6 +428,32 @@
         "outbound_cid and outbound_handsets are the outbound half. A handset no line claims presents policy.toml's outbound_cid — the primary line, which is also 911's route, so there is one answer to \"which line am I on when I have not said\"."
       ]
     },
+    "listening": {
+      "description": "The limits for outside callers who reach a shelf or a story of the day on this line. Optional; every key has a default, and they apply whenever a menu leads to a shelf.",
+      "type": "object",
+      "properties": {
+        "max_listeners": {
+          "description": "How many callers may listen on this line at once. Every listener holds a provider channel the house could otherwise ring on.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "max_minutes": {
+          "description": "The longest a call that reaches a shelf may last, counted from when the call arrived — menu time included.",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 240,
+          "default": 20
+        }
+      },
+      "additionalProperties": false,
+      "x-rules": [
+        "One minute before the limit the caller hears \"This call will end in one minute\" (a bundled system phrase); at the limit, a short goodbye and the call ends. Asterisk enforces the limit as well, so a listener can never outstay it.",
+        "Listeners are counted by Asterisk (GROUP_COUNT) per line, and do not count against MAX_CONCURRENT_CALLS once released — exactly as a caller leaving a message does not.",
+        "The lobby's rate limiter and the challenge still stand in front: a choice with challenge = true asks it before the caller is released."
+      ]
+    },
     "menus": {
       "description": "A public line's front menu and the menus it leads to: \"press 1 for orders, 2 for our hours\". Named from [line] menu; a line that names none answers with the PIN lobby as before.",
       "type": "array",
@@ -438,7 +464,7 @@
           "choices": {
             "type": "array",
             "items": {
-              "description": "One key and where it leads: exactly one of extension, menu, recording or voicemail.",
+              "description": "One key and where it leads: exactly one of extension, menu, recording, voicemail, shelf or story_of_the_day.",
               "type": "object",
               "properties": {
                 "challenge": {
@@ -485,6 +511,30 @@
                     "/var/lib/asterisk/sounds/\u003cprefix\u003e/recordings/\u003cid\u003e"
                   ]
                 },
+                "shelf": {
+                  "description": "A [[shelves]] id in this file: the caller is released to the books menu, restricted to that shelf's titles, under the line's [listening] limits. No bookmarks: an outside caller starts each title from the beginning.",
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "x-cross-references": [
+                    "policy.toml [[shelves]].id",
+                    "extensions_books.conf [cmm-listen] (doorman render)"
+                  ],
+                  "x-rules": [
+                    "Over [listening] max_listeners, the caller hears that the listening lines are busy and is offered this menu again.",
+                    "Zero at the shelf, or three unanswered tries, says goodbye and ends the call: once released, the caller does not return to this menu."
+                  ]
+                },
+                "story_of_the_day": {
+                  "description": "A [[shelves]] id in this file: the caller hears one title from it, from the beginning, and the call ends — no browsing. A one-title shelf is a fixed story; with several, the titles take turns a day each, in the order written, turning over at the box's midnight.",
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                  "x-cross-references": [
+                    "policy.toml [[shelves]].id"
+                  ],
+                  "x-rules": [
+                    "Same [listening] limits, listener cap and handoff as shelf."
+                  ]
+                },
                 "then": {
                   "description": "What follows a recording: the menu that offered it again, or the parting prompt and a hangup.",
                   "type": "string",
@@ -512,7 +562,7 @@
               "additionalProperties": false,
               "x-rules": [
                 "Exactly one target. `doorman check` refuses none, or more than one.",
-                "An extension, voicemail or recording leaf hands the caller off; a menu leaf moves them; a recording returns them to the menu that offered it unless then = \"goodbye\".",
+                "An extension, voicemail, shelf or story leaf hands the caller off; a menu leaf moves them; a recording returns them to the menu that offered it unless then = \"goodbye\".",
                 "The call record stores the target chosen (\"extension:orders\"), never the key pressed."
               ]
             },
@@ -651,6 +701,49 @@
         "additionalProperties": false,
         "x-rules": [
           "Validated whether or not it is enabled: a disabled schedule with an impossible time fails `doorman check`, is refused by the daemon's reload and by sync, exactly as an enabled one is."
+        ]
+      }
+    },
+    "shelves": {
+      "description": "Dial-a-Story: the titles of the box's audiobook library a menu choice may offer callers on this line, to browse (shelf) or as the story of the day (story_of_the_day). Never the whole library — a title reaches an outside caller only by being written here.",
+      "type": "array",
+      "items": {
+        "description": "One shelf: an explicit list of title ids from the box's prepared audiobook catalog (`doorman books list`).",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Named by a menu choice's shelf or story_of_the_day.",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "x-rules": [
+              "Unique among [[shelves]]."
+            ]
+          },
+          "titles": {
+            "description": "Catalog book ids, in the order the shelf announces them (and a story of the day takes turns through them).",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+            },
+            "minItems": 1,
+            "x-cross-references": [
+              "/var/spool/asterisk/cmm-books/library/catalog.json books[].id"
+            ],
+            "x-rules": [
+              "At least one, at most 128, no id twice. Never the whole library by default: privately imported audio is exposed only by being listed."
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "titles"
+        ],
+        "additionalProperties": false,
+        "x-rules": [
+          "A title not on a shelf a menu offers cannot be reached from this line: the books menu a caller is released to is built from the shelf's titles alone.",
+          "`doorman check` refuses a title the installed catalog does not have, when it can read the catalog, and warns that it could not check when it cannot. At call time a title missing from the catalog is simply not offered.",
+          "A shelf no reachable menu offers is valid and `doorman check` warns about it."
         ]
       }
     }

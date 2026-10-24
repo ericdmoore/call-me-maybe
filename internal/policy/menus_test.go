@@ -233,7 +233,7 @@ func TestDisabledExtensionStillSatisfiesAMenuReference(t *testing.T) {
 func TestMenusInTheWrongFileAreRefused(t *testing.T) {
 	handsets := "[[handsets]]\nid = \"kitchen\"\nendpoint = \"PJSIP/kitchen\"\n" + frontMenu
 	_, err := fromSplitTOML([]byte("[house]\nhandsets = [\"kitchen\"]\n"), []byte(handsets), Options{})
-	if err == nil || !strings.Contains(err.Error(), "menus belong in policy.toml") {
+	if err == nil || !strings.Contains(err.Error(), "/menus/") || !strings.Contains(err.Error(), "belong in policy.toml") {
 		t.Fatalf("err = %v", err)
 	}
 	for _, file := range []string{"trunks", "contacts"} {
