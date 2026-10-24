@@ -1102,7 +1102,9 @@ the box's own (a LAN with IPv6, where a phone reaches `jepsen.local` over
 its global address), so a mistaken port forward exposes nothing; it
 never believes `X-Forwarded-For`. Never put it behind a public proxy —
 Tailscale Funnel included: a proxy on the box arrives from loopback, which
-the fence has to allow.
+the fence has to allow. The unit also keeps the listener from seeing what
+the asterisk user can otherwise read: `/etc/asterisk` is empty to it but for
+`cmm-mail.env`, and the spool and the bullmoose token are not there at all.
 
 **How long a link lasts:** `VOICEMAIL_LINK_DAYS` (14) from the message,
 then the listener (hourly) and notify (each run) prune it. A link is a link

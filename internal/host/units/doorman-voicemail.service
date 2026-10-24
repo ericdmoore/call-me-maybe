@@ -30,6 +30,15 @@ PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
 ReadWritePaths=/var/lib/asterisk/cmm-voicemail
+# The asterisk user can read pjsip.conf, ari.conf, the handsets' SIP
+# passwords, every recording and the house's send-only mail token. This
+# process is the one that answers the network, so it sees none of them:
+# /etc/asterisk is an empty read-only tmpfs with only the settings file
+# bound in, and the spool and the token are not there at all. The links
+# are their own files under /var/lib, so the spool is never needed.
+TemporaryFileSystem=/etc/asterisk:ro
+BindReadOnlyPaths=-/etc/asterisk/cmm-mail.env
+InaccessiblePaths=-/var/spool/asterisk -/var/lib/asterisk/.bullmoose
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 MemoryMax=64M
 

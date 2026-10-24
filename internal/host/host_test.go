@@ -360,12 +360,17 @@ func TestTheVoicemailDirectoryAndUnit(t *testing.T) {
 			continue
 		}
 		c := string(u.Content)
-		for _, line := range []string{"User=asterisk", "ExecStart=/opt/call-me-maybe/bin/doorman voicemail serve", "ReadWritePaths=/var/lib/asterisk/cmm-voicemail", "ProtectSystem=strict"} {
+		for _, line := range []string{"User=asterisk", "ExecStart=/opt/call-me-maybe/bin/doorman voicemail serve", "ReadWritePaths=/var/lib/asterisk/cmm-voicemail", "ProtectSystem=strict",
+			// The listener answers the network as the asterisk user; it must
+			// not see what that user can read: SIP/ARI passwords in
+			// /etc/asterisk, the recordings, the mail token.
+			"TemporaryFileSystem=/etc/asterisk:ro", "BindReadOnlyPaths=-/etc/asterisk/cmm-mail.env",
+			"InaccessiblePaths=-/var/spool/asterisk -/var/lib/asterisk/.bullmoose"} {
 			if !strings.Contains(c, line+"\n") {
 				t.Errorf("unit lacks %q", line)
 			}
 		}
-		if strings.Contains(c, "EnvironmentFile") || strings.Contains(c, ".env\n") {
+		if strings.Contains(c, "EnvironmentFile") || strings.Contains(c, "/opt/call-me-maybe/.env") {
 			t.Error("the voicemail listener must not load doorman's .env")
 		}
 		if DefaultLayout().VoicemailState != "/var/lib/asterisk/cmm-voicemail" {
