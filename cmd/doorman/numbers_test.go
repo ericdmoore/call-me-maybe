@@ -396,3 +396,19 @@ func TestRunNumbersRefusesBadConfig(t *testing.T) {
 		t.Errorf("a policy naming an unknown trunk: exit = %d, want %d", rc, numbersExitUsage)
 	}
 }
+
+// With no policy file there are no claims, and every number on the account
+// would read as unclaimed with exit 0 — a green from a typo'd path. It is a
+// usage error instead, decided before any provider is asked.
+func TestRunNumbersRefusesAMissingPolicyFile(t *testing.T) {
+	dir := policyDir(t, map[string]string{"trunks.toml": telnyxNumbersTrunk})
+	missing := filepath.Join(dir, "polcy.toml")
+	var rc int
+	errOut := captureStderr(t, func() {
+		rc = runNumbers([]string{"-trunks", filepath.Join(dir, "trunks.toml"),
+			"-handsets", filepath.Join(dir, "handsets.toml"), missing})
+	})
+	if rc != numbersExitUsage || !strings.Contains(errOut, missing) {
+		t.Errorf("missing policy: exit = %d, want %d naming the path; stderr:\n%s", rc, numbersExitUsage, errOut)
+	}
+}

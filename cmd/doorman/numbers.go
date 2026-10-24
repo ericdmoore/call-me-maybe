@@ -187,7 +187,17 @@ func runNumbers(args []string) int {
 	if fs.NArg() > 0 {
 		path = fs.Arg(0)
 	}
-	lines, _, err := renderLines(policyPathArg(path), handsetsPathArg(*handsetsFlag), trunks)
+	policyPath := policyPathArg(path)
+	if _, err := os.Stat(policyPath); errors.Is(err, os.ErrNotExist) {
+		// renderLines reads a missing policy as no lines, which is right for
+		// render and wrong here: the claims are the whole input, and with none
+		// every number reads as unclaimed and the run exits 0 — a green from a
+		// typo'd path, or a copy of trunks.toml without the policy beside it.
+		fmt.Fprintf(os.Stderr, "✗ no policy file at %s, so there are no claimed numbers to check.\n"+
+			"  Pass the path of policy.toml (its policy.<line>.toml files are found beside it).\n", policyPath)
+		return numbersExitUsage
+	}
+	lines, _, err := renderLines(policyPath, handsetsPathArg(*handsetsFlag), trunks)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return numbersExitUsage
