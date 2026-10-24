@@ -84,6 +84,9 @@ const (
 	// problem — a number held for later is ordinary — and listed because the
 	// one you meant to type is often in this list.
 	numberUnclaimed numberVerdict = "unclaimed"
+	// numberOtherTrunk is on this account and claimed for a different trunk
+	// that shares it, whose own section weighs the claim. Not a problem here.
+	numberOtherTrunk numberVerdict = "other_trunk"
 	// numberUnchecked is a claim on a trunk that could not be asked.
 	numberUnchecked numberVerdict = "unchecked"
 )
@@ -430,6 +433,20 @@ func checkTrunkNumbers(ctx context.Context, c numbersCheck, tr policy.Trunk) tru
 		out.Numbers = append(out.Numbers, row)
 	}
 
+	// Two trunks can share one account — two credential connections behind
+	// one API key — and each then sees the other's numbers. Those are claimed,
+	// just not here, and saying "claimed by no policy file" about them invites
+	// somebody tidying the account to release a number in use.
+	elsewhere := map[string][]string{}
+	for id, cls := range c.claims {
+		if id == tr.ID {
+			continue
+		}
+		for _, cl := range cls {
+			elsewhere[cl.E164] = appendOnce(elsewhere[cl.E164], id)
+		}
+	}
+
 	var spare []string
 	for e164 := range account {
 		if !claimed[e164] {
@@ -439,6 +456,14 @@ func checkTrunkNumbers(ctx context.Context, c numbersCheck, tr policy.Trunk) tru
 	sort.Strings(spare)
 	for _, e164 := range spare {
 		n := account[e164]
+		if others := elsewhere[e164]; len(others) > 0 {
+			sort.Strings(others)
+			row := describeHeld(numberRow{Number: e164, Verdict: numberOtherTrunk}, n)
+			row.Detail = fmt.Sprintf("on this account, claimed for %s %s and checked there — %s",
+				plural(len(others), "trunk"), strings.Join(others, ", "), connectionPhrase(n.Connection))
+			out.Numbers = append(out.Numbers, row)
+			continue
+		}
 		row := describeHeld(numberRow{Number: e164, Verdict: numberUnclaimed}, n)
 		row.Detail = "on this account, claimed by no policy file — " + connectionPhrase(n.Connection)
 		out.Numbers = append(out.Numbers, row)

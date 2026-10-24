@@ -397,6 +397,45 @@ func TestRunNumbersRefusesBadConfig(t *testing.T) {
 	}
 }
 
+// Two trunks on one account — two credential connections, one API key — each
+// see the other's numbers. Those are claimed, just not on this trunk, and a
+// report calling them "claimed by no policy file" invites releasing one in use.
+func TestNumbersOnASharedAccountNameTheTrunkThatClaimsThem(t *testing.T) {
+	srv := telnyxAccountServer(t)
+	report := checkNumbers(context.Background(), numbersCheck{
+		trunks: trunksFor(t, telnyxNumbersTrunk+`
+[[trunks]]
+id = "office"
+provider = "telnyx"
+host = "sip.telnyx.com"
+username = "office-pbx"
+password_env = "TRUNK_OFFICE_PASSWORD"
+api_key_env = "TRUNK_TELNYX_API_KEY"
+`),
+		claims: map[string][]numberClaim{
+			"telnyx": {answers("+15125550142", "default")},
+			"office": {answers("+15125550144", "office")},
+		},
+		secret: telnyxSecrets(), timeout: 5 * time.Second, endpoint: srv.URL,
+	})
+	home, office := report.Trunks[0], report.Trunks[1]
+	if r := rowFor(t, home, "+15125550144"); r.Verdict != numberOtherTrunk || !strings.Contains(r.Detail, "trunk office") {
+		t.Errorf("office's number on the home trunk: %+v", r)
+	}
+	if r := rowFor(t, office, "+15125550142"); r.Verdict != numberOtherTrunk || !strings.Contains(r.Detail, "trunk telnyx") {
+		t.Errorf("home's number on the office trunk: %+v", r)
+	}
+	if r := rowFor(t, office, "+15125550144"); r.Verdict != numberRouted {
+		t.Errorf("office's own claim: %+v", r)
+	}
+	if r := rowFor(t, home, "+15125550199"); r.Verdict != numberUnclaimed {
+		t.Errorf("a number nobody claims is still unclaimed: %+v", r)
+	}
+	if got := numbersExit(report); got != 0 {
+		t.Errorf("exit = %d, want 0", got)
+	}
+}
+
 // With no policy file there are no claims, and every number on the account
 // would read as unclaimed with exit 0 — a green from a typo'd path. It is a
 // usage error instead, decided before any provider is asked.
