@@ -752,11 +752,29 @@ same sync the next poll would have run anyway.
 
 ### Rolling back
 
+**Check the live files with the old binary first.** A release can add a
+configuration shape the one before it never knew. `afterhours = ["nights",
+"weekend-days"]` is one (new after v0.18.0), and an older daemon
+refuses it, falls back to its last good copy, and refuses that too, because
+the newer daemon saved the copy *with* the list in it. With nothing it can
+load, it does not start. Nothing translates a file between shapes on the way
+down, so this step is by hand until a release carries machinery for it:
+
+```bash
+$ V=v0.14.0
+$ cd /opt/call-me-maybe
+$ sudo -u doorman bin/doorman.before-$V check --policy-only
+```
+
+If it refuses the files, simplify them to what it names before restoring the
+binary. For an afterhours list that is choosing one schedule
+(`afterhours = "nights"`) and accepting what that gives up — here, weekends
+ring — because the old release cannot say weekdays 9–5 at all.
+
 ```bash
 # The binary is the deploy artifact. Each upgrade keeps the replaced copies as
 # doorman.before-vX.Y.Z (see "Deploying upgrades"); rollback restores them all
 # and restarts the same units:
-$ V=v0.14.0
 $ for t in /opt/call-me-maybe/bin/doorman /usr/local/bin/doorman; do
 >   sudo cp -a "$t.before-$V" "$t"; done
 $ sudo systemctl restart doorman doorman-sync doorman-directory doorman-inbox
