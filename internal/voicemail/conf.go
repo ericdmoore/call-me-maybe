@@ -25,6 +25,9 @@ type Box struct {
 	Context, Mailbox string
 	FullName         string
 	Emails           []string
+	// Refused counts the addresses on the line that failed ValidAddress;
+	// the strings themselves go no further than the check.
+	Refused int
 }
 
 // maxIncludeDepth bounds #include chains; Asterisk itself stops at a
@@ -121,7 +124,7 @@ func (p *confParser) line(raw string, depth int) {
 		b.FullName = strings.TrimSpace(fields[1])
 	}
 	if len(fields) > 2 {
-		b.Emails = emailsOf(fields[2])
+		b.Emails, b.Refused = emailsOf(fields[2])
 	}
 	// A box declared twice takes the later line, as app_voicemail's own
 	// append_mailbox overwrites the earlier one.
@@ -191,16 +194,20 @@ func splitAssignment(line string) (key, value string, ok bool) {
 var address = regexp.MustCompile(`^[A-Za-z0-9._%+=!#$&'*/?^{}~][A-Za-z0-9._%+=!#$&'*/?^{}~-]*@[A-Za-z0-9.-]+$`)
 
 // emailsOf splits app_voicemail's email field, which may name several
-// addresses separated by |, and keeps the ones shaped like an address.
-func emailsOf(field string) []string {
-	var out []string
+// addresses separated by |, keeps the ones shaped like an address, and
+// counts the others so the caller can say a box's own address was refused.
+func emailsOf(field string) (out []string, refused int) {
 	for _, a := range strings.Split(field, "|") {
 		a = strings.TrimSpace(a)
-		if ValidAddress(a) {
+		switch {
+		case a == "":
+		case ValidAddress(a):
 			out = append(out, a)
+		default:
+			refused++
 		}
 	}
-	return out
+	return out, refused
 }
 
 // ValidAddress reports whether a is an address this package will pass to a

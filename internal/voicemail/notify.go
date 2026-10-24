@@ -89,8 +89,7 @@ func (n *Notifier) linkDays() int {
 func (n *Notifier) Run(ctx context.Context, vmContext, mailbox string) error {
 	to := n.recipients(vmContext, mailbox)
 	if len(to) == 0 {
-		n.logf("no address for %s: voicemail.conf gives the box no email and MAIL_TO is not set; voicemail for %s stays in the box only", mailbox, mailbox)
-		return nil
+		return nil // recipients said why
 	}
 
 	var sent *sentList
@@ -167,19 +166,29 @@ func (n *Notifier) Run(ctx context.Context, vmContext, mailbox string) error {
 }
 
 // recipients is the box's own address(es) from voicemail.conf, else MAIL_TO.
+// A box whose line names an email that the shape check refuses is not a box
+// without one: its owner meant it to be theirs, and MAIL_TO is somebody
+// else's mailbox. Its mail stays in the box, and the log says why.
 func (n *Notifier) recipients(vmContext, mailbox string) []string {
 	if n.Conf != "" {
 		box, ok, err := LookupBox(n.Conf, vmContext, mailbox)
 		switch {
 		case err != nil:
 			n.logf("cannot read %s (%v); falling back to MAIL_TO", n.Conf, err)
+		case ok && box.Refused > 0 && len(box.Emails) == 0:
+			n.logf("%s's email in voicemail.conf is not an address doorman will hand to a mail hook (%d refused: a bare address, no name or <>, no spaces); not falling back to MAIL_TO, so voicemail for %s stays in the box only", mailbox, box.Refused, mailbox)
+			return nil
 		case ok && len(box.Emails) > 0:
+			if box.Refused > 0 {
+				n.logf("%s's email in voicemail.conf: %d address(es) refused (a bare address, no name or <>, no spaces); mailing the other %d", mailbox, box.Refused, len(box.Emails))
+			}
 			return box.Emails
 		}
 	}
 	if to := strings.TrimSpace(n.MailTo); to != "" {
 		return []string{to}
 	}
+	n.logf("no address for %s: voicemail.conf gives the box no email and MAIL_TO is not set; voicemail for %s stays in the box only", mailbox, mailbox)
 	return nil
 }
 

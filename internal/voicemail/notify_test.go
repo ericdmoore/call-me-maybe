@@ -392,6 +392,24 @@ func TestRecipientsAndFailures(t *testing.T) {
 	if got := n.recipients("household", "kids"); !reflect.DeepEqual(got, []string{"house@example.com"}) || !strings.Contains(strings.Join(logs, ""), "falling back to MAIL_TO") {
 		t.Errorf("recipients = %v, logs %q", got, logs)
 	}
+	// A box whose own address is refused by the shape check is somebody's
+	// own box: it never falls back to the shared house mailbox.
+	os.WriteFile(conf, []byte("[household]\nteen => 4242,Teen,Teen <teen@example.com>\nmixed => 4242,Mixed,Mum <mum@example.com>|dad@example.com\nblank => 4242,Blank,,pager@example.com\n"), 0o600)
+	n.Conf = conf
+	logs = nil
+	if got := n.recipients("household", "teen"); got != nil || !strings.Contains(strings.Join(logs, ""), "not falling back to MAIL_TO") {
+		t.Errorf("teen = %v, logs %q", got, logs)
+	}
+	if strings.Contains(strings.Join(logs, ""), "teen@") {
+		t.Errorf("the refused string reached the log: %q", logs)
+	}
+	logs = nil
+	if got := n.recipients("household", "mixed"); !reflect.DeepEqual(got, []string{"dad@example.com"}) || !strings.Contains(strings.Join(logs, ""), "1 address(es) refused") {
+		t.Errorf("mixed = %v, logs %q", got, logs)
+	}
+	if got := n.recipients("household", "blank"); !reflect.DeepEqual(got, []string{"house@example.com"}) {
+		t.Errorf("an empty email field is no email: %v", got)
+	}
 	// An empty box is a log line.
 	logs = nil
 	n.Run(context.Background(), "household", "nobody")

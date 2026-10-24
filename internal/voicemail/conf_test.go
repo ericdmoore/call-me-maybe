@@ -112,7 +112,11 @@ func TestABoxNeverCarriesThePIN(t *testing.T) {
 	if s := strings.Join([]string{b.Context, b.Mailbox, b.FullName, strings.Join(b.Emails, ",")}, " "); strings.Contains(s, "864213") {
 		t.Errorf("the PIN came out of the parser: %q", s)
 	}
-	if n := reflect.TypeOf(Box{}).NumField(); n != 4 {
+	if b.Refused != 0 {
+		t.Errorf("Refused = %d for a line with one good address", b.Refused)
+	}
+	// Refused is a count of addresses, the only number Box holds.
+	if n := reflect.TypeOf(Box{}).NumField(); n != 5 {
 		t.Errorf("Box has %d fields; adding one is how a PIN would get in — keep it to what a mail needs", n)
 	}
 }

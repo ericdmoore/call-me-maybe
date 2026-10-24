@@ -1132,8 +1132,12 @@ The email on a box's line in `voicemail.conf` — `box => pin,Full Name,email`
 — is where notify sends that box's mail; a handset's `email` in
 `handsets.toml` lands on its generated line in `voicemail_handsets.conf`,
 which notify reads through the `#tryinclude`. Several addresses separated
-by `|` each get the mail. A box with no email goes to `MAIL_TO`; with
-neither, the message stays in the box and the log says so. A business line
+by `|` each get the mail. Write bare addresses: `Name <a@b>` or anything
+with spaces is refused before it reaches the hook's command line, and a box
+whose every address is refused is **not** mailed to `MAIL_TO` — it is
+somebody's own box — so it stays in the box and the log says why. A box
+with no email goes to `MAIL_TO`; with neither, the message stays in the box
+and the log says so. A business line
 and a family line are two boxes, two addresses:
 
 ```ini
