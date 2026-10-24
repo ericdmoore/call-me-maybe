@@ -367,6 +367,13 @@ func checkTrunkNumbers(ctx context.Context, c numbersCheck, tr policy.Trunk) tru
 	p, err := provider.New(tr.Provider, cfg)
 	switch {
 	case errors.Is(err, provider.ErrNoCredentials):
+		if mismatch := trunkCredentialMismatch(tr); mismatch != "" {
+			// Credentials were declared and cannot be used: a mistake, so the
+			// run says it could not check rather than that nothing was asked.
+			out.State = numbersError
+			out.Detail = mismatch
+			return unchecked()
+		}
 		out.State = numbersUnconfigured
 		out.Detail = "no API key on this trunk, so its numbers cannot be listed — " +
 			"add api_key_env to it in trunks.toml and the variable it names to the environment"

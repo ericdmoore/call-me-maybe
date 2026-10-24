@@ -296,6 +296,29 @@ func trunkAPIConfig(tr policy.Trunk, secret func(string) (string, bool), endpoin
 	return cfg, ""
 }
 
+// trunkCredentialMismatch is the detail for a trunk that declares provider API
+// credentials of a shape its provider does not take — api_key_env on VoIP.ms,
+// or a login and password on Telnyx — or "" when that is not what happened.
+//
+// policy cannot catch this at load: provider is display-only there, and the
+// clients that know each API's shape live in internal/provider, which nothing
+// under internal/ may import. So the provider commands catch it, and as a
+// failure rather than as "unconfigured": the trunk asked to be watched —
+// often with a balance_min — and reporting it as merely unwatched would exit 0
+// on a threshold nothing can ever evaluate.
+func trunkCredentialMismatch(tr policy.Trunk) string {
+	if !tr.BalanceConfigured() {
+		return ""
+	}
+	given := "api_username and api_password_env"
+	if tr.APIKeyEnv != "" {
+		given = "api_key_env"
+	}
+	return fmt.Sprintf("trunks.toml gives this trunk %s, which is not how the %s API "+
+		"authenticates (VoIP.ms takes api_username + api_password_env; Telnyx takes "+
+		"api_key_env) — so nothing is checking it", given, provider.Canonical(tr.Provider))
+}
+
 // checkTrunkBalance answers for one trunk. Every path returns a result: there
 // is no branch here that drops a trunk on the floor.
 func checkTrunkBalance(ctx context.Context, c balanceCheck, tr policy.Trunk) balanceResult {
@@ -324,6 +347,14 @@ func checkTrunkBalance(ctx context.Context, c balanceCheck, tr policy.Trunk) bal
 	p, err := provider.New(tr.Provider, cfg)
 	switch {
 	case errors.Is(err, provider.ErrNoCredentials):
+		if mismatch := trunkCredentialMismatch(tr); mismatch != "" {
+			r.State = balanceError
+			r.Detail = mismatch
+			if min := c.thresholdFor(tr); min > 0 {
+				r.Threshold = &min
+			}
+			return r
+		}
 		r.State = balanceUnconfigured
 		r.Detail = "no API credentials, so this balance is not being watched"
 		return r
