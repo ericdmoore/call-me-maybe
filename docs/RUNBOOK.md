@@ -1997,22 +1997,24 @@ $ doorman calls --line biz --json | jq -r '[.reason, .challenge] | @tsv' | sort 
 
 #### The arithmetic challenge
 
-1. **Build the clips once, on a Mac** — the same macOS `say` voice the Books
-   menus use, normalised like every bundled clip:
+1. **Build the clips with the bundled pack.** `prompts/build.sh` renders them
+   into `prompts/build/challenge/` in the same piper voice as the lobby,
+   normalised like every bundled clip, on any workstation that can build the
+   lobby (see "Prompts" above):
 
    ```bash
-   $ bash prompts/challenge.sh              # SAY_VOICE=Daniel to choose another
-   $ rsync -av prompts/build/challenge/ pi@raspberrypi:/tmp/cmm-challenge/
+   $ bash prompts/build.sh
    ```
 
    They are the house's clips, not a pack's: `challenge/` beside the bundled
    prompts, outside the six-name contract, played whatever `[line] prompts`
-   says. Apple's terms cover what its voices say, so they are rendered for
-   your own box and never published.
+   says.
 
-2. **Install them on the box**:
+2. **Install them on the box** with the rest of the bundled pack — the same
+   copy of `prompts/build/` puts them in place. Just the new directory:
 
    ```bash
+   $ rsync -av prompts/build/challenge/ pi@raspberrypi:/tmp/cmm-challenge/
    $ sudo mkdir -p /var/lib/asterisk/sounds/call-me-maybe/challenge
    $ sudo cp /tmp/cmm-challenge/* /var/lib/asterisk/sounds/call-me-maybe/challenge/
    $ sudo chown -R asterisk:asterisk /var/lib/asterisk/sounds/call-me-maybe/challenge
@@ -2048,13 +2050,14 @@ $ doorman calls --line biz --json | jq -r '[.reason, .challenge] | @tsv' | sort 
 2. **Supply the words.** The menu clip and every recording are yours, played
    from the line's prefix (`[line] prompts`, else `PROMPT_MEDIA_PREFIX`):
    `menus/<id>` and `recordings/<id>`, as `.wav` (8 kHz) and `.wav16`
-   (16 kHz), mono 16-bit. Record them, or render the `say` text on a Mac the
-   way `prompts/challenge.sh` does:
+   (16 kHz), mono 16-bit. Record them, or render the text with the piper
+   voice the way `prompts/build.sh` does, so the menu matches the lobby:
 
    ```bash
-   $ say -v Samantha -r 170 -o front.aiff "Thanks for calling Blue Door Bakery. For orders, press 1."
-   $ ffmpeg -i front.aiff -af loudnorm=I=-18:TP=-2:LRA=7 -ar 8000 -ac 1 -acodec pcm_s16le front.wav
-   $ ffmpeg -i front.aiff -af loudnorm=I=-18:TP=-2:LRA=7 -ar 16000 -ac 1 -acodec pcm_s16le -f wav front.wav16
+   $ echo "Thanks for calling Blue Door Bakery. For orders, press 1." |
+       piper --model ~/.local/share/piper/en_GB-alba-medium.onnx --output_file front.raw.wav
+   $ ffmpeg -i front.raw.wav -af loudnorm=I=-18:TP=-2:LRA=7 -ar 8000 -ac 1 -acodec pcm_s16le front.wav
+   $ ffmpeg -i front.raw.wav -af loudnorm=I=-18:TP=-2:LRA=7 -ar 16000 -ac 1 -acodec pcm_s16le -f wav front.wav16
    # on the box, for a line with prompts = "bluedoor":
    $ sudo mkdir -p /var/lib/asterisk/sounds/bluedoor/menus /var/lib/asterisk/sounds/bluedoor/recordings
    $ sudo cp front.wav front.wav16 /var/lib/asterisk/sounds/bluedoor/menus/

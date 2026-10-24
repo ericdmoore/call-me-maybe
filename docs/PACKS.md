@@ -113,7 +113,8 @@ house's is its own.
 times six" before a phone rings speaks it from the bundled pack's
 `challenge/` directory (`prompts/manifest.json` under `"challenge"`: an
 explanation, "what is", "times", "that's right", "try again", and the digits
-zero to nine), rendered by `prompts/challenge.sh` and played whatever pack
+zero to nine), rendered by `prompts/build.sh` with the rest of the bundled
+pack, in the same voice, and played whatever pack
 the line uses. It is a second, optional clip set beside the contract, so a
 pack that predates it keeps working, and the challenge can never half-work
 for want of a pack's copy. A pack supplying its own `challenge/` is a later,

@@ -17,8 +17,8 @@
 #
 # NEEDS      Two clips beside the bakery's prompt pack, recorded or rendered
 #            by you: menus/front and recordings/hours (RUNBOOK, "A front
-#            menu"). The challenge's clips, built once with
-#            prompts/challenge.sh (RUNBOOK, "The arithmetic challenge").
+#            menu"). The challenge's clips, built with the bundled pack by
+#            prompts/build.sh (RUNBOOK, "The arithmetic challenge").
 #            `doorman check`, run on the box, names any that are missing.
 #
 # DOES NOT   Stop a voice agent that understands speech, or verify anybody's

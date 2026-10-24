@@ -207,6 +207,6 @@ func warnChallengeClips() {
 	}
 	fmt.Printf("  ! the challenge clips are not all installed: %s has no %s.\n"+
 		"    Callers will hear silence where the question should be. Build them with\n"+
-		"    prompts/challenge.sh and install them as RUNBOOK \"The arithmetic challenge\" says.\n",
+		"    prompts/build.sh and install them as RUNBOOK \"The arithmetic challenge\" says.\n",
 		filepath.Join(soundsDir, lobby.ChallengeMediaPrefix()), strings.Join(missing, ", "))
 }

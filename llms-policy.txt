@@ -246,8 +246,9 @@ scenario below.
   `<line prefix>/menus/<id>` and `<line prefix>/recordings/<id>` under
   Asterisk's sounds directory. Never suggest runtime speech. `doorman check`,
   on the box, warns about missing clips.
-- The challenge speaks from a bundled clip set (`prompts/challenge.sh`),
-  outside the six-prompt pack contract, so it works with any pack.
+- The challenge speaks from a bundled clip set (`prompts/build.sh`, in the
+  same open voice as the lobby), outside the six-prompt pack contract, so it
+  works with any pack.
 - Wrong answers have their own rate limiter and never cost the PIN budget;
   a right answer never forgives a PIN failure. `MAX_PIN_ATTEMPTS` retries,
   a new question each time; silence is dismissed and charged nothing.

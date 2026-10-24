@@ -129,7 +129,8 @@ dismissal.
 - **The PIN path never meets it**, and neither do callers the ladder admits.
 - **The voice is the house's.** The clips are a bundled `challenge/` set
   outside the six-prompt pack contract, so they play whatever `prompts` says.
-  Build them with `prompts/challenge.sh`; see "A public line" in the runbook.
+  `prompts/build.sh` renders them with the rest of the bundled pack; see "A
+  public line" in the runbook.
 
 **What it is for, honestly.** It stops dialers that press nothing or press
 keys at random, and very young children. It is not age verification: an
