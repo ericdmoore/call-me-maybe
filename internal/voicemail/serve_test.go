@@ -2,8 +2,10 @@ package voicemail
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -110,6 +112,7 @@ func TestUnknownAndMalformedTokens(t *testing.T) {
 
 func TestOnlyTheHouseholdsOwnNetworksAreServed(t *testing.T) {
 	s, tok, _ := serveFixture(t)
+	s.local = func() ([]net.Addr, error) { return nil, nil } // a box with no global IPv6
 	opened := 0
 	s.open = func(p string) (*os.File, error) { opened++; return os.Open(p) }
 	allowed := []string{
@@ -138,6 +141,43 @@ func TestOnlyTheHouseholdsOwnNetworksAreServed(t *testing.T) {
 	}
 	if opened != 0 {
 		t.Errorf("a refused request touched the filesystem %d times", opened)
+	}
+}
+
+// A LAN with IPv6: the phone and the box both hold global addresses in the
+// same /64, and a .local name can resolve to the box's. The phone is the
+// household; a global address outside the box's own /64s is not.
+func TestAnIPv6LANIsTheHouseholdsOwnNetwork(t *testing.T) {
+	s, tok, _ := serveFixture(t)
+	mustNet := func(cidr string) net.Addr {
+		ip, n, err := net.ParseCIDR(cidr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n.IP = ip
+		return n
+	}
+	s.local = func() ([]net.Addr, error) {
+		return []net.Addr{
+			mustNet("127.0.0.1/8"), mustNet("::1/128"), mustNet("192.168.7.133/24"),
+			mustNet("fe80::1/64"), mustNet("100.69.157.72/32"),
+			mustNet("2a02:1234:5678:9a00::85/128"), // a DHCPv6 address: the /64 around it is the LAN
+			mustNet("2600:1700:abcd:ef01:1::1/64"), // SLAAC on a second segment
+		}, nil
+	}
+	for _, a := range []string{"[2a02:1234:5678:9a00:1c3e:77ff:fe01:2]:51000", "[2600:1700:abcd:ef01::42]:1", "[2a02:1234:5678:9a00::85]:1"} {
+		if w := get(s, "/v/"+tok, a, nil); w.Code != 200 {
+			t.Errorf("%s = %d, want 200", a, w.Code)
+		}
+	}
+	for _, a := range []string{"[2a02:1234:5678:9a01::1]:1", "[2600:1700:abcd:ef02::1]:1", "[2001:4860:4860::8888]:1", "8.8.8.8:1", "[ff02::1]:1"} {
+		if w := get(s, "/v/"+tok, a, nil); w.Code != 403 {
+			t.Errorf("%s = %d, want 403", a, w.Code)
+		}
+	}
+	s.local = func() ([]net.Addr, error) { return nil, errors.New("no interfaces") }
+	if w := get(s, "/v/"+tok, "[2a02:1234:5678:9a00::2]:1", nil); w.Code != 403 {
+		t.Errorf("with no interface list = %d, want 403", w.Code)
 	}
 }
 

@@ -1096,8 +1096,10 @@ so the link cannot be found by trying — but anybody who has the link and is
 on the home network or the tailnet can play the message, so treat a
 forwarded voicemail mail as a forwarded recording. As a second fence the
 listener refuses (403) any client that is not loopback, a private LAN
-range, link-local, IPv6 unique-local, or the tailnet (`100.64.0.0/10`,
-`fd7a:115c:a1e0::/48`), so a mistaken port forward exposes nothing; it
+range, link-local, IPv6 unique-local, the tailnet (`100.64.0.0/10`,
+`fd7a:115c:a1e0::/48`), or a global IPv6 address in the same /64 as one of
+the box's own (a LAN with IPv6, where a phone reaches `jepsen.local` over
+its global address), so a mistaken port forward exposes nothing; it
 never believes `X-Forwarded-For`. Never put it behind a public proxy —
 Tailscale Funnel included: a proxy on the box arrives from loopback, which
 the fence has to allow.

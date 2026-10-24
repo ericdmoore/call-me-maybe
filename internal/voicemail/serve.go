@@ -15,8 +15,9 @@ import (
 // audio/wav, or — to a browser asking for a page — a page with one <audio>
 // element. The link is only as private as the network it is reachable on,
 // so the server adds one fence of its own: a request from an address that
-// is not loopback, private, link-local or the tailnet is refused before
-// the path is even read, which turns a mistaken port forward into a 403
+// is not loopback, private, link-local, the tailnet or the box's own IPv6
+// LAN (see allowed) is refused before the path is even read, which turns
+// a mistaken port forward into a 403
 // rather than a public recording. X-Forwarded-For is never consulted —
 // nothing proxies this, and a header is the caller's to write.
 type Server struct {
@@ -25,6 +26,9 @@ type Server struct {
 	// open is os.Open; a test swaps it to prove a malformed token never
 	// reaches the filesystem.
 	open func(string) (*os.File, error)
+	// local lists the box's own interface addresses; nil is the real ones.
+	// A test swaps it for a LAN it can describe.
+	local func() ([]net.Addr, error)
 }
 
 // privateRanges are the networks a household's own devices arrive from.
@@ -61,6 +65,56 @@ func Private(remoteAddr string) bool {
 	return false
 }
 
+// allowed is Private, or a global IPv6 address on the box's own LAN: the
+// /64 one of its own interface addresses is in. A household with IPv6 has
+// no private range to name — the phone and the box both hold global
+// addresses, and a .local name can resolve to the box's — so the segment
+// is identified by the box's own address on it. Anything from beyond the
+// box's own segments is still refused.
+func (s *Server) allowed(remoteAddr string) bool {
+	if Private(remoteAddr) {
+		return true
+	}
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap().WithZone("")
+	if !addr.Is6() || !addr.IsGlobalUnicast() {
+		return false
+	}
+	local := s.local
+	if local == nil {
+		local = net.InterfaceAddrs
+	}
+	addrs, err := local()
+	if err != nil {
+		return false
+	}
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		own, ok := netip.AddrFromSlice(ipn.IP)
+		if !ok {
+			continue
+		}
+		own = own.Unmap()
+		if !own.Is6() || !own.IsGlobalUnicast() {
+			continue
+		}
+		if seg, err := own.Prefix(64); err == nil && seg.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) log() *slog.Logger {
 	if s.Log != nil {
 		return s.Log
@@ -73,7 +127,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Set("Cache-Control", "no-store")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-Content-Type-Options", "nosniff")
-	if !Private(r.RemoteAddr) {
+	if !s.allowed(r.RemoteAddr) {
 		s.log().Warn("voicemail link refused: request from outside the home network and tailnet")
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
