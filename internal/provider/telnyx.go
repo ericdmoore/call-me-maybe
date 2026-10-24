@@ -39,10 +39,12 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 )
@@ -116,14 +118,14 @@ func (t *telnyx) Balance(ctx context.Context) (Amount, error) {
 		Data *telnyxBalance `json:"data"`
 	}
 	if err := json.Unmarshal(body, &wrapped); err != nil {
-		return Amount{}, errTelnyxNotJSON(len(body))
+		return Amount{}, errTelnyxUnreadable(body, err)
 	}
 	b := wrapped.Data
 	if b == nil {
 		// The unwrapped shape the reference's example shows.
 		b = &telnyxBalance{}
 		if err := json.Unmarshal(body, b); err != nil {
-			return Amount{}, errTelnyxNotJSON(len(body))
+			return Amount{}, errTelnyxUnreadable(body, err)
 		}
 	}
 	raw := b.AvailableCredit
@@ -233,7 +235,7 @@ func telnyxList[T any](ctx context.Context, t *telnyx, path string) ([]T, error)
 		}
 		var p telnyxPage[T]
 		if err := json.Unmarshal(body, &p); err != nil {
-			return nil, errTelnyxNotJSON(len(body))
+			return nil, errTelnyxUnreadable(body, err)
 		}
 		all = append(all, p.Data...)
 
@@ -320,6 +322,64 @@ func explainTelnyxStatus(status int) string {
 		return "Telnyx's side failed; nothing here to fix, try again later"
 	default:
 		return "an answer this client does not know how to read"
+	}
+}
+
+// errTelnyxUnreadable says which of two different things went wrong when an
+// answer would not decode. A body that is not JSON at all came from something
+// between here and the API. A body that IS JSON but does not fit is the API
+// itself, answering in a shape other than the one this client was written
+// from — the likeliest first failure of a client nobody has run live — and
+// blaming an intermediary for it sends the operator looking for a proxy that
+// does not exist.
+//
+// The shape error names the field path and the JSON kind found there, both of
+// which come from this client's own types and the JSON grammar. Never the
+// value: encoding/json describes a misplaced number as "number <literal>", so
+// only the first word of that description is kept.
+func errTelnyxUnreadable(body []byte, err error) error {
+	if !json.Valid(body) {
+		return errTelnyxNotJSON(len(body))
+	}
+	where := ""
+	var typ *json.UnmarshalTypeError
+	if errors.As(err, &typ) {
+		kind := "value"
+		if f := strings.Fields(typ.Value); len(f) > 0 {
+			kind = f[0]
+		}
+		field := typ.Field
+		if field == "" {
+			field = "the top level"
+		}
+		where = fmt.Sprintf(" (%s is a JSON %s, and this client expects %s)", field, kind, jsonKindOf(typ.Type))
+	}
+	return fmt.Errorf("telnyx: the API answered JSON in a shape this client does not expect%s — "+
+		"the response shape has changed and this client needs updating", where)
+}
+
+// jsonKindOf names what a Go type decodes from, in the JSON grammar's words,
+// so the shape error reads in terms of the answer rather than of this code.
+func jsonKindOf(t reflect.Type) string {
+	if t == nil {
+		return "something else"
+	}
+	switch t.Kind() {
+	case reflect.Slice, reflect.Array:
+		return "an array"
+	case reflect.Struct, reflect.Map:
+		return "an object"
+	case reflect.Bool:
+		return "a boolean"
+	case reflect.String:
+		if t.Name() == "Number" {
+			return "a number"
+		}
+		return "a string"
+	case reflect.Pointer:
+		return jsonKindOf(t.Elem())
+	default:
+		return "a number"
 	}
 }
 

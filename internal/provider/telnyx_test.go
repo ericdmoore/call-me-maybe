@@ -285,6 +285,38 @@ func TestTelnyxRefusesAnAnswerThatIsNotJSON(t *testing.T) {
 	}
 }
 
+// JSON that does not fit is the API answering in a shape this client was not
+// written for — not a proxy — and the error says which field, never its value.
+func TestTelnyxNamesAShapeDriftInsteadOfBlamingAProxy(t *testing.T) {
+	for name, tc := range map[string]struct{ body, says string }{
+		"page count as a string": {`{"data":[],"meta":{"page_number":1,"total_pages":"3"}}`,
+			"meta.total_pages is a JSON string, and this client expects a number"},
+		"connection id a number": {`{"data":[{"id":"1","phone_number":"+15125550142","status":"active","connection_id":99017,"connection_name":"house"}],"meta":{"total_pages":1}}`,
+			"data.connection_id is a JSON number, and this client expects a string"},
+		"data an object": {`{"data":{"phone_number":"+15125550142"}}`,
+			"data is a JSON object, and this client expects an array"},
+	} {
+		tx := telnyxServer(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(tc.body))
+		})
+		_, err := tx.Numbers(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "shape this client does not expect") ||
+			!strings.Contains(err.Error(), tc.says) || strings.Contains(err.Error(), "not JSON") {
+			t.Errorf("%s: want a shape error saying %q, got %v", name, tc.says, err)
+			continue
+		}
+		if strings.Contains(err.Error(), "99017") || strings.Contains(err.Error(), "+1512") {
+			t.Errorf("%s: a value from the body reached the error: %v", name, err)
+		}
+	}
+	tx := telnyxServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"balance":true,"currency":"USD"}}`))
+	})
+	if _, err := tx.Balance(context.Background()); err == nil || !strings.Contains(err.Error(), "shape") {
+		t.Errorf("Balance: want a shape error, got %v", err)
+	}
+}
+
 // A failure on the second listing fails the whole answer: numbers without
 // their connections' usernames would read as "cannot tell" across the board.
 func TestTelnyxFailsWholeWhenTheConnectionsCannotBeRead(t *testing.T) {
