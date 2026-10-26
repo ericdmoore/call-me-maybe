@@ -206,6 +206,11 @@ func Prepare(ctx context.Context, source, root string) error {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return err
 	}
+	unlock, err := lockLibrary(root)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	for i := range c.Books {
 		b := &c.Books[i]
 		stage, err := os.MkdirTemp(root, ".prepare-")

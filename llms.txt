@@ -33,6 +33,10 @@ doorman sync run          # observed files → SQLite echo → hosted snapshots;
 doorman sync inventory    # read-only local library measurement; --content sets
                           # the root (default <state>/content/library). The normal
                           # sync loop reports it every 30s; no media is uploaded
+doorman sync media list   # --source explicit trusted HTTPS sandbox origin; never prints signed URLs
+                          # sync media once downloads/installs bounded previews and reports receipts
+                          # manual opt-in lane; does not enable background delivery or restart calls
+doorman books install-preview # --archive local.cmmpack; free local preview import, at most 2 minutes
 doorman books prepare     # --source catalog.json imports existing local recordings
 doorman books prompts     # --library directory: offline macOS say menu pages; --voice Samantha
                           # for *2665 (*BOOK); offline ffmpeg/espeak-ng preparation

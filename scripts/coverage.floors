@@ -15,6 +15,7 @@ callmemaybe/internal/events              81
 callmemaybe/internal/inbox               70
 callmemaybe/internal/lobby               88
 callmemaybe/internal/lsp                 46
+callmemaybe/internal/mediadelivery        78
 callmemaybe/internal/notify              87
 callmemaybe/internal/observation         100
 callmemaybe/internal/pack                90

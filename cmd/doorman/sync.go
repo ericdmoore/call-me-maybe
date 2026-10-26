@@ -19,8 +19,10 @@ import (
 	"callmemaybe/internal/accountbook"
 	"callmemaybe/internal/activation"
 	"callmemaybe/internal/bell"
+	"callmemaybe/internal/books"
 	"callmemaybe/internal/config"
 	"callmemaybe/internal/contentinventory"
+	"callmemaybe/internal/mediadelivery"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/syncmachine"
 	"callmemaybe/internal/syncwire"
@@ -29,6 +31,9 @@ import (
 )
 
 func runSync(args []string) int {
+	if len(args) > 0 && args[0] == "media" {
+		return runSyncMedia(args[1:])
+	}
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: doorman sync run|once|snapshot|inventory [--state directory] [--content directory]")
 		return 2
@@ -337,4 +342,54 @@ const syncRemovedMessage = "sync: this box was removed from its account; hosted 
 func syncRemoved() int {
 	fmt.Fprintln(os.Stderr, syncRemovedMessage)
 	return syncExitRemoved
+}
+
+// Separate, explicit command: ordinary configuration sync cannot start a media
+// conversion, and no response can opt a box into a different credential origin.
+func runSyncMedia(args []string) int {
+	if len(args) == 0 || (args[0] != "list" && args[0] != "once") {
+		fmt.Fprintln(os.Stderr, "usage: doorman sync media list|once --source https://trusted-sandbox-origin [--state directory] [--library directory]")
+		return 2
+	}
+	fs := flag.NewFlagSet("sync media "+args[0], flag.ContinueOnError)
+	origin := fs.String("source", "", "operator-approved sandbox HTTPS origin (receives the sync credential)")
+	state := fs.String("state", "/var/lib/doorman", "private account state directory")
+	library := fs.String("library", books.DefaultLibrary, "prepared local playback library")
+	menuBundle := fs.String("menu-bundle", "", "prepared menu bundle matching the next preview catalog")
+	if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
+		return 2
+	}
+	source, err := account.New(*state).SandboxMedia(*origin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "sync media: an explicit trusted HTTPS source is required")
+		return 2
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	if args[0] == "list" {
+		offers, err := source.List(ctx)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		if json.NewEncoder(os.Stdout).Encode(offers) != nil {
+			return 1
+		}
+		return 0
+	}
+	var installErr error
+	err = mediadelivery.Receive(ctx, source, filepath.Join(*state, "media-preview"), func(ctx context.Context, data []byte, hash string) error {
+		installErr = books.ImportPreviewWithMenus(ctx, data, hash, *library, *menuBundle)
+		return installErr
+	})
+	if err != nil {
+		if errors.Is(installErr, books.ErrMenuRefresh) {
+			fmt.Fprintln(os.Stderr, books.ErrMenuRefresh)
+		} else {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		return 1
+	}
+	fmt.Fprintln(os.Stdout, "Sandbox preview pass complete; installation receipts reflect local playback readiness, not a handset listening test.")
+	return 0
 }
