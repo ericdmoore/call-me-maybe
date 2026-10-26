@@ -156,6 +156,7 @@ const DefaultTimeout = 3 * time.Second
 type Target struct {
 	URL, Token       string
 	SendFullCallerID bool
+	NoRedirect       bool
 }
 type delivery struct {
 	event  Event
@@ -251,7 +252,7 @@ func Open(o Options) (*Webhook, error) {
 		token:   o.Token,
 		full:    o.SendFullCallerID,
 		timeout: o.Timeout,
-		client:  &http.Client{Timeout: o.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		client:  &http.Client{Timeout: o.Timeout},
 		log:     o.Log,
 	}
 	go w.run()
@@ -264,7 +265,7 @@ func (w *Webhook) Post(e Event) {
 	if w == nil {
 		return
 	}
-	target := Target{w.url, w.token, w.full}
+	target := Target{URL: w.url, Token: w.token, SendFullCallerID: w.full}
 	if w.resolve != nil {
 		target = w.resolve()
 	}
@@ -370,7 +371,13 @@ func (w *Webhook) send(e Event, target Target) {
 		req.Header.Set("Authorization", "Bearer "+target.Token)
 	}
 
-	resp, err := w.client.Do(req)
+	client := w.client
+	if target.NoRedirect {
+		copy := *client
+		copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		client = &copy
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		w.failed.Add(1)
 		u, _ := url.Parse(target.URL)

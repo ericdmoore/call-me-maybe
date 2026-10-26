@@ -1725,7 +1725,7 @@ func serve() error {
 			Resolve: func() notify.Target {
 				held := webhooks.Current()
 				if held.Managed {
-					return notify.Target{URL: held.Config.URL()}
+					return notify.Target{URL: held.Config.URL(), NoRedirect: true}
 				}
 				if cfg.WebhookMode == "legacy" {
 					return notify.Target{URL: cfg.WebhookURL, Token: cfg.WebhookToken, SendFullCallerID: !cfg.WebhookRedactCallerID}

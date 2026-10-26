@@ -31,7 +31,7 @@ func TestManagedReloadPostsFixedJSONWithoutLegacyCredentials(t *testing.T) {
 	hook, err := notify.Open(notify.Options{Token: "test-legacy-token", SendFullCallerID: true, Resolve: func() notify.Target {
 		current := store.Current()
 		if current.Managed {
-			return notify.Target{URL: current.Config.URL()}
+			return notify.Target{URL: current.Config.URL(), NoRedirect: true}
 		}
 		return notify.Target{}
 	}})
@@ -58,5 +58,25 @@ func TestManagedReloadPostsFixedJSONWithoutLegacyCredentials(t *testing.T) {
 		if r.Path != prefix+webhookconfig.Suffix || r.Auth != "" || r.Content != "application/json" || r.Payload.Type != "completed" || r.Payload.Caller == "+15125550100" {
 			t.Fatalf("incorrect delivery: %#v", r)
 		}
+	}
+}
+
+func TestManagedRedirectIsRefusedWhileLegacyStillFollows(t *testing.T) {
+	target := newReceiver(t)
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer redirect.Close()
+	managed := open(t, notify.Options{Resolve: func() notify.Target { return notify.Target{URL: redirect.URL, NoRedirect: true} }})
+	managed.Post(notify.Event{Type: "ringing"})
+	_ = managed.Close()
+	if len(target.got()) != 0 || managed.Failed() != 1 {
+		t.Fatal("managed endpoint followed redirect")
+	}
+	legacy := open(t, notify.Options{URL: redirect.URL})
+	legacy.Post(notify.Event{Type: "ringing"})
+	_ = legacy.Close()
+	if len(target.got()) != 1 || legacy.Failed() != 0 {
+		t.Fatal("legacy redirect behavior changed")
 	}
 }
