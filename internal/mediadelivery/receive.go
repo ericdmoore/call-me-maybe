@@ -33,6 +33,21 @@ type Install func(context.Context, []byte, string) error
 
 var ErrJournal = errors.New("media: cannot safely reconcile delivery receipt")
 
+// JournalError identifies the failed operation without printing private paths
+// or untrusted file contents. Callers can inspect the cause with errors.Is/As.
+// Every JournalError still matches ErrJournal for existing retry handling.
+type JournalError struct {
+	Operation string
+	cause     error
+}
+
+func (e *JournalError) Error() string                    { return "media: receipt journal " + e.Operation + " failed" }
+func (e *JournalError) Unwrap() error                    { return e.cause }
+func (e *JournalError) Is(target error) bool             { return target == ErrJournal }
+func journalFailure(operation string, cause error) error { return &JournalError{operation, cause} }
+
+const MaxPreviewBytes = 1 << 20
+
 type pending struct {
 	Sequence int64  `json:"sequence"`
 	State    string `json:"state"`
@@ -45,19 +60,22 @@ type pending struct {
 // The installer must be atomic and idempotent for the exact archive hash.
 func Receive(ctx context.Context, source Source, dir string, install Install) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return ErrJournal
+		return journalFailure("create-directory", err)
 	}
 	info, err := os.Lstat(dir)
-	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
-		return ErrJournal
+	if err != nil {
+		return journalFailure("stat-directory", err)
+	}
+	if !info.IsDir() || info.Mode().Perm()&0077 != 0 {
+		return journalFailure("validate-directory", nil)
 	}
 	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
 	if err != nil {
-		return ErrJournal
+		return journalFailure("open-lock", err)
 	}
 	defer lock.Close()
-	if syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
-		return ErrJournal
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return journalFailure("lock", err)
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	offers, err := source.List(ctx)
@@ -67,17 +85,17 @@ func Receive(ctx context.Context, source Source, dir string, install Install) er
 	for _, p := range offers {
 		// Delivery IDs are opaque, path-free base64url values validated by account.
 		if len(p.Delivery) != 43 || filepath.Base(p.Delivery) != p.Delivery || p.Delivery == "." {
-			return ErrJournal
+			return journalFailure("validate-offer", nil)
 		}
 		file := filepath.Join(dir, p.Delivery+".json")
 		var old pending
 		data, readErr := os.ReadFile(file)
 		if readErr == nil {
 			if len(data) > 2048 || json.Unmarshal(data, &old) != nil || old.SHA256 != p.SHA256 || old.Sequence < 1 || old.Sequence > 1_000_000_000 {
-				return ErrJournal
+				return journalFailure("decode-receipt", nil)
 			}
 			if p.Sequence > old.Sequence || (p.Sequence == old.Sequence && p.State != old.State) {
-				return ErrJournal
+				return journalFailure("reconcile-receipt", nil)
 			}
 			if p.Sequence < old.Sequence {
 				if err := source.Receipt(ctx, p, old.Sequence, old.State, old.Code); err != nil {
@@ -87,10 +105,10 @@ func Receive(ctx context.Context, source Source, dir string, install Install) er
 				p.State = old.State
 			}
 			if err := os.Remove(file); err != nil {
-				return ErrJournal
+				return journalFailure("remove-receipt", err)
 			}
 		} else if !os.IsNotExist(readErr) {
-			return ErrJournal
+			return journalFailure("read-receipt", readErr)
 		}
 		if p.State == "installed" {
 			continue
@@ -105,8 +123,8 @@ func Receive(ctx context.Context, source Source, dir string, install Install) er
 			}
 			p.Sequence = next.Sequence
 			p.State = state
-			if os.Remove(file) != nil {
-				return ErrJournal
+			if err := os.Remove(file); err != nil {
+				return journalFailure("remove-receipt", err)
 			}
 			return nil
 		}
@@ -123,6 +141,14 @@ func Receive(ctx context.Context, source Source, dir string, install Install) er
 				return receiptErr
 			}
 			return err
+		}
+		// The transport already bounds the stream. Check the Source contract
+		// here as well so alternate sources cannot pass bad bytes to install.
+		if p.Bytes <= 0 || p.Bytes > MaxPreviewBytes || int64(len(archive)) != p.Bytes {
+			if err := report("failed", "checksum"); err != nil {
+				return err
+			}
+			return ErrChecksum
 		}
 		if err := report("downloaded", ""); err != nil {
 			return err
@@ -145,11 +171,11 @@ func Receive(ctx context.Context, source Source, dir string, install Install) er
 func save(file string, p pending) error {
 	data, err := json.Marshal(p)
 	if err != nil {
-		return ErrJournal
+		return journalFailure("encode-receipt", err)
 	}
 	f, err := os.CreateTemp(filepath.Dir(file), ".receipt-")
 	if err != nil {
-		return ErrJournal
+		return journalFailure("create-receipt", err)
 	}
 	defer os.Remove(f.Name())
 	if err = f.Chmod(0600); err == nil {
@@ -159,19 +185,22 @@ func save(file string, p pending) error {
 		err = f.Sync()
 	}
 	closeErr := f.Close()
-	if err != nil || closeErr != nil {
-		return ErrJournal
+	if err != nil {
+		return journalFailure("write-receipt", err)
 	}
-	if os.Rename(f.Name(), file) != nil {
-		return ErrJournal
+	if closeErr != nil {
+		return journalFailure("close-receipt", closeErr)
+	}
+	if err := os.Rename(f.Name(), file); err != nil {
+		return journalFailure("publish-receipt", err)
 	}
 	d, err := os.Open(filepath.Dir(file))
 	if err != nil {
-		return ErrJournal
+		return journalFailure("open-directory", err)
 	}
 	defer d.Close()
-	if d.Sync() != nil {
-		return ErrJournal
+	if err := d.Sync(); err != nil {
+		return journalFailure("sync-directory", err)
 	}
 	return nil
 }

@@ -17,7 +17,7 @@ import (
 )
 
 const mediaPath = "/v1/store/sandbox/packs"
-const MaxPreviewBytes = 1 << 20
+const MaxPreviewBytes = mediadelivery.MaxPreviewBytes
 
 var mediaID = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 var mediaHash = regexp.MustCompile(`^[a-f0-9]{64}$`)

@@ -86,6 +86,7 @@ install_ffmpeg() {
 # Let APT solve the whole local package set before changing the runner. Direct
 # dpkg -i can partially install packages from another image and leave apt broken.
 install_cached_espeak() {
+	local debs=${1:?cached package directory required}
 	compgen -G "$debs/*.deb" >/dev/null || return 1
 	timeout 120 "${apt[@]}" install -y -qq --no-install-recommends \
 		--no-download --no-remove "$debs"/*.deb >/dev/null
@@ -97,7 +98,7 @@ install_espeak() {
 		return
 	fi
 	local debs=$dir/espeak-debs
-	if install_cached_espeak; then
+	if install_cached_espeak "$debs"; then
 		echo "espeak-ng from cached packages"
 		return
 	fi
@@ -106,7 +107,7 @@ install_espeak() {
 	rm -rf "$debs" && mkdir -p "$debs/partial"
 	if apt_bounded "${apt[@]}" install -y --no-install-recommends --download-only \
 		-o Dir::Cache::archives="$debs" espeak-ng &&
-		install_cached_espeak; then
+		install_cached_espeak "$debs"; then
 		sudo chown -R "$(id -u):$(id -g)" "$debs"
 		rm -rf "$debs/partial" "$debs/lock"
 		echo "espeak-ng from apt (packages cached)"

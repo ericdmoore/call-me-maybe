@@ -3,10 +3,12 @@ package mediadelivery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -16,16 +18,22 @@ type fakeSource struct {
 	failState   string
 	reject      bool
 	downloadErr error
+	payload     []byte
+	codes       []string
 }
 
 func (s *fakeSource) List(context.Context) ([]Offer, error) {
 	return []Offer{s.offer}, nil
 }
 func (s *fakeSource) Download(context.Context, Offer) ([]byte, error) {
+	if s.payload != nil {
+		return s.payload, s.downloadErr
+	}
 	return []byte("archive"), s.downloadErr
 }
 func (s *fakeSource) Receipt(_ context.Context, p Offer, seq int64, state, code string) error {
 	s.events = append(s.events, state)
+	s.codes = append(s.codes, code)
 	if s.failState == state {
 		s.failState = ""
 		return errors.New("network")
@@ -41,7 +49,7 @@ func (s *fakeSource) Receipt(_ context.Context, p Offer, seq int64, state, code 
 	return nil
 }
 func fake() *fakeSource {
-	return &fakeSource{offer: Offer{Delivery: strings.Repeat("a", 43), SHA256: strings.Repeat("b", 64), State: "offered"}}
+	return &fakeSource{offer: Offer{Delivery: strings.Repeat("a", 43), SHA256: strings.Repeat("b", 64), State: "offered", Bytes: 7}}
 }
 func TestReceiveInstallationAndReplay(t *testing.T) {
 	source := fake()
@@ -107,19 +115,22 @@ func TestReceiveNeverReportsInstalledAfterFailure(t *testing.T) {
 func TestReceiveRefusesReceiptConflictAndCorruptJournal(t *testing.T) {
 	source := fake()
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	file := filepath.Join(dir, source.offer.Delivery+".json")
 	if err := save(file, pending{1, "downloaded", "", source.offer.SHA256}); err != nil {
 		t.Fatal(err)
 	}
 	source.offer.Sequence = 1
 	source.offer.State = "failed"
-	if Receive(t.Context(), source, dir, nil) != ErrJournal {
+	if !errors.Is(Receive(t.Context(), source, dir, nil), ErrJournal) {
 		t.Fatal("overwrote a conflicting transition")
 	}
 	if err := os.WriteFile(file, []byte("broken"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if Receive(t.Context(), source, dir, nil) != ErrJournal {
+	if !errors.Is(Receive(t.Context(), source, dir, nil), ErrJournal) {
 		t.Fatal("ignored broken journal")
 	}
 	source.offer.Sequence = 0
@@ -129,4 +140,77 @@ func TestReceiveRefusesReceiptConflictAndCorruptJournal(t *testing.T) {
 	if Receive(t.Context(), source, dir, nil) == nil {
 		t.Fatal("installed after refusal")
 	}
+}
+
+func TestReceiveRejectsSourceSizeMismatchBeforeInstallation(t *testing.T) {
+	for _, size := range []int{0, 6, 8, MaxPreviewBytes + 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			source := fake()
+			source.payload = make([]byte, size)
+			installed := false
+			err := Receive(t.Context(), source, filepath.Join(t.TempDir(), "journal"), func(context.Context, []byte, string) error { installed = true; return nil })
+			if !errors.Is(err, ErrChecksum) || installed {
+				t.Fatal("bad source bytes reached installer", err)
+			}
+			if !reflect.DeepEqual(source.events, []string{"downloading", "failed"}) || source.codes[1] != "checksum" {
+				t.Fatal("invalid failure receipt", source.events, source.codes)
+			}
+		})
+	}
+}
+func TestJournalErrorsDistinguishStorageLockAndInvalidDataWithoutPaths(t *testing.T) {
+	assert := func(err error, operation string) {
+		t.Helper()
+		var failure *JournalError
+		if !errors.Is(err, ErrJournal) || !errors.As(err, &failure) || failure.Operation != operation {
+			t.Fatalf("wrong diagnostic: %v", err)
+		}
+		if strings.Contains(err.Error(), "private-marker") {
+			t.Fatal("journal diagnostic leaked a private path")
+		}
+	}
+	// A real filesystem failure retains its underlying error for operator code.
+	root := t.TempDir()
+	file := filepath.Join(root, "private-marker")
+	if err := os.WriteFile(file, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := Receive(t.Context(), fake(), filepath.Join(file, "journal"), nil)
+	assert(err, "create-directory")
+	var pathError *os.PathError
+	if !errors.As(err, &pathError) {
+		t.Fatal("storage cause was lost")
+	}
+	// A concurrently held lock is a different failure, with an inspectable errno.
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	err = Receive(t.Context(), fake(), dir, nil)
+	assert(err, "lock")
+	if !errors.Is(err, syscall.EWOULDBLOCK) {
+		t.Fatal("lock cause was lost")
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	source := fake()
+	if err := os.WriteFile(filepath.Join(dir, source.offer.Delivery+".json"), []byte("private-marker"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	assert(Receive(t.Context(), source, dir, nil), "decode-receipt")
+	if err := save(filepath.Join(dir, source.offer.Delivery+".json"), pending{1, "downloaded", "", source.offer.SHA256}); err != nil {
+		t.Fatal(err)
+	}
+	source.offer.Sequence = 1
+	source.offer.State = "failed"
+	assert(Receive(t.Context(), source, dir, nil), "reconcile-receipt")
 }
