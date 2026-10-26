@@ -184,3 +184,19 @@ Session finish and handoff do not imply call termination. See [events](docs/even
 - Tests use stdlib `testing`, colocated with the code.
 
 `doorman login` enrolls this device through a passkey-approved browser code. Run it as the backup service user so `--state` points to the same private account directory. The enrolment request suggests a box name for the account to show: `BOX_NAME` from the environment or `--env` (default `/opt/call-me-maybe/.env`), otherwise the hostname, never `localhost`, at most 64 characters; `doorman sync run` offers the same name once in a status report (until accepted, recorded in the sync state directory) for boxes enrolled before that. After that the household renames it on the account; it is never logged. `doorman account status` reports enrollment without revealing credentials; `account rotate --capability backup|sync` durably stages a replacement before first use. Account credentials and the transport key never enter backups or the daemon call path. Upload credentials remain write-only. Cloud restore requires separate passkey-approved `recovery authorize` access and the eight-group **Backup decryption phrase**, followed by saving and confirming a replacement sheet. Restore writes only a new inactive inspection root; it never activates services or retires the source. The two-group **Account sign-in codes** work in the browser and cannot decrypt backups. See `docs/CLOUD-BACKUP-PROTOCOL.md`.
+
+Managed event webhooks use optional `webhook.toml` beside `policy.toml` (see
+`doorman schema webhook`). Set `domain` to an HTTP(S) origin and `path_prefix`
+to an optional path. The daemon sends ringing and completed event payloads as
+JSON POSTs to `<domain><path_prefix>/cc.dialdoorman/events`, without an event
+type suffix. Caller numbers are redacted and environment bearer tokens are
+not forwarded. Missing file preserves the legacy environment setting; an
+empty domain and prefix explicitly disable managed delivery. This does not
+change the separate event-journal doorbell.
+
+Treat the file and its `.last-good` copy as private (0600). Reload occurs
+within a second; invalid edits retain the last good endpoint across restart.
+`doorman check` validates it. Hosted changes arrive encrypted to the enrolled
+transport key, through the revision-checked sync queue. Snapshots expose only
+domain/configured state; private prefix edits still advance the revision.
+An applied receipt requires the running daemon's exact accepted file digest.

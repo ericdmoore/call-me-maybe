@@ -26,6 +26,7 @@ import (
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/syncmachine"
 	"callmemaybe/internal/syncwire"
+	"callmemaybe/internal/webhookconfig"
 
 	"github.com/gorilla/websocket"
 )
@@ -83,6 +84,7 @@ func runSync(args []string) int {
 		}
 	}
 	paths := syncmachine.Paths{Policy: policyPathArg(*p), Handsets: handsetsPathArg(*h), Trunks: trunksPathArg(*tr), Contacts: contactsPathArg(*contacts), CountryCode: defaultCountryCode(), Phonebooks: *phonebooks}
+	paths.Webhook = filepath.Join(filepath.Dir(paths.Policy), "webhook.toml")
 	dir := filepath.Join(*state, "sync")
 	m, err := syncmachine.Open(dir, status.Box, paths)
 	if err != nil {
@@ -92,8 +94,11 @@ func runSync(args []string) int {
 	defer m.Close()
 	stats := &syncmachine.Stats{}
 	inventory := &contentinventory.Scanner{Path: *content}
+	m.OpenWebhook = client.OpenWebhook
 	m.SampleStatus = func() syncwire.Status {
 		sample := stats.Sample(*state, version)
+		caps := []string{webhookconfig.Capability}
+		sample.Capabilities = &caps
 		sample.ContentInventory = inventory.Sample()
 		return sample
 	}
@@ -184,6 +189,12 @@ func activationApplied(dir string) func(syncmachine.Paths, map[string][]byte) bo
 		// the bytes on disk ("" for none on either side).
 		if paths.Phonebooks != "" {
 			if current[passActivationKey] != passBookHash(filepath.Join(paths.Phonebooks, accountbook.Dir), files) {
+				return false
+			}
+		}
+		if paths.Webhook != "" {
+			hash, ok := current[webhookconfig.ActivationKey]
+			if !ok || hash != webhookconfig.Hash(files[paths.Webhook]) {
 				return false
 			}
 		}

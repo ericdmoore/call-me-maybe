@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"callmemaybe/internal/syncwire"
+	"callmemaybe/internal/webhookconfig"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -25,6 +26,8 @@ type Machine struct {
 	lock  *os.File
 	paths Paths
 	now   func() time.Time
+	// OpenWebhook is injected by the command; internal packages never import account.
+	OpenWebhook func(string, syncwire.QueueItem) (webhookconfig.Config, error)
 	// Applied must prove that the daemon accepted this exact file revision.
 	// nil keeps an honest saved receipt until a later run can confirm it.
 	Applied      func(Paths, map[string][]byte) bool
@@ -101,6 +104,7 @@ func Open(dir, box string, paths Paths) (*Machine, error) {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS echo (singleton INTEGER PRIMARY KEY CHECK(singleton=1), box TEXT NOT NULL, generation TEXT NOT NULL, revision INTEGER NOT NULL, configuration TEXT NOT NULL, observed_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, body TEXT NOT NULL, receipt TEXT, target_path TEXT, before_hash TEXT, after_hash TEXT);
 CREATE TABLE IF NOT EXISTS revisions (revision INTEGER PRIMARY KEY, box_digest TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS webhook_echo (singleton INTEGER PRIMARY KEY CHECK(singleton=1), digest TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS box_name (box TEXT PRIMARY KEY, accepted_at INTEGER NOT NULL);
 `)
 	// writes is the intent of a command that changes several files: a JSON
@@ -158,14 +162,25 @@ func (m *Machine) record(o *observed) (syncwire.Snapshot, error) {
 	if err != nil {
 		return syncwire.Snapshot{}, ErrState
 	}
-	_, err = m.db.Exec("UPDATE echo SET revision=revision+1,configuration=?,observed_at=? WHERE singleton=1 AND configuration!=? AND revision<9223372036854775807", string(body), m.now().UnixMilli(), string(body))
+	tx, err := m.db.Begin()
+	if err != nil {
+		return syncwire.Snapshot{}, ErrState
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec("UPDATE echo SET revision=revision+1,configuration=?,observed_at=? WHERE singleton=1 AND (configuration!=? OR COALESCE((SELECT digest FROM webhook_echo WHERE singleton=1),'')!=?) AND revision<9223372036854775807", string(body), m.now().UnixMilli(), string(body), o.webhookDigest)
 	if err == nil {
-		_, err = m.db.Exec("INSERT OR IGNORE INTO revisions SELECT revision,? FROM echo WHERE singleton=1", o.boxDigest)
+		_, err = tx.Exec("INSERT INTO webhook_echo VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET digest=excluded.digest", o.webhookDigest)
 	}
 	if err == nil {
-		_, err = m.db.Exec("DELETE FROM revisions WHERE revision < (SELECT revision FROM echo WHERE singleton=1) - ?", keptRevisions)
+		_, err = tx.Exec("INSERT OR IGNORE INTO revisions SELECT revision,? FROM echo WHERE singleton=1", o.boxDigest)
+	}
+	if err == nil {
+		_, err = tx.Exec("DELETE FROM revisions WHERE revision < (SELECT revision FROM echo WHERE singleton=1) - ?", keptRevisions)
 	}
 	if err != nil {
+		return syncwire.Snapshot{}, ErrState
+	}
+	if tx.Commit() != nil {
 		return syncwire.Snapshot{}, ErrState
 	}
 	return m.snapshot()

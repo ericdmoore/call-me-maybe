@@ -552,6 +552,21 @@ func (e Verb8Name) Valid() bool {
 	}
 }
 
+// Defines values for Verb9Name.
+const (
+	WebhookSet Verb9Name = "webhook.set"
+)
+
+// Valid indicates whether the value is a known member of the Verb9Name enum.
+func (e Verb9Name) Valid() bool {
+	switch e {
+	case WebhookSet:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SyncBellParamsUpgrade.
 const (
 	Websocket SyncBellParamsUpgrade = "websocket"
@@ -619,6 +634,7 @@ type Configuration struct {
 	Phonebooks []Phonebook        `json:"phonebooks"`
 	Policies   []Policy           `json:"policies"`
 	Validation *ValidationContext `json:"validation,omitempty"`
+	Webhook    *WebhookState      `json:"webhook,omitempty"`
 }
 
 // Contact defines model for Contact.
@@ -915,7 +931,8 @@ type SnapshotResultStatus string
 // Status defines model for Status.
 type Status struct {
 	// BoxName The name the box suggests for itself: BOX_NAME, otherwise its hostname. Sent until one status report carrying it has been accepted for the box's current enrolment, then omitted, so a box enrolled before enrolment carried a name still supplies one. A suggestion only: the name the household sets on the account wins.
-	BoxName *string `json:"boxName,omitempty"`
+	BoxName      *string   `json:"boxName,omitempty"`
+	Capabilities *[]string `json:"capabilities,omitempty"`
 
 	// ConfigRejection Present while the newest configuration on the box's disk is rejected by its validator; the box keeps its last good revision. Omitted once a valid configuration is accepted.
 	ConfigRejection  *ConfigRejection  `json:"configRejection,omitempty"`
@@ -1068,10 +1085,33 @@ type Verb8 struct {
 // Verb8Name defines model for Verb.8.Name.
 type Verb8Name string
 
+// Verb9 defines model for Verb.9.
+type Verb9 struct {
+	Domain   string          `json:"domain"`
+	Envelope WebhookEnvelope `json:"envelope"`
+	Name     Verb9Name       `json:"name"`
+}
+
+// Verb9Name defines model for Verb.9.Name.
+type Verb9Name string
+
 // Version defines model for Version.
 type Version struct {
 	Generation string `json:"generation"`
 	Revision   string `json:"revision"`
+}
+
+// WebhookEnvelope defines model for WebhookEnvelope.
+type WebhookEnvelope struct {
+	Ciphertext   string `json:"ciphertext"`
+	EphemeralKey string `json:"ephemeralKey"`
+	Nonce        string `json:"nonce"`
+}
+
+// WebhookState defines model for WebhookState.
+type WebhookState struct {
+	Configured bool   `json:"configured"`
+	Domain     string `json:"domain"`
 }
 
 // SyncBellParams defines parameters for SyncBell.
@@ -1315,6 +1355,32 @@ func (t *Verb) FromVerb8(v Verb8) error {
 
 // MergeVerb8 performs a merge with any union data inside the Verb, using the provided Verb8
 func (t *Verb) MergeVerb8(v Verb8) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsVerb9 returns the union data inside the Verb as a Verb9
+func (t Verb) AsVerb9() (Verb9, error) {
+	var body Verb9
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromVerb9 overwrites any union data inside the Verb as the provided Verb9
+func (t *Verb) FromVerb9(v Verb9) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeVerb9 performs a merge with any union data inside the Verb, using the provided Verb9
+func (t *Verb) MergeVerb9(v Verb9) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
