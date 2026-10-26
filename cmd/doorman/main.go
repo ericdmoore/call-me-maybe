@@ -176,6 +176,10 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -fetch                    fetch contacts.toml url sources now; otherwise report what the daemon last cached
       -messages path            texts the house answers, optional (default $MESSAGES_PATH or ./messages.toml)
       -env path                 secrets file, for the tokens url sources name (with -fetch; default ./.env)
+  doorman sync media list|once --source <https-origin>
+                              opt-in sandbox preview delivery, separate from config sync
+  doorman books install-preview --archive <file>
+                              verify and install a bounded local preview, no account required
   doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
                                 "build" renders audio through piper, ElevenLabs,
                                 OpenAI or Polly, "voices" lists what a backend

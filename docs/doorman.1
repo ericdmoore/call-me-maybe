@@ -805,6 +805,24 @@ Print the version. A release binary reports its git tag.
 .TP
 .B doorman help
 Print a usage summary.
+.SH SANDBOX PREVIEW MEDIA
+.B doorman sync media list|once --source https://trusted-sandbox-origin
+runs the explicit, command-side preview lane. The approved origin receives the
+box's sync credential; redirects and cross-origin download addresses
+are refused.
+It is separate from configuration sync and never runs on call admission.
+.B list
+shows offers without signed URLs.
+.B once
+verifies and installs bounded previews into the local Books library,
+with durable
+installation receipts. Options are --state and --library. No timer is installed.
+.PP
+.B doorman books install-preview --archive local.cmmpack
+uses the same free local importer without an account. Previews are limited to
+1 MiB archives and two minutes. Full books require compressed playback support;
+this importer deliberately refuses them. An installed receipt is not proof of
+handset playback. See docs/media-preview.md for limits and recovery semantics.
 .SH FILES
 .TP
 .I policy.toml
