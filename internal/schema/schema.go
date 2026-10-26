@@ -82,7 +82,7 @@ var (
 )
 
 // Names are the selectable schema names for `doorman schema <name>`.
-var Names = []string{"policy", "handsets", "trunks", "contacts", "messages", "env", "template"}
+var Names = []string{"policy", "handsets", "trunks", "contacts", "messages", "webhook", "env", "template"}
 
 // Get returns one schema by name.
 func Get(name string) (*Schema, error) {
@@ -97,6 +97,8 @@ func Get(name string) (*Schema, error) {
 		return Contacts(), nil
 	case "messages":
 		return Messages(), nil
+	case "webhook":
+		return Webhook(), nil
 	case "env":
 		return Env(), nil
 	case "template":
@@ -119,6 +121,7 @@ func All(version string) *Bundle {
 			"trunks.toml":   Trunks(),
 			"contacts.toml": Contacts(),
 			"messages.toml": Messages(),
+			"webhook.toml":  Webhook(),
 			"env":           Env(),
 			"template":      TemplateFormat(),
 		},
@@ -1082,4 +1085,11 @@ func TemplateFormat() *Schema {
 			},
 		},
 	}
+}
+
+// Webhook describes the private optional sibling of policy.toml.
+func Webhook() *Schema {
+	return &Schema{SchemaURI: "https://json-schema.org/draft/2020-12/schema", ID: "https://callmemaybe.cc/schema/webhook.json", Title: "webhook.toml — managed event destination", Type: "object", AdditionalProperties: falsy,
+		Properties: map[string]*Schema{"domain": {Type: "string", MaxLength: ptr(1024), Description: "HTTP(S) origin, including optional port. Empty disables managed delivery."}, "path_prefix": {Type: "string", MaxLength: ptr(1024), Description: "Optional path prefix. The fixed /cc.dialdoorman/events suffix is appended. Treat this value as a secret."}},
+		Rules:      []string{"No credentials, query, fragment, traversal or escaped separators. Both fields empty disables managed delivery. Missing file uses the legacy environment setting.", "One POST per ringing or completed call, application/json, JSON(payload). Managed destinations receive redacted caller numbers and no inherited bearer token.", "Hot reload keeps the last good file, including across restart. Saved receipts become applied only when the daemon reports the exact accepted file digest."}}
 }

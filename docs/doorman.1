@@ -1232,3 +1232,15 @@ An explicitly configured journal must open at startup; runtime failures remain
 nonfatal to calls. check --policy-only skips local service environment/storage
 checks when validating examples.
 Normal check reports policy before environment.
+
+.SH MANAGED WEBHOOK
+The optional private webhook.toml beside policy.toml accepts domain (HTTP or
+HTTPS origin) and path_prefix. See doorman schema webhook. The daemon POSTs
+JSON event payloads to domain + path_prefix + /cc.dialdoorman/events for
+ringing and completed calls. Managed delivery redacts caller numbers and
+never inherits WEBHOOK_TOKEN. Empty values disable managed delivery; an
+absent file preserves the environment default. The separate journal doorbell
+is unchanged. Keep this file and its .last-good copy mode 0600. Invalid edits
+keep the last good endpoint across restart; doorman check validates the file.
+Sync applies encrypted, revision-checked changes and reports applied only
+after the running daemon accepts the exact file revision.

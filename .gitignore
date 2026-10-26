@@ -41,3 +41,7 @@ coverage.out
 *.db-wal
 *.db-shm
 *.db.lock
+
+# Private managed integration destination and restart fallback.
+/webhook.toml
+/webhook.toml.last-good

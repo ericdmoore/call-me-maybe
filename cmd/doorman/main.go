@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -49,6 +50,7 @@ import (
 	"callmemaybe/internal/schema"
 	"callmemaybe/internal/setup"
 	"callmemaybe/internal/updatecheck"
+	"callmemaybe/internal/webhookconfig"
 )
 
 // version is the release identity. A release build stamps it from the git tag
@@ -470,6 +472,16 @@ func runCheck(args []string) (code int) {
 		path = fs.Arg(0)
 	}
 	path = policyPathArg(path)
+	webhookPath := filepath.Join(filepath.Dir(path), "webhook.toml")
+	if data, err := webhookconfig.Read(webhookPath); err == nil {
+		if _, err = webhookconfig.Parse(data); err != nil {
+			fmt.Fprintln(os.Stderr, "webhook.toml: invalid domain or path prefix")
+			return 1
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintln(os.Stderr, "webhook.toml: cannot read configuration")
+		return 1
+	}
 	handsetsPath := handsetsPathArg(*handsetsFlag)
 
 	// The provider inventory, when there is one. check always passes it —
@@ -1636,7 +1648,11 @@ func serve() error {
 		defer stopPasses()
 		go passes.watch(passCtx, time.Second)
 	}
-	stopActivation := observeActivation(opened, passes)
+	webhooks := webhookconfig.OpenStore(filepath.Join(filepath.Dir(cfg.PolicyPath), "webhook.toml"))
+	webhookCtx, stopWebhooks := context.WithCancel(context.Background())
+	defer stopWebhooks()
+	go webhooks.Watch(webhookCtx)
+	stopActivation := observeActivation(opened, passes, webhooks)
 	defer stopActivation()
 
 	client := ari.New(ari.Options{
@@ -1697,10 +1713,26 @@ func serve() error {
 	// line after the first call nobody heard announced. Only the host is
 	// logged — the URL is a credential.
 	var hook *notify.Webhook
-	if cfg.WebhookURL != "" && cfg.WebhookMode == "legacy" {
+	{
 		var err error
 		hook, err = notify.Open(notify.Options{
-			URL:              cfg.WebhookURL,
+			URL: func() string {
+				if !webhooks.Current().Managed && cfg.WebhookMode == "legacy" {
+					return cfg.WebhookURL
+				}
+				return ""
+			}(),
+			Resolve: func() notify.Target {
+				held := webhooks.Current()
+				if held.Managed {
+					return notify.Target{URL: held.Config.URL(), NoRedirect: true}
+				}
+				if cfg.WebhookMode == "legacy" {
+					return notify.Target{URL: cfg.WebhookURL, Token: cfg.WebhookToken, SendFullCallerID: !cfg.WebhookRedactCallerID}
+				}
+				return notify.Target{}
+			},
+
 			Token:            cfg.WebhookToken,
 			Timeout:          cfg.WebhookTimeout,
 			SendFullCallerID: !cfg.WebhookRedactCallerID,
@@ -1711,7 +1743,7 @@ func serve() error {
 			return fmt.Errorf("service startup failed: %w", err)
 		}
 		defer func() { _ = hook.Close() }()
-		log.Info("event webhook enabled", "host", hook.Host(), "redacted", cfg.WebhookRedactCallerID)
+		log.Info("event webhook configuration loaded")
 	}
 
 	// The address books, when there are any — absent is the state every install

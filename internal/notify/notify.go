@@ -151,7 +151,19 @@ const DefaultTimeout = 3 * time.Second
 // Options configures a Webhook. The zero value is safe rather than
 // convenient — SendFullCallerID defaults off, so a caller ID cannot escape
 // through a struct literal somebody forgot to fill in.
+// Target is captured when an event is queued; a later settings change cannot
+// send an earlier event or a legacy bearer token to a different receiver.
+type Target struct {
+	URL, Token       string
+	SendFullCallerID bool
+	NoRedirect       bool
+}
+type delivery struct {
+	event  Event
+	target Target
+}
 type Options struct {
+	Resolve func() Target
 	// URL is the endpoint. Treat it as a credential: a Home Assistant webhook
 	// id is the entire secret, which is why it never reaches a log line.
 	URL string
@@ -175,13 +187,14 @@ type Webhook struct {
 	// closed channel panics even inside a select. Losing a notification at
 	// shutdown is nothing; taking the process down with it is not. Close
 	// signals through stop instead.
-	ch   chan Event
+	ch   chan delivery
 	stop chan struct{}
 	done chan struct{}
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	resolve func() Target
 	url     string
 	host    string
 	token   string
@@ -200,12 +213,16 @@ type Webhook struct {
 // an error here, at startup, where an operator will see it — not silently at
 // the end of the first call.
 func Open(o Options) (*Webhook, error) {
-	if o.URL == "" {
+	if o.URL == "" && o.Resolve == nil {
 		return nil, errors.New("notify: no url")
 	}
-	u, err := url.Parse(o.URL)
+	initial := o.URL
+	if initial == "" && o.Resolve != nil {
+		initial = "https://disabled.invalid"
+	}
+	u, err := url.Parse(initial)
 	if err != nil {
-		return nil, fmt.Errorf("notify: not a valid URL: %w", err)
+		return nil, errors.New("notify: not a valid URL")
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, fmt.Errorf("notify: scheme must be http or https, got %q", u.Scheme)
@@ -224,11 +241,12 @@ func Open(o Options) (*Webhook, error) {
 	w := &Webhook{
 		// 64, matching the call log. Far beyond what a household generates,
 		// and the point of the cap is the case that is not a household.
-		ch:      make(chan Event, 64),
+		ch:      make(chan delivery, 64),
 		stop:    make(chan struct{}),
 		done:    make(chan struct{}),
 		ctx:     ctx,
 		cancel:  cancel,
+		resolve: o.Resolve,
 		url:     o.URL,
 		host:    u.Host,
 		token:   o.Token,
@@ -247,8 +265,15 @@ func (w *Webhook) Post(e Event) {
 	if w == nil {
 		return
 	}
+	target := Target{URL: w.url, Token: w.token, SendFullCallerID: w.full}
+	if w.resolve != nil {
+		target = w.resolve()
+	}
+	if target.URL == "" {
+		return
+	}
 	select {
-	case w.ch <- e:
+	case w.ch <- delivery{e, target}:
 	default:
 		w.dropped.Add(1)
 	}
@@ -314,18 +339,18 @@ func (w *Webhook) run() {
 	}
 }
 
-func (w *Webhook) deliver(e Event) {
+func (w *Webhook) deliver(e delivery) {
 	if w.ctx.Err() != nil {
 		// Shutting down against an endpoint that is not answering. Abandon
 		// the backlog rather than hold the process open.
 		w.dropped.Add(1)
 		return
 	}
-	w.send(e)
+	w.send(e.event, e.target)
 }
 
-func (w *Webhook) send(e Event) {
-	if !w.full {
+func (w *Webhook) send(e Event, target Target) {
+	if !target.SendFullCallerID {
 		e = e.Redacted()
 	}
 	body, err := json.Marshal(e)
@@ -334,22 +359,29 @@ func (w *Webhook) send(e Event) {
 		return
 	}
 
-	req, err := http.NewRequestWithContext(w.ctx, http.MethodPost, w.url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(w.ctx, http.MethodPost, target.URL, bytes.NewReader(body))
 	if err != nil {
 		w.failed.Add(1)
-		w.warn("webhook request could not be built", err)
+		w.log.Warn("webhook request could not be built", "host", w.host)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "doorman")
-	if w.token != "" {
-		req.Header.Set("Authorization", "Bearer "+w.token)
+	if target.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+target.Token)
 	}
 
-	resp, err := w.client.Do(req)
+	client := w.client
+	if target.NoRedirect {
+		copy := *client
+		copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		client = &copy
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		w.failed.Add(1)
-		w.warn("webhook post failed", err)
+		u, _ := url.Parse(target.URL)
+		w.log.Warn("webhook post failed", "host", u.Host)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -359,18 +391,7 @@ func (w *Webhook) send(e Event) {
 
 	if resp.StatusCode >= 300 {
 		w.failed.Add(1)
-		w.log.Warn("webhook rejected the event", "host", w.host, "status", resp.StatusCode)
+		targetURL, _ := url.Parse(target.URL)
+		w.log.Warn("webhook rejected the event", "host", targetURL.Host, "status", resp.StatusCode)
 	}
-}
-
-// warn logs a delivery failure without the URL in it. net/url wraps transport
-// errors together with the full URL, and that URL is a credential — a Home
-// Assistant webhook id is the whole secret. Unwrap to the transport error and
-// print the host on its own.
-func (w *Webhook) warn(msg string, err error) {
-	var uerr *url.Error
-	if errors.As(err, &uerr) {
-		err = uerr.Err
-	}
-	w.log.Warn(msg, "host", w.host, "err", err)
 }
