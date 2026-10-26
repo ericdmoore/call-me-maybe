@@ -371,3 +371,43 @@ func TestShortTipAndFullHelpOnStar(t *testing.T) {
 		t.Fatal("help key routing failed")
 	}
 }
+
+func TestStarPoundDuringWholePageAudio(t *testing.T) {
+	keys := []int{'*', '#', '4', '#', '2'}
+	m, tr := testMenu(t, func(cmd string) string {
+		if len(keys) == 0 {
+			t.Error("unexpected command")
+			return result('0')
+		}
+		k := keys[0]
+		keys = keys[1:]
+		return result(k)
+	})
+	c := menuCatalog(120)
+	if err := buildMenus(m.root, c, "Zoe (Premium)", func(_, p string) error { return os.WriteFile(p, []byte{0, 0}, 0644) }); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	m.clips, err = loadMenus(m.root, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	titles := make([]string, len(c.Books))
+	for i, b := range c.Books {
+		titles[i] = filepath.Join(bookDir(m.root, b), "title")
+	}
+	page := 0
+	got, err := m.browse("books", titles, &page)
+	if err != nil || got != 28 || page != 3 || len(keys) != 0 {
+		t.Fatalf("got %d page %d remaining %v err %v", got, page, keys, err)
+	}
+	for _, line := range strings.Split(tr.text(), "\n") {
+		if !strings.Contains(line, "/menu-audio/") && !strings.HasPrefix(line, "WAIT FOR DIGIT") {
+			t.Fatalf("unexpected fallback %s", line)
+		}
+	}
+	text := menuTexts(m.root, c)[pageKey(m.root, "books", titles, 0)]
+	if !strings.Contains(text, "Star then pound to choose a page.") {
+		t.Fatal("missing shortcut instruction")
+	}
+}
