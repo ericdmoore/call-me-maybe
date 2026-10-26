@@ -25,6 +25,7 @@ import (
 
 // bookPaths names the inputs.
 type bookPaths struct {
+	gamePreview                bool
 	handsets, policy, contacts string
 	countryCode                string
 	// own is the directory of per-handset additions (*88); empty means none.
@@ -47,6 +48,11 @@ func loadBooks(paths bookPaths) (provision.Books, error) {
 	books := provision.Books{
 		"house":  provision.HouseBook(handsets),
 		"people": provision.PeopleBook(pol.Callers()),
+	}
+	if paths.gamePreview {
+		house := books["house"]
+		house.Contacts = append(house.Contacts, provision.Contact{Name: "Games (*GAME)", Numbers: []provision.Number{{Kind: "work", Dial: "*4263"}}})
+		books["house"] = house
 	}
 	sources, err := policy.LoadContacts(paths.contacts)
 	if err != nil {

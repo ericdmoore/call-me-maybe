@@ -133,3 +133,24 @@ invitation, acceptance, a question, help and hangup; then verify ordinary calls.
 Rollback: stop the preview service, remove its hand-maintained dialplan include,
 reload the dialplan, and remove only its preview media/binary. The ordinary
 `doorman` service and existing lobby media are not replaced by this preview.
+
+## Handset contact and refresh timing
+
+For a box with this preview installed, run its directory process with
+`doorman provision directory --games-preview` (preserving its existing state and
+other flags). This adds **Games (*GAME)**, dialing `*4263`, to the House book.
+Leave the flag off on boxes without a playable game preview. Phones that omit
+the House book do not receive the entry.
+
+The directory's push worker detects changed phonebooks on its one-second loop
+and imports them to reachable supported handsets, with retries for busy or
+unreachable phones. A successful `phonebook imported <handset>` log confirms the
+phone accepted the updated book; the UI may need its Contacts view reopened.
+The provisioned fallback poll interval is 60 minutes. A fresh provision or a
+manual phonebook download also fetches the current directory. Updating the
+preview directory process does not restart ordinary calls or the game process.
+
+If a preview uses a directory-service drop-in pointing to a preview binary,
+remove that drop-in and restart the directory service before removing the
+preview files. Existing ordinary calling and game calls need no restart for a
+phonebook update.
