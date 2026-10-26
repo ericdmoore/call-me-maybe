@@ -1232,3 +1232,9 @@ An explicitly configured journal must open at startup; runtime failures remain
 nonfatal to calls. check --policy-only skips local service environment/storage
 checks when validating examples.
 Normal check reports policy before environment.
+
+.SH LOCAL GAME PREVIEW
+.B doorman games check|serve --pack DIR --handsets FILE --rooms id,id
+validates or runs an opt-in Starlark game on selected internal handsets.
+The separate doorman-games-preview ARI application supports accepted room invitations.
+See docs/GAME-PREVIEW.md for installation, controls and rollback.

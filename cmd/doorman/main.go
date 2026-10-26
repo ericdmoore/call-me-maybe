@@ -113,6 +113,8 @@ func runCommand() int {
 			return runInbox(os.Args[2:])
 		case "digest":
 			return runDigest(os.Args[2:])
+		case "games":
+			return runGames(os.Args[2:])
 		case "pack":
 			return runPack(os.Args[2:])
 		case "version", "-v", "--version":
@@ -180,6 +182,8 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                               opt-in sandbox preview delivery, separate from config sync
   doorman books install-preview --archive <file>
                               verify and install a bounded local preview, no account required
+  doorman games check|serve --pack DIR --handsets FILE --rooms id,id
+                                opt-in internal handset game preview; see docs/GAME-PREVIEW.md
   doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
                                 "build" renders audio through piper, ElevenLabs,
                                 OpenAI or Polly, "voices" lists what a backend

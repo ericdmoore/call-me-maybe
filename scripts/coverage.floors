@@ -19,6 +19,7 @@ callmemaybe/internal/mediadelivery        78
 callmemaybe/internal/notify              87
 callmemaybe/internal/observation         100
 callmemaybe/internal/pack                90
+callmemaybe/internal/phonegame           76
 callmemaybe/internal/policy              79
 callmemaybe/internal/provider            90
 callmemaybe/internal/provision           86
