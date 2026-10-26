@@ -31,7 +31,9 @@ jobs:
       - run: node --test .github/ai/*.test.cjs .github/site/*.test.cjs
 
   test:
-    runs-on: ubuntu-latest
+    # Keep native audio packages on a stable image; ubuntu-latest moved to
+    # 26.04, whose eSpeak package downloads timed out during this rehearsal.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:

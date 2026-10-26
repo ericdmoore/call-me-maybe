@@ -104,7 +104,7 @@ install_espeak() {
 	# Download into the cache first, so the next run needs no mirror, then
 	# install from what was downloaded.
 	rm -rf "$debs" && mkdir -p "$debs/partial"
-	if apt_bounded "${apt[@]}" install -y -qq --no-install-recommends --download-only \
+	if apt_bounded "${apt[@]}" install -y --no-install-recommends --download-only \
 		-o Dir::Cache::archives="$debs" espeak-ng &&
 		install_cached_espeak; then
 		sudo chown -R "$(id -u):$(id -g)" "$debs"
