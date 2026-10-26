@@ -32,6 +32,7 @@ type Handset struct {
 	Number       int
 }
 type Manager struct {
+	Observe         func(string)
 	previousLayouts map[string]map[string]string
 	onWindow        func(string, string)
 	closed          bool
@@ -491,6 +492,7 @@ func (r *room) media(media, channel string) error {
 		err = r.m.api.Play(r.ctx, channel, "sound:"+media, id)
 	}
 	if err != nil {
+		r.observeStage("media-command-failed")
 		return err
 	}
 	timer := time.NewTimer(90 * time.Second)
@@ -500,10 +502,15 @@ func (r *room) media(media, channel string) error {
 		case <-r.ctx.Done():
 			return r.ctx.Err()
 		case <-timer.C:
+			r.observeStage("media-playback-timeout")
 			_ = r.m.api.StopPlayback(r.ctx, id)
 			return errors.New("playback timeout")
 		case e := <-r.events:
 			if e.Type == "PlaybackFinished" && e.Playback != nil && e.Playback.ID == id {
+				if e.Playback.State == "failed" {
+					r.observeStage("media-playback-failed")
+					return errors.New("Asterisk could not play the declared media")
+				}
 				return nil
 			}
 			if err = r.observe(e); err != nil {
@@ -601,4 +608,10 @@ func (r *room) syncRoom(reply *Reply) error {
 	state.Freeze()
 	reply.State = state
 	return nil
+}
+
+func (r *room) observeStage(stage string) {
+	if r.m.Observe != nil {
+		r.m.Observe(stage)
+	}
 }

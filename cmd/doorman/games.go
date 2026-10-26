@@ -85,6 +85,7 @@ func runGames(args []string) int {
 		fmt.Fprintln(os.Stderr, "games: invalid preview room selection")
 		return 1
 	}
+	manager.Observe = func(stage string) { slog.Warn("game preview media failure", "stage", stage) }
 	defer manager.Close()
 	if _, err = client.Ping(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "games: ARI unavailable")

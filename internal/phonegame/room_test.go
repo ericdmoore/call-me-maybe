@@ -277,3 +277,26 @@ func TestKeypadDiscardsBufferedAndForeignDigits(t *testing.T) {
 		t.Fatal("stale or foreign keypad input accepted")
 	}
 }
+
+func TestFailedAsteriskPlaybackIsNotTreatedAsSuccess(t *testing.T) {
+	p := fixture(t)
+	f := &fakeAPI{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m, e := New(ctx, f, p, []Handset{{ID: "kitchen", Endpoint: "PJSIP/kitchen", Number: 101}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	f.m = m
+	r := &room{m: m, id: "playback-test", bridge: "b", ctx: ctx, events: make(chan ari.Event, 2)}
+	stages := []string{}
+	m.Observe = func(stage string) { stages = append(stages, stage) }
+	// The fake's success event has no registered room. Supply the real failure event.
+	r.events <- ari.Event{Type: "PlaybackFinished", Playback: &ari.Playback{ID: "playback-test-1", State: "failed"}}
+	if e = r.media("games/free-test/missing", ""); e == nil {
+		t.Fatal("failed playout was treated as a completed prompt")
+	}
+	if len(stages) != 1 || stages[0] != "media-playback-failed" {
+		t.Fatal("missing safe failure diagnostic")
+	}
+}

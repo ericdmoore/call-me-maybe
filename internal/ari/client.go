@@ -50,6 +50,7 @@ type CallerID struct {
 }
 
 type Playback struct {
+	State     string `json:"state"`
 	ID        string `json:"id"`
 	MediaURI  string `json:"media_uri"`
 	TargetURI string `json:"target_uri"`

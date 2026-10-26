@@ -154,3 +154,15 @@ If a preview uses a directory-service drop-in pointing to a preview binary,
 remove that drop-in and restart the directory service before removing the
 preview files. Existing ordinary calling and game calls need no restart for a
 phonebook update.
+
+### Verify the actual Asterisk sound root
+
+Do not assume `/var/lib/asterisk/sounds` is the active sound directory.
+Check `asterisk -rx 'core show settings'`: playback resolves relative to the
+reported **Data directory**, under `sounds/`. On Debian this can be
+`/usr/share/asterisk/sounds`, even while the VarLib directory is
+`/var/lib/asterisk`. File integrity validation in `--pack` does not prove
+Asterisk can resolve its relative media URI. Verify a generated clip through
+Asterisk before declaring the entry point ready. Failed playback now aborts
+the game and emits a fixed diagnostic stage instead of silently opening an
+unheard keypad prompt; diagnostics never include caller IDs or entered digits.
