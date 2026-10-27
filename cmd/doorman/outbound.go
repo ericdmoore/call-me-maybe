@@ -222,7 +222,8 @@ type cidCheck struct {
 // without asking a provider — and being clear about the rest.
 //
 // You cannot query VoIP.ms or Telnyx from here to ask which DIDs an account
-// owns, and there is no shape of config that would make that possible. What
+// owns: this runs in `doorman check` and in the daemon, and neither ever holds
+// a provider API key. `doorman numbers` asks Telnyx, from a CLI that does. What
 // this box does know is which numbers it answers and which provider each
 // arrives on, because [line] number and [line] trunk say so. That is enough for
 // the one mistake worth catching: presenting a number that this same config

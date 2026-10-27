@@ -745,11 +745,16 @@ from
 .B api_username
 and
 .B api_password_env
-on each trunk, and the threshold from
+on each trunk \(em or
+.B api_key_env
+instead, for a provider whose API takes one key, such as Telnyx \(em and the
+threshold from
 .B balance_min
 there or
 .B \-\-min
 here.
+.B doorman check
+refuses a trunk whose credentials are the shape its provider does not take.
 .PP
 .BR "The daemon never reads those credentials" .
 A provider API key manages DIDs, sub\-accounts and billing, which is
@@ -794,6 +799,39 @@ runs the command every morning.
 Flags:
 .BR \-\-trunks ", " \-\-env ", " \-\-min ", " \-\-json ", " \-\-timeout ", "
 .BR \-\-ring ", " \-\-handsets ", " \-\-repeat ", " \-\-ring\-timeout ", " \-\-state ", " \-\-prom .
+.TP
+.BI "doorman numbers [\-trunks " path "] [\-json] [" policy ]
+Which phone numbers each trunk's account holds, asked of the provider's API,
+against the numbers the policy files claim for that trunk:
+.B [line] number
+and
+.B [line] outbound_cid
+on every line whose
+.B [line] trunk
+names it. Each claim is reported as on the account and assigned to the
+connection the trunk registers as; on the account but assigned to no
+connection, or to one another SIP username registers as; not active yet; or
+not on the account at all. Numbers on the account that no policy file names
+are listed too, and one claimed for another trunk on the same account names
+that trunk. A number a line only presents needs to be held, not routed.
+.PP
+Telnyx today, through
+.B api_key_env
+on the trunk. A provider doorman cannot ask (VoIP.ms) is reported with its
+claims unchecked, never failed. The numbers are the household's own and are
+printed in full, as
+.B doorman check
+prints them. The key can buy and release numbers;
+.BR "the daemon never reads it" .
+.PP
+Flags:
+.BR \-\-trunks ", " \-\-handsets ", " \-\-env ", " \-\-json ", " \-\-timeout .
+Exit status as for
+.BR "doorman balance" :
+1 when a claimed number is not where the policy says, 3 when a trunk could not
+be checked \(em including one whose API credentials are not the kind its
+provider takes. A missing policy file is exit 2: with no claims, every number
+would otherwise read as unclaimed and the run would pass.
 .PP
 .BI "doorman e164 " number
 Show how a raw caller ID normalises to E.164. Use this when a known caller
@@ -1065,11 +1103,15 @@ unwritable output directory.
 The command line was wrong.
 .PP
 .B doorman balance
-uses the same 0, 1 and 2 and adds one:
+and
+.B doorman numbers
+use the same 0, 1 and 2 and add one:
 .TP
 .B 3
-Nothing was below its threshold, but at least one trunk could not be checked at
-all. Separate from 1 on purpose \(em an expired API key and an empty account
+Nothing was below its threshold (or, for
+.BR numbers ,
+out of place), but at least one trunk could not be checked at all.
+Separate from 1 on purpose \(em an expired API key and an empty account
 look identical from here, and treating one as the other is how a real outage
 gets dismissed as a broken cron job. 1 wins when both happen, because a balance
 known to be low is more actionable than one that is unknown.

@@ -1,5 +1,6 @@
 // Package provider is what doorman knows about the companies that carry its
-// calls. Today that is one question: how much credit is left.
+// calls. Today that is two questions: how much credit is left, and which phone
+// numbers the account actually holds.
 //
 // A prepaid trunk that reaches zero does not error. Inbound calls simply stop
 // arriving, and "nobody called today" is indistinguishable from a quiet
@@ -21,12 +22,19 @@
 // alarming or a blank that looks broken. That distinction is the whole point:
 // without it this would be a VoIP.ms feature wearing a general name.
 //
+// [NumberLister] is the second capability, and the same shape for the same
+// reason: Telnyx can say which numbers an account holds and which connection
+// each one is assigned to; VoIP.ms can too in principle, but nothing here asks
+// it yet, and a provider that cannot is reported as such rather than as an
+// account with no numbers.
+//
 // # Nothing here runs on a call path, and the daemon never reads it
 //
 // A provider's API credential usually manages DIDs, sub-accounts and billing:
 // considerably more privilege than the SIP sub-account password, which
 // docs/RUNBOOK.md §1 already says to keep off the Pi. So this package is
-// reached from `doorman balance` and from nowhere else. The daemon does not
+// reached from `doorman balance` and `doorman numbers` and from nowhere else.
+// The daemon does not
 // import it, does not resolve the credential, and does not poll — which keeps
 // the higher-privilege key off the call path and out of the long-running
 // process entirely. The recommended arrangement is to run the check wherever
@@ -34,8 +42,9 @@
 //
 // # The URL is a credential
 //
-// The one API here takes its credentials as query parameters, so the request
-// URL carries a password and must never be printed. net/http wraps every
+// VoIP.ms takes its credentials as query parameters, so the request URL
+// carries a password and must never be printed. (Telnyx takes a bearer key in
+// a header, which is better, and is held to the same rule anyway.) net/http wraps every
 // transport failure in a *url.Error holding the whole URL, which no name-based
 // analyzer can catch because by then the identifier is `err`. [scrub] unwraps
 // it and keeps the host alone, exactly as internal/notify does with the
@@ -71,6 +80,54 @@ type Provider interface {
 type Balance interface {
 	Balance(ctx context.Context) (Amount, error)
 }
+
+// A NumberLister reports the phone numbers an account holds and where each is
+// pointed. Optional, exactly like [Balance]: a provider without it is one this
+// package cannot ask, which is a different answer from "the account has none".
+//
+// It exists because the alternative is copying a number by hand from a portal
+// into a policy file, and a typo there is a line that silently never rings.
+type NumberLister interface {
+	Numbers(ctx context.Context) ([]Number, error)
+}
+
+// Number is one phone number on an account, as the provider describes it.
+type Number struct {
+	// E164 is the number as the provider printed it — E.164 for every provider
+	// here today. The caller normalises before comparing, because "the same
+	// number" is a policy question and this package does not hold the policy.
+	E164 string
+	// Status is the provider's own word for the number's state, printed as
+	// given. Active is whether that word means calls route to it today.
+	Status string
+	Active bool
+	// Connection is where inbound calls to the number are sent. Its zero value
+	// means assigned to none, which on a provider that routes by connection is
+	// a number that rings nowhere.
+	Connection Connection
+	// Emergency is whether the provider says emergency calling is enabled on
+	// the number, or nil when it does not say. It is the one fact trunks.toml
+	// declares (e911) because doorman could not discover it — and here is a
+	// provider that can be asked.
+	Emergency *bool
+}
+
+// Connection is the thing a provider routes a number to: a Telnyx SIP
+// Connection, a VoIP.ms sub-account.
+type Connection struct {
+	ID   string
+	Name string
+	// Username is the SIP login that registers as this connection, when the
+	// provider will say. It is what a trunk in trunks.toml can be matched by —
+	// `username` there is exactly this — so "assigned to the connection this
+	// trunk registers as" is a comparison of two strings rather than a guess.
+	// Empty when the provider does not say, or the connection is not one a
+	// registration can be (an IP or FQDN connection on Telnyx).
+	Username string
+}
+
+// Assigned reports whether the number is pointed anywhere at all.
+func (c Connection) Assigned() bool { return c.ID != "" || c.Name != "" }
 
 // Billing is how an account is paid for, which decides whether "no balance" is
 // a fact or a failure.
@@ -117,6 +174,10 @@ type Config struct {
 	// variable trunks.toml names. It is never read from the environment here:
 	// one place resolves secrets, and it is the one the operator ran.
 	Password string
+	// Key is a bearer API key, for a provider that authenticates with one
+	// credential rather than a login and a password — Telnyx. Resolved the
+	// same way as Password, from the variable api_key_env names.
+	Key string
 	// HTTP is the client for network backends. Nil means a sensible default.
 	HTTP *http.Client
 	// Endpoint overrides the service URL, for testing. Nothing in production
@@ -139,12 +200,13 @@ type factory func(Config) (Provider, error)
 
 // backends is an explicit map rather than init()-time self-registration, for
 // the same reason internal/voice's is: the list you can grep beats indirection
-// that hides it. Both entries are load-bearing — one implements the capability
-// and one deliberately does not, which is what keeps the optional interface
-// honest rather than theoretical.
+// that hides it. Every entry is load-bearing — Flowroute implements neither
+// capability, VoIP.ms one, Telnyx both — which is what keeps the optional
+// interfaces honest rather than theoretical.
 var backends = map[string]factory{
 	"voip.ms":   newVoIPMS,
 	"flowroute": newFlowroute,
+	"telnyx":    newTelnyx,
 }
 
 // Backends lists the providers doorman has a client for, sorted.
@@ -167,13 +229,23 @@ func Backends() []string {
 // have. The credentials here are a sentinel: constructors do no I/O, and the
 // only thing they are used for is getting past a refusal to build without any.
 func BalanceBackends() []string {
+	return backendsThat(func(p Provider) bool { _, ok := p.(Balance); return ok })
+}
+
+// NumberBackends lists the providers doorman can ask which numbers an account
+// holds, discovered the same way and for the same reason as [BalanceBackends].
+func NumberBackends() []string {
+	return backendsThat(func(p Provider) bool { _, ok := p.(NumberLister); return ok })
+}
+
+func backendsThat(can func(Provider) bool) []string {
 	var names []string
 	for name, build := range backends {
-		p, err := build(Config{Username: "probe", Password: "probe"})
+		p, err := build(Config{Username: "probe", Password: "probe", Key: "probe"})
 		if err != nil {
 			continue
 		}
-		if _, ok := p.(Balance); ok {
+		if can(p) {
 			names = append(names, name)
 		}
 	}
@@ -226,8 +298,8 @@ func New(name string, cfg Config) (Provider, error) {
 
 // scrub reduces a transport error to its cause and the host it was talking to.
 //
-// The credentials travel in the query string — the API this package talks to
-// takes them no other way — so the whole URL is a credential. net/http wraps
+// The VoIP.ms credentials travel in the query string — that API takes them no
+// other way — so the whole URL is a credential. net/http wraps
 // every transport failure in a *url.Error carrying it, and no name-based
 // analyzer will ever catch that: by the time it is a problem the identifier is
 // `err`. internal/notify unwraps exactly this way for exactly this reason, and
