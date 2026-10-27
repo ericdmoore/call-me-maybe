@@ -120,6 +120,8 @@ func runCommand() int {
 			return runDigest(os.Args[2:])
 		case "games":
 			return runGames(os.Args[2:])
+		case "voicemail":
+			return runVoicemail(os.Args[2:])
 		case "pack":
 			return runPack(os.Args[2:])
 		case "version", "-v", "--version":
@@ -189,11 +191,10 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                               verify and install a bounded local preview, no account required
   doorman games check|serve --pack DIR --handsets FILE --rooms id,id
                                 opt-in internal handset game preview; see docs/GAME-PREVIEW.md
-  doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
-                                "build" renders audio through piper, ElevenLabs,
-                                OpenAI or Polly, "voices" lists what a backend
-                                offers. Rendering is content-addressed, so
-                                editing one line re-renders one clip.
+  doorman pack <cmd> [target]   build, lint, install, list or select local packs.
+                                "install" renders missing audio before activation;
+                                "use" selects an installed voice. "pack help"
+                                describes archives, renderers and offline use.
   doorman events --json         read durable events through the internal public_events_v1 view
       --after cursor           exclusive sequence cursor (default 0)
       --limit count            maximum events (default 100, maximum 10000)
@@ -380,7 +381,21 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 /v1/audio/transcriptions — tools/speechd on a Mac,
                                 or whisper-server anywhere) sets STT_ENDPOINT in
                                 .env; "none" clears it. No restart: only the
-                                phonebook job reads it
+                                phonebook job reads it. Voicemail transcripts
+                                read their own copy in /etc/asterisk/cmm-mail.env
+  doorman voicemail notify <context> <mailbox> [new] [old] [urgent]
+                                Asterisk's externnotify, as the asterisk user
+                                (scripts/voicemail-notify starts it detached):
+                                each new message mailed through MAIL_HOOK to
+                                the box's own address in voicemail.conf, else
+                                MAIL_TO, with a transcript when STT_ENDPOINT is
+                                set and a recording link per VOICEMAIL_LINK_BASE.
+                                Reads /etc/asterisk/cmm-mail.env, never .env
+  doorman voicemail serve       the recording links, GET /v/<token> on
+                                VOICEMAIL_LINK_LISTEN (default :8095), to
+                                loopback, private, link-local and tailnet
+                                addresses only; pruned after VOICEMAIL_LINK_DAYS
+                                (default 14). doorman-voicemail.service runs it
   doorman digest [flags]        yesterday as one mail: calls from the journal,
                                 texts from the inbox's outcome log, as Markdown
                                 on stdout (redacted) or --mail through MAIL_HOOK
@@ -634,6 +649,7 @@ func runCheck(args []string) (code int) {
 	// The host's services are not the policy's business: --policy-only
 	// validates files on any machine, including CI's, where no unit exists.
 	if !*policyOnly {
+		fmt.Printf("Default voice pack (configured): %s\n", configuredPack(*envFlag))
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		env := secretLookup(*envFlag)
 		base := filepath.Dir(*envFlag)

@@ -363,6 +363,12 @@ handsets = ["kitchen"]
 // receive its own DTMF.
 func TestRouteHandsStarFourToTheConsole(t *testing.T) {
 	set := testLines(t, "biz")
+	// testLines leaves every timeout at zero, and with them the console
+	// gives up on its menu the instant it starts and unregisters itself on
+	// its own goroutine — before this one looks, on a busy runner. A wait
+	// the test never reaches keeps it registered until StasisEnd ends it.
+	set.deflt.Cfg.FirstDigitTimeout = time.Minute
+	set.deflt.Cfg.InterDigitTimeout = time.Minute
 	reg := newRegistry()
 	client := ari.New(ari.Options{BaseURL: "http://127.0.0.1:1", App: "doorman", Log: quiet()})
 

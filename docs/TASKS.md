@@ -35,14 +35,18 @@ doorman releases unanswered and afterhours callers into `[voicemail-drop]`
 via ARI continue with `MAILBOX` set. Per-extension and house mailboxes are
 policy (`voicemail = "kids"`).
 
-**Remaining: transcription.** Wire `externnotify` in `voicemail.conf` to a
-small script that fires per new message, POSTs the WAV to the whisper
-endpoint, and emails the transcript (the audio email already went out —
-transcription is enrichment, never a gate).
+**Transcription: built (#148), awaiting a real-box trial.** `externnotify`
+runs `scripts/voicemail-notify`, which starts `doorman voicemail notify`
+detached: the PCM `.wav` goes to `STT_ENDPOINT`, and the mail carries the
+transcript (or "(no transcript)"), a recording link per
+`VOICEMAIL_LINK_BASE` served by `doorman voicemail serve` to the home
+network and tailnet only, and goes to the box's own address in
+`voicemail.conf` before `MAIL_TO`. RUNBOOK, "The house mailbox".
 
-- [ ] Script is fire-and-forget and cannot delay or fail message delivery.
-- [ ] STT endpoint down → message flow completely unaffected.
-- [ ] No recordings deleted; retention stays a separate decision (2c below).
+- [x] Script is fire-and-forget and cannot delay or fail message delivery.
+- [x] STT endpoint down → message flow completely unaffected.
+- [x] No recordings deleted (link pruning removes only the link's own
+      hard link); retention stays a separate decision (2c below).
 
 **2c. Retention** still stands: configurable window, default 90 days, sweep
 on a timer, decided before the disk fills.

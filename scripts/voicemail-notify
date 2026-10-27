@@ -3,72 +3,53 @@
 #
 # Asterisk runs this as `externnotify` after a message is saved, off the
 # call, as its own user, with: <context> <mailbox> <new> [old] [urgent].
-# It finds the newest message in that box, writes a short note with the
-# recording linked, and hands it to the mail hook. If the hook fails the
-# message is still in the box and the lamp is still lit: mail is a feed,
-# never the record.
+# The work is `doorman voicemail notify`: the box's own address from
+# voicemail.conf (else MAIL_TO), a transcript when STT_ENDPOINT is set, a
+# recording link per VOICEMAIL_LINK_BASE, and one mail through the hook.
+# This checks the arguments and starts it detached — its own session, stdin
+# from /dev/null, output to syslog as cmm-voicemail — so Asterisk is never
+# kept waiting on a transcription. If anything fails the message is still
+# in the box and the lamp is still lit: mail is a feed, never the record.
 #
-# Settings come from /etc/asterisk/cmm-mail.env (0640 root:asterisk):
-#   MAIL_TO=midbury@example.com                     required
+# Settings come from /etc/asterisk/cmm-mail.env (0640 root:asterisk), read
+# by doorman rather than sourced here (RUNBOOK, "The house mailbox"):
+#   MAIL_TO=midbury@example.com          a box with no email of its own
 #   MAIL_HOOK=/opt/call-me-maybe/scripts/mail-hook-bullmoose   default
-# and the asterisk user's own bullmoose login (RUNBOOK, "The house mailbox").
+#   STT_ENDPOINT= STT_MODEL= STT_TIMEOUT_MS=                   optional
+#   VOICEMAIL_LINK_BASE= VOICEMAIL_LINK_LISTEN= VOICEMAIL_LINK_DAYS=  optional
+# and the asterisk user's own bullmoose login.
 set -u
 ctx="${1:-}"
 box="${2:-}"
 case "$ctx" in ''|*[!A-Za-z0-9_-]*) echo "voicemail-notify: bad context" >&2; exit 2 ;; esac
 case "$box" in ''|*[!A-Za-z0-9_-]*) echo "voicemail-notify: bad mailbox" >&2; exit 2 ;; esac
+shift 2
+[ "$#" -le 3 ] || { echo "voicemail-notify: too many arguments" >&2; exit 2; }
+for count in "$@"; do
+  case "$count" in *[!0-9]*) echo "voicemail-notify: bad message count" >&2; exit 2 ;; esac
+done
 
 log() { logger -t cmm-voicemail -- "$*" 2>/dev/null || echo "cmm-voicemail: $*" >&2; }
 
-ENVFILE="${CMM_MAIL_ENV:-/etc/asterisk/cmm-mail.env}"
-if [ -r "$ENVFILE" ]; then
-  # shellcheck disable=SC1090
-  . "$ENVFILE"
+DOORMAN="${DOORMAN:-/opt/call-me-maybe/bin/doorman}"
+if [ ! -x "$DOORMAN" ]; then
+  DOORMAN=$(command -v doorman 2>/dev/null) || DOORMAN=""
 fi
-MAIL_HOOK="${MAIL_HOOK:-/opt/call-me-maybe/scripts/mail-hook-bullmoose}"
-if [ -z "${MAIL_TO:-}" ]; then
-  log "MAIL_TO is not set in $ENVFILE; voicemail for $box stays in the box only"
+if [ -z "$DOORMAN" ]; then
+  log "doorman is not installed; voicemail for $box stays in the box only"
   exit 0
 fi
-export MAIL_TO MAIL_HOOK
 
-spool="${VOICEMAIL_SPOOL:-/var/spool/asterisk/voicemail}/$ctx/$box/INBOX"
-txt=$(ls -1 "$spool"/msg*.txt 2>/dev/null | sort | tail -n 1)
-if [ -z "$txt" ]; then
-  log "no message found in $spool"
-  exit 0
-fi
-field() { sed -n "s/^$1=//p" "$txt" | head -n 1; }
-callerid=$(field callerid)
-origdate=$(field origdate)
-duration=$(field duration)
-wav="${txt%.txt}.wav"
-[ -f "$wav" ] || wav="${txt%.txt}.WAV"
-
-body=$(mktemp) || exit 1
-trap 'rm -f "$body"' EXIT
-# The caller ID is a code span: "<+1512…>" would otherwise be read as an
-# HTML tag by the Markdown renderer and vanish from the body.
-{
-  printf 'Voicemail for **%s** from `%s`\n\n' "$box" "${callerid:-unknown}"
-  printf -- '- when: %s\n- length: %s s\n- box: %s@%s\n' "${origdate:-?}" "${duration:-?}" "$box" "$ctx"
-  if [ -f "$wav" ]; then
-    printf '\n[recording](%s)\n' "$wav"
+notify() {
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$DOORMAN" voicemail notify "$ctx" "$box" "$@"
   else
-    printf '\n(no recording file found beside %s)\n' "$txt"
+    "$DOORMAN" voicemail notify "$ctx" "$box" "$@"
   fi
-} > "$body"
-
-subject="Voicemail for $box from ${callerid:-unknown}"
-if command -v timeout >/dev/null 2>&1; then
-  timeout 60 "$MAIL_HOOK" "$subject" < "$body"
+}
+if command -v logger >/dev/null 2>&1; then
+  ( trap '' HUP; notify "$@" </dev/null 2>&1 | logger -t cmm-voicemail ) </dev/null >/dev/null 2>&1 &
 else
-  "$MAIL_HOOK" "$subject" < "$body"
-fi
-rc=$?
-if [ "$rc" -eq 0 ]; then
-  log "sent $box's new message to $MAIL_TO"
-else
-  log "mail hook failed (rc=$rc); the message is still in $box"
+  ( trap '' HUP; notify "$@" </dev/null >/dev/null 2>&1 ) </dev/null >/dev/null 2>&1 &
 fi
 exit 0

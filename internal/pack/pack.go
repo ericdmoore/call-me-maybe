@@ -39,6 +39,10 @@ type Manifest struct {
 	License     string `json:"license"`
 	Kind        string `json:"kind"`
 	Description string `json:"description,omitempty"`
+	// ArchiveVersion is required in distributable .cmmpack files; absent in
+	// legacy source directories. Audio names clips supplied by the author.
+	ArchiveVersion int                    `json:"archive_version,omitempty"`
+	Audio          map[string]AudioSource `json:"audio,omitempty"`
 
 	// Voice is either a bare string (a piper model, the legacy form) or an
 	// object naming a backend. Both load, so existing packs keep working.
@@ -49,6 +53,13 @@ type Manifest struct {
 
 	// Story names the source file for kind "story". Defaults to story.md.
 	Story string `json:"story,omitempty"`
+}
+
+// AudioSource binds a bundled WAV pair to its script. A recording without a
+// script has no SourceHash; an edited script must not silently play old audio.
+type AudioSource struct {
+	Origin     string `json:"origin"` // human or rendered
+	SourceHash string `json:"source_hash,omitempty"`
 }
 
 // VoiceSpec is the object form of Manifest.Voice.
@@ -96,9 +107,11 @@ func (i Item) hash() string {
 	}
 	sort.Strings(keys)
 
-	fmt.Fprintf(h, "v1\n%s\n%s\n%s\n", i.Text, i.Voice.Backend, i.Voice.ID)
+	// Length framing prevents newlines in text/settings from colliding with
+	// field boundaries. v2 also invalidates the old rendering pipeline cache.
+	fmt.Fprintf(h, "v2\n%q\n%q\n%q\n", i.Text, i.Voice.Backend, i.Voice.ID)
 	for _, k := range keys {
-		fmt.Fprintf(h, "%s=%s\n", k, i.Voice.Settings[k])
+		fmt.Fprintf(h, "%q=%q\n", k, i.Voice.Settings[k])
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
@@ -124,6 +137,9 @@ func Load(dir string) (*Pack, error) {
 	if m.Kind == "" {
 		m.Kind = KindVoice
 	}
+	if m.ArchiveVersion != 0 && m.ArchiveVersion != 1 {
+		return nil, fmt.Errorf("pack: unsupported archive_version %d", m.ArchiveVersion)
+	}
 
 	p := &Pack{Dir: dir, Manifest: m}
 	spec, err := m.Resolve()
@@ -142,6 +158,9 @@ func Load(dir string) (*Pack, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := p.validateAudioSources(); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 
@@ -156,7 +175,7 @@ var PromptNames = []string{
 func voiceItems(m Manifest, spec VoiceSpec) ([]Item, error) {
 	var missing []string
 	for _, n := range PromptNames {
-		if strings.TrimSpace(m.Prompts[n]) == "" {
+		if _, audio := m.Audio[n]; strings.TrimSpace(m.Prompts[n]) == "" && !audio {
 			missing = append(missing, n)
 		}
 	}
@@ -186,6 +205,9 @@ func storyItems(dir string, m Manifest) (*story.Story, []Item, error) {
 	if name == "" {
 		name = "story.md"
 	}
+	if !safeName(name) {
+		return nil, nil, errors.New("pack: unsafe story filename")
+	}
 	src, err := os.ReadFile(filepath.Join(dir, name))
 	if err != nil {
 		return nil, nil, fmt.Errorf("pack: %w", err)
@@ -212,6 +234,21 @@ func storyItems(dir string, m Manifest) (*story.Story, []Item, error) {
 			Voice: VoiceSpec{Backend: v.Backend, ID: v.ID, Settings: v.Settings},
 		})
 	}
+	seen := map[string]bool{}
+	for _, id := range st.Order {
+		for _, line := range st.Nodes[id].Lines {
+			if line.Verb == "sfx" {
+				name := "sfx/" + line.Attrs["name"]
+				if !safeName(name) {
+					return nil, nil, errors.New("pack: unsafe sound-effect name")
+				}
+				if !seen[name] {
+					items = append(items, Item{Name: name})
+					seen[name] = true
+				}
+			}
+		}
+	}
 	return st, items, nil
 }
 
@@ -221,6 +258,9 @@ func (p *Pack) Backends() []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, i := range p.Items {
+		if _, bundled := p.Manifest.Audio[i.Name]; bundled || i.Text == "" {
+			continue
+		}
 		if !seen[i.Voice.Backend] {
 			seen[i.Voice.Backend] = true
 			out = append(out, i.Voice.Backend)
@@ -234,6 +274,9 @@ func (p *Pack) Backends() []string {
 func (p *Pack) Estimate(cfg func(string) voice.Config) map[string]voice.Cost {
 	byBackend := map[string][]string{}
 	for _, i := range p.Items {
+		if _, bundled := p.Manifest.Audio[i.Name]; bundled || i.Text == "" {
+			continue
+		}
 		byBackend[i.Voice.Backend] = append(byBackend[i.Voice.Backend], i.Text)
 	}
 
@@ -292,6 +335,16 @@ func (p *Pack) Build(ctx context.Context, out string, renderers func(string) (vo
 		// Content-addressed skip: the sidecar records what produced the audio
 		// sitting beside it.
 		want := item.hash()
+		if _, bundled := p.Manifest.Audio[item.Name]; bundled || item.Text == "" {
+			if err := copyAudio(p.Dir, out, item.Name); err != nil {
+				return rep, err
+			}
+			if err := os.WriteFile(dest+".hash", []byte(want), 0o644); err != nil {
+				return rep, err
+			}
+			rep.Cached = append(rep.Cached, item.Name)
+			continue
+		}
 		if current(dest, want) {
 			rep.Cached = append(rep.Cached, item.Name)
 			continue
@@ -310,8 +363,8 @@ func (p *Pack) Build(ctx context.Context, out string, renderers func(string) (vo
 		if err != nil {
 			return rep, fmt.Errorf("pack: rendering %q: %w", item.Name, err)
 		}
-		if audio.Samples() == 0 {
-			return rep, fmt.Errorf("pack: %q rendered to silence", item.Name)
+		if audio.Samples() == 0 || audio.SampleRate < 8000 || audio.SampleRate > 192000 || len(audio.PCM)%2 != 0 || len(audio.PCM) > maxEntryBytes {
+			return rep, fmt.Errorf("pack: %q rendered to silence or invalid/oversized PCM", item.Name)
 		}
 
 		// The shared stage: one normalisation, then both pack rates.

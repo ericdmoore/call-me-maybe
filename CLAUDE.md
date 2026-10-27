@@ -37,6 +37,7 @@ make build                 # → bin/doorman for the host
 make cross                 # → bin/doorman-linux-{amd64,arm64,armv7}
 make man                   # read the man page from the working tree
 make run                   # dev run with .env sourced (needs reachable Asterisk)
+./bin/doorman pack help    # local archive build/lint/install/list/use; no account required
 ./bin/doorman schema       # the config surface as JSON Schema — read this first
 ./bin/doorman check        # validate policy.toml, print what it resolves to
 ./bin/doorman rotate       # rotate extension PINs (all, or by label)
@@ -247,8 +248,12 @@ Break these and the phone fails in ways that look like working software.
    with crypto/rand for the same reason.
 6. **Failed PIN attempts always call `Limiter.Failure`.** The bouncer's only
    defence against a redialler is that budget.
-7. **Prompts are pre-rendered WAVs, never runtime TTS.** A speech service must
-   never sit between an inbound call and a greeting.
+7. **No synthesis on the call path.** Prompts are complete installed WAVs.
+   `doorman pack build` and `pack install` may render ahead of time, including
+   on the Pi; they never run in the daemon. Failed renders leave existing
+   audio available, installation never activates it, and `pack use` verifies
+   the complete pack before switching. A speech service must never sit between
+   an inbound call and a greeting. Preserve the separate s16 overlay boundary.
 8. **StasisEnd and ChannelDestroyed are different events and must stay
    different.** StasisEnd on the caller means "left our app, possibly alive"
    (handset transfers look like this) and routes to `CallerLeft`, which

@@ -195,7 +195,7 @@ call-me-maybe/
 └── docs/                  RUNBOOK · TASKS · architecture · roadmap
 ```
 
-`lobby` and `bouncer` aren't separate services — they're two branches of one state machine, so splitting them would add a network hop and no seam. `speech` isn't a service either: prompts are rendered once with piper and committed as WAVs, so the Pi never does TTS and a broken speech service can never make the phone unreachable. And doorman ships as one statically linked binary (`make cross` covers both 64-bit and 32-bit Pi OS) — nothing to install on the Pi but the file itself.
+`lobby` and `bouncer` aren't separate services — they're two branches of one state machine, so splitting them would add a network hop and no seam. `speech` isn't a service either: calls play complete installed WAVs. The bundled prompts ship ready-made; `doorman pack install` can render a local pack’s missing clips ahead of time, including on the Pi. Calls never wait for TTS, and a failed render leaves the previous audio available. See [the pack workflow](docs/PACKS.md#installing-and-selecting). And doorman ships as one statically linked binary (`make cross` covers both 64-bit and 32-bit Pi OS) — nothing to install on the Pi but the file itself.
 
 ---
 
@@ -232,7 +232,7 @@ sudo asterisk -rx "pjsip show endpoints"
 
 ### 3. Prompts
 
-On a workstation with piper and ffmpeg (not the Pi):
+To rebuild the bundled prompts, use a workstation with piper and ffmpeg:
 
 ```bash
 bash prompts/build.sh

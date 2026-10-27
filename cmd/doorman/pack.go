@@ -16,25 +16,42 @@ import (
 	"callmemaybe/internal/voice"
 )
 
-var packUsage = `doorman pack — build and check prompt packs
+var packUsage = `doorman pack — build, install and select local packs
 
 Usage:
   doorman pack check  <dir>            validate a pack without rendering
   doorman pack build  <dir> [flags]    render it to audio
   doorman pack voices --backend <name> list the voices a backend offers
+  doorman pack lint <file.cmmpack>      validate without rendering
+  doorman pack install <file.cmmpack>   stage, render missing clips and install
+  doorman pack list                    installed versions and latest attempts
+  doorman pack use <id>                select a complete voice and restart doorman
+
+Install/list/use flags (after the file or id):
+  --sounds-dir <dir>   Asterisk sounds root (default /var/lib/asterisk/sounds)
+  --env <file>         operator environment (default ./.env)
+  --renderer-revision <id>  cache revision (default this doorman version)
+  --dry-run           install plan and estimate, without rendering or installing
+  --json              list as JSON (includes the configured active prefix)
+  --no-restart        use: configure only; restart doorman yourself to activate
 
 Build flags:
   -o <dir>        output directory (default <dir>/build)
   --dry-run       report what would be rendered and what it would cost
-  --backend <n>   override the backend named in the pack
+  --backend <n>   override the backend named in the pack (directory output only)
+  --archive <f>   also write a .cmmpack
+  --source-only   package scripts and declared recordings; requires --archive
+
+Check flag:
+  --hashes        print clip source hashes for binding recorded audio to scripts
 
 Backends: ` + backendList + `
 
 Rendering is content-addressed, so editing one line re-renders one clip. Run
 build twice and the second is free.
 
-Nothing here runs on a call. Prompts are rendered once on a workstation and
-committed as WAVs; the Pi does no synthesis.
+Nothing here runs on a call. Audio may render on the box during installation;
+only complete installed audio can be activated. Local packs need no account.
 `
 
 var backendList = strings.Join(voice.Backends(), ", ")
@@ -45,6 +62,8 @@ func runPack(args []string) int {
 		return 2
 	}
 	switch args[0] {
+	case "lint", "install", "list", "use":
+		return runPackLocal(args)
 	case "check":
 		return runPackCheck(args[1:])
 	case "build":
@@ -63,18 +82,19 @@ func runPack(args []string) int {
 // voiceConfig builds the backend config from the environment. Credentials are
 // never taken from a pack: a pack is a file you downloaded.
 func voiceConfig(backend string) voice.Config {
-	cfg := voice.Config{Region: os.Getenv("AWS_REGION")}
+	return packVoiceConfig(".env", backend)
+}
+
+func packVoiceConfig(envPath, backend string) voice.Config {
+	lookup := secretLookup(envPath)
+	env := func(key string) string { v, _ := lookup(key); return v }
+	cfg := voice.Config{Region: env("AWS_REGION"), Env: env}
 	switch backend {
 	case "piper":
-		cfg.Command = os.Getenv("PIPER_CMD")
+		cfg.Command = env("PIPER_CMD")
 	case "exec":
-		// Any command taking text on stdin and writing PCM on stdout. This
-		// is how a TTS service on another machine, or one nobody has written
-		// a backend for, reaches a pack build.
-		cfg.Command = os.Getenv("VOICE_EXEC_CMD")
-		if a := os.Getenv("VOICE_EXEC_ARGS"); a != "" {
-			cfg.Args = strings.Fields(a)
-		}
+		cfg.Command = env("VOICE_EXEC_CMD")
+		cfg.Args = strings.Fields(env("VOICE_EXEC_ARGS"))
 	}
 	return cfg
 }
@@ -87,8 +107,12 @@ func packDir(args []string) (string, []string) {
 }
 
 func runPackCheck(args []string) int {
-	dir, _ := packDir(args)
-	_ = loadDotEnv(".env")
+	dir, rest := packDir(args)
+	fs := flag.NewFlagSet("pack check", flag.ContinueOnError)
+	hashes := fs.Bool("hashes", false, "print clip source hashes")
+	if err := fs.Parse(rest); err != nil || fs.NArg() != 0 {
+		return 2
+	}
 
 	p, err := pack.Load(dir)
 	if err != nil {
@@ -100,6 +124,14 @@ func runPackCheck(args []string) int {
 	if p.Manifest.License == "" {
 		fmt.Fprintln(os.Stderr, "\n✗ no licence in pack.json — see LICENSES.md")
 		return 1
+	}
+	if *hashes {
+		for _, item := range p.Items {
+			if item.Text != "" {
+				fmt.Printf("%s  %s\n", item.SourceHash(), item.Name)
+			}
+		}
+		return 0
 	}
 
 	if p.Story != nil {
@@ -134,6 +166,8 @@ func runPackBuild(args []string) int {
 	out := fs.String("o", "", "output directory")
 	dryRun := fs.Bool("dry-run", false, "report cost without rendering")
 	override := fs.String("backend", "", "override the pack's backend")
+	archive := fs.String("archive", "", "write a .cmmpack archive")
+	sourceOnly := fs.Bool("source-only", false, "package source and declared recordings without synthesis (requires --archive)")
 	if err := fs.Parse(rest); err != nil {
 		return 2
 	}
@@ -143,6 +177,22 @@ func runPackBuild(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ %v\n", err)
 		return 1
+	}
+	if (*sourceOnly && *archive == "") || (*archive != "" && *override != "") {
+		fmt.Fprintln(os.Stderr, "✗ --source-only requires --archive; --archive uses the manifest voice (edit it instead of --backend)")
+		return 2
+	}
+	if *sourceOnly {
+		if *dryRun {
+			fmt.Println("Source-only archive: no audio will be rendered.")
+			return 0
+		}
+		if err := p.WriteArchive(*archive, ""); err != nil {
+			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+			return 1
+		}
+		fmt.Printf("✓ packaged source into %s\n", *archive)
+		return 0
 	}
 	if *override != "" {
 		for i := range p.Items {
@@ -201,6 +251,14 @@ func runPackBuild(args []string) int {
 		fmt.Printf("  %d unchanged\n", len(rep.Cached))
 	}
 
+	if *archive != "" {
+		if err := p.WriteArchive(*archive, rep.OutDir); err != nil {
+			fmt.Fprintf(os.Stderr, "✗ %v\n", err)
+			return 1
+		}
+		fmt.Printf("\n✓ packaged into %s\nInstall: doorman pack install %s\n", *archive, *archive)
+		return 0
+	}
 	fmt.Printf("\n✓ built into %s\n", rep.OutDir)
 	fmt.Printf("\nInstall on the Pi:\n"+
 		"  sudo mkdir -p /var/lib/asterisk/sounds/%s\n"+
