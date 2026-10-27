@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // [[menus]], extension ids, and PIN-less extensions (#150 M2).
@@ -271,5 +272,23 @@ handsets = ["kitchen"]
 	}
 	if _, err := RotatePins(path, []string{"Orders"}); err == nil || !strings.Contains(err.Error(), "no PIN to rotate") {
 		t.Fatalf("rotating a PIN-less extension by name: %v", err)
+	}
+}
+
+func TestPinlessMenuExtensionKeepsMultipleAfterhoursSchedules(t *testing.T) {
+	src := strings.Replace(businessHours, `pin = "428917"`, `id = "orders"`, 1)
+	p := menuPolicy(t, "[line]\nmenu = \"front\"\n"+src+frontMenu)
+	ext, ok := p.LookupExtensionID("orders")
+	if !ok || ext.ID != "orders" || ext.PIN != "" {
+		t.Fatalf("menu extension: %+v", ext)
+	}
+	if got := strings.Join(ext.Afterhours.IDs(), ","); got != "nights,weekend-days" {
+		t.Fatalf("afterhours = %q", got)
+	}
+	if !ext.Afterhours.Active(weekday(time.Saturday, 12, 0)) || ext.Afterhours.Active(weekday(time.Monday, 12, 0)) {
+		t.Fatal("menu extension lost the union of its quiet hours")
+	}
+	if len(p.PINs()) != 0 || p.PinLength != 0 {
+		t.Fatal("menu-only extension entered the PIN lobby")
 	}
 }
