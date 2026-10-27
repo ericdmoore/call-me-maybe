@@ -224,3 +224,25 @@ func TestSharedCardsRefreshOnlyTheirIntendedPhoneBooks(t *testing.T) {
 		t.Fatal("explicit house opt-out ignored")
 	}
 }
+
+func TestGamePreviewContactOnlyWhenEnabled(t *testing.T) {
+	paths := bookFixture(t)
+	for _, enabled := range []bool{false, true} {
+		paths.gamePreview = enabled
+		books, err := loadBooks(paths)
+		if err != nil {
+			t.Fatal(err)
+		}
+		model, _ := provision.Lookup("grandstream-wp826")
+		xml, err := renderBooks(policy.Handset{ID: "kitchen"}, model, books)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(xml), "*4263") != enabled {
+			t.Fatal("game preview contact does not follow installed-preview flag")
+		}
+		if enabled && (!strings.Contains(string(xml), "<FirstName>Games</FirstName>") || !strings.Contains(string(xml), "<LastName>(*GAME)</LastName>")) {
+			t.Fatal("game contact lacks the mnemonic label")
+		}
+	}
+}

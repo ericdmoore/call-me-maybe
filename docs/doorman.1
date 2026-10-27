@@ -1485,6 +1485,13 @@ nonfatal to calls. check --policy-only skips local service environment/storage
 checks when validating examples.
 Normal check reports policy before environment.
 
+.SH LOCAL GAME PREVIEW
+.B doorman games check|serve --pack DIR --handsets FILE --rooms id,id
+validates or runs an opt-in Starlark game on selected internal handsets.
+The separate doorman-games-preview ARI application supports accepted room
+invitations.
+See docs/GAME-PREVIEW.md for installation, controls and rollback.
+
 .SH MANAGED WEBHOOK
 The optional private webhook.toml beside policy.toml accepts domain (HTTP or
 HTTPS origin) and path_prefix. See doorman schema webhook. The daemon POSTs

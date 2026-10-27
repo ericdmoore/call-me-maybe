@@ -24,6 +24,7 @@ callmemaybe/internal/notify             87
 callmemaybe/internal/observation        100
 callmemaybe/internal/ownbook            90
 callmemaybe/internal/pack               90
+callmemaybe/internal/phonegame          76
 callmemaybe/internal/policy             84
 callmemaybe/internal/provider           90
 callmemaybe/internal/provision          90

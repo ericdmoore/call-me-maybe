@@ -10,6 +10,8 @@ The fastest way to understand the configuration surface is to ask the binary
 rather than to read prose:
 
 ```bash
+doorman games check|serve --pack DIR --handsets FILE --rooms id,id
+                          # opt-in local internal-handset multiplayer preview; docs/GAME-PREVIEW.md
 doorman schema            # every config key, type, default, and cross-file
                           # reference as JSON Schema — policy.toml,
                           # handsets.toml, trunks.toml, contacts.toml, and the

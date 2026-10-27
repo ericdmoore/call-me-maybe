@@ -620,6 +620,7 @@ func joinIDs(phones []provision.Phone) string {
 // exits 0 — a house of hand-configured phones has nothing to serve.
 func runProvisionDirectory(args []string) int {
 	fs := flag.NewFlagSet("provision directory", flag.ExitOnError)
+	gamesPreview := fs.Bool("games-preview", false, "include the installed local game preview in the House phonebook")
 	handsetsFlag := fs.String("handsets", "", "inventory file (default $HANDSETS_PATH or ./handsets.toml)")
 	policyFlag := fs.String("policy", "", "policy file, for [[people]] (default $POLICY_PATH or ./policy.toml)")
 	contactsFlag := fs.String("contacts", "", "address-book inventory, optional (default $CONTACTS_PATH or ./contacts.toml)")
@@ -632,7 +633,7 @@ func runProvisionDirectory(args []string) int {
 		fmt.Println("PROVISION_ADDRESS is not set: no phone fetches a directory from this box, so there is none to serve.")
 		return 0
 	}
-	paths := bookPaths{handsets: handsetsPathArg(*handsetsFlag), policy: policyPathArg(*policyFlag),
+	paths := bookPaths{gamePreview: *gamesPreview, handsets: handsetsPathArg(*handsetsFlag), policy: policyPathArg(*policyFlag),
 		contacts: contactsPathArg(*contactsFlag), countryCode: defaultCountryCode(),
 		own: filepath.Join(render.PhonebookDir(render.Env(env)), "own")}
 	handsets, _, err := policy.LoadHandsets(paths.handsets)

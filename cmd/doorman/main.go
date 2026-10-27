@@ -118,6 +118,8 @@ func runCommand() int {
 			return runInbox(os.Args[2:])
 		case "digest":
 			return runDigest(os.Args[2:])
+		case "games":
+			return runGames(os.Args[2:])
 		case "voicemail":
 			return runVoicemail(os.Args[2:])
 		case "pack":
@@ -187,6 +189,8 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                               opt-in sandbox preview delivery, separate from config sync
   doorman books install-preview --archive <file>
                               verify and install a bounded local preview, no account required
+  doorman games check|serve --pack DIR --handsets FILE --rooms id,id
+                                opt-in internal handset game preview; see docs/GAME-PREVIEW.md
   doorman pack <cmd> [target]   build, lint, install, list or select local packs.
                                 "install" renders missing audio before activation;
                                 "use" selects an installed voice. "pack help"

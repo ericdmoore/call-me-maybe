@@ -13,6 +13,7 @@ require (
 	github.com/oapi-codegen/runtime v1.7.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+	go.starlark.net v0.0.0-20261016124120-4811d7e34ea3
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
