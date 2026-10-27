@@ -556,3 +556,19 @@ doorman. Ubuntu Server is the initial rehearsal target. Package availability
 varies; adapters require Asterisk 20+ and accept an existing installation.
 Use `--dry-run` to preview. These scripts prepare the host; household call
 configuration and activation remain explicit steps in the runbook.
+
+Managed event webhooks use optional `webhook.toml` beside `policy.toml` (see
+`doorman schema webhook`). Set `domain` to an HTTP(S) origin and `path_prefix`
+to an optional path. The daemon sends ringing and completed event payloads as
+JSON POSTs to `<domain><path_prefix>/cc.dialdoorman/events`, without an event
+type suffix. Caller numbers are redacted and environment bearer tokens are
+not forwarded. Missing file preserves the legacy environment setting; an
+empty domain and prefix explicitly disable managed delivery. This does not
+change the separate event-journal doorbell.
+
+Treat the file and its `.last-good` copy as private (0600). Reload occurs
+within a second; invalid edits retain the last good endpoint across restart.
+`doorman check` validates it. Hosted changes arrive encrypted to the enrolled
+transport key, through the revision-checked sync queue. Snapshots expose only
+domain/configured state; private prefix edits still advance the revision.
+An applied receipt requires the running daemon's exact accepted file digest.

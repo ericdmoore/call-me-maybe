@@ -5,7 +5,35 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"callmemaybe/internal/policy"
 )
+
+// policy refuses a trunk whose API credentials are not the shape its provider
+// takes, from a table of its own because nothing under internal/ may import
+// this package. This holds the table to the clients: each is built with only a
+// login and with only a key, and the shape it accepts is the one the table
+// must name. A client that takes neither, or both, is one the table leaves
+// unchecked.
+func TestPolicyKnowsWhichCredentialsEachClientTakes(t *testing.T) {
+	for _, name := range Backends() {
+		_, loginErr := New(name, Config{Username: "a@example.invalid", Password: "x"})
+		_, keyErr := New(name, Config{Key: "KEY-fiction"})
+		login := !errors.Is(loginErr, ErrNoCredentials)
+		key := !errors.Is(keyErr, ErrNoCredentials)
+		want := policy.APIAuthUnknown
+		switch {
+		case login && !key:
+			want = policy.APIAuthLogin
+		case key && !login:
+			want = policy.APIAuthKey
+		}
+		if got := policy.ProviderAPIAuth(name); got != want {
+			t.Errorf("%s: policy.ProviderAPIAuth = %v, but the client accepts login=%v key=%v",
+				name, got, login, key)
+		}
+	}
+}
 
 func TestBalanceIsOptional(t *testing.T) {
 	prepaid, err := New("voip.ms", Config{Username: "a@example.invalid", Password: "x"})
@@ -43,9 +71,9 @@ func TestCanonicalAcceptsTheSpellingsPeopleWrite(t *testing.T) {
 }
 
 func TestNewNamesWhatItDoesHaveWhenItDoesNotHaveThis(t *testing.T) {
-	_, err := New("telnyx", Config{})
+	_, err := New("callcentric", Config{})
 	if !errors.Is(err, ErrUnknown) {
-		t.Fatalf("New(telnyx) error = %v, want ErrUnknown", err)
+		t.Fatalf("New(callcentric) error = %v, want ErrUnknown", err)
 	}
 	// The list matters: "unknown provider" with nothing else leaves an operator
 	// guessing whether they misspelled it.
@@ -82,8 +110,8 @@ func TestAmountPrintsTwoPlacesAndOnlyARealCurrency(t *testing.T) {
 // advertise a provider doorman cannot actually ask.
 func TestBalanceBackendsAreOnlyTheOnesThatCanAnswer(t *testing.T) {
 	got := BalanceBackends()
-	if len(got) != 1 || got[0] != "voip.ms" {
-		t.Fatalf("BalanceBackends() = %v, want [voip.ms]", got)
+	if strings.Join(got, ",") != "telnyx,voip.ms" {
+		t.Fatalf("BalanceBackends() = %v, want [telnyx voip.ms]", got)
 	}
 	for _, name := range got {
 		if Canonical(name) == "" {
@@ -93,6 +121,32 @@ func TestBalanceBackendsAreOnlyTheOnesThatCanAnswer(t *testing.T) {
 	if len(BalanceBackends()) >= len(Backends()) {
 		t.Error("every backend reports a balance, which means the optional " +
 			"interface is not being exercised by anything")
+	}
+}
+
+// The second capability, held to the same rule: advertised only where it is
+// real, and not by every backend, or the optional interface proves nothing.
+func TestNumberBackendsAreOnlyTheOnesThatCanAnswer(t *testing.T) {
+	got := NumberBackends()
+	if strings.Join(got, ",") != "telnyx" {
+		t.Fatalf("NumberBackends() = %v, want [telnyx]", got)
+	}
+	voipms, err := New("voip.ms", Config{Username: "a@example.invalid", Password: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := voipms.(NumberLister); ok {
+		t.Error("voip.ms claims NumberLister — nothing here asks its API for DIDs yet, " +
+			"and advertising it would make every policy number read as missing")
+	}
+}
+
+func TestAnUnassignedConnectionIsTheZeroValue(t *testing.T) {
+	if (Connection{}).Assigned() {
+		t.Error("the zero Connection must read as assigned to none")
+	}
+	if !(Connection{Name: "house"}).Assigned() || !(Connection{ID: "1"}).Assigned() {
+		t.Error("a connection with an id or a name is assigned")
 	}
 }
 

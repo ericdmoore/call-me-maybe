@@ -9,8 +9,8 @@
 #   ffmpeg     a pinned, checksum-verified static build, kept in DIR (which the
 #              workflow caches); apt only if that is unavailable.
 #   espeak-ng  .deb files kept in DIR from the last successful download and
-#              installed with dpkg, which needs no mirror; otherwise a bounded,
-#              retried apt download that refills DIR.
+#              installed with APT in no-download mode, which needs no mirror;
+#              otherwise a bounded, retried apt download that refills DIR.
 #
 # Every network step has a timeout and a retry limit, and the workflow step
 # has timeout-minutes on top. BtbN prunes old autobuild releases: when the
@@ -83,23 +83,31 @@ install_ffmpeg() {
 	apt_bounded "${apt[@]}" install -y -qq --no-install-recommends ffmpeg
 }
 
+# Let APT solve the whole local package set before changing the runner. Direct
+# dpkg -i can partially install packages from another image and leave apt broken.
+install_cached_espeak() {
+	local debs=${1:?cached package directory required}
+	compgen -G "$debs/*.deb" >/dev/null || return 1
+	timeout 120 "${apt[@]}" install -y -qq --no-install-recommends \
+		--no-download --no-remove "$debs"/*.deb >/dev/null
+}
+
 install_espeak() {
 	if command -v espeak-ng >/dev/null; then
 		echo "espeak-ng preinstalled"
 		return
 	fi
 	local debs=$dir/espeak-debs
-	if compgen -G "$debs/*.deb" >/dev/null && timeout 120 sudo dpkg -i "$debs"/*.deb >/dev/null; then
+	if install_cached_espeak "$debs"; then
 		echo "espeak-ng from cached packages"
 		return
 	fi
 	# Download into the cache first, so the next run needs no mirror, then
 	# install from what was downloaded.
 	rm -rf "$debs" && mkdir -p "$debs/partial"
-	if apt_bounded "${apt[@]}" install -y -qq --no-install-recommends --download-only \
+	if apt_bounded "${apt[@]}" install -y --no-install-recommends --download-only \
 		-o Dir::Cache::archives="$debs" espeak-ng &&
-		compgen -G "$debs/*.deb" >/dev/null &&
-		timeout 120 sudo dpkg -i "$debs"/*.deb >/dev/null; then
+		install_cached_espeak "$debs"; then
 		sudo chown -R "$(id -u):$(id -g)" "$debs"
 		rm -rf "$debs/partial" "$debs/lock"
 		echo "espeak-ng from apt (packages cached)"

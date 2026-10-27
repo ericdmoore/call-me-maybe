@@ -36,7 +36,7 @@ type write struct {
 // state is a file's hash in a view, "" when the view has no such file.
 func state(files map[string][]byte, path string) string {
 	data, ok := files[path]
-	if !ok {
+	if !ok || data == nil {
 		return ""
 	}
 	return fileHash(data)
@@ -186,7 +186,7 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 				return m.abandon(item.Id, answer, conflicted)
 			}
 		}
-		if r := m.plan(list, current, o.policies, view, nil); r != nil {
+		if r := m.plan(item, list, current, o.policies, view, nil); r != nil {
 			return m.abandon(item.Id, answer, r)
 		}
 		for _, w := range intent {
@@ -205,7 +205,7 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 			return answer(&refusal{syncwire.ReceiptStatusStale, syncwire.Expired})
 		}
 		var order []string
-		if r := m.plan(list, current, o.policies, view, &order); r != nil {
+		if r := m.plan(item, list, current, o.policies, view, &order); r != nil {
 			return answer(r)
 		}
 		for _, path := range order {
@@ -235,11 +235,11 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 		var done bool
 		switch {
 		case w.Before == "":
-			done, err = atomicCreate(w.Path, view[w.Path])
+			done, err = atomicCreateMode(w.Path, view[w.Path], w.Path == m.paths.Webhook)
 		case w.After == "":
 			done, err = atomicRemove(w.Path, o.files[w.Path])
 		default:
-			done, err = atomicReplace(w.Path, o.files[w.Path], view[w.Path])
+			done, err = atomicReplaceMode(w.Path, o.files[w.Path], view[w.Path], w.Path == m.paths.Webhook)
 		}
 		if err != nil && done {
 			// Leave prepared intent intact. The next pass recognises the
@@ -336,7 +336,7 @@ func needsBase(list []syncwire.Verb) bool {
 // plan applies verbs, in order, to view: each sees what the ones before it
 // did. order, when given, collects the paths touched, first touch first,
 // which is the order they are written in.
-func (m *Machine) plan(list []syncwire.Verb, current syncwire.Snapshot, policies map[string]string, view map[string][]byte, order *[]string) *refusal {
+func (m *Machine) plan(item syncwire.QueueItem, list []syncwire.Verb, current syncwire.Snapshot, policies map[string]string, view map[string][]byte, order *[]string) *refusal {
 	touch := func(path string) {
 		if order == nil {
 			return
@@ -355,6 +355,20 @@ func (m *Machine) plan(list []syncwire.Verb, current syncwire.Snapshot, policies
 	for _, v := range list {
 		raw, _ := v.MarshalJSON()
 		switch verbName(raw) {
+		case "webhook.set":
+			if len(list) != 1 || m.paths.Webhook == "" || m.OpenWebhook == nil {
+				return refuse(syncwire.Unsupported)
+			}
+			c, err := m.OpenWebhook(m.box, item)
+			if err != nil {
+				return refuse(syncwire.Invalid)
+			}
+			after, err := patchTable(view[m.paths.Webhook], "", "", map[string]any{"domain": c.Domain, "path_prefix": c.PathPrefix})
+			if err != nil {
+				return refuse(syncwire.Invalid)
+			}
+			view[m.paths.Webhook] = after
+			touch(m.paths.Webhook)
 		case "policy.setSchedule":
 			v, _ := v.AsVerb0()
 			path := policies[v.Policy]

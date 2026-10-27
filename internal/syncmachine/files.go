@@ -25,6 +25,7 @@ import (
 	"callmemaybe/internal/ownbook"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/syncwire"
+	"callmemaybe/internal/webhookconfig"
 
 	"github.com/BurntSushi/toml"
 )
@@ -42,6 +43,7 @@ type Paths struct {
 	Contacts    string
 	CountryCode string
 	Phonebooks  string
+	Webhook     string
 }
 
 type observed struct {
@@ -52,7 +54,8 @@ type observed struct {
 	// and their contacts. A delivered book changes the snapshot revision,
 	// but an edit proposed against the box's own files is still current if
 	// nothing else moved.
-	boxDigest string
+	boxDigest     string
+	webhookDigest string
 }
 
 var (
@@ -189,6 +192,26 @@ func list(v map[string]any, key string) []any {
 	return a
 }
 func enabled(v map[string]any) bool { b, ok := v["enabled"].(bool); return !ok || b }
+
+// afterhours is an extension's afterhours as the wire carries it: one id as
+// the string it has always been, several as a list. A list of one id means
+// exactly that id, and is sent as the string, so the two spellings of one
+// schedule are the same snapshot — the one a service that predates lists
+// has always accepted.
+func afterhours(e map[string]any) (any, bool) {
+	switch v := e["afterhours"].(type) {
+	case string:
+		return v, v != ""
+	case []any:
+		if len(v) == 1 {
+			if id, ok := v[0].(string); ok {
+				return id, id != ""
+			}
+		}
+		return v, len(v) > 0
+	}
+	return nil, false
+}
 func stableID(prefix string, parts ...string) string {
 	data, _ := json.Marshal(parts)
 	sum := sha256.Sum256(data)
@@ -335,8 +358,8 @@ func observe(paths Paths) (*observed, error) {
 			e["pinSet"] = str(e, "pin") != ""
 			delete(e, "pin")
 			item := map[string]any{"id": fmt.Sprintf("extension:%d", i), "label": str(e, "label"), "handsets": list(e, "handsets"), "pinSet": e["pinSet"], "enabled": enabled(e)}
-			if v := str(e, "afterhours"); v != "" {
-				item["afterhours"] = v
+			if v, ok := afterhours(e); ok {
+				e["afterhours"], item["afterhours"] = v, v
 			}
 			extensions = append(extensions, item)
 		}
@@ -579,12 +602,32 @@ func observe(paths Paths) (*observed, error) {
 			boxContacts = append(boxContacts, c)
 		}
 	}
+	var webhook *syncwire.WebhookState
+	if paths.Webhook != "" {
+		data, err := j.read(paths.Webhook)
+		c := webhookconfig.Config{}
+		if err != nil && !errors.Is(err, errMissing) {
+			return nil, j.unreadable(paths.Webhook, err)
+		}
+		if err == nil {
+			c, err = webhookconfig.Parse(data)
+			if err != nil {
+				return nil, j.reject(paths.Webhook, "invalid webhook domain or path prefix")
+			}
+		}
+		out.files[paths.Webhook] = data
+		out.webhookDigest = webhookconfig.Hash(data)
+		webhook = &syncwire.WebhookState{Domain: c.Domain, Configured: c.Domain != ""}
+	}
 	digest, err := json.Marshal(map[string]any{"handsets": handsets, "contacts": boxContacts, "phonebooks": boxBooks, "policies": policies, "validation": context})
 	if err != nil {
 		return nil, j.reject(paths.Policy, "sync cannot represent the configuration")
 	}
-	out.boxDigest = fileHash(digest)
+	out.boxDigest = fileHash(append(digest, []byte(out.webhookDigest)...))
 	configuration := map[string]any{"handsets": handsets, "contacts": contacts, "phonebooks": books, "policies": policies, "validation": context}
+	if webhook != nil {
+		configuration["webhook"] = webhook
+	}
 	data, err := json.Marshal(configuration)
 	if err != nil {
 		return nil, j.reject(paths.Policy, "sync cannot represent the configuration")
@@ -658,6 +701,9 @@ func wireFile(paths Paths, lines []policy.LineFile, where string) string {
 func (o *observed) unchanged() bool {
 	for path, before := range o.files {
 		after, err := readFile(path)
+		if before == nil && errors.Is(err, errMissing) {
+			continue
+		}
 		if err != nil || !bytes.Equal(before, after) {
 			return false
 		}

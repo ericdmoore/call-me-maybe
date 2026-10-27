@@ -70,7 +70,7 @@ site-assets: build
 	@cp llms.txt site/public/llms.txt
 	@cp llms-policy.txt site/public/llms-policy.txt
 	@cp install.sh site/public/install.sh
-	@for n in policy handsets trunks contacts messages env; do \
+	@for n in policy handsets trunks contacts messages webhook env; do \
 		./bin/doorman schema $$n > site/public/schema/$$n.json; \
 	done
 	@# The examples, beside the schema, so a model can fetch a worked
@@ -83,7 +83,7 @@ site-assets: build
 		examples/contacts.example.toml examples/messages.example.toml site/public/examples/
 	@cp examples/.env.example site/public/examples/env.example
 	@cp -R examples/scenarios site/public/examples/scenarios
-	@echo "✓ site/public: llms.txt, llms-policy.txt, install.sh, schema/{policy,handsets,trunks,contacts,messages,env}.json, examples/"
+	@echo "✓ site/public: llms.txt, llms-policy.txt, install.sh, schema/{policy,handsets,trunks,contacts,messages,webhook,env}.json, examples/"
 
 ## check: everything that must be green before a commit
 check: fmt-check vet lint test build wasm
@@ -91,7 +91,7 @@ check: fmt-check vet lint test build wasm
 ## wasm: the shared rules a hosted validator and phonebook preview run must
 ## keep building for WebAssembly, so the box and the service share one
 ## implementation of validation and composition.
-WASM_PACKAGES := ./internal/accountbook ./internal/configcheck ./internal/policy ./internal/provision ./internal/syncwire
+WASM_PACKAGES := ./internal/webhookconfig ./internal/accountbook ./internal/configcheck ./internal/policy ./internal/provision ./internal/syncwire
 wasm:
 	GOOS=wasip1 GOARCH=wasm go build $(WASM_PACKAGES)
 

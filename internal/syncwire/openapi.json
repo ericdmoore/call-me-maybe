@@ -697,9 +697,24 @@
                   "type": "boolean"
                 },
                 "afterhours": {
-                  "type": "string",
-                  "maxLength": 64,
-                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 64,
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
+                      },
+                      "minItems": 2,
+                      "maxItems": 100
+                    }
+                  ],
+                  "description": "The schedule id an extension's afterhours names, or every id when it names several; the extension is quiet while any is active. One id is always sent as a string."
                 }
               },
               "required": ["id", "label", "handsets", "pinSet", "enabled"]
@@ -707,7 +722,14 @@
             "maxItems": 1000
           }
         },
-        "required": ["id", "label", "houseHandsets", "people", "schedules", "extensions"]
+        "required": [
+          "id",
+          "label",
+          "houseHandsets",
+          "people",
+          "schedules",
+          "extensions"
+        ]
       },
       "Configuration": {
         "type": "object",
@@ -743,6 +765,9 @@
           },
           "validation": {
             "$ref": "#/components/schemas/ValidationContext"
+          },
+          "webhook": {
+            "$ref": "#/components/schemas/WebhookState"
           }
         },
         "required": ["handsets", "contacts", "phonebooks", "policies"]
@@ -783,7 +808,13 @@
             "$ref": "#/components/schemas/Configuration"
           }
         },
-        "required": ["schema", "generation", "revision", "observedAt", "configuration"]
+        "required": [
+          "schema",
+          "generation",
+          "revision",
+          "observedAt",
+          "configuration"
+        ]
       },
       "ConfigRejection": {
         "type": "object",
@@ -894,6 +925,14 @@
             "type": "string",
             "maxLength": 64,
             "description": "The name the box suggests for itself: BOX_NAME, otherwise its hostname. Sent until one status report carrying it has been accepted for the box's current enrolment, then omitted, so a box enrolled before enrolment carried a name still supplies one. A suggestion only: the name the household sets on the account wins."
+          },
+          "capabilities": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
           }
         },
         "required": ["schema", "version", "sampledAt"]
@@ -1061,6 +1100,24 @@
               }
             },
             "required": ["name", "handset", "books"]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "domain", "envelope"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": ["webhook.set"]
+              },
+              "domain": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "envelope": {
+                "$ref": "#/components/schemas/WebhookEnvelope"
+              }
+            }
           }
         ]
       },
@@ -1269,8 +1326,22 @@
               "type": "object",
               "properties": {
                 "afterhours": {
-                  "type": "string",
-                  "maxLength": 2048
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 2048
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "maxLength": 2048
+                      },
+                      "minItems": 2,
+                      "maxItems": 1000
+                    }
+                  ],
+                  "description": "One schedule id, or several; a list of one is sent as the string it means."
                 },
                 "afterhours_ring": {
                   "type": "array",
@@ -1913,7 +1984,15 @@
             "x-go-type": "int64"
           }
         },
-        "required": ["id", "title", "path", "kind", "origin", "state", "fileCount"]
+        "required": [
+          "id",
+          "title",
+          "path",
+          "kind",
+          "origin",
+          "state",
+          "fileCount"
+        ]
       },
       "ContentInventory": {
         "type": "object",
@@ -1977,7 +2056,13 @@
             "x-go-type": "int64"
           }
         },
-        "required": ["sampledAt", "state", "label", "items", "knownAllocatedBytes"]
+        "required": [
+          "sampledAt",
+          "state",
+          "label",
+          "items",
+          "knownAllocatedBytes"
+        ]
       },
       "BellSignal": {
         "type": "object",
@@ -1989,6 +2074,97 @@
           }
         },
         "required": ["t"]
+      },
+      "WebhookProposal": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "base", "notAfter", "verb"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "base": {
+            "$ref": "#/components/schemas/Version"
+          },
+          "notAfter": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "x-go-type": "int64"
+          },
+          "verb": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "domain", "pathPrefix"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": ["webhook.configure"]
+              },
+              "domain": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "pathPrefix": {
+                "type": "string",
+                "maxLength": 1024
+              }
+            }
+          }
+        }
+      },
+      "WebhookEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ephemeralKey", "nonce", "ciphertext"],
+        "properties": {
+          "ephemeralKey": {
+            "type": "string",
+            "maxLength": 43,
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "nonce": {
+            "type": "string",
+            "maxLength": 16,
+            "pattern": "^[A-Za-z0-9_-]{16}$"
+          },
+          "ciphertext": {
+            "type": "string",
+            "maxLength": 8192,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
+      },
+      "WebhookState": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["domain", "configured"],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "configured": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WebhookInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["domain", "pathPrefix"],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "pathPrefix": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        }
       }
     }
   }

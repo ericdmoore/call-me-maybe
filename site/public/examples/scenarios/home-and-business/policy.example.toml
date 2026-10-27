@@ -73,9 +73,10 @@
 #            carries 911 unless trunks.toml says otherwise. See the
 #            multi-venture example for that shape.
 #
-#            Close the business at weekends, or put the house on a schedule
-#            — the same limits the family-line and solo-business examples
-#            state, unchanged by having both on one box.
+#            Close the business at weekends as written (policy.biz.toml's
+#            [[schedules]] note names the second window that would), or put
+#            the house on a schedule — the limit the family-line example
+#            states, unchanged by having both on one box.
 #
 # CHECK IT   ./bin/doorman check --allow-placeholders \
 #                --handsets examples/scenarios/home-and-business/handsets.example.toml \

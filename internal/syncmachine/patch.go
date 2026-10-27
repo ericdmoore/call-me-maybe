@@ -30,6 +30,10 @@ func patchTable(data []byte, section, id string, values map[string]any) ([]byte,
 	parser.Reset(data)
 	var current *table
 	var tables []*table
+	if section == "" {
+		current = &table{end: len(data), fields: map[string]span{}}
+		tables = append(tables, current)
+	}
 	for parser.NextExpression() {
 		node := parser.Expression()
 		keys := []string{}
@@ -142,6 +146,10 @@ func patchTable(data []byte, section, id string, values map[string]any) ([]byte,
 // leaves the target exactly as it was; a failure after it (the directory fsync)
 // leaves the new bytes in place without a durability guarantee.
 func atomicReplace(path string, before, after []byte) (renamed bool, err error) {
+	return atomicReplaceMode(path, before, after, false)
+}
+
+func atomicReplaceMode(path string, before, after []byte, private bool) (bool, error) {
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() {
 		return false, ErrFiles
@@ -152,7 +160,11 @@ func atomicReplace(path string, before, after []byte) (renamed bool, err error) 
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
-	if err = f.Chmod(info.Mode().Perm()); err != nil {
+	mode := info.Mode().Perm()
+	if private {
+		mode = 0o600
+	}
+	if err = f.Chmod(mode); err != nil {
 		return false, ErrFiles
 	}
 	// An operator running as root must not leave a doorman-owned file root-only.
@@ -186,6 +198,10 @@ func atomicReplace(path string, before, after []byte) (renamed bool, err error) 
 // synced temporary file, which fails rather than replacing anything that
 // appeared meanwhile. created reports whether the file now exists.
 func atomicCreate(path string, after []byte) (created bool, err error) {
+	return atomicCreateMode(path, after, false)
+}
+
+func atomicCreateMode(path string, after []byte, private bool) (bool, error) {
 	dir := filepath.Dir(path)
 	parent, err := os.Stat(filepath.Dir(dir))
 	if err != nil || !parent.IsDir() {
@@ -202,7 +218,15 @@ func atomicCreate(path string, after []byte) (created bool, err error) {
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
-	if f.Chmod(0o640) != nil || chownLike(f.Name(), parent) != nil {
+	mode := os.FileMode(0o640)
+	if private {
+		mode = 0o600
+		parent, err = os.Stat(dir)
+		if err != nil {
+			return false, ErrFiles
+		}
+	}
+	if f.Chmod(mode) != nil || chownLike(f.Name(), parent) != nil {
 		return false, ErrFiles
 	}
 	if _, err = f.Write(after); err != nil || f.Sync() != nil || f.Close() != nil {

@@ -66,8 +66,9 @@
 #            only use here is a parent in the kitchen returning a supplier's
 #            call as the bakery.
 #
-#            Close a venture at weekends, or schedule the house — the same
-#            limits every example states.
+#            Close a venture at weekends as written (a second schedule in
+#            each extension's afterhours would), or schedule the house — the
+#            limit every example states.
 #
 # CHECK IT   ./bin/doorman check --allow-placeholders \
 #                --handsets examples/scenarios/multi-venture/handsets.example.toml \

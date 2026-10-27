@@ -107,6 +107,13 @@ type Trunk struct {
 	// like a variable name is refused, so a key pasted here fails the load
 	// instead of reaching a commit.
 	APIPasswordEnv string `toml:"api_password_env"`
+	// APIKeyEnv names the .env variable holding a provider API key, for a
+	// provider that authenticates with one bearer key rather than a login and
+	// a password — Telnyx. The alternative to the pair above, never beside it:
+	// a trunk is one account, and one account has one way in. Same privilege
+	// warning, same variable-name rule, and the same readers: `doorman
+	// balance` and `doorman numbers`, never the daemon.
+	APIKeyEnv string `toml:"api_key_env"`
 	// BalanceMin is the balance below which `doorman balance` exits non-zero,
 	// in whatever currency the account is held in. Unset means report but never
 	// fail: a threshold nobody chose is a threshold that fires at the wrong
@@ -115,10 +122,42 @@ type Trunk struct {
 }
 
 // BalanceConfigured reports whether this trunk was given credentials to ask
-// its provider about the balance. Absent is the normal state and not a
-// mistake — `doorman balance` says so and moves on rather than failing.
+// its provider's API anything — the balance, or which numbers it holds. Either
+// shape counts: a login and password, or a key. Absent is the normal state and
+// not a mistake — `doorman balance` says so and moves on rather than failing.
 func (t Trunk) BalanceConfigured() bool {
-	return t.APIUsername != "" && t.APIPasswordEnv != ""
+	return (t.APIUsername != "" && t.APIPasswordEnv != "") || t.APIKeyEnv != ""
+}
+
+// APIAuth is the credential shape a provider's account API takes.
+type APIAuth int
+
+const (
+	// APIAuthUnknown is a provider this package does not know the API of, or
+	// one whose client needs no credentials: whatever the trunk gives it is
+	// not checked here.
+	APIAuthUnknown APIAuth = iota
+	// APIAuthLogin is api_username + api_password_env.
+	APIAuthLogin
+	// APIAuthKey is api_key_env.
+	APIAuthKey
+)
+
+// providerAPIAuth is keyed by the flattened provider name. It lives here, not
+// beside the clients, because nothing under internal/ may import
+// internal/provider; that package's tests build every client with each shape
+// and fail if this table disagrees with what the client accepts.
+var providerAPIAuth = map[string]APIAuth{
+	"voipms": APIAuthLogin,
+	"telnyx": APIAuthKey,
+}
+
+// ProviderAPIAuth is the credential shape the named provider's API takes,
+// however the name was spelled ("VoIP.ms", "voipms", "voip-ms").
+func ProviderAPIAuth(provider string) APIAuth {
+	flat := strings.NewReplacer(" ", "", "-", "", ".", "", "_", "").
+		Replace(strings.ToLower(strings.TrimSpace(provider)))
+	return providerAPIAuth[flat]
 }
 
 // DefaultTrunkCodecs is what a trunk allows when it says nothing. ulaw first
@@ -391,14 +430,44 @@ func compileTrunks(f TrunkFile) (*Trunks, []string) {
 				where, tr.APIPasswordEnv, strings.ToUpper(strings.NewReplacer("-", "_").Replace(tr.ID)))
 		}
 		switch {
+		case tr.APIKeyEnv != "" && (tr.APIUsername != "" || tr.APIPasswordEnv != ""):
+			// One account, one way in. Both present is a trunk where nobody can
+			// tell which credential the check is about to use.
+			fail("%s sets api_key_env and api_username/api_password_env — a provider "+
+				"API takes one or the other (Telnyx a key; VoIP.ms a login and password), "+
+				"so keep the one this trunk's provider uses", where)
+		case tr.APIKeyEnv != "" && !envVarPattern.MatchString(tr.APIKeyEnv):
+			fail("%s api_key_env %q must be the NAME of a .env variable such as "+
+				"TRUNK_%s_API_KEY — never the key itself",
+				where, tr.APIKeyEnv, strings.ToUpper(strings.NewReplacer("-", "_").Replace(tr.ID)))
+		}
+		// Credentials of the other provider's shape are a trunk that looks
+		// watched and is not: `doorman balance` and `doorman numbers` can
+		// only refuse it when they run, and `doorman check` is where the
+		// person writing the file is looking.
+		if tr.BalanceConfigured() {
+			switch ProviderAPIAuth(tr.Provider) {
+			case APIAuthLogin:
+				if tr.APIKeyEnv != "" {
+					fail("%s sets api_key_env, but the %s API signs in with a login — "+
+						"use api_username and api_password_env instead", where, tr.Provider)
+				}
+			case APIAuthKey:
+				if tr.APIKeyEnv == "" {
+					fail("%s sets api_username/api_password_env, but the %s API takes one key — "+
+						"use api_key_env instead", where, tr.Provider)
+				}
+			}
+		}
+		switch {
 		case tr.BalanceMin < 0:
 			fail("%s balance_min %v must not be negative — it is the balance below which "+
 				"`doorman balance` fails, not a credit limit", where, tr.BalanceMin)
 		case tr.BalanceMin > 0 && !tr.BalanceConfigured():
 			// A threshold nothing can evaluate is the silent-failure shape this
 			// whole feature exists to remove.
-			fail("%s sets balance_min but no api_username/api_password_env, so nothing "+
-				"can ever check it", where)
+			fail("%s sets balance_min but no api_username/api_password_env or api_key_env, "+
+				"so nothing can ever check it", where)
 		}
 
 		if tr.Context == "" {
