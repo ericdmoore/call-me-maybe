@@ -6,7 +6,7 @@
 // module's package patterns. Nothing here is linked into doorman.
 module callmemaybe/tools
 
-go 1.26.8
+go 1.26.10
 
 require golang.org/x/tools v0.49.0
 
