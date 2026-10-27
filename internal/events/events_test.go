@@ -527,3 +527,25 @@ func TestASiblingWritesBesideTheOwner(t *testing.T) {
 		t.Fatalf("page = %+v", p)
 	}
 }
+
+func TestCloseFlushesPendingLossWithoutAnotherEvent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal", "events.db")
+	w, err := StartChecked(path, testOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A quiet producer must not hide its final dropped observations when the
+	// writer shuts down before the next maintenance tick.
+	w.pending.Add(3)
+	w.dropped.Add(3)
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p := readTest(t, path, Query{Limit: 10})
+	if len(p.Events) != 1 || p.Events[0].Type != CoverageGap || p.Events[0].Payload.Count != 3 {
+		t.Fatalf("shutdown did not flush pending loss: %+v", p)
+	}
+	if w.Degraded() || w.Failed() != 0 {
+		t.Fatal("successful loss flush left writer degraded")
+	}
+}
