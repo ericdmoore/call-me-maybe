@@ -530,11 +530,13 @@ single crossing of midnight. The near-miss — `start = "17:30"`, `end = "17:29"
 `days = ["FR","SA"]` — leaves a one-minute hole on Saturday and closes Monday
 morning as well.
 
-- [ ] A window may span more than one midnight, or an extension may name more
+- [x] A window may span more than one midnight, or an extension may name more
       than one schedule. Decide which; naming several is probably smaller and
-      composes better with §3's house-scope variant.
-- [ ] Absent the new form, behaviour is byte-identical.
-- [ ] `doorman check`'s ACTIVE NOW marker stays correct across the longer span.
+      composes better with §3's house-scope variant. *Decided (#149): an
+      extension names several — `afterhours = ["nights", "weekend-days"]` —
+      and is quiet while any is active.*
+- [x] Absent the new form, behaviour is byte-identical.
+- [x] `doorman check`'s ACTIVE NOW marker stays correct across the longer span.
 
 **Files:** `internal/policy/policy.go`, `internal/policy/policy_test.go`.
 

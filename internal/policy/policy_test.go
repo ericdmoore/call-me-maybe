@@ -197,7 +197,7 @@ func TestAfterhoursWindowSemantics(t *testing.T) {
 	p := mustPolicy(t, ladderPolicy)
 	e, _ := p.LookupExtension("555001")
 	ah := e.Afterhours
-	if ah == nil {
+	if !ah.Live() {
 		t.Fatal("afterhours not compiled")
 	}
 	at := func(day time.Weekday, hh, mm int) time.Time {
@@ -251,7 +251,7 @@ func TestDisabledScheduleMakesReferencesInert(t *testing.T) {
 		"id = \"school-night\"\nenabled = false", 1)
 	p := mustPolicy(t, off)
 	e, _ := p.LookupExtension("555001")
-	if e.Afterhours != nil {
+	if e.Afterhours.Live() {
 		t.Error("a disabled schedule must compile references to nil — that is the holiday switch")
 	}
 }

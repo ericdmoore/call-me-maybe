@@ -865,6 +865,13 @@ handset playback. See docs/media-preview.md for limits and recovery semantics.
 .TP
 .I policy.toml
 The rules: line identity, allow\-list, extensions, ringer ladders, schedules.
+An extension's
+.B afterhours
+names one
+.B [[schedules]]
+id or a list of them, and the line is quiet while any is active \(em
+weekdays 9\(en5 is
+.BR "afterhours = [\(dqnights\(dq, \(dqweekend\-days\(dq]" .
 Changes weekly and is safe to hand\-edit \(em when
 .B POLICY_WATCH
 is enabled, edits go live without a restart, and a file that fails
