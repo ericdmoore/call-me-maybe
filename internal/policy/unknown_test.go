@@ -421,8 +421,8 @@ afterhours = "always"
 			if got := e.Afterhours.Describe(); got != "20:30–07:00 SU MO" {
 				t.Errorf("Describe = %q", got)
 			}
-			if e.AfterhoursID != "school-night" {
-				t.Errorf("AfterhoursID = %q", e.AfterhoursID)
+			if ids := e.Afterhours.IDs(); len(ids) != 1 || ids[0] != "school-night" {
+				t.Errorf("afterhours ids = %q", ids)
 			}
 		case "Day":
 			if got := e.Afterhours.Describe(); got != "09:00–17:00 every day" {
@@ -438,9 +438,9 @@ afterhours = "always"
 }
 
 func TestDisabledScheduleKeepsItsIDForDisplay(t *testing.T) {
-	// nil Afterhours with a non-empty AfterhoursID is "switched off", which
-	// behaves like "no schedule" but means something entirely different to
-	// whoever is reading the file.
+	// A named schedule with a nil window is "switched off", which behaves
+	// like "no schedule" but means something entirely different to whoever
+	// is reading the file.
 	p := mustPolicy(t, `
 [house]
 handsets = ["kitchen"]
@@ -465,10 +465,10 @@ afterhours = "school-night"
 	if !ok {
 		t.Fatal("extension missing")
 	}
-	if e.Afterhours != nil {
+	if e.Afterhours.Live() || len(e.Afterhours) != 1 || e.Afterhours[0].Window != nil {
 		t.Error("disabled schedule should compile to a nil window")
 	}
-	if e.AfterhoursID != "school-night" {
-		t.Errorf("AfterhoursID = %q, want the id retained for display", e.AfterhoursID)
+	if ids := e.Afterhours.IDs(); len(ids) != 1 || ids[0] != "school-night" {
+		t.Errorf("afterhours ids = %q, want the id retained for display", ids)
 	}
 }

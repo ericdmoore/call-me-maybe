@@ -14,7 +14,7 @@ on:
         default: default
         options:
           - default
-          - ollama/gpt-oss:20b
+          - litellm/@local/openai/gpt-oss:20b-64k
           - openrouter/anthropic/claude-opus-5.5
           - openrouter/anthropic/claude-sonnet-5.5
           - openrouter/deepseek/deepseek-v4.1-flash
@@ -67,7 +67,7 @@ jobs:
         id: gate
         env:
           POLICY_SHA: ${{ github.workflow_sha }}
-          DEFAULT_MODEL: ${{ inputs.model != 'default' && inputs.model || vars.OCR_MODEL || 'ollama/gpt-oss:20b' }}
+          DEFAULT_MODEL: ${{ inputs.model != 'default' && inputs.model || vars.OCR_MODEL || 'litellm/@local/openai/gpt-oss:20b-64k' }}
           CHEAP_REVIEW: ${{ inputs.cheap && 'true' || 'false' }}
           OCR_REVIEW_MINUTES: ${{ vars.OCR_REVIEW_MINUTES }}
           OCR_REREVIEW_MINUTES: ${{ vars.OCR_REREVIEW_MINUTES }}
@@ -131,14 +131,19 @@ jobs:
         env:
           OCR_LLM_URL: ${{ needs.authorize.outputs.url }}
           OCR_LLM_MODEL: ${{ needs.authorize.outputs.model_id }}
-          OCR_LLM_TOKEN: ${{ needs.authorize.outputs.provider == 'openrouter' && secrets.OPENROUTER_API_KEY || 'ollama' }}
+          LITELLM_KEY_FILE: ${{ vars.LITELLM_KEY_FILE }}
           OCR_USE_ANTHROPIC: 'false'
           OCR_LLM_PROTOCOL: openai
           OCR_LLM_TIMEOUT: '1200'
           OPENROUTER_API_KEY: ${{ needs.authorize.outputs.provider == 'openrouter' && secrets.OPENROUTER_API_KEY || '' }}
           PROVIDER: ${{ needs.authorize.outputs.provider }}
         run: |
-          node -e 'require(process.env.AI_POLICY + "/models.cjs").credential(process.env.REVIEW_MODEL, process.env.OPENROUTER_API_KEY)'
+          # The credential for this route: the host's LiteLLM key for the local
+          # alias, read from the file LITELLM_KEY_FILE names, or the OpenRouter
+          # secret. Masked, and held in this step's environment only.
+          OCR_LLM_TOKEN="$(node -e 'process.stdout.write(require(process.env.AI_POLICY + "/models.cjs").credential(process.env.REVIEW_MODEL, process.env.OPENROUTER_API_KEY))')"
+          echo "::add-mask::$OCR_LLM_TOKEN"
+          export OCR_LLM_TOKEN
           bash "$AI_POLICY/review.sh"
       - name: Get pinned upstream publisher
         if: always() && steps.review.outcome != 'skipped'

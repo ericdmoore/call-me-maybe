@@ -7,6 +7,7 @@
 //	doorman schema [name]    print the config surface as JSON Schema
 //	doorman calls            read the call log
 //	doorman balance          what is left on each prepaid trunk
+//	doorman numbers          which numbers each trunk's account holds
 //	doorman pack             build and check prompt packs
 //	doorman rotate [flags] [label ...]
 //	                         rotate extension PINs (all, or by label)
@@ -18,6 +19,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -49,6 +51,7 @@ import (
 	"callmemaybe/internal/schema"
 	"callmemaybe/internal/setup"
 	"callmemaybe/internal/updatecheck"
+	"callmemaybe/internal/webhookconfig"
 )
 
 // version is the release identity. A release build stamps it from the git tag
@@ -87,6 +90,8 @@ func runCommand() int {
 			return runCalls(os.Args[2:])
 		case "balance":
 			return runBalance(os.Args[2:])
+		case "numbers":
+			return runNumbers(os.Args[2:])
 		case "provision":
 			return runProvision(os.Args[2:])
 		case "backup":
@@ -176,6 +181,10 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -fetch                    fetch contacts.toml url sources now; otherwise report what the daemon last cached
       -messages path            texts the house answers, optional (default $MESSAGES_PATH or ./messages.toml)
       -env path                 secrets file, for the tokens url sources name (with -fetch; default ./.env)
+  doorman sync media list|once --source <https-origin>
+                              opt-in sandbox preview delivery, separate from config sync
+  doorman books install-preview --archive <file>
+                              verify and install a bounded local preview, no account required
   doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
                                 "build" renders audio through piper, ElevenLabs,
                                 OpenAI or Polly, "voices" lists what a backend
@@ -219,6 +228,24 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -min n                    threshold for trunks that declare no balance_min
       -json                     machine-readable, for a cron job on another box
       -timeout d                how long to wait on one provider (default 20s)
+  doorman numbers [flags] [path]
+                                which numbers each trunk's account holds, from
+                                the provider's API, against the numbers the
+                                policy files claim for it ([line] number and
+                                outbound_cid with [line] trunk): on the account
+                                and assigned to the connection the trunk
+                                registers as, assigned to none or to another,
+                                or not on the account at all. Exit 1 when a
+                                claimed number is not where the policy says,
+                                3 when a trunk could not be checked. Telnyx
+                                today (api_key_env on the trunk); a provider
+                                it cannot ask is reported, never failed. The
+                                daemon never reads the key
+      -trunks path              provider inventory (default $TRUNKS_PATH or ./trunks.toml)
+      -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
+      -env path                 secrets file holding the API keys (default ./.env)
+      -json                     machine-readable
+      -timeout d                how long to wait on one provider (default 30s)
   doorman schema [name]         print the configuration surface as JSON Schema:
                                 every key, type, default, and cross-file
                                 reference for policy.toml, handsets.toml,
@@ -423,7 +450,7 @@ func loadDotEnv(path string) map[string]string {
 }
 
 // secretLookup resolves a named secret for the subcommands that need one —
-// `render` for SIP passwords, `balance` for provider API passwords. The real
+// `render` for SIP passwords, `balance` and `numbers` for provider API keys. The real
 // environment wins over the file, so a systemd unit or a CI runner can supply
 // a value the file does not have.
 func secretLookup(envPath string) func(string) (string, bool) {
@@ -466,6 +493,16 @@ func runCheck(args []string) (code int) {
 		path = fs.Arg(0)
 	}
 	path = policyPathArg(path)
+	webhookPath := filepath.Join(filepath.Dir(path), "webhook.toml")
+	if data, err := webhookconfig.Read(webhookPath); err == nil {
+		if _, err = webhookconfig.Parse(data); err != nil {
+			fmt.Fprintln(os.Stderr, "webhook.toml: invalid domain or path prefix")
+			return 1
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintln(os.Stderr, "webhook.toml: cannot read configuration")
+		return 1
+	}
 	handsetsPath := handsetsPathArg(*handsetsFlag)
 
 	// The provider inventory, when there is one. check always passes it —
@@ -1011,7 +1048,7 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 			fmt.Printf("      rings        %s\n", describePlan(e.Plan))
 			fmt.Printf("      voicemail    %s\n", orDefault(e.Plan.Mailbox, noMailbox))
 			fmt.Printf("      afterhours   %s\n", describeAfterhours(e, now))
-			if e.AfterhoursID != "" {
+			if len(e.Afterhours) > 0 {
 				fmt.Printf("      during it    %s\n", describeAfterhoursPlan(e))
 			}
 		}
@@ -1095,21 +1132,38 @@ func describePlan(plan policy.RingPlan) string {
 	return strings.Join(stages, ", then ")
 }
 
+// describeAfterhours names every schedule the extension's afterhours lists
+// and describes the union of the ones switched on: "nights, weekend-days —
+// 17:00–09:00 every day; 09:00–17:00 SU SA". One schedule reads exactly as it
+// always has.
 func describeAfterhours(e policy.ResolvedExtension, now time.Time) string {
-	if e.AfterhoursID == "" {
+	if len(e.Afterhours) == 0 {
 		return noAfterhours
 	}
-	if e.Afterhours == nil {
-		// The schedule exists but carries enabled = false. Identical to "no
-		// schedule" at call time, and completely different to whoever is
+	if !e.Afterhours.Live() {
+		// Every schedule exists but carries enabled = false. Identical to
+		// "no schedule" at call time, and completely different to whoever is
 		// reading the file wondering why quiet hours stopped working.
-		return fmt.Sprintf("%s — switched off (enabled = false), so this line rings at any hour", e.AfterhoursID)
+		off := "switched off"
+		if len(e.Afterhours) > 1 {
+			off = "all switched off"
+		}
+		return fmt.Sprintf("%s — %s (enabled = false), so this line rings at any hour",
+			strings.Join(e.Afterhours.IDs(), ", "), off)
+	}
+	names := make([]string, 0, len(e.Afterhours))
+	for _, w := range e.Afterhours {
+		if w.Window == nil {
+			names = append(names, w.ScheduleID+" (switched off)")
+			continue
+		}
+		names = append(names, w.ScheduleID)
 	}
 	state := ""
 	if e.Afterhours.Active(now) {
 		state = "  ← ACTIVE NOW"
 	}
-	return fmt.Sprintf("%s — %s%s", e.AfterhoursID, e.Afterhours.Describe(), state)
+	return fmt.Sprintf("%s — %s%s", strings.Join(names, ", "), e.Afterhours.Describe(), state)
 }
 
 // describeCurfews prints each sleeping-capable handset with every window it
@@ -1632,7 +1686,11 @@ func serve() error {
 		defer stopPasses()
 		go passes.watch(passCtx, time.Second)
 	}
-	stopActivation := observeActivation(opened, passes)
+	webhooks := webhookconfig.OpenStore(filepath.Join(filepath.Dir(cfg.PolicyPath), "webhook.toml"))
+	webhookCtx, stopWebhooks := context.WithCancel(context.Background())
+	defer stopWebhooks()
+	go webhooks.Watch(webhookCtx)
+	stopActivation := observeActivation(opened, passes, webhooks)
 	defer stopActivation()
 
 	client := ari.New(ari.Options{
@@ -1693,10 +1751,26 @@ func serve() error {
 	// line after the first call nobody heard announced. Only the host is
 	// logged — the URL is a credential.
 	var hook *notify.Webhook
-	if cfg.WebhookURL != "" && cfg.WebhookMode == "legacy" {
+	{
 		var err error
 		hook, err = notify.Open(notify.Options{
-			URL:              cfg.WebhookURL,
+			URL: func() string {
+				if !webhooks.Current().Managed && cfg.WebhookMode == "legacy" {
+					return cfg.WebhookURL
+				}
+				return ""
+			}(),
+			Resolve: func() notify.Target {
+				held := webhooks.Current()
+				if held.Managed {
+					return notify.Target{URL: held.Config.URL(), NoRedirect: true}
+				}
+				if cfg.WebhookMode == "legacy" {
+					return notify.Target{URL: cfg.WebhookURL, Token: cfg.WebhookToken, SendFullCallerID: !cfg.WebhookRedactCallerID}
+				}
+				return notify.Target{}
+			},
+
 			Token:            cfg.WebhookToken,
 			Timeout:          cfg.WebhookTimeout,
 			SendFullCallerID: !cfg.WebhookRedactCallerID,
@@ -1707,7 +1781,7 @@ func serve() error {
 			return fmt.Errorf("service startup failed: %w", err)
 		}
 		defer func() { _ = hook.Close() }()
-		log.Info("event webhook enabled", "host", hook.Host(), "redacted", cfg.WebhookRedactCallerID)
+		log.Info("event webhook configuration loaded")
 	}
 
 	// The address books, when there are any — absent is the state every install

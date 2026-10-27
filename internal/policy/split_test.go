@@ -63,7 +63,7 @@ func TestSplitLayoutMergesAndCompiles(t *testing.T) {
 	if !ok || e.Plan.Steps[0].Endpoints[0] != "PJSIP/kids-room" {
 		t.Errorf("extension = %+v, %v", e, ok)
 	}
-	if e.Afterhours == nil {
+	if !e.Afterhours.Live() {
 		t.Error("schedule reference not resolved across files")
 	}
 	if got := p.HousePlan().Steps[0].Endpoints; len(got) != 1 || got[0] != "PJSIP/kitchen" {

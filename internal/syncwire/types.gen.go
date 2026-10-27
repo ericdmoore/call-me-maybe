@@ -552,6 +552,21 @@ func (e Verb8Name) Valid() bool {
 	}
 }
 
+// Defines values for Verb9Name.
+const (
+	WebhookSet Verb9Name = "webhook.set"
+)
+
+// Valid indicates whether the value is a known member of the Verb9Name enum.
+func (e Verb9Name) Valid() bool {
+	switch e {
+	case WebhookSet:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SyncBellParamsUpgrade.
 const (
 	Websocket SyncBellParamsUpgrade = "websocket"
@@ -619,6 +634,7 @@ type Configuration struct {
 	Phonebooks []Phonebook        `json:"phonebooks"`
 	Policies   []Policy           `json:"policies"`
 	Validation *ValidationContext `json:"validation,omitempty"`
+	Webhook    *WebhookState      `json:"webhook,omitempty"`
 }
 
 // Contact defines model for Contact.
@@ -741,18 +757,30 @@ type PhonebookRole string
 // Policy defines model for Policy.
 type Policy struct {
 	Extensions []struct {
-		Afterhours *string  `json:"afterhours,omitempty"`
-		Enabled    bool     `json:"enabled"`
-		Handsets   []string `json:"handsets"`
-		Id         string   `json:"id"`
-		Label      string   `json:"label"`
-		PinSet     bool     `json:"pinSet"`
+		// Afterhours The schedule id an extension's afterhours names, or every id when it names several; the extension is quiet while any is active. One id is always sent as a string.
+		Afterhours *Policy_Extensions_Afterhours `json:"afterhours,omitempty"`
+		Enabled    bool                          `json:"enabled"`
+		Handsets   []string                      `json:"handsets"`
+		Id         string                        `json:"id"`
+		Label      string                        `json:"label"`
+		PinSet     bool                          `json:"pinSet"`
 	} `json:"extensions"`
 	HouseHandsets []string   `json:"houseHandsets"`
 	Id            string     `json:"id"`
 	Label         string     `json:"label"`
 	People        []Contact  `json:"people"`
 	Schedules     []Schedule `json:"schedules"`
+}
+
+// PolicyExtensionsAfterhours0 defines model for Policy.Extensions.Afterhours.0.
+type PolicyExtensionsAfterhours0 = string
+
+// PolicyExtensionsAfterhours1 defines model for Policy.Extensions.Afterhours.1.
+type PolicyExtensionsAfterhours1 = []string
+
+// Policy_Extensions_Afterhours The schedule id an extension's afterhours names, or every id when it names several; the extension is quiet while any is active. One id is always sent as a string.
+type Policy_Extensions_Afterhours struct {
+	union json.RawMessage
 }
 
 // PolicyValues defines model for PolicyValues.
@@ -768,12 +796,13 @@ type PolicyValues struct {
 		WebhookSet *bool                       `json:"webhookSet,omitempty"`
 	} `json:"actions,omitempty"`
 	Extensions *[]struct {
-		Afterhours     *string   `json:"afterhours,omitempty"`
-		AfterhoursRing *[]string `json:"afterhours_ring,omitempty"`
-		Enabled        *bool     `json:"enabled,omitempty"`
-		Handsets       *[]string `json:"handsets,omitempty"`
-		Label          string    `json:"label"`
-		PinSet         bool      `json:"pinSet"`
+		// Afterhours One schedule id, or several; a list of one is sent as the string it means.
+		Afterhours     *PolicyValues_Extensions_Afterhours `json:"afterhours,omitempty"`
+		AfterhoursRing *[]string                           `json:"afterhours_ring,omitempty"`
+		Enabled        *bool                               `json:"enabled,omitempty"`
+		Handsets       *[]string                           `json:"handsets,omitempty"`
+		Label          string                              `json:"label"`
+		PinSet         bool                                `json:"pinSet"`
 		Steps          *[]struct {
 			Handsets []string `json:"handsets"`
 			Rings    *int64   `json:"rings,omitempty"`
@@ -813,6 +842,17 @@ type PolicyValues struct {
 
 // PolicyValuesActionsConfirm defines model for PolicyValues.Actions.Confirm.
 type PolicyValuesActionsConfirm string
+
+// PolicyValuesExtensionsAfterhours0 defines model for PolicyValues.Extensions.Afterhours.0.
+type PolicyValuesExtensionsAfterhours0 = string
+
+// PolicyValuesExtensionsAfterhours1 defines model for PolicyValues.Extensions.Afterhours.1.
+type PolicyValuesExtensionsAfterhours1 = []string
+
+// PolicyValues_Extensions_Afterhours One schedule id, or several; a list of one is sent as the string it means.
+type PolicyValues_Extensions_Afterhours struct {
+	union json.RawMessage
+}
 
 // PolicyValuesLineOnNoInput defines model for PolicyValues.Line.OnNoInput.
 type PolicyValuesLineOnNoInput string
@@ -915,7 +955,8 @@ type SnapshotResultStatus string
 // Status defines model for Status.
 type Status struct {
 	// BoxName The name the box suggests for itself: BOX_NAME, otherwise its hostname. Sent until one status report carrying it has been accepted for the box's current enrolment, then omitted, so a box enrolled before enrolment carried a name still supplies one. A suggestion only: the name the household sets on the account wins.
-	BoxName *string `json:"boxName,omitempty"`
+	BoxName      *string   `json:"boxName,omitempty"`
+	Capabilities *[]string `json:"capabilities,omitempty"`
 
 	// ConfigRejection Present while the newest configuration on the box's disk is rejected by its validator; the box keeps its last good revision. Omitted once a valid configuration is accepted.
 	ConfigRejection  *ConfigRejection  `json:"configRejection,omitempty"`
@@ -1068,10 +1109,33 @@ type Verb8 struct {
 // Verb8Name defines model for Verb.8.Name.
 type Verb8Name string
 
+// Verb9 defines model for Verb.9.
+type Verb9 struct {
+	Domain   string          `json:"domain"`
+	Envelope WebhookEnvelope `json:"envelope"`
+	Name     Verb9Name       `json:"name"`
+}
+
+// Verb9Name defines model for Verb.9.Name.
+type Verb9Name string
+
 // Version defines model for Version.
 type Version struct {
 	Generation string `json:"generation"`
 	Revision   string `json:"revision"`
+}
+
+// WebhookEnvelope defines model for WebhookEnvelope.
+type WebhookEnvelope struct {
+	Ciphertext   string `json:"ciphertext"`
+	EphemeralKey string `json:"ephemeralKey"`
+	Nonce        string `json:"nonce"`
+}
+
+// WebhookState defines model for WebhookState.
+type WebhookState struct {
+	Configured bool   `json:"configured"`
+	Domain     string `json:"domain"`
 }
 
 // SyncBellParams defines parameters for SyncBell.
@@ -1090,6 +1154,130 @@ type SyncSnapshotJSONRequestBody = Snapshot
 
 // SyncStatusJSONRequestBody defines body for SyncStatus for application/json ContentType.
 type SyncStatusJSONRequestBody = Status
+
+// AsPolicyExtensionsAfterhours0 returns the union data inside the Policy_Extensions_Afterhours as a PolicyExtensionsAfterhours0
+func (t Policy_Extensions_Afterhours) AsPolicyExtensionsAfterhours0() (PolicyExtensionsAfterhours0, error) {
+	var body PolicyExtensionsAfterhours0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPolicyExtensionsAfterhours0 overwrites any union data inside the Policy_Extensions_Afterhours as the provided PolicyExtensionsAfterhours0
+func (t *Policy_Extensions_Afterhours) FromPolicyExtensionsAfterhours0(v PolicyExtensionsAfterhours0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePolicyExtensionsAfterhours0 performs a merge with any union data inside the Policy_Extensions_Afterhours, using the provided PolicyExtensionsAfterhours0
+func (t *Policy_Extensions_Afterhours) MergePolicyExtensionsAfterhours0(v PolicyExtensionsAfterhours0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPolicyExtensionsAfterhours1 returns the union data inside the Policy_Extensions_Afterhours as a PolicyExtensionsAfterhours1
+func (t Policy_Extensions_Afterhours) AsPolicyExtensionsAfterhours1() (PolicyExtensionsAfterhours1, error) {
+	var body PolicyExtensionsAfterhours1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPolicyExtensionsAfterhours1 overwrites any union data inside the Policy_Extensions_Afterhours as the provided PolicyExtensionsAfterhours1
+func (t *Policy_Extensions_Afterhours) FromPolicyExtensionsAfterhours1(v PolicyExtensionsAfterhours1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePolicyExtensionsAfterhours1 performs a merge with any union data inside the Policy_Extensions_Afterhours, using the provided PolicyExtensionsAfterhours1
+func (t *Policy_Extensions_Afterhours) MergePolicyExtensionsAfterhours1(v PolicyExtensionsAfterhours1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t Policy_Extensions_Afterhours) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *Policy_Extensions_Afterhours) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsPolicyValuesExtensionsAfterhours0 returns the union data inside the PolicyValues_Extensions_Afterhours as a PolicyValuesExtensionsAfterhours0
+func (t PolicyValues_Extensions_Afterhours) AsPolicyValuesExtensionsAfterhours0() (PolicyValuesExtensionsAfterhours0, error) {
+	var body PolicyValuesExtensionsAfterhours0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPolicyValuesExtensionsAfterhours0 overwrites any union data inside the PolicyValues_Extensions_Afterhours as the provided PolicyValuesExtensionsAfterhours0
+func (t *PolicyValues_Extensions_Afterhours) FromPolicyValuesExtensionsAfterhours0(v PolicyValuesExtensionsAfterhours0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePolicyValuesExtensionsAfterhours0 performs a merge with any union data inside the PolicyValues_Extensions_Afterhours, using the provided PolicyValuesExtensionsAfterhours0
+func (t *PolicyValues_Extensions_Afterhours) MergePolicyValuesExtensionsAfterhours0(v PolicyValuesExtensionsAfterhours0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPolicyValuesExtensionsAfterhours1 returns the union data inside the PolicyValues_Extensions_Afterhours as a PolicyValuesExtensionsAfterhours1
+func (t PolicyValues_Extensions_Afterhours) AsPolicyValuesExtensionsAfterhours1() (PolicyValuesExtensionsAfterhours1, error) {
+	var body PolicyValuesExtensionsAfterhours1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPolicyValuesExtensionsAfterhours1 overwrites any union data inside the PolicyValues_Extensions_Afterhours as the provided PolicyValuesExtensionsAfterhours1
+func (t *PolicyValues_Extensions_Afterhours) FromPolicyValuesExtensionsAfterhours1(v PolicyValuesExtensionsAfterhours1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePolicyValuesExtensionsAfterhours1 performs a merge with any union data inside the PolicyValues_Extensions_Afterhours, using the provided PolicyValuesExtensionsAfterhours1
+func (t *PolicyValues_Extensions_Afterhours) MergePolicyValuesExtensionsAfterhours1(v PolicyValuesExtensionsAfterhours1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t PolicyValues_Extensions_Afterhours) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *PolicyValues_Extensions_Afterhours) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // AsVerb0 returns the union data inside the Verb as a Verb0
 func (t Verb) AsVerb0() (Verb0, error) {
@@ -1315,6 +1503,32 @@ func (t *Verb) FromVerb8(v Verb8) error {
 
 // MergeVerb8 performs a merge with any union data inside the Verb, using the provided Verb8
 func (t *Verb) MergeVerb8(v Verb8) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsVerb9 returns the union data inside the Verb as a Verb9
+func (t Verb) AsVerb9() (Verb9, error) {
+	var body Verb9
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromVerb9 overwrites any union data inside the Verb as the provided Verb9
+func (t *Verb) FromVerb9(v Verb9) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeVerb9 performs a merge with any union data inside the Verb, using the provided Verb9
+func (t *Verb) MergeVerb9(v Verb9) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
