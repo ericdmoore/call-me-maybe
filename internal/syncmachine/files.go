@@ -192,6 +192,26 @@ func list(v map[string]any, key string) []any {
 	return a
 }
 func enabled(v map[string]any) bool { b, ok := v["enabled"].(bool); return !ok || b }
+
+// afterhours is an extension's afterhours as the wire carries it: one id as
+// the string it has always been, several as a list. A list of one id means
+// exactly that id, and is sent as the string, so the two spellings of one
+// schedule are the same snapshot — the one a service that predates lists
+// has always accepted.
+func afterhours(e map[string]any) (any, bool) {
+	switch v := e["afterhours"].(type) {
+	case string:
+		return v, v != ""
+	case []any:
+		if len(v) == 1 {
+			if id, ok := v[0].(string); ok {
+				return id, id != ""
+			}
+		}
+		return v, len(v) > 0
+	}
+	return nil, false
+}
 func stableID(prefix string, parts ...string) string {
 	data, _ := json.Marshal(parts)
 	sum := sha256.Sum256(data)
@@ -338,8 +358,8 @@ func observe(paths Paths) (*observed, error) {
 			e["pinSet"] = str(e, "pin") != ""
 			delete(e, "pin")
 			item := map[string]any{"id": fmt.Sprintf("extension:%d", i), "label": str(e, "label"), "handsets": list(e, "handsets"), "pinSet": e["pinSet"], "enabled": enabled(e)}
-			if v := str(e, "afterhours"); v != "" {
-				item["afterhours"] = v
+			if v, ok := afterhours(e); ok {
+				e["afterhours"], item["afterhours"] = v, v
 			}
 			extensions = append(extensions, item)
 		}

@@ -562,6 +562,77 @@ func TestAfterhoursGoesStraightToVoicemailWithoutRinging(t *testing.T) {
 	h.waitFinished(t)
 }
 
+// Weekdays 9–5 is two windows, and the line is quiet while either is open.
+// The policy layer proving the union is not enough: the session must read
+// it, so each edge of the week goes through a real call.
+func TestAfterhoursListTakesAMessageOutsideBusinessHours(t *testing.T) {
+	const office = `
+[house]
+handsets = ["office"]
+
+[[handsets]]
+id = "office"
+endpoint = "PJSIP/office"
+
+[[schedules]]
+id = "nights"
+start = "17:00"
+end = "09:00"
+
+[[schedules]]
+id = "weekend-days"
+start = "09:00"
+end = "17:00"
+days = ["SA", "SU"]
+
+[[extensions]]
+pin = "555001"
+label = "Office"
+handsets = ["office"]
+voicemail = "office"
+afterhours = ["nights", "weekend-days"]
+`
+	cases := []struct {
+		name  string
+		at    time.Time
+		rings bool
+	}{
+		{"Friday 17:00", time.Date(2026, 7, 10, 17, 0, 0, 0, time.Local), false},
+		{"Saturday noon", time.Date(2026, 7, 11, 12, 0, 0, 0, time.Local), false},
+		{"Monday 08:59", time.Date(2026, 7, 6, 8, 59, 0, 0, time.Local), false},
+		{"Monday 09:00", time.Date(2026, 7, 6, 9, 0, 0, 0, time.Local), true},
+		{"Friday 16:59", time.Date(2026, 7, 10, 16, 59, 0, 0, time.Local), true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := startWith(t, office, "9995550199", nil)
+			h.now = c.at
+			h.finishPlayback(t)
+			dialPin(h, "555001")
+
+			if c.rings {
+				h.fake.expect(t, "CreateBridge")
+				h.fake.expect(t, "AddToBridge")
+				h.fake.expect(t, "Ring")
+				if o := h.fake.expect(t, "Originate"); o.Args[0] != "PJSIP/office" {
+					t.Fatalf("originated %s, want PJSIP/office", o.Args[0])
+				}
+				<-h.legs
+				h.sess.CallerGone()
+				h.waitFinished(t)
+				return
+			}
+			// Straight to the mailbox: no bridge, no ring, no originate.
+			if s := h.fake.expect(t, "SetChannelVar"); s.Args[2] != "office" {
+				t.Fatalf("mailbox = %s, want office", s.Args[2])
+			}
+			h.fake.expect(t, "Continue")
+			h.sess.CallerLeft()
+			h.waitFinished(t)
+		})
+	}
+}
+
 func TestHouseNoAnswerFallsToFamilyVoicemail(t *testing.T) {
 	src := strings.Replace(kidsLadderPolicy, `[[people]]`, ``, 1) // no-op; fixture has none
 	src += "\n[[people]]\nname = \"Grandma\"\nnumbers = [\"512-555-0100\"]\n"

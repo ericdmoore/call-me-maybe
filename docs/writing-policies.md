@@ -260,9 +260,28 @@ on `MO` covers Monday evening through Tuesday morning. That is why the example
 lists `SU` through `TH` for school nights: Friday and Saturday evenings stay
 open.
 
+**A window crosses midnight at most once per day it lists**, so some hours
+take two. Weekdays 9–5 is a night window and a weekend one, both named by
+the extension (see [Quiet hours](#quiet-hours-and-redirecting-instead-of-silencing)):
+
+```toml
+[[schedules]]
+id = "nights"
+start = "17:00"
+end = "09:00"            # every evening through the next morning
+
+[[schedules]]
+id = "weekend-days"
+start = "09:00"
+end = "17:00"
+days = ["SA", "SU"]
+```
+
 **`enabled = false` is the holiday switch.** One edit turns bedtime off for
 spring break without hunting through every extension that references it, and
-turns it back on without reconstructing the times from memory.
+turns it back on without reconstructing the times from memory. An extension
+naming several schedules keeps only the ones still on; with all of them off
+it rings at any hour.
 
 ---
 
@@ -285,7 +304,7 @@ handsets = ["kitchen"]
 | `handsets` | list | Simple form: one ring stage. **Mutually exclusive with `steps`.** |
 | `steps` | list | Ladder form: escalating stages. **Mutually exclusive with `handsets`.** |
 | `voicemail` | string | Mailbox when nobody answers, and the afterhours destination. |
-| `afterhours` | string | A `[[schedules]]` id. |
+| `afterhours` | string or list | A `[[schedules]]` id, or a list of them; quiet while any is active. |
 | `afterhours_ring` | list | Ring these during the window instead of taking a message. |
 | `enabled` | bool | Defaults true. |
 
@@ -442,6 +461,19 @@ That one field is what expresses:
   rest, without the caller needing to know whose night it is.
 - **Babysitter forwarding** — the evening window rings a different handset.
 
+`afterhours` may name several schedules, and the line is quiet while **any**
+of them is active. That is how hours needing more than one window are
+written — weekdays 9–5, with the two schedules above:
+
+```toml
+afterhours = ["nights", "weekend-days"]
+```
+
+The line rings Monday to Friday from 09:00 to 16:59 and takes a message at
+every other hour. Each id must exist and appear once; `doorman check` shows
+the union, `nights, weekend-days — 17:00–09:00 every day; 09:00–17:00 SU SA`,
+and marks any schedule that is switched off.
+
 `afterhours` requires **either** `voicemail` or `afterhours_ring`. A caller
 during quiet hours has to have somewhere to go.
 
@@ -510,8 +542,8 @@ Rules worth knowing about before you hit them:
 - Extension PINs must be unique, digits only, and at least four digits.
 - `handsets` and `steps` are mutually exclusive; exactly one is required.
 - Each ladder step needs `rings` or `seconds`.
-- `afterhours` must name a defined schedule, and needs `voicemail` or
-  `afterhours_ring`.
+- `afterhours` must name a defined schedule (or a non-empty list of them,
+  each once), and needs `voicemail` or `afterhours_ring`.
 - `afterhours_ring` without `afterhours` is an error — there is no window for it
   to apply to.
 - Mailbox and schedule ids are lowercase alphanumeric, dash, underscore.

@@ -655,8 +655,75 @@ afterhours = "school-night"
 		t.Fatal("extension missing")
 	}
 	got := describeAfterhours(e, time.Now())
-	if !strings.Contains(got, "school-night") || !strings.Contains(got, "switched off") {
-		t.Errorf("afterhours = %q, want the disabled schedule still named", got)
+	if want := "school-night — switched off (enabled = false), so this line rings at any hour"; got != want {
+		t.Errorf("afterhours = %q, want the disabled schedule still named: %q", got, want)
+	}
+}
+
+// An afterhours naming several schedules is described as their union, with
+// any switched-off one marked rather than dropped — and with every one off,
+// said plainly, because that is the holiday switch and not a mistake.
+func TestCheckDescribesAnAfterhoursUnion(t *testing.T) {
+	const src = `
+[house]
+handsets = ["office"]
+
+[[handsets]]
+id = "office"
+endpoint = "PJSIP/office"
+
+[[schedules]]
+id = "nights"
+start = "17:00"
+end = "09:00"
+
+[[schedules]]
+id = "weekend-days"
+start = "09:00"
+end = "17:00"
+days = ["SA", "SU"]
+
+[[extensions]]
+pin = "428917"
+label = "Office"
+handsets = ["office"]
+voicemail = "office"
+afterhours = ["nights", "weekend-days"]
+`
+	describe := func(src string, now time.Time) string {
+		t.Helper()
+		pol, err := policy.FromTOML([]byte(src))
+		if err != nil {
+			t.Fatalf("policy: %v", err)
+		}
+		e, ok := pol.LookupExtension("428917")
+		if !ok {
+			t.Fatal("extension missing")
+		}
+		return describeAfterhours(e, now)
+	}
+	saturdayNoon := time.Date(2026, 7, 11, 12, 0, 0, 0, time.Local)
+	wednesdayNoon := time.Date(2026, 7, 8, 12, 0, 0, 0, time.Local)
+
+	if got, want := describe(src, saturdayNoon),
+		"nights, weekend-days — 17:00–09:00 every day; 09:00–17:00 SU SA  ← ACTIVE NOW"; got != want {
+		t.Errorf("Saturday noon:\n got %q\nwant %q", got, want)
+	}
+	if got, want := describe(src, wednesdayNoon),
+		"nights, weekend-days — 17:00–09:00 every day; 09:00–17:00 SU SA"; got != want {
+		t.Errorf("Wednesday noon:\n got %q\nwant %q", got, want)
+	}
+
+	weekendOff := strings.Replace(src, `id = "weekend-days"`, "id = \"weekend-days\"\nenabled = false", 1)
+	if got, want := describe(weekendOff, saturdayNoon),
+		"nights, weekend-days (switched off) — 17:00–09:00 every day"; got != want {
+		t.Errorf("one switched off:\n got %q\nwant %q", got, want)
+	}
+
+	allOff := strings.Replace(weekendOff, `id = "nights"`, "id = \"nights\"\nenabled = false", 1)
+	if got, want := describe(allOff, saturdayNoon),
+		"nights, weekend-days — all switched off (enabled = false), so this line rings at any hour"; got != want {
+		t.Errorf("all switched off:\n got %q\nwant %q", got, want)
 	}
 }
 
