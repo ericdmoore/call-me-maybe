@@ -22,6 +22,10 @@ var diagnostics io.Writer = os.Stderr
 type AGI struct {
 	in  *bufio.Scanner
 	out io.Writer
+	// lim is an outside caller's time limit (listen.go), checked before every
+	// command so no prompt, wait or recording can carry a call past it. Nil
+	// for a household handset, which has none.
+	lim *limit
 }
 type response struct {
 	key     int
@@ -30,7 +34,7 @@ type response struct {
 }
 
 func Connect(in io.Reader, out io.Writer) (*AGI, error) {
-	a := &AGI{bufio.NewScanner(in), out}
+	a := &AGI{in: bufio.NewScanner(in), out: out}
 	for n := 0; n < 100; n++ {
 		if !a.in.Scan() {
 			return nil, ErrHangup
@@ -48,6 +52,17 @@ func (a *AGI) command(command string) (response, error) {
 	var r response
 	if strings.ContainsAny(command, "\r\n\x00") {
 		return r, errors.New("invalid AGI command")
+	}
+	if a.lim != nil {
+		// The limit speaks through this same method; unset while it does,
+		// so its own warning is not checked against itself.
+		lim := a.lim
+		a.lim = nil
+		err := lim.check(a)
+		a.lim = lim
+		if err != nil {
+			return r, err
+		}
 	}
 	if _, err := fmt.Fprintln(a.out, command); err != nil {
 		return r, ErrHangup
@@ -101,7 +116,14 @@ func (a *AGI) number(n int) (int, error) {
 }
 
 func (a *AGI) wait() (int, error) {
-	r, err := a.command("WAIT FOR DIGIT 10000")
+	ms := int64(10000)
+	if a.lim != nil {
+		// Never wait past the next thing the limit has to say.
+		if d := a.lim.until().Milliseconds(); d < ms {
+			ms = max(d, 100)
+		}
+	}
+	r, err := a.command(fmt.Sprintf("WAIT FOR DIGIT %d", ms))
 	return r.key, err
 }
 
@@ -110,6 +132,12 @@ type menu struct {
 	root, state, handset string
 	ctx                  context.Context
 	clips                map[string]string
+	// public is an outside caller (listen.go): no handset, so no bookmark
+	// survives the call. Positions live in memory, for this call alone.
+	public bool
+	memory map[string]Position
+	// story plays one title with no browsing and no spoken help first.
+	story bool
 }
 
 func (m *menu) prompt(name string) (int, error) {
@@ -158,8 +186,15 @@ func Run(ctx context.Context, a *AGI) error {
 		m.clips = nil
 		fmt.Fprintln(diagnostics, "books: menu audio unavailable, using compatibility prompts:", err)
 	}
-	paths := make([]string, len(c.Books))
-	for i, b := range c.Books {
+	return m.shelf(c.Books)
+}
+
+// shelf browses a list of books until the caller backs out. A handset's list
+// is the whole catalog; an outside caller's is the shelf its line offers, and
+// nothing else — the index a key selects is into this list alone.
+func (m *menu) shelf(list []Book) error {
+	paths := make([]string, len(list))
+	for i, b := range list {
 		paths[i] = filepath.Join(bookDir(m.root, b), "title")
 	}
 	page := 0
@@ -172,13 +207,13 @@ func Run(ctx context.Context, a *AGI) error {
 			_, err = m.prompt("goodbye")
 			return err
 		}
-		if !ready(m.root, c.Books[index]) {
+		if !ready(m.root, list[index]) {
 			if _, err := m.prompt("unavailable"); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := m.book(c.Books[index]); err != nil {
+		if err := m.book(list[index]); err != nil {
 			return err
 		}
 	}

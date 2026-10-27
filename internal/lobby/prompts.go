@@ -31,3 +31,11 @@ func NewPrompts(mediaPrefix string) *Prompts {
 func (p *Prompts) URI(name Prompt) string {
 	return "sound:" + p.prefix + "/" + string(name)
 }
+
+// Media renders a clip under the same prefix that is not one of the six — a
+// line's own words: "menus/front", "recordings/hours". Those subdirectories
+// are operator content, outside any pack contract, so naming one can never
+// make a pack half-work.
+func (p *Prompts) Media(path string) string {
+	return "sound:" + p.prefix + "/" + path
+}

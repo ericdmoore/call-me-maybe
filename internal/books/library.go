@@ -26,6 +26,11 @@ const maxJSONBytes = 2 << 20
 var errJSONTooLarge = errors.New("JSON exceeds the 2 MiB limit")
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// ValidID reports whether id is a book id a catalog may hold — what a public
+// line's [[shelves]] titles must be (internal/policy keeps the same rule).
+func ValidID(id string) bool { return idPattern.MatchString(id) }
+
 var revisionPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 // Catalog order is the spoken order. Audio paths in a preparation input are

@@ -673,7 +673,36 @@ exten => *2665,1,Answer()
  same => n,Set(AGISIGHUP=no)
  same => n,AGI(/opt/call-me-maybe/bin/doorman,books,menu)
  same => n,Hangup()
+
+; Dial-a-Story (#155): a caller on a public line who chose a shelf. doorman
+; releases them here (ARI continue) with the shelf and the line's limits set
+; as channel variables; nothing includes this context and no handset can dial
+; into it. A missing value refuses rather than defaulting: an unset title
+; list must never mean the whole library, nor an unset limit no limit.
+; GROUP is set before it is counted, so two callers arriving together can
+; never both fit into the last place.
+[cmm-listen]
+exten => s,1,NoOp(Listening: ${CMM_LISTEN_MODE} on ${CMM_LISTEN_GROUP})
+ same => n,GotoIf($["${CMM_LISTEN_TITLES}" = "" | "${CMM_LISTEN_SECONDS}" = "" | "${CMM_LISTEN_MAX}" = "" | "${CMM_LISTEN_GROUP}" = ""]?refused)
+ same => n,Set(GROUP(cmm-listen)=${CMM_LISTEN_GROUP})
+ same => n,GotoIf($[${GROUP_COUNT(${CMM_LISTEN_GROUP}@cmm-listen)} > ${CMM_LISTEN_MAX}]?busy)
+ same => n,Set(TIMEOUT(absolute)=${CMM_LISTEN_SECONDS})
+ same => n,Set(AGISIGHUP=no)
+ same => n,AGI(/opt/call-me-maybe/bin/doorman,books,listen)
+ same => n,Hangup()
+ same => n(busy),Set(GROUP(cmm-listen)=)
+ same => n,Playback(call-me-maybe/system/listen-busy)
+ same => n(refused),Hangup()
 `
+
+// ListenContext is the dialplan context doorman releases an outside listener
+// into, and the GROUP() category its listener cap counts in. The lobby
+// carries its own copy of both (it imports nothing from here); a test in
+// cmd/doorman holds them together.
+const (
+	ListenContext       = "cmm-listen"
+	ListenGroupCategory = "cmm-listen"
+)
 
 // messageRoute is one handset's number → endpoint for [cmm-messages].
 type messageRoute struct {

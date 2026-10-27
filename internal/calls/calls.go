@@ -65,6 +65,10 @@ const (
 	OutcomeAnswered = "answered"
 	// OutcomeVoicemail: released into the dialplan to leave a message.
 	OutcomeVoicemail = "voicemail"
+	// OutcomeListening: released into the dialplan to listen to a books
+	// shelf or a story of the day (#155). Choice says which; how long they
+	// listened is Asterisk's to know, not doorman's.
+	OutcomeListening = "listening"
 	// OutcomeDismissed: doorman ended it deliberately. Reason says why.
 	OutcomeDismissed = "dismissed"
 	// OutcomeAbandoned: the caller hung up first. The zero value, so a call
@@ -95,6 +99,14 @@ const (
 	ViaPeople    = "people"
 	ViaContacts  = "contacts/"
 	ViaLobbyPass = "lobby-pass"
+)
+
+// Challenge verdicts: what Record.Challenge may say.
+const (
+	ChallengePassed      = "passed"
+	ChallengeFailed      = "failed"
+	ChallengeNoAnswer    = "no-answer"
+	ChallengeRateLimited = "rate-limited"
 )
 
 type Record struct {
@@ -153,6 +165,20 @@ type Record struct {
 	Extension string `json:"extension,omitempty"`
 	PIN       string `json:"pin,omitempty"`
 	Attempts  int    `json:"attempts,omitempty"`
+
+	// Challenge is the arithmetic challenge's verdict on this call — one of
+	// the Challenge* values — and empty when none was asked. Never the
+	// question and never what was typed: the answer is entered digits, and
+	// invariant 1 has no exception for digits that are not a PIN.
+	Challenge string `json:"challenge,omitempty"`
+
+	// Menu is the id of the last [[menus]] entry this caller heard, on a line
+	// that answers with one. Choice is what they chose there, as kind:id —
+	// "extension:orders", "recording:hours" — the target and never the key
+	// pressed: a key is an entered digit, and the target answers "which
+	// choice do callers use" just as well.
+	Menu   string `json:"menu,omitempty"`
+	Choice string `json:"choice,omitempty"`
 
 	// Stages is the ladder as actually walked. The most useful field here:
 	// it is what tells you a stage times out before anyone can cross a room.

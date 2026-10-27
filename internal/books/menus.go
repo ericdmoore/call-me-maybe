@@ -41,7 +41,10 @@ func speakable(title string) string {
 	return strings.NewReplacer("[", "[ ", "]", " ]").Replace(title)
 }
 
-func menuTexts(root string, c Catalog) map[string]string {
+// menuTexts is every clip a bundle holds. shelves are public lines' shelves
+// (#155), each a list of title ids: their pages are rendered beside the
+// catalog's, keyed by the shelf's own titles like every page.
+func menuTexts(root string, c Catalog, shelves ...[]string) map[string]string {
 	texts := make(map[string]string)
 	for name, text := range prompts {
 		texts[name] = text
@@ -96,12 +99,23 @@ func menuTexts(root string, c Catalog) map[string]string {
 		pages("chapters", chapters, chapterNames)
 	}
 	pages("books", titles, names)
+	for _, shelf := range shelves {
+		var titles, names []string
+		for _, b := range shelfOf(c, shelf) {
+			titles = append(titles, filepath.Join(bookDir(root, b), "title"))
+			names = append(names, speakable(b.Title))
+		}
+		pages("books", titles, names)
+	}
 	return texts
 }
 
 // PrepareMenus also works with a copy of catalog.json alone, so a Mac can
 // render menus for a Linux box without copying or touching its recordings.
-func PrepareMenus(ctx context.Context, root, voice string) error {
+// shelves are the [[shelves]] public lines offer, so their pages speak in
+// the same voice; without them a shelf is announced with the compatibility
+// prompts, which is complete but plainer.
+func PrepareMenus(ctx context.Context, root, voice string, shelves ...[]string) error {
 	if !validText(voice) {
 		return errors.New("invalid menu voice")
 	}
@@ -114,10 +128,10 @@ func PrepareMenus(ctx context.Context, root, voice string) error {
 	}
 	return buildMenus(root, c, voice, func(text, output string) error {
 		return sayMenu(ctx, voice, text, output)
-	})
+	}, shelves...)
 }
 
-func buildMenus(root string, c Catalog, voice string, render func(string, string) error) error {
+func buildMenus(root string, c Catalog, voice string, render func(string, string) error, shelves ...[]string) error {
 	dir := filepath.Join(root, "menu-audio")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -128,7 +142,7 @@ func buildMenus(root string, c Catalog, voice string, render func(string, string
 		_ = os.RemoveAll(path)
 	}
 	bundle := menuBundle{Schema: 1, Catalog: digest(c), Voice: voice, Clips: map[string]string{}}
-	for key, text := range menuTexts(root, c) {
+	for key, text := range menuTexts(root, c, shelves...) {
 		hash := digest([]string{"macos-say-v1-loudnorm-18", voice, text})
 		destination := filepath.Join(dir, hash+".sln16")
 		s, err := os.Lstat(destination)
@@ -277,6 +291,19 @@ func loadMenus(root string, c Catalog) (map[string]string, error) {
 			return nil, errors.New("missing menu audio")
 		}
 		clips[key] = path
+	}
+	// Shelf pages are extras: a bundle built without them is complete, and
+	// one damaged page costs that page its voice, never the bundle. Keyed by
+	// the shelf's titles, a page can only ever announce the list it was
+	// rendered for.
+	for key, hash := range bundle.Clips {
+		if _, required := clips[key]; required || !strings.HasPrefix(key, "page/books/") || !revisionPattern.MatchString(hash) {
+			continue
+		}
+		path := filepath.Join(root, "menu-audio", hash)
+		if s, err := os.Lstat(path + ".sln16"); err == nil && s.Mode().IsRegular() && s.Size() > 0 && s.Size()%2 == 0 {
+			clips[key] = path
+		}
 	}
 	return clips, nil
 }

@@ -30,11 +30,30 @@ func (m *menu) progressPath(b Book) string {
 }
 
 func (m *menu) loadProgress(b Book) Position {
+	if m.public {
+		if p, ok := m.memory[b.ID]; ok {
+			return p
+		}
+		return Position{Speed: 10}
+	}
 	p := Position{Speed: 10}
 	if readJSON(m.progressPath(b), &p) != nil || p.Chapter < 0 || p.Chapter >= len(b.Chapters) || math.IsNaN(p.Seconds) || math.IsInf(p.Seconds, 0) || p.Seconds < 0 || p.Seconds > b.Chapters[p.Chapter].Seconds || p.Speed < 5 || p.Speed > 20 {
 		return Position{Speed: 10}
 	}
 	return p
+}
+
+// saveProgress keeps a position: on disk for a handset's bookmark, in memory
+// for an outside caller, whose place is forgotten when the call ends.
+func (m *menu) saveProgress(b Book, p Position) error {
+	if m.public {
+		if m.memory == nil {
+			m.memory = map[string]Position{}
+		}
+		m.memory[b.ID] = p
+		return nil
+	}
+	return writeJSON(m.progressPath(b), p)
 }
 
 type window struct {
@@ -116,17 +135,21 @@ func (s *stream) close() { s.once.Do(func() { s.cancel(); <-s.done; _ = os.Remov
 
 func (m *menu) listen(b Book, p *Position) error {
 	p.Started = true
-	if err := writeJSON(m.progressPath(b), p); err != nil {
+	if err := m.saveProgress(b, *p); err != nil {
 		return err
 	}
 	// Help is skippable. A key pressed during it is applied before playback.
-	intro := "controls"
-	if m.clips["tip"] != "" {
-		intro = "tip"
-	}
-	key, err := m.prompt(intro)
-	if err != nil {
-		return err
+	// A story of the day starts with the story.
+	var key int
+	var err error
+	if !m.story {
+		intro := "controls"
+		if m.clips["tip"] != "" {
+			intro = "tip"
+		}
+		if key, err = m.prompt(intro); err != nil {
+			return err
+		}
 	}
 	paused := false
 	var current *stream
@@ -137,7 +160,7 @@ func (m *menu) listen(b Book, p *Position) error {
 		}
 	}
 	defer stop()
-	defer func() { _ = writeJSON(m.progressPath(b), p) }()
+	defer func() { _ = m.saveProgress(b, *p) }()
 	for {
 		if err := m.ctx.Err(); err != nil {
 			return err
@@ -186,7 +209,7 @@ func (m *menu) listen(b Book, p *Position) error {
 					return err
 				}
 			}
-			if err := writeJSON(m.progressPath(b), p); err != nil {
+			if err := m.saveProgress(b, *p); err != nil {
 				return err
 			}
 			if key != 0 {
@@ -217,7 +240,7 @@ func (m *menu) listen(b Book, p *Position) error {
 			}
 			p.Chapter++
 			p.Seconds = 0
-			if err := writeJSON(m.progressPath(b), p); err != nil {
+			if err := m.saveProgress(b, *p); err != nil {
 				return err
 			}
 		}
@@ -247,7 +270,7 @@ func (m *menu) listen(b Book, p *Position) error {
 		if w.err != nil {
 			return w.err
 		}
-		r, playErr := m.a.command("STREAM FILE " + quote(w.path[:len(w.path)-len(".sln16")]) + ` "0123456789*#"`)
+		r, playErr := m.playWindow(w)
 		_ = os.Remove(w.path)
 		played := r.samples
 		if played < 0 {
@@ -257,7 +280,7 @@ func (m *menu) listen(b Book, p *Position) error {
 			played = w.samples
 		}
 		p.Seconds = math.Min(b.Chapters[p.Chapter].Seconds, p.Seconds+float64(played)/sampleRate*float64(p.Speed)/10)
-		if err := writeJSON(m.progressPath(b), p); err != nil {
+		if err := m.saveProgress(b, *p); err != nil {
 			return err
 		}
 		if playErr != nil {
