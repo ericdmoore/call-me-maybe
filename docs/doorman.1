@@ -411,7 +411,11 @@ and messages.toml; the digest with
 .B MAIL_HOOK
 and
 .BR MAIL_TO ;
-the balance timer with trunks.toml. Idempotent: a rerun is the upgrade;
+the balance timer with trunks.toml; the voicemail links with
+.B VOICEMAIL_LINK_BASE
+in
+.IR /etc/asterisk/cmm\-mail.env .
+Idempotent: a rerun is the upgrade;
 a unit doorman did not write is left alone.
 .B \-\-dry\-run
 prints the plan. Needs root for the real thing.
@@ -422,7 +426,49 @@ whether it answers; a URL (an OpenAI\-compatible /v1/audio/transcriptions)
 sets
 .B STT_ENDPOINT
 in .env; \fBnone\fR clears it. Only the phonebook job reads it, on its next
-run, so no restart.
+run, so no restart. Voicemail transcripts read their own copy from
+.IR /etc/asterisk/cmm\-mail.env ,
+because the asterisk user cannot read .env.
+.TP
+.B doorman voicemail notify \fIcontext mailbox\fR [\fInew old urgent\fR]
+Asterisk's
+.BR externnotify ,
+run as the asterisk user and started detached by
+.IR scripts/voicemail\-notify .
+Mails each new message in the box's INBOX once, through
+.BR MAIL_HOOK ,
+to the box's own address in
+.I voicemail.conf
+(and the files it includes; several separated by |), else to
+.BR MAIL_TO .
+With
+.B STT_ENDPOINT
+set the mail carries a transcript of the PCM .wav, and "(no transcript)"
+otherwise or on any failure. With
+.B VOICEMAIL_LINK_BASE
+set the recording is hard\-linked under a 128\-bit random token in
+.I /var/lib/asterisk/cmm\-voicemail/links
+and the mail lists one link per base instead of the file. Reads
+.I /etc/asterisk/cmm\-mail.env
+(or
+.BR CMM_MAIL_ENV ),
+never .env; exits 0 whatever happens, because mail is a feed and the
+message stays in the box.
+.TP
+.B doorman voicemail serve
+The recording links:
+.B GET /v/\fItoken\fR
+on
+.B VOICEMAIL_LINK_LISTEN
+(default :8095), as audio/wav, or a page with an audio element for a
+browser. Refuses (403) any client outside loopback, RFC 1918, link\-local,
+IPv6 unique\-local and the tailnet's 100.64.0.0/10; X\-Forwarded\-For is
+never read. Prunes links older than
+.B VOICEMAIL_LINK_DAYS
+(default 14) at start and hourly. Run by
+.IR doorman\-voicemail.service ;
+exits 0 without
+.BR VOICEMAIL_LINK_BASE .
 .TP
 .B doorman login \fR[\fB\-\-state\fR \fIdirectory\fR] [\fB\-\-env\fR \fIfile\fR]
 Enrol this device through a browser/passkey approval. Run as the backup
@@ -923,6 +969,14 @@ Secrets and tuning. Loaded by systemd's
 .B EnvironmentFile
 in production. Contains the ARI password and every handset and trunk
 password; keep it mode 0600.
+.TP
+.I /etc/asterisk/cmm\-mail.env
+The voicemail mail's settings, read by
+.B doorman voicemail
+as the asterisk user, which cannot read .env: MAIL_TO, MAIL_HOOK, a copy of
+STT_ENDPOINT, STT_MODEL and STT_TIMEOUT_MS, and VOICEMAIL_LINK_BASE,
+VOICEMAIL_LINK_LISTEN and VOICEMAIL_LINK_DAYS. Root\-owned, group asterisk,
+mode 0640.
 .TP
 .I examples/
 Templates to copy for all of the above.

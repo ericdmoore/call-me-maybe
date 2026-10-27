@@ -8,8 +8,13 @@
 ;                   email as-is.
 ;   externnotify  — the house mailbox: a script that runs after each message
 ;                   is saved and hands it to a mail hook (the shipped one
-;                   uses the bullmoose CLI with a send-only token). See
-;                   RUNBOOK, "The house mailbox".
+;                   uses the bullmoose CLI with a send-only token), mailing
+;                   each box's message to the email on its line below (else
+;                   MAIL_TO), with a transcript and a home-network recording
+;                   link when configured. See RUNBOOK, "The house mailbox".
+;                   Pick one means one: with externnotify, leave mailcmd
+;                   unset and no sendmail on the box, or a box with an email
+;                   is mailed twice.
 ;
 ; CHANGE THE PASSWORDS. 4242 below is a placeholder, and voicemail
 ; passwords are dialable from any handset via *97.
@@ -29,7 +34,8 @@ serveremail = lobby@example.com
 emailsubject = [Home phone] Voicemail for ${VM_NAME} from ${VM_CALLERID}
 ; mailcmd = /usr/bin/msmtp -t
 ; The house mailbox route. Runs as the asterisk user, off the call, after the
-; message is saved; reads MAIL_TO from /etc/asterisk/cmm-mail.env. A failed
+; message is saved, detached so nothing here waits on a transcription; reads
+; /etc/asterisk/cmm-mail.env (MAIL_TO, STT_*, VOICEMAIL_LINK_*). A failed
 ; send leaves the message in the box and the lamp lit.
 ; externnotify = /opt/call-me-maybe/scripts/voicemail-notify
 

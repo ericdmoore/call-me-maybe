@@ -118,6 +118,8 @@ func runCommand() int {
 			return runInbox(os.Args[2:])
 		case "digest":
 			return runDigest(os.Args[2:])
+		case "voicemail":
+			return runVoicemail(os.Args[2:])
 		case "pack":
 			return runPack(os.Args[2:])
 		case "version", "-v", "--version":
@@ -376,7 +378,21 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 /v1/audio/transcriptions — tools/speechd on a Mac,
                                 or whisper-server anywhere) sets STT_ENDPOINT in
                                 .env; "none" clears it. No restart: only the
-                                phonebook job reads it
+                                phonebook job reads it. Voicemail transcripts
+                                read their own copy in /etc/asterisk/cmm-mail.env
+  doorman voicemail notify <context> <mailbox> [new] [old] [urgent]
+                                Asterisk's externnotify, as the asterisk user
+                                (scripts/voicemail-notify starts it detached):
+                                each new message mailed through MAIL_HOOK to
+                                the box's own address in voicemail.conf, else
+                                MAIL_TO, with a transcript when STT_ENDPOINT is
+                                set and a recording link per VOICEMAIL_LINK_BASE.
+                                Reads /etc/asterisk/cmm-mail.env, never .env
+  doorman voicemail serve       the recording links, GET /v/<token> on
+                                VOICEMAIL_LINK_LISTEN (default :8095), to
+                                loopback, private, link-local and tailnet
+                                addresses only; pruned after VOICEMAIL_LINK_DAYS
+                                (default 14). doorman-voicemail.service runs it
   doorman digest [flags]        yesterday as one mail: calls from the journal,
                                 texts from the inbox's outcome log, as Markdown
                                 on stdout (redacted) or --mail through MAIL_HOOK
