@@ -1,7 +1,7 @@
 package lobby
 
 // Prompts are pre-rendered WAVs shipped with the repo (see prompts/build.sh),
-// not runtime TTS. The Pi does no synthesis: playback is a file read, which is
+// not call-time TTS. Installation may synthesise ahead of time; playback is a file read, which is
 // why the lobby can answer and start talking in well under a second — and why
 // a broken speech service can never make the house phone unreachable.
 //

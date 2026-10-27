@@ -16,9 +16,9 @@
 //
 // # Nothing here runs on a call path
 //
-// Prompts are rendered once on a workstation and committed as WAVs; the Pi
-// does no synthesis (CLAUDE.md invariant 7). This package is build-time tooling
-// that happens to live in the same binary, and the daemon never calls it.
+// Prompts render ahead of time on a workstation or during pack installation
+// on the appliance (CLAUDE.md invariant 7). This package is authoring/install
+// tooling in the same binary; the daemon never calls it.
 //
 // # Transport is not the pattern
 //

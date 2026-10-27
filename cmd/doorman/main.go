@@ -187,11 +187,10 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                               opt-in sandbox preview delivery, separate from config sync
   doorman books install-preview --archive <file>
                               verify and install a bounded local preview, no account required
-  doorman pack <cmd> <dir>      build and check prompt packs. "check" validates,
-                                "build" renders audio through piper, ElevenLabs,
-                                OpenAI or Polly, "voices" lists what a backend
-                                offers. Rendering is content-addressed, so
-                                editing one line re-renders one clip.
+  doorman pack <cmd> [target]   build, lint, install, list or select local packs.
+                                "install" renders missing audio before activation;
+                                "use" selects an installed voice. "pack help"
+                                describes archives, renderers and offline use.
   doorman events --json         read durable events through the internal public_events_v1 view
       --after cursor           exclusive sequence cursor (default 0)
       --limit count            maximum events (default 100, maximum 10000)
@@ -646,6 +645,7 @@ func runCheck(args []string) (code int) {
 	// The host's services are not the policy's business: --policy-only
 	// validates files on any machine, including CI's, where no unit exists.
 	if !*policyOnly {
+		fmt.Printf("Default voice pack (configured): %s\n", configuredPack(*envFlag))
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		env := secretLookup(*envFlag)
 		base := filepath.Dir(*envFlag)

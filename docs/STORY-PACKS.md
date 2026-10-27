@@ -267,7 +267,18 @@ utterance through the backends named in `voices`, normalises loudness, and
 writes the 8 kHz/16 kHz pair per clip along with a compiled graph.
 
 Nothing synthesises during a call, ever (CLAUDE.md invariant 7). A story pack
-installs as audio files exactly like a voice pack.
+installs as audio files exactly like a voice pack. The local builder and
+installer work today; the handset story player is separate work (#69).
+`pack use` refuses stories, because they cannot replace the six lobby prompts.
+
+Ship source with `doorman pack build <dir> --source-only --archive story.cmmpack`,
+or omit `--source-only` to render before packaging. Install with
+`doorman pack install story.cmmpack`: it renders missing utterances and writes
+the compiled graph, original Markdown and audio into an immutable version.
+Every `<sfx name="door-creak"/>` must supply both `sfx/door-creak.wav` and
+`sfx/door-creak.wav16`; effects are copied, never sent to TTS. The builder
+declares their recorded origin automatically. Other supplied utterances use
+the `audio` manifest bindings documented in [PACKS.md](PACKS.md).
 
 ```
 the-threshold/
@@ -279,10 +290,11 @@ the-threshold/
 │   ├── entrance-01.wav16
 │   └── …
 └── sfx/
-    └── door-creak.wav
+    ├── door-creak.wav
+    └── door-creak.wav16
 ```
 
-Rendering is content-addressed on `(text, voice, settings)`, so editing one
+Rendering is content-addressed on `(text, backend, voice, settings)`, so editing one
 line re-renders one clip rather than the whole story. On a paid backend that is
 the difference between a tool you use and one you are afraid of.
 
