@@ -26,6 +26,12 @@ type Destination interface {
 	Delete(ctx context.Context, name string) error
 }
 
+// WriteOnly is a destination whose credentials cannot list, read or delete.
+// Its service owns retention; delivery and local decryption do not prove readback.
+type WriteOnly interface {
+	WriteOnly() bool
+}
+
 // FileDest is a directory: on the box, a mounted drive, an NFS share.
 type FileDest struct{ Dir string }
 
@@ -170,6 +176,10 @@ func Deliver(ctx context.Context, dests []Destination, name string, content []by
 		r := Delivery{Dest: d.Name()}
 		if err := d.Put(ctx, name, strings.NewReader(string(content))); err != nil {
 			r.Err = err
+			out = append(out, r)
+			continue
+		}
+		if w, ok := d.(WriteOnly); ok && w.WriteOnly() {
 			out = append(out, r)
 			continue
 		}

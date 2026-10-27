@@ -7,6 +7,7 @@
 //	doorman schema [name]    print the config surface as JSON Schema
 //	doorman calls            read the call log
 //	doorman balance          what is left on each prepaid trunk
+//	doorman numbers          which numbers each trunk's account holds
 //	doorman pack             build and check prompt packs
 //	doorman rotate [flags] [label ...]
 //	                         rotate extension PINs (all, or by label)
@@ -18,6 +19,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -32,9 +34,11 @@ import (
 	"syscall"
 	"time"
 
+	"callmemaybe/internal/accountbook"
 	"callmemaybe/internal/ari"
 	"callmemaybe/internal/calls"
 	"callmemaybe/internal/config"
+	"callmemaybe/internal/configcheck"
 	"callmemaybe/internal/contacts"
 	"callmemaybe/internal/events"
 	"callmemaybe/internal/host"
@@ -47,6 +51,7 @@ import (
 	"callmemaybe/internal/schema"
 	"callmemaybe/internal/setup"
 	"callmemaybe/internal/updatecheck"
+	"callmemaybe/internal/webhookconfig"
 )
 
 // version is the release identity. A release build stamps it from the git tag
@@ -85,10 +90,20 @@ func runCommand() int {
 			return runCalls(os.Args[2:])
 		case "balance":
 			return runBalance(os.Args[2:])
+		case "numbers":
+			return runNumbers(os.Args[2:])
 		case "provision":
 			return runProvision(os.Args[2:])
 		case "backup":
 			os.Exit(runBackup(os.Args[2:]))
+		case "recovery":
+			os.Exit(runRecovery(os.Args[2:]))
+		case "login":
+			return runLogin(os.Args[2:])
+		case "account":
+			return runAccount(os.Args[2:])
+		case "sync":
+			return runSync(os.Args[2:])
 		case "restore":
 			os.Exit(runRestore(os.Args[2:]))
 		case "stt":
@@ -97,6 +112,8 @@ func runCommand() int {
 			os.Exit(runPhonebook(os.Args[2:]))
 		case "reminders":
 			return runReminders(os.Args[2:])
+		case "books":
+			return runBooks(os.Args[2:])
 		case "inbox":
 			return runInbox(os.Args[2:])
 		case "digest":
@@ -164,6 +181,10 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -fetch                    fetch contacts.toml url sources now; otherwise report what the daemon last cached
       -messages path            texts the house answers, optional (default $MESSAGES_PATH or ./messages.toml)
       -env path                 secrets file, for the tokens url sources name (with -fetch; default ./.env)
+  doorman sync media list|once --source <https-origin>
+                              opt-in sandbox preview delivery, separate from config sync
+  doorman books install-preview --archive <file>
+                              verify and install a bounded local preview, no account required
   doorman pack <cmd> [target]   build, lint, install, list or select local packs.
                                 "install" renders missing audio before activation;
                                 "use" selects an installed voice. "pack help"
@@ -206,6 +227,24 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
       -min n                    threshold for trunks that declare no balance_min
       -json                     machine-readable, for a cron job on another box
       -timeout d                how long to wait on one provider (default 20s)
+  doorman numbers [flags] [path]
+                                which numbers each trunk's account holds, from
+                                the provider's API, against the numbers the
+                                policy files claim for it ([line] number and
+                                outbound_cid with [line] trunk): on the account
+                                and assigned to the connection the trunk
+                                registers as, assigned to none or to another,
+                                or not on the account at all. Exit 1 when a
+                                claimed number is not where the policy says,
+                                3 when a trunk could not be checked. Telnyx
+                                today (api_key_env on the trunk); a provider
+                                it cannot ask is reported, never failed. The
+                                daemon never reads the key
+      -trunks path              provider inventory (default $TRUNKS_PATH or ./trunks.toml)
+      -handsets path            inventory file (default $HANDSETS_PATH or ./handsets.toml)
+      -env path                 secrets file holding the API keys (default ./.env)
+      -json                     machine-readable
+      -timeout d                how long to wait on one provider (default 30s)
   doorman schema [name]         print the configuration surface as JSON Schema:
                                 every key, type, default, and cross-file
                                 reference for policy.toml, handsets.toml,
@@ -292,6 +331,11 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
   doorman reminders prune       remove finished reminder recordings (Asterisk user);
                                 --spool overrides /var/spool/asterisk. The
                                 *80/*81/*82 menus run through Asterisk AGI.
+  doorman books prepare        prepare existing recordings for the *2665 Books menu;
+                                --source catalog.json, --library directory.
+                                Offline preparation needs ffmpeg and espeak-ng.
+  doorman books list           print the prepared recording catalog as JSON;
+                                --library overrides the Asterisk spool library.
   doorman phonebook [flags]     numbers added from handsets with *88: file each
                                 recording's number into that phone's own book
                                 at once (PHONEBOOK_DIR/own/<id>.vcf, served by
@@ -300,6 +344,14 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 answers; doorman-phonebook.timer runs it every
                                 minute. Never on a call; no STT means the
                                 number keeps its number for a name
+  doorman login [--state DIR]  enrol with a browser/passkey approval; run as the
+                                backup service user. Credentials stay in private
+                                account state and never enter backup bundles
+  doorman recovery authorize|setup|restore|confirm|cancel|status
+                                printed-phrase cloud recovery; restore requires an inactive --root
+  doorman account status|rotate
+                                show IDs/capabilities or rotate one capability;
+                                status --json never prints credential values
   doorman backup init|run|list|verify
                                 the house as one sealed file: init makes the
                                 keypair (public half into .env, private printed
@@ -307,8 +359,8 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
                                 the state directory (journal snapshotted),
                                 voicemail, the *88 spool and the hand-written
                                 Asterisk files into one age-encrypted bundle and
-                                delivers it to every destination (BACKUP_PATH;
-                                s3 and the account later), pruning by
+                                delivers it to file, S3 and opted-in cloud
+                                (BACKUP_CLOUD=true after login); local/S3 prune by
                                 BACKUP_KEEP_DAILY/WEEKLY; doorman-backup.timer
                                 runs it nightly; verify opens the newest with
                                 the private key (BACKUP_IDENTITY_FILE or typed)
@@ -397,7 +449,7 @@ func loadDotEnv(path string) map[string]string {
 }
 
 // secretLookup resolves a named secret for the subcommands that need one —
-// `render` for SIP passwords, `balance` for provider API passwords. The real
+// `render` for SIP passwords, `balance` and `numbers` for provider API keys. The real
 // environment wins over the file, so a systemd unit or a CI runner can supply
 // a value the file does not have.
 func secretLookup(envPath string) func(string) (string, bool) {
@@ -440,6 +492,16 @@ func runCheck(args []string) (code int) {
 		path = fs.Arg(0)
 	}
 	path = policyPathArg(path)
+	webhookPath := filepath.Join(filepath.Dir(path), "webhook.toml")
+	if data, err := webhookconfig.Read(webhookPath); err == nil {
+		if _, err = webhookconfig.Parse(data); err != nil {
+			fmt.Fprintln(os.Stderr, "webhook.toml: invalid domain or path prefix")
+			return 1
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintln(os.Stderr, "webhook.toml: cannot read configuration")
+		return 1
+	}
 	handsetsPath := handsetsPathArg(*handsetsFlag)
 
 	// The provider inventory, when there is one. check always passes it —
@@ -462,15 +524,11 @@ func runCheck(args []string) (code int) {
 		return 1
 	}
 
-	// StrictUnknownKeys is set here and nowhere else that loads a policy. An
-	// operator is reading this output and a typo is exactly what they came to
-	// find; the daemon, which cannot afford to refuse a file, only warns.
-	opts := policy.Options{
-		AllowPlaceholders: *allowPlaceholders,
-		StrictUnknownKeys: true,
-		Trunks:            trunks,
-		ModelKnown:        provision.Known,
-	}
+	// The same rules the daemon's reload and sync apply (configcheck), so a
+	// file this passes is one both of them accept. AllowPlaceholders is the
+	// one difference, and only CI sets it.
+	opts := configcheck.Options(trunks)
+	opts.AllowPlaceholders = *allowPlaceholders
 
 	files, ignored := policy.DiscoverLines(path)
 	results := make([]checkedLine, 0, len(files))
@@ -554,6 +612,12 @@ func runCheck(args []string) (code int) {
 		set = contacts.Load(contactSources, defaultCountryCode())
 	}
 	if !printContacts(set, lists) {
+		rc = 1
+	}
+	// Silent without a lobby pass book, which is every box not enrolled with
+	// an account: who the account lets past the lobby, as counts per line.
+	accountBooks := filepath.Join(render.PhonebookDir(render.Env(secretLookup(*envFlag))), accountbook.Dir)
+	if !printLobbyPass(accountBooks, results[0].pol.HandsetList(), lists, set) {
 		rc = 1
 	}
 	// The words, when there are any. Absent is the state every install is in
@@ -732,6 +796,9 @@ func checkEnvironment() int {
 		v, ok := dotenv[k]
 		return v, ok
 	}, 3*time.Second))
+	if line := describeAccount("/var/lib/doorman"); line != "" {
+		fmt.Println(line)
+	}
 	if line, ok := describeBackup("/var/lib/doorman", time.Now(), func(k string) (string, bool) {
 		if v, ok := os.LookupEnv(k); ok {
 			return v, true
@@ -981,7 +1048,7 @@ func describeLine(path string, p *policy.Policy, allowPlaceholders bool) {
 			fmt.Printf("      rings        %s\n", describePlan(e.Plan))
 			fmt.Printf("      voicemail    %s\n", orDefault(e.Plan.Mailbox, noMailbox))
 			fmt.Printf("      afterhours   %s\n", describeAfterhours(e, now))
-			if e.AfterhoursID != "" {
+			if len(e.Afterhours) > 0 {
 				fmt.Printf("      during it    %s\n", describeAfterhoursPlan(e))
 			}
 		}
@@ -1065,21 +1132,38 @@ func describePlan(plan policy.RingPlan) string {
 	return strings.Join(stages, ", then ")
 }
 
+// describeAfterhours names every schedule the extension's afterhours lists
+// and describes the union of the ones switched on: "nights, weekend-days —
+// 17:00–09:00 every day; 09:00–17:00 SU SA". One schedule reads exactly as it
+// always has.
 func describeAfterhours(e policy.ResolvedExtension, now time.Time) string {
-	if e.AfterhoursID == "" {
+	if len(e.Afterhours) == 0 {
 		return noAfterhours
 	}
-	if e.Afterhours == nil {
-		// The schedule exists but carries enabled = false. Identical to "no
-		// schedule" at call time, and completely different to whoever is
+	if !e.Afterhours.Live() {
+		// Every schedule exists but carries enabled = false. Identical to
+		// "no schedule" at call time, and completely different to whoever is
 		// reading the file wondering why quiet hours stopped working.
-		return fmt.Sprintf("%s — switched off (enabled = false), so this line rings at any hour", e.AfterhoursID)
+		off := "switched off"
+		if len(e.Afterhours) > 1 {
+			off = "all switched off"
+		}
+		return fmt.Sprintf("%s — %s (enabled = false), so this line rings at any hour",
+			strings.Join(e.Afterhours.IDs(), ", "), off)
+	}
+	names := make([]string, 0, len(e.Afterhours))
+	for _, w := range e.Afterhours {
+		if w.Window == nil {
+			names = append(names, w.ScheduleID+" (switched off)")
+			continue
+		}
+		names = append(names, w.ScheduleID)
 	}
 	state := ""
 	if e.Afterhours.Active(now) {
 		state = "  ← ACTIVE NOW"
 	}
-	return fmt.Sprintf("%s — %s%s", e.AfterhoursID, e.Afterhours.Describe(), state)
+	return fmt.Sprintf("%s — %s%s", strings.Join(names, ", "), e.Afterhours.Describe(), state)
 }
 
 // describeCurfews prints each sleeping-capable handset with every window it
@@ -1319,7 +1403,8 @@ func runRender(args []string) int {
 		return true
 	}
 	if !write("pjsip_handsets.conf", frags.PJSIP) || !write("extensions_handsets.conf", frags.Dialplan) ||
-		!write("voicemail_handsets.conf", frags.Voicemail) {
+		!write("voicemail_handsets.conf", frags.Voicemail) ||
+		!write("pjsip_books.conf", frags.BooksPJSIP) || !write("extensions_books.conf", frags.BooksDialplan) {
 		return 1
 	}
 
@@ -1410,6 +1495,8 @@ func runRender(args []string) int {
 	fmt.Println("  sudo cp " + strings.Join(confs, " ") + " /etc/asterisk/")
 	fmt.Println("  sudo chown asterisk:asterisk /etc/asterisk/*_handsets.conf")
 	fmt.Println("  sudo chmod 640 /etc/asterisk/*_handsets.conf")
+	fmt.Println("  sudo chown asterisk:asterisk /etc/asterisk/*_books.conf")
+	fmt.Println("  sudo chmod 640 /etc/asterisk/*_books.conf")
 	if trunkFrags != nil {
 		fmt.Println("  sudo chown asterisk:asterisk /etc/asterisk/*_trunks.conf")
 		fmt.Println("  sudo chmod 640 /etc/asterisk/*_trunks.conf")
@@ -1418,6 +1505,8 @@ func runRender(args []string) int {
 	fmt.Println("\nvoicemail_handsets.conf is read once voicemail.conf ends with")
 	fmt.Println("  #tryinclude \"voicemail_handsets.conf\"")
 	fmt.Println("(the shipped example does). It appends to [household]; hand-written boxes there stay.")
+	fmt.Println("\nBooks: pjsip.conf and extensions.conf must #tryinclude their *_books.conf")
+	fmt.Println("after their *_handsets.conf include (the shipped examples do).")
 	if trunkFrags != nil {
 		fmt.Println("\nThe trunk files are only read once pjsip.conf and extensions.conf")
 		fmt.Println("#include them — see RUNBOOK \"Add a second provider\". Delete the")
@@ -1571,7 +1660,7 @@ func serve() error {
 			"path", ig.Path, "reason", ig.Reason)
 	}
 
-	opened, err := openLines(lineFiles, cfg.HandsetsPath, cfg.PolicyWatch, log, journal)
+	opened, err := openLines(lineFiles, cfg.HandsetsPath, cfg.TrunksPath, cfg.PolicyWatch, log, journal)
 	if err != nil {
 		log.Error("cannot load policy", "path", cfg.PolicyPath, "err", err)
 		return fmt.Errorf("service startup failed: %w", err)
@@ -1581,6 +1670,28 @@ func serve() error {
 			o.store.Close()
 		}
 	}()
+	// The account's lobby pass book: global, like the address books, and
+	// loaded before the first call so a pass holder is never sent to the
+	// lobby by a race with startup. Read with the default line's inventory,
+	// the one every line shares, so a selection that makes the set invalid
+	// keeps the last good pass book exactly as it keeps the last good
+	// directory. A box with no account books holds no passes.
+	defaultLine := opened[0].store
+	passes := openPasses(filepath.Join(cfg.PhonebookDir, accountbook.Dir), func() ([]policy.Handset, string) {
+		p := defaultLine.Current()
+		return p.HandsetList(), p.SourceDigest()
+	}, log)
+	if cfg.PolicyWatch {
+		passCtx, stopPasses := context.WithCancel(context.Background())
+		defer stopPasses()
+		go passes.watch(passCtx, time.Second)
+	}
+	webhooks := webhookconfig.OpenStore(filepath.Join(filepath.Dir(cfg.PolicyPath), "webhook.toml"))
+	webhookCtx, stopWebhooks := context.WithCancel(context.Background())
+	defer stopWebhooks()
+	go webhooks.Watch(webhookCtx)
+	stopActivation := observeActivation(opened, passes, webhooks)
+	defer stopActivation()
 
 	client := ari.New(ari.Options{
 		BaseURL:      cfg.ARIBaseURL,
@@ -1640,10 +1751,26 @@ func serve() error {
 	// line after the first call nobody heard announced. Only the host is
 	// logged — the URL is a credential.
 	var hook *notify.Webhook
-	if cfg.WebhookURL != "" && cfg.WebhookMode == "legacy" {
+	{
 		var err error
 		hook, err = notify.Open(notify.Options{
-			URL:              cfg.WebhookURL,
+			URL: func() string {
+				if !webhooks.Current().Managed && cfg.WebhookMode == "legacy" {
+					return cfg.WebhookURL
+				}
+				return ""
+			}(),
+			Resolve: func() notify.Target {
+				held := webhooks.Current()
+				if held.Managed {
+					return notify.Target{URL: held.Config.URL(), NoRedirect: true}
+				}
+				if cfg.WebhookMode == "legacy" {
+					return notify.Target{URL: cfg.WebhookURL, Token: cfg.WebhookToken, SendFullCallerID: !cfg.WebhookRedactCallerID}
+				}
+				return notify.Target{}
+			},
+
 			Token:            cfg.WebhookToken,
 			Timeout:          cfg.WebhookTimeout,
 			SendFullCallerID: !cfg.WebhookRedactCallerID,
@@ -1654,7 +1781,7 @@ func serve() error {
 			return fmt.Errorf("service startup failed: %w", err)
 		}
 		defer func() { _ = hook.Close() }()
-		log.Info("event webhook enabled", "host", hook.Host(), "redacted", cfg.WebhookRedactCallerID)
+		log.Info("event webhook configuration loaded")
 	}
 
 	// The address books, when there are any — absent is the state every install
@@ -1741,6 +1868,7 @@ func serve() error {
 		if journal != nil {
 			deps.Events = journal
 		}
+		deps.Passes = passes
 		if callLog != nil {
 			deps.Calls = callLog
 		}

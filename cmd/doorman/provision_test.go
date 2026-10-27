@@ -289,9 +289,11 @@ func TestOnlyTheProvisionCommandNamesTheServingPackage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(src), "internal/provision/serve") {
-			t.Errorf("%s mentions internal/provision/serve — the LAN listener is reached from "+
-				"`doorman provision` and nothing else, deliberately", name)
+		for _, pkg := range []string{"internal/provision/serve", "internal/provision/push"} {
+			if strings.Contains(string(src), pkg) {
+				t.Errorf("%s mentions %s — handset management is reached from "+
+					"`doorman provision` and nothing else, deliberately", name, pkg)
+			}
 		}
 	}
 }
@@ -305,7 +307,7 @@ func TestNothingUnderInternalImportsTheServingPackage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if filepath.Base(dir) != "serve" {
+		if filepath.Base(dir) != "serve" && filepath.Base(dir) != "push" {
 			pkgs, err := parser.ParseDir(fset, dir, nil, parser.ImportsOnly)
 			if err != nil {
 				t.Fatalf("parsing %s: %v", dir, err)
@@ -313,8 +315,8 @@ func TestNothingUnderInternalImportsTheServingPackage(t *testing.T) {
 			for _, pkg := range pkgs {
 				for path, file := range pkg.Files {
 					for _, imp := range file.Imports {
-						if strings.Contains(imp.Path.Value, "internal/provision/serve") {
-							t.Errorf("%s imports internal/provision/serve — the daemon must never link the LAN listener", path)
+						if strings.Contains(imp.Path.Value, "internal/provision/serve") || strings.Contains(imp.Path.Value, "internal/provision/push") {
+							t.Errorf("%s imports handset management — the daemon must never reach this package", path)
 						}
 					}
 				}

@@ -45,15 +45,18 @@ admitted from an address book is recorded with the source that named them
 (`doorman calls` shows `Grandma (contacts/eric)`), which is the answer to "why
 did the phone ring for someone I never allow-listed".
 
-With a file, the lobby walks a five-rung ladder and the first match wins:
+With a file, the lobby walks this ladder and the first match wins (rung 3
+exists only on a box enrolled with an account that has delivered a lobby pass
+book — see [The lobby pass book](#the-lobby-pass-book)):
 
 | | Source | Result |
 |---|---|---|
 | 1 | a **block** source | dismissed, and never hears the lobby |
 | 2 | `[[people]]` | straight through — you said so explicitly |
-| 3 | a **personal** contact | straight through |
-| 4 | a **published** contact | the lobby: dial an extension |
-| 5 | anybody else | the lobby |
+| 3 | the account's **lobby pass** book | straight through, welcomed by the contact's name |
+| 4 | a **personal** contact | straight through |
+| 5 | a **published** contact | the lobby: dial an extension |
+| 6 | anybody else | the lobby |
 
 `[[people]]` still beats the classifier, so writing somebody down is the
 override and needs no new mechanism. **A number that is both allow-listed and
@@ -154,14 +157,29 @@ $ sudo mkdir -p /opt/call-me-maybe
 $ sudo chown "$USER" /opt/call-me-maybe
 $ git clone https://github.com/YOU/call-me-maybe /opt/call-me-maybe
 
-# On a WORKSTATION (not the Pi), build and ship the binary. Check the Pi arch
-# first: uname -m says aarch64 -> arm64 build, armv7l -> armv7 build.
-$ make cross
-$ scp bin/doorman-linux-arm64 pi@raspberrypi:/opt/call-me-maybe/bin/doorman
-$ ssh pi@raspberrypi /opt/call-me-maybe/bin/doorman version
+# On the box, download the release binary for its arch and verify it against
+# that release's checksums.txt (uname -m: x86_64 -> amd64, aarch64 -> arm64,
+# armv7l -> armv7). Boxes run release binaries only; see "Deploying upgrades".
+$ V=v0.14.0 A=arm64
+$ B=https://github.com/ericdmoore/call-me-maybe/releases/download/$V
+$ curl -fsSLO "$B/doorman-linux-$A" && curl -fsSLO "$B/checksums.txt"
+$ grep " doorman-linux-$A\$" checksums.txt | sha256sum -c -
+$ sudo install -m 0755 "doorman-linux-$A" /opt/call-me-maybe/bin/doorman
+$ /opt/call-me-maybe/bin/doorman version          # exactly "doorman 0.14.0"
 ```
 
 ### Deploying upgrades
+
+**A box runs release binaries only.** Every `doorman` on a box (the services'
+copy, `/usr/local/bin`, the operator's `~/.local/bin`, and anything a systemd
+unit or drop-in starts) is a published `vX.Y.Z` release asset, checked against
+that release's `checksums.txt` on the box. Never a `make cross` or branch
+build copied over, and never a one-off binary wired in through a drop-in:
+`doorman version` must print exactly the release version, and a `-N-gSHA`
+suffix or any other label means an unofficial build. To ship unreleased work,
+merge it and cut a release; a hotfix is a patch release. The one exception is
+an emergency rollback to the previous known-good binary (below), which is
+followed by a release, not left in place.
 
 On a workstation, rerun the documented `install.sh` installer:
 
@@ -189,10 +207,43 @@ The script refuses to continue if the unit file or a managed template in
 `/opt/call-me-maybe/asterisk` changed between releases — review the diff,
 copy the new one into place, then rerun.
 
-For the Pi, build the desired release with `make cross` and use the `scp`
-command above. Keep `bin/doorman.prev` for rollback, then restart the doorman
-service and verify `doorman version`. The interactive notice names `install.sh`
-on workstations and the `scp` path on Linux ARM hosts.
+For the Pi, download and verify the release asset as in the install steps
+above. Keep each binary you replace beside it as `doorman.before-vX.Y.Z`, named
+for the release you are installing, so a retried upgrade cannot overwrite the
+rollback target. Check that no call is up (`sudo asterisk -rx "core show
+channels count"`), then restart `doorman`, `doorman-sync`, `doorman-directory`
+and `doorman-inbox`; Asterisk does not need a restart for a binary change. The
+interactive notice names `install.sh` on workstations and this download path on
+Linux ARM hosts.
+
+#### After an upgrade: smoke checkpoints
+
+Record each before the upgrade and compare after; any failure means roll back.
+
+1. **Identity:** every copy prints exactly the release version, and its
+   SHA-256 matches `checksums.txt`.
+2. **Configuration:** `doorman check` passes on the live files. Worth running
+   the *new* binary's `doorman check --policy-only` before restarting: a
+   release can tighten validation. If it refuses the live files, the daemon
+   still starts — on the last good copy it saved, or on the first upgrade
+   under the previous release's rules (see *An invalid policy must never take
+   the phone down*) — but it says so loudly until the files pass.
+3. **Services:** the four units are active with no restarts; only the units you
+   restarted have new PIDs.
+4. **Phone network:** the trunk shows `Registered` (`pjsip show
+   registrations`) and the `doorman` ARI app is connected (`ari show apps`).
+5. **Calls:** a known caller rings the house; an unknown caller hears the
+   lobby, and a wrong extension gets "Good day"; an outbound call and a
+   Room2Room call connect.
+6. **Backup:** `sudo systemctl start doorman-backup` succeeds to every
+   destination.
+7. **Sync, if enrolled:** the box's last-seen time and reported version update,
+   the content library totals are unchanged, and a harmless hosted edit (and
+   its revert) comes back `applied`.
+8. **Logs:** no new warnings from any unit for ten minutes.
+
+`./scripts/smoke.sh` on the box covers the deployment checks it knows about;
+the call and hosted checks need a person.
 
 Successful interactive operator commands can print a newer-release notice to
 stderr, after their output, at most once per 24 hours. Both stdout and stderr
@@ -544,15 +595,195 @@ names it. `cannot reach ARI` is rungs 4–5. The unit has
 `StartLimitBurst=5`, so it stops rather than looping forever — clear with
 `sudo systemctl reset-failed doorman` after fixing.
 
-### Rolling back
+### Box removed from its account
 
 ```bash
-# The binary is the deploy artifact. Keep the previous one around by copying
-# bin/doorman to bin/doorman.prev before each deploy; then rollback is:
-$ sudo systemctl stop doorman
-$ mv /opt/call-me-maybe/bin/doorman.prev /opt/call-me-maybe/bin/doorman
-$ sudo systemctl start doorman
+$ journalctl -u doorman-sync -n 20 --no-pager
+$ sudo -u doorman doorman account status
 ```
+
+``sync: this box was removed from its account; hosted sync and cloud backups
+have stopped; calls keep working; run `doorman login` to enrol it again`` means
+an account owner removed this box. It is a deliberate sign-out, not a fault:
+the service answered `401 box_removed`, and the box forgot every credential,
+recorded when it happened, and stopped. `doorman-sync` exits 6, which its unit
+treats as a clean stop, so it is inactive rather than failed and nothing
+retries against the service. Calls, policies, phonebooks and the local
+configuration are unaffected.
+
+`doorman account status` and `doorman check` say the box was removed and when.
+The nightly backup reports `– cloud: stopped, this box was removed from its
+account` instead of failing a destination. If a file or S3 destination is also
+configured it keeps delivering and the run still passes. A cloud-only box has
+no copy anywhere: the run prints `✗ nothing was backed up`, exits 1, posts
+`BackupFailed` for the stopped destination, and `doorman check` goes red, until
+you add a file or S3 destination or enrol the box again. `doorman login` also
+clears the "stopped" note from the last run's record, so `doorman check` stops
+reporting it as soon as the box is enrolled.
+
+To connect it again, enrol it as a new box and start sync:
+
+```bash
+$ sudo -u doorman doorman login
+$ sudo systemctl start doorman-sync     # or: sudo doorman init services
+```
+
+A plain `401` without that word is still the old "sign in again" case: sync
+keeps its backoff and asks for `doorman login`.
+
+### The box's name on the account
+
+The account shows each box by the name the box suggested, or by an identifier
+fragment when it suggested none. The suggestion is `BOX_NAME` from `.env`, or
+the hostname when that is unset; an empty name or `localhost` suggests nothing.
+It is trimmed and cut to at most 64 characters on a character boundary.
+
+- `doorman login` sends it with the enrolment request. It reads `BOX_NAME`
+  from its environment, else from `--env` (default
+  `/opt/call-me-maybe/.env`), so a plain `sudo -u doorman doorman login` sees
+  the value the units see. If the service refuses that request as invalid
+  (`400`, as a service that predates the name does), login retries once
+  without the name and enrols as before.
+- `doorman sync run` sends it in the status report until one report carrying
+  it has been accepted for this enrolment, records that in the sync state
+  directory (`echo.db`), and never sends it again, restarts included. This is
+  how a box enrolled before enrolment carried a name gets one. If the service
+  refuses a report carrying the name as invalid (`400`), the same report is
+  sent again at once without it and the name is offered again after 24 hours,
+  so the name can never stop status reporting. Any other failure is the
+  report's, and the next pass offers the name again.
+
+After that the account owns the name: rename the box there. Changing
+`BOX_NAME` or the hostname later renames nothing. The name goes only to the
+household's own connected account and is never logged.
+
+### The lobby pass book
+
+The account can let callers skip the lobby, the way `[[people]]` does, without
+anybody editing `policy.toml`: the household gives a contact a *lobby pass* on
+the account, and the account delivers its pass holders to the box as one
+special account book.
+
+Account books arrive through sync as `PHONEBOOK_DIR/account/acct-<id>.toml`.
+An ordinary one is **directory only**: being in a phone's book makes a number
+dialable from that phone and admits nobody. The one book whose file carries
+`role = "lobby-pass"` is the reverse:
+
+- **Read by admission, never shown.** No handset may select it, no book may
+  include it, and it includes nothing; sync refuses a `phonebook.select`,
+  `phonebook.assign` or delivery that would put it in a directory
+  (`rejected`/`invalid`), and `doorman check` fails on a hand edit that does.
+  A pass holder need not be in any other book or on any phone.
+- **One per box**, up to 5000 contacts (a directory book stays at 2000), in a
+  file of at most 1 MiB.
+- **After `[[people]]`.** A number in both is welcomed by the `[[people]]`
+  name; a number a block source names is still dismissed. `[[people]]` stays
+  the box's own list and the deliberate override.
+- **Local data only.** A call reads an in-memory map; nothing on the call path
+  reads a file or the network for it.
+- **Hot reload with last good.** The daemon re-reads the account books within
+  a second of any change to them or to `handsets.toml`, through the same
+  rules sync and the directory apply. A set those rules refuse keeps the
+  pass book in service; a restart onto a refused set runs the last good copy
+  (`PHONEBOOK_DIR/account/.lobby-pass.last-good`, written only from accepted
+  bytes), and with no copy the box starts with nobody holding a pass — they
+  hear the lobby, and the phone keeps answering.
+- **Delivered like any book**: `phonebook.put` (with `beforeHash` to replace),
+  `phonebook.remove`, the echo carrying its revision, hash and role. The
+  receipt says `applied` once the running daemon admits from exactly the
+  delivered bytes.
+
+What a log line or `doorman check` says about it is counts:
+
+```text
+Lobby pass: 3 holders, 4 numbers   (acct-…, revision 7)
+  /opt/call-me-maybe/policy.toml: 3 admitted by pass; 1 already in [[people]], welcomed by that name
+```
+
+```bash
+$ journalctl -u doorman --no-pager | grep 'lobby pass'
+# lobby pass book loaded book=acct-… revision=7 holders=3 numbers=4
+```
+
+A pass holder's call is logged as `known caller, welcoming` with the name,
+`via=lobby-pass` and the usual masked caller, and `doorman calls` shows it as
+`Grandpa Joe (lobby-pass)`. The file is managed: take a pass away on the
+account, not here. Removing the book on the account (or deleting the file)
+sends every holder back to the lobby within a second.
+
+### Sync is slow to pick up a hosted change
+
+A hosted edit normally reaches the box in about a second: `doorman sync run`
+holds the *bell*, an outbound WebSocket to the account service that carries
+nothing but "sync now". The box sends `ping` every 25 seconds and expects
+`pong`; a ring runs the ordinary HTTPS sync at once. While the bell is up the
+box polls only every `SYNC_BELL_POLL_S` seconds (default 300) as a safety net;
+while it is down it polls every five seconds, exactly as without a bell. So a
+blocked bell costs speed of delivery at worst, never correctness.
+
+A command's receipt says `saved` once the file is written and `applied` once
+the daemon is running that exact revision. Between passes, while a `saved`
+receipt is outstanding, sync asks the daemon's local activation socket
+(`active.sock` in the sync state directory) every half second whether the
+revision is loaded, and runs one pass as soon as it is, so the app shows
+`applied` within a second or two of `policy reloaded`. After 30 seconds the
+checks slow down, doubling to one every 30 seconds, until the receipt is
+applied or the command expires. They are local reads only; with nothing
+outstanding there are none.
+
+```bash
+$ journalctl -u doorman-sync --no-pager | grep 'bell:'
+```
+
+Only state changes are logged, and a failure that repeats is logged once an
+hour, not once a minute:
+
+| Line | Meaning |
+|---|---|
+| `bell: connected; polling slowly while it stays up` | healthy |
+| `bell: disconnected (network)` / `(no heartbeat answer)` / `(service heartbeat timeout)` | it reconnects with backoff, 1 s doubling to 5 min; polling is back to five seconds meanwhile |
+| `bell: disconnected (replaced)` | a newer bell for the same box took over. Once is a restart. If a line asking whether a second `doorman sync run` is running follows, find the other process (`pgrep -a doorman`) |
+| `bell: unavailable (… 404 …)` | the service does not offer the bell there, or a proxy strips WebSocket upgrades. Polling continues at five seconds; the box tries again every few minutes |
+| `bell: refused for this credential (401 unauthorized)` / `(403 sync_required)` | the credential will not be let in. The bell waits for a new one (`doorman login`, `doorman account rotate`) and does not retry until then; sync itself reports the same credential problem |
+
+A removed box (`box_removed`) stops the bell along with sync — see *Box
+removed from its account*. To run without the bell, set `SYNC_BELL=false` in
+`.env` and `sudo systemctl restart doorman-sync`. Nothing read from the socket
+is ever configuration or a command: the one message it acts on asks for the
+same sync the next poll would have run anyway.
+
+### Rolling back
+
+**Check the live files with the old binary first.** A release can add a
+configuration shape the one before it never knew. `afterhours = ["nights",
+"weekend-days"]` is one (new after v0.18.0), and an older daemon
+refuses it, falls back to its last good copy, and refuses that too, because
+the newer daemon saved the copy *with* the list in it. With nothing it can
+load, it does not start. Nothing translates a file between shapes on the way
+down, so this step is by hand until a release carries machinery for it:
+
+```bash
+$ V=v0.14.0
+$ cd /opt/call-me-maybe
+$ sudo -u doorman bin/doorman.before-$V check --policy-only
+```
+
+If it refuses the files, simplify them to what it names before restoring the
+binary. For an afterhours list that is choosing one schedule
+(`afterhours = "nights"`) and accepting what that gives up — here, weekends
+ring — because the old release cannot say weekdays 9–5 at all.
+
+```bash
+# The binary is the deploy artifact. Each upgrade keeps the replaced copies as
+# doorman.before-vX.Y.Z (see "Deploying upgrades"); rollback restores them all
+# and restarts the same units:
+$ for t in /opt/call-me-maybe/bin/doorman /usr/local/bin/doorman; do
+>   sudo cp -a "$t.before-$V" "$t"; done
+$ sudo systemctl restart doorman doorman-sync doorman-directory doorman-inbox
+```
+
+This is the one time a box may run a binary that is not the current release:
+the previous known-good one, until the fix ships as a patch release.
 
 Asterisk config is not in the deploy path — roll it back separately by editing
 `/etc/asterisk/` and running `sudo asterisk -rx "core reload"`.
@@ -576,6 +807,7 @@ valid **transfer target**.
 | *4 | **Outbound console**: call as another one of your numbers. Only interesting with more than one line, and it refuses 911 — see "Outbound caller ID" below. This is the one that goes through doorman |
 | *(none)* | **Bedtime** — a `curfew` on the handset in `handsets.toml` names `[[schedules]]`; while one is active the phone skips ordinary incoming calls, cannot call out (911 and the reminder apps excepted), is left out of pages and ring-all, and has ordinary calls dropped at the hour. Nothing to dial: it is the house's rule, not the phone's. See "Bedtime" below |
 | *80 | **Call back today at** an AM/PM time. Past times are refused with a suggestion to use *81. See “Scheduled calls” below |
+| *2665 (*BOOK) | **Books.** Browse prepared local recordings and chapters, resume, seek, pause and change playback speed. See [Books](BOOKS.md). Respects handset curfew. |
 | *81 | **Call back in** 0–9 hours and 0–99 minutes. Extra minutes carry into hours; the total must be positive |
 | *82 | **Wake up call** at an AM/PM time tomorrow, once |
 | *88 | **Add a number to this phone.** Key the number, `#`, say the name after the beep. The number is in this phone's directory within a minute (named by its number), and under the spoken name once the box has had it transcribed. This phone's book only — never the allow-list. See "Add a number from a handset" |
@@ -843,11 +1075,15 @@ Both are pure `policy.toml`; see the `Kids` extension in
 `examples/policy.example.toml` for the shape. A ladder is `[[extensions.steps]]`
 blocks — each rings its handsets/groups for `rings` cycles (~6s each, or
 `seconds = N` exactly) before escalating; exhausting the ladder lands in the
-extension's `voicemail`. Afterhours (`[extensions.afterhours]`) is a window
-during which the line skips ringing entirely and goes straight to voicemail —
-`start`/`end` in local time (crossing midnight is fine and belongs to the
-start day), `days` lists the nights it *begins*. Flip `enabled = false` for
-holidays; hot reload applies it within a second.
+extension's `voicemail`. Afterhours is `afterhours = "<id>"` on the
+extension, naming a `[[schedules]]` window during which the line skips
+ringing and goes to `afterhours_ring` or straight to voicemail — `start`/`end`
+in local time (crossing midnight is fine and belongs to the start day), `days`
+lists the days it *begins*. One window crosses midnight at most once per day,
+so hours that need two name a list, quiet while any is active: weekdays 9–5 is
+`afterhours = ["nights", "weekend-days"]` (see `examples/scenarios/solo-business`).
+Flip `enabled = false` on the `[[schedules]]` entry to make it inert — the
+holiday switch; hot reload applies it within a second.
 
 `./bin/doorman check` prints each extension's ladder, mailbox, and — the
 important one — whether afterhours is **ACTIVE NOW**, which is the first
@@ -858,9 +1094,10 @@ It prints the settings you *didn't* write too, as `(none — ...)`. That is
 deliberate and it is how you catch a misspelled key: `voicmail = "kids"` is a
 legal TOML key that no field claims, so before it was reported the mailbox
 simply never existed and the file looked fine. Check now rejects a key it
-does not recognise and suggests the nearest real one; if you would rather see
-it than be stopped by it, that is what the daemon's log does — it warns and
-keeps the phone up (see *An invalid policy must never take the phone down*).
+does not recognise and suggests the nearest real one. The daemon's reload and
+sync refuse the same file — one validator for all three — and the daemon keeps
+the last good policy in service while they do (see *An invalid policy must
+never take the phone down*).
 
 ### Home Assistant Assist (optional)
 
@@ -1144,8 +1381,9 @@ duplicated. Recovery never changes an explicit selection back to House.
 
 Cards live under `PHONEBOOK_DIR/shared/house.vcf` or
 `PHONEBOOK_DIR/shared/handsets/<id>.vcf`, separate from `*88`'s own files. The
-phone-directory service notices changes automatically; each phone shows them
-on its next directory refresh. The normal state-directory backup includes
+phone-directory service notices changes automatically; LAN WP826 phones receive
+an immediate import, while other phones show them at their next directory poll.
+The normal state-directory backup includes
 these files. These are **directory additions only**: importing a contact
 changes neither `[[people]]`, `contacts.toml`, nor call-screening permissions.
 
@@ -1189,9 +1427,9 @@ encrypts and can never decrypt, a destination holds blobs it cannot read,
 and a stolen box cannot read its own backups.
 
 **Optional: a copy on the box, and what it costs.** Put a copy at
-`/var/lib/doorman/backup/identity.key` (doorman, 0600 — the one directory
-under the state tree that is never bundled) and every `backup run` reads
-each delivered bundle back from its destination and opens it ("verified
+`/var/lib/doorman/backup/identity.key` (doorman, 0600 — backup state and account
+credentials are never bundled) and every `backup run` reads
+each delivered file/S3 bundle back from its destination and opens it ("verified
 (read back)" in `check`); `verify` and `restore` find the key there too. The
 trade is explicit: **with the copy present, the box — and anyone who gets
 root on it — can decrypt every bundle made for that key, past and future.**
@@ -1210,6 +1448,16 @@ time, every file's hash, and what was excluded (`--no-voicemail` leaves the
 messages out). `doorman check` prints the last run, its age and where it
 went, and fails the check past a day or after a failed destination.
 `backup.completed` / `backup.failed` go to the journal, by destination name.
+
+**Cloud uploads:** run `sudo -u doorman doorman login`, approve the device code in
+the browser for the intended house, then set `BACKUP_CLOUD=true` in `.env`.
+Preserve the existing recipient and local/S3 destinations. `doorman account status`
+shows IDs and capabilities, never credential values. A cloud upload is reported as
+stored, not readback verified: its credential cannot list, read or delete. View
+metadata at <https://app.dialdoorman.cc/backups/>. Customer-authorized cloud recovery
+is still integration work; [the protocol guide](CLOUD-BACKUP-PROTOCOL.md) records
+retry, custody and recovery boundaries. A box removed from its account stops uploading
+and says so; see [Box removed from its account](#box-removed-from-its-account).
 
 **A new box from a bundle:**
 
@@ -1382,10 +1630,36 @@ A file that fails validation is rejected and the previous version stays live,
 so a typo cannot take the phone down — but check the log to confirm the reload
 actually happened rather than silently failing.
 
-Also worth a look: `unrecognised key in config, ignoring it`. The daemon warns
-rather than refusing, so an edit that misspelled a key *does* reload — it just
-does not do what you meant. `doorman check` turns the same warning into an
-error and tells you which key it should have been.
+Also worth a look: `unrecognised key in config`. A misspelled key is refused
+like any other invalid edit — the reload fails, the previous policy stays live,
+and `doorman check` says which key it should have been. `doorman check`, the
+daemon's reload and the sync observer apply one validator, so they always agree
+on whether a file is valid. The reload failure is logged with numbers and PINs
+redacted; a box enrolled in sync also reports it to the account as the file it
+rejected and why.
+
+**Across a restart, too.** Each time a line's files are accepted, at startup
+or on reload, the daemon saves an exact copy beside them in
+`policy.last-good/<line>/` (`policy.toml`, `handsets.toml`, `trunks.toml` when
+there is one; mode 0600, same owner as the originals, swapped in atomically).
+If the current files are refused at startup — a bad edit made while doorman
+was stopped, or a release whose validation is stricter — it runs that copy
+and logs one line you cannot miss:
+`POLICY REFUSED AT STARTUP — running the last good configuration until the
+files are fixed`, with the redacted reason. Fix the files and the ordinary
+reload picks them up. The copies hold PINs, like the files they copy; leave
+them where they are and never commit them.
+
+With no usable copy — the first start after upgrading from a release that
+never wrote one — the daemon runs the current files under the previous
+release's rules, so an upgrade never leaves a box worse off than before:
+unknown keys and handset models are warnings again, `[line] trunk` goes
+unchecked, the new size bounds and disabled-schedule checks do not apply. It
+logs `POLICY REFUSED BY THE CURRENT RULES — running it under the previous
+release's rules until the files are fixed`, and sync still reports the
+rejection. Nothing loaded that way becomes the last good copy; the first edit
+the current rules accept does. Only a file the previous release refused too
+stops the daemon starting.
 
 ### Add a handset
 
@@ -1415,10 +1689,56 @@ the phone at the box with the id and its `HANDSET_<ID>_PASSWORD`, confirm
 `Avail` with `pjsip show contacts`.
 
 The phones' directory — the other rooms, the feature codes, and `[[people]]`
-— comes from `doorman-directory.service`, always on, read-only, one port above
-the provisioning window. A name added to `[[people]]` is on every phone at
-its next poll (hourly) with nothing rendered and no window opened. A handset's
+— comes from `doorman-directory.service`, whose read-only HTTPS listener is one
+port above the provisioning window. A handset's
 `phonebook` key narrows what it shows: `["house"]` for a child's room.
+
+The directory service checks the rendered books every second and pushes changed
+XML to LAN WP826 phones using their existing web-admin credential. No reboot,
+provisioning window, Apply button, or call-service restart is needed. File edits,
+CLI imports and hosted assignments take the same path. The importer was verified
+on WP826 firmware 1.0.1.71; other models retain their configured pull interval
+(hourly by default). The WP826's ordinary pull timer has a five-minute minimum,
+so lowering that timer cannot provide interactive delivery.
+
+Discovery matches the inventory's MAC against Linux's IPv4 neighbour cache,
+populated by ordinary traffic between Asterisk and the phones. The service
+checks the device's advertised MAC/model before challenge login. That is a
+device-type check, not authentication: the answering host reports its own MAC
+and model. This uses the
+phone's existing HTTP management interface on the local LAN; passwords are
+hashed with its challenge, sessions are short lived, and redirects/proxies are
+disabled. No credentials or contact values enter logs. Routed or IPv6-only
+phones are not discovered by this path and retain pull delivery.
+
+Know the trade-off before relying on push. The upload is plain HTTP, so the
+household directory — names and numbers — crosses the LAN in clear, and a
+device that can take over a phone's LAN address (ARP spoofing, a reused DHCP
+lease) and answer like a WP826 would receive it. The admin credential is not
+exposed: the login is a hash over a one-time challenge and the password is
+random per phone. If the LAN is shared with devices you do not trust, put the
+phones on their own VLAN or SSID. The firmware's HTTPS management interface is
+not used by this path today.
+
+The importer requires `P333=0` (keep manually edited entries), which our
+provisioning template already sets. It refuses to push when that setting has
+drifted rather than risk erasing local contacts. Replacing the imported book
+removes contacts no longer selected and preserves entries added manually.
+Pending phones retry independently, with bounded backoff. A refusal only a
+person can fix — a failed login, a device that is not the inventory's phone, or
+a drifted keep-manual setting — waits five minutes, so the phone does not see
+an admin login every thirty seconds, unless the book or the phone's inventory
+entry changes first. Edits arriving during an import
+remain pending, and a directory-service restart resends the current book.
+Invalid source edits keep the last good directory.
+
+After upgrading the binary, restart `doorman-directory` to enable push.
+`journalctl -u doorman-directory` reports `phonebook imported <id>` only after the
+phone acknowledges import, or `phonebook push pending <id>` on failure.
+`Active on box` in the hosted UI still describes daemon activation, not handset
+delivery. For an end-to-end timing trial, record the hosted queue creation time
+and poll the handset's authenticated contact list for the expected addition or
+removal; an HTTP 200 or SIP NOTIFY acknowledgement alone is not that proof.
 
 ### Texts to the house
 
@@ -1890,6 +2210,131 @@ $ sudo asterisk -rx 'pjsip show registrations'
 $ sudo asterisk -rvvv                      # then ring the number: you want a
                                            # NoOp naming the line, not silence
 ```
+
+### Adding a Telnyx line
+
+> **Written from Telnyx's documentation, not from a working line.** This
+> section was written in October 2026 from developers.telnyx.com and
+> support.telnyx.com. The owner has decided to buy a Telnyx line; nobody has
+> registered one yet. Portal labels are what the documentation calls them and
+> may have moved. Treat every step as unverified, and rewrite this note — with
+> what actually happened — the day the first one registers.
+
+Telnyx sells SIP trunking as *SIP Connections*. The one this project can use
+is a **credentials** connection: the box registers outbound with a username
+and password, inbound calls come back down that registration, and no port is
+opened and no IP allow-list is kept. FQDN and IP connections are IP
+authentication — the shape issue #5 rules out — and are not covered here.
+
+**Nothing in `doorman render` is Telnyx-specific.** The generated
+registration, the `line=yes` + `endpoint=` binding and the two identify blocks
+are the same ones VoIP.ms gets (`internal/render/telnyx_test.go` is the
+proof). What differs is the portal, and four settings in it.
+
+1. **Create the connection.** In the Mission Control portal, under Voice → SIP
+   Trunking, add a SIP Connection and choose **Credentials** as the
+   authentication type. Pick the username and password there: they are what
+   this box registers as, and the username is also what `doorman numbers`
+   matches the connection by. A long random password is right — nobody types
+   it, `.env` holds it.
+
+2. **Inbound: leave the destination number format on a number.** The
+   connection's inbound settings choose what Telnyx puts in the Request-URI:
+   `+E.164` (the default), `E.164`, `National`, or `SIP Username`. The first
+   three all work — the generated dialplan routes every DID in all three
+   forms. **Not `SIP Username`:** it replaces the dialled number with the
+   connection's username, so the trunk is still identified but the dialplan
+   has no digits to route on, and every call fails with "extension not
+   found". While there, allow G.711 μ-law and G.722 and nothing that would
+   transcode.
+
+3. **Outbound: assign an outbound voice profile.** A connection with no
+   outbound voice profile places no calls. Create one (or use the account's
+   default) and attach the connection to it.
+
+4. **Point each number at the connection.** Under Numbers, set each number's
+   connection to the one from step 1. A number assigned to no connection is
+   one Telnyx has nowhere to send — it rings nowhere, with nothing on the box
+   to show for it. While there, enable **emergency calling** on the number
+   with the household's street address. Telnyx does it per number, and
+   `e911 = true` in `trunks.toml` is only true once it is done.
+
+5. **Declare the trunk** in `trunks.toml` (the commented block in
+   `examples/trunks.example.toml` is this one) and put the password in
+   `.env`:
+
+   ```toml
+   [[trunks]]
+   id       = "telnyx"
+   provider = "telnyx"
+   host     = "sip.telnyx.com"
+   username = "cmm-home"                     # the connection's SIP username
+   password_env = "TRUNK_TELNYX_PASSWORD"    # the NAME of a .env variable
+   e911     = true                           # only once step 4 is done
+   ```
+
+   ```bash
+   $ sudo -u doorman nano .env      # TRUNK_TELNYX_PASSWORD=…
+   ```
+
+6. **Give the number a line** — `[line] number` and `[line] trunk = "telnyx"`
+   in its policy file, exactly as in "Add a second provider" step 2. Declare
+   **every** number assigned to this connection: the identify blocks match the
+   numbers this config names, and if Telnyx does not echo the `;line=` tag
+   back, a call to a number no line declares matches no endpoint and is
+   dropped. `doorman numbers` (below) lists any it finds.
+
+7. **Render, install, reload** — "Add a second provider" steps 3 and 4. Then:
+
+   ```bash
+   $ sudo asterisk -rx 'pjsip reload'
+   $ sudo asterisk -rx 'pjsip show registrations'   # want telnyx_reg … Registered
+   $ sudo asterisk -rx 'pjsip show endpoint telnyx'
+   $ sudo asterisk -rvvv                            # ring the number: want a NoOp
+                                                    # naming its line, not silence
+   ```
+
+   `Rejected` with a 401/403 is the username or password. Stuck at `Unregistered`
+   with no answer is the network or the host. Registered but silent on a call
+   is step 2 or step 4 — or step 6, for a number no line declares.
+
+8. **Place a call from the line** and check both ends, as in "Add a second
+   provider" step 5. Telnyx presents the number in `From` only when the
+   account holds it.
+
+#### Checking the account's numbers
+
+A number copied by hand from the portal into a policy file is one typo from a
+line that never rings. Telnyx's API can say which numbers the account holds
+and which connection each is assigned to, and `doorman numbers` asks it.
+
+The API key is **not** the connection's password and is far more privilege —
+it can buy and release numbers and reconfigure every connection on the
+account. Create one on the portal's API Keys page, keep it on whatever machine
+runs the check (ideally not the Pi), and name it in `trunks.toml`:
+
+```toml
+api_key_env = "TRUNK_TELNYX_API_KEY"   # in the [[trunks]] block above
+```
+
+```bash
+$ nano .env                            # TRUNK_TELNYX_API_KEY=…  (not on the Pi)
+$ ./bin/doorman numbers
+telnyx (telnyx), registers as cmm-home — 3 numbers on the account
+  ✓ +15125550142  line default answers it — on this account, assigned to connection house (…), the one this trunk registers as
+  ✗ +15125550143  line biz answers it — on this account but assigned to no connection, …
+  · +15125550199  on this account, claimed by no policy file — assigned to connection house (…)
+```
+
+It exits 1 when a number a policy file claims for the trunk is not on the
+account, is not active yet, or — for a number a line *answers* — is assigned
+to no connection or to one some other username registers as. It exits 3 when
+the account could not be asked, and 0 otherwise. The daemon never reads the
+key. The same key lets `doorman balance` report the account's available
+credit.
+
+Like the provider client, this was written against Telnyx's published API
+reference and has not yet been run against a live account.
 
 ### Which trunk carries 911
 
@@ -2735,7 +3180,7 @@ Not everything here is a matter of discipline. These are checked by machine:
 | Concurrent calls are capped | admission control in the event router |
 | Config cross-references resolve | `doorman check`, the LSP, and the daemon share one validator |
 | The provider API key stays out of the daemon | `internal/provider` is reachable only from `doorman balance`; tests assert nothing on the call path imports it and no other file in `cmd/doorman` reads the credential |
-| Every config key is one the schema names | `doorman check` and the LSP reject an unknown key; the daemon warns and keeps running |
+| Every config key is one the schema names | `doorman check`, the LSP, the daemon's reload and sync reject an unknown key; the daemon keeps its last good policy |
 
 
 ## Event journal and consumer recovery

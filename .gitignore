@@ -2,6 +2,8 @@
 .env
 policy.toml
 handsets.toml
+# The daemon's last good copy of the files above, kept beside policy.toml.
+*.last-good/
 # trunks.toml holds no secrets by design (password_env names a variable), but
 # it is local inventory like the two above, and a sub-account username is not
 # something to publish either.
@@ -39,3 +41,7 @@ coverage.out
 *.db-wal
 *.db-shm
 *.db.lock
+
+# Private managed integration destination and restart fallback.
+/webhook.toml
+/webhook.toml.last-good

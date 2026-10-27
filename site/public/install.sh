@@ -153,27 +153,39 @@ fetch_to "${base}/${asset}" "${tmp}/${asset}" \
 	|| die "download failed — does $VERSION publish a $asset asset?"
 
 info "verifying checksum"
-if fetch_to "${base}/checksums.txt" "${tmp}/checksums.txt" 2>/dev/null; then
-	want=$(awk -v a="$asset" '$2 == a || $2 == "*" a { print $1 }' "${tmp}/checksums.txt" | head -1)
-	if [ -z "$want" ]; then
-		warn "no checksum listed for $asset — skipping verification"
-	else
-		if command -v sha256sum >/dev/null 2>&1; then
-			got=$(sha256sum "${tmp}/${asset}" | awk '{print $1}')
-		elif command -v shasum >/dev/null 2>&1; then
-			got=$(shasum -a 256 "${tmp}/${asset}" | awk '{print $1}')
-		else
-			got=""
-			warn "no sha256sum or shasum — skipping verification"
-		fi
-		if [ -n "$got" ]; then
-			[ "$got" = "$want" ] || die "checksum mismatch: expected $want, got $got"
-			ok "checksum verified"
-		fi
-	fi
+fetch_to "${base}/checksums.txt" "${tmp}/checksums.txt" \
+	|| die "could not download checksums.txt for $VERSION; refusing unverified download"
+
+# Require exactly one well-formed entry for this asset. Consume the whole
+# manifest so a duplicate cannot be hidden after a valid first match.
+want=$(awk -v a="$asset" '
+	$2 == a || $2 == "*" a {
+		count++
+		if (NF != 2 || length($1) != 64 || $1 ~ /[^[:xdigit:]]/) bad = 1
+		digest = tolower($1)
+	}
+	END {
+		if (count != 1 || bad) exit 1
+		print digest
+	}
+' "${tmp}/checksums.txt") \
+	|| die "checksums.txt must contain exactly one valid SHA-256 for $asset; refusing unverified download"
+
+if command -v sha256sum >/dev/null 2>&1; then
+	got=$(sha256sum "${tmp}/${asset}") \
+		|| die "sha256sum failed; refusing unverified download"
+elif command -v shasum >/dev/null 2>&1; then
+	got=$(shasum -a 256 "${tmp}/${asset}") \
+		|| die "shasum failed; refusing unverified download"
 else
-	warn "no checksums.txt in $VERSION — skipping verification"
+	die "SHA-256 verification requires sha256sum or shasum; refusing unverified download"
 fi
+got=${got%%[[:space:]]*}
+[[ "$got" =~ ^[[:xdigit:]]{64}$ ]] \
+	|| die "SHA-256 tool returned an invalid digest; refusing unverified download"
+got=$(printf '%s' "$got" | tr '[:upper:]' '[:lower:]')
+[ "$got" = "$want" ] || die "checksum mismatch; refusing unverified download"
+ok "checksum verified"
 
 # ── Install ──────────────────────────────────────────────────────────
 chmod +x "${tmp}/${asset}"

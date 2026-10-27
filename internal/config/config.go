@@ -34,9 +34,10 @@ type Config struct {
 	PolicyPath   string
 	HandsetsPath string
 	// TrunksPath is the provider inventory. The file is optional and its
-	// absence is the compatibility gate; the daemon reads it for exactly one
-	// thing, which is to announce at startup which trunk carries 911. Nothing
-	// on the call path routes on a trunk.
+	// absence is the compatibility gate. The daemon reads it to announce at
+	// startup which trunk carries 911, and to check each policy's [line] trunk
+	// against it on every load, as `doorman check` and sync do. Nothing on the
+	// call path routes on a trunk.
 	TrunksPath string
 	// ContactsPath is the address-book inventory. Optional, and absent is the
 	// state every install is in: no file, no lookup, and the lobby admits
@@ -87,6 +88,7 @@ type Config struct {
 	// daemon parses and ignores them, as with STT_*.
 	BackupRecipient       string
 	BackupPath            string
+	BackupCloud           bool
 	BackupKeepDaily       int
 	BackupKeepWeekly      int
 	BackupS3Endpoint      string
@@ -103,6 +105,14 @@ type Config struct {
 	EventJournalMaxEvents int
 	EventJournalMaxAge    time.Duration
 	WebhookMode           string // legacy | doorbell
+	// Sync bell keys: read by `doorman sync run`; the daemon parses and
+	// ignores them, as with BACKUP_*.
+	SyncBell     bool
+	SyncBellPoll time.Duration
+	// BoxName is BOX_NAME as written, read by `doorman login` and `doorman
+	// sync run` through BoxName (which falls back to the hostname); the
+	// daemon parses and ignores it.
+	BoxName string
 
 	// WebhookURL enables the event webhook. Empty — the default — means no
 	// webhook at all. Treat the value as a secret: a Home Assistant webhook
@@ -213,6 +223,7 @@ func load(get func(string) string, requireSecrets bool) (Config, error) {
 		PhonebookSpool:        str("PHONEBOOK_SPOOL", "/var/spool/call-me-maybe"),
 		BackupRecipient:       str("BACKUP_RECIPIENT", ""),
 		BackupPath:            str("BACKUP_PATH", ""),
+		BackupCloud:           boolean("BACKUP_CLOUD", false),
 		BackupKeepDaily:       integer("BACKUP_KEEP_DAILY", 7),
 		BackupKeepWeekly:      integer("BACKUP_KEEP_WEEKLY", 8),
 		BackupS3Endpoint:      str("BACKUP_S3_ENDPOINT", ""),
@@ -229,6 +240,9 @@ func load(get func(string) string, requireSecrets bool) (Config, error) {
 		EventJournalMaxEvents: integer("EVENT_JOURNAL_MAX_EVENTS", 100000),
 		EventJournalMaxAge:    time.Duration(days) * 24 * time.Hour,
 		WebhookMode:           str("WEBHOOK_MODE", "legacy"),
+		SyncBell:              boolean("SYNC_BELL", true),
+		SyncBellPoll:          time.Duration(integer("SYNC_BELL_POLL_S", 300)) * time.Second,
+		BoxName:               str("BOX_NAME", ""),
 
 		WebhookURL:            str("WEBHOOK_URL", ""),
 		WebhookToken:          str("WEBHOOK_TOKEN", ""),
@@ -283,6 +297,11 @@ func load(get func(string) string, requireSecrets bool) (Config, error) {
 		}
 	}
 
+	if c.SyncBellPoll < MinSyncBellPoll || c.SyncBellPoll > MaxSyncBellPoll {
+		issues = append(issues, "  "+syncBellPollIssue)
+		c.SyncBellPoll = DefaultSyncBellPoll
+	}
+
 	issues = append(issues, c.JournalIssues()...)
 	if len(issues) > 0 {
 		return Config{}, fmt.Errorf("invalid environment configuration:\n%s\n\nSee examples/.env.example", strings.Join(issues, "\n"))
@@ -318,6 +337,34 @@ func isLoopback(host string) bool {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+// The safety-net poll while the sync bell is up. Never faster than the
+// ordinary five-second cadence, never so slow that a missed ring waits hours.
+const (
+	DefaultSyncBellPoll = 5 * time.Minute
+	MinSyncBellPoll     = 5 * time.Second
+	MaxSyncBellPoll     = time.Hour
+)
+
+const syncBellPollIssue = "SYNC_BELL_POLL_S: must be a whole number of seconds from 5 to 3600"
+
+// SyncBellSettings reads the sync bell's two keys without requiring the rest
+// of the environment to be valid: sync must not stop because of a daemon
+// setting it never uses. A bad value falls back to its default and is
+// returned as an issue, worded as doorman check words it.
+func SyncBellSettings(get func(string) string) (enabled bool, poll time.Duration, issue string) {
+	enabled = get("SYNC_BELL") == "" || truthy.MatchString(get("SYNC_BELL"))
+	v := get("SYNC_BELL_POLL_S")
+	if v == "" {
+		return enabled, DefaultSyncBellPoll, ""
+	}
+	n, err := strconv.Atoi(v)
+	poll = time.Duration(n) * time.Second
+	if err != nil || poll < MinSyncBellPoll || poll > MaxSyncBellPoll {
+		return enabled, DefaultSyncBellPoll, syncBellPollIssue
+	}
+	return enabled, poll, ""
 }
 
 // UpdateChecksEnabled reads the operator preference without requiring ARI

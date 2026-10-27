@@ -335,6 +335,12 @@ curl -fsSL https://callmemaybe.cc/install.sh | bash
 It detects your OS and architecture, verifies the SHA-256 against the
 published checksums, and installs to `/usr/local/bin` (or `~/.local/bin` when
 that isn't writable). `--version`, `--prefix`, and `--force` all work.
+Missing, malformed or duplicate checksum entries, a missing/failing SHA-256 tool,
+and mismatches stop installation before the downloaded binary runs or replaces an
+existing copy. `--force` does not bypass verification. Install `sha256sum` or
+`shasum` if neither is available; use a release with a complete `checksums.txt`.
+This checks integrity against the hosted release manifest; it is not independent
+publisher authentication. [Signed release metadata is tracked separately](https://github.com/ericdmoore/call-me-maybe/issues/120).
 
 ---
 
@@ -550,3 +556,19 @@ doorman. Ubuntu Server is the initial rehearsal target. Package availability
 varies; adapters require Asterisk 20+ and accept an existing installation.
 Use `--dry-run` to preview. These scripts prepare the host; household call
 configuration and activation remain explicit steps in the runbook.
+
+Managed event webhooks use optional `webhook.toml` beside `policy.toml` (see
+`doorman schema webhook`). Set `domain` to an HTTP(S) origin and `path_prefix`
+to an optional path. The daemon sends ringing and completed event payloads as
+JSON POSTs to `<domain><path_prefix>/cc.dialdoorman/events`, without an event
+type suffix. Caller numbers are redacted and environment bearer tokens are
+not forwarded. Missing file preserves the legacy environment setting; an
+empty domain and prefix explicitly disable managed delivery. This does not
+change the separate event-journal doorbell.
+
+Treat the file and its `.last-good` copy as private (0600). Reload occurs
+within a second; invalid edits retain the last good endpoint across restart.
+`doorman check` validates it. Hosted changes arrive encrypted to the enrolled
+transport key, through the revision-checked sync queue. Snapshots expose only
+domain/configured state; private prefix edits still advance the revision.
+An applied receipt requires the running daemon's exact accepted file digest.

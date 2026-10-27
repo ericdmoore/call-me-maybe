@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://callmemaybe.cc/schema/webhook.json",
+  "title": "webhook.toml — managed event destination",
+  "type": "object",
+  "properties": {
+    "domain": {
+      "description": "HTTP(S) origin, including optional port. Empty disables managed delivery.",
+      "type": "string",
+      "maxLength": 1024
+    },
+    "path_prefix": {
+      "description": "Optional path prefix. The fixed /cc.dialdoorman/events suffix is appended. Treat this value as a secret.",
+      "type": "string",
+      "maxLength": 1024
+    }
+  },
+  "additionalProperties": false,
+  "x-rules": [
+    "No credentials, query, fragment, traversal or escaped separators. Both fields empty disables managed delivery. Missing file uses the legacy environment setting.",
+    "One POST per ringing or completed call, application/json, JSON(payload). Managed destinations receive redacted caller numbers and no inherited bearer token.",
+    "Hot reload keeps the last good file, including across restart. Saved receipts become applied only when the daemon reports the exact accepted file digest."
+  ]
+}

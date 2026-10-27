@@ -75,6 +75,10 @@ DCO sign-off (`git commit -s`) is welcome but not enforced. See
 
 Direct Go dependencies are permissively licensed:
 
+- `github.com/google/uuid` — BSD 3-Clause
+- `github.com/skip2/go-qrcode` — MIT; recovery-sheet QR generation, command path only
+- `filippo.io/age` — BSD 3-Clause
+- `golang.org/x/term` — BSD 3-Clause
 - `github.com/BurntSushi/toml` — MIT
 - `github.com/gorilla/websocket` — BSD 2-Clause
 - `gopkg.in/yaml.v3` — MIT and Apache 2.0

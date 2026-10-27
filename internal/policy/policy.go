@@ -196,9 +196,10 @@ type Extension struct {
 	// Voicemail is the mailbox when every stage goes unanswered — and the
 	// afterhours destination. Empty = dismiss with "nobody's available".
 	Voicemail string `toml:"voicemail"`
-	// Afterhours names a [[schedules]] id. (Decoded as `any` so the retired
-	// inline-table form can produce a helpful error instead of a decode
-	// failure.)
+	// Afterhours names a [[schedules]] id, or a list of them: the line is in
+	// its afterhours state while ANY named window is active. (Decoded as
+	// `any` so one id and a list both load, and the retired inline-table form
+	// can produce a helpful error instead of a decode failure.)
 	Afterhours any `toml:"afterhours"`
 	// AfterhoursRing redirects the call during the afterhours window instead
 	// of sending it straight to voicemail. Without it, quiet hours can only
@@ -258,7 +259,11 @@ var (
 	endpointPattern = regexp.MustCompile(`^[A-Za-z0-9]+/\S+$`)
 	pinPattern      = regexp.MustCompile(`^\d+$`)
 	mailboxPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
-	clockPattern    = regexp.MustCompile(`^(\d{1,2}):(\d{2})$`)
+	// clockPattern is H:MM or HH:MM: "7:00" has always loaded and means
+	// 07:00, so it stays valid everywhere (sync carries it as 07:00). The
+	// range is checked separately so "25:99" is told it is not a time of day
+	// rather than that it is shaped wrongly.
+	clockPattern = regexp.MustCompile(`^(\d{1,2}):(\d{2})$`)
 )
 
 var dayIndex = map[string]int{"SU": 0, "MO": 1, "TU": 2, "WE": 3, "TH": 4, "FR": 5, "SA": 6}
@@ -341,27 +346,78 @@ func (a *Afterhours) Describe() string {
 	return fmt.Sprintf("%s–%s %s", clock(a.StartMin), clock(a.EndMin), days)
 }
 
-// CurfewWindow is one schedule a handset's curfew names, kept with its id so
-// `doorman check` can say which window put the phone to sleep. Window is nil
-// when the schedule carries enabled = false: present, inert, and shown as
-// such rather than silently dropped.
+// CurfewWindow is one schedule a handset's curfew (or an extension's
+// afterhours) names, kept with its id so `doorman check` can say which window
+// is doing the work. Window is nil when the schedule carries enabled = false:
+// present, inert, and shown as such rather than silently dropped.
 type CurfewWindow struct {
 	ScheduleID string
 	Window     *Afterhours
 }
 
+// ScheduleWindows is every schedule an extension's afterhours names, in the
+// order written, and is active while ANY of them is — the same union a
+// handset's curfew is. A list, because one window crosses midnight at most
+// once per day it lists: weekdays 9–5 needs one window for the nights and
+// another for the weekend days.
+//
+// A switched-off schedule stays in the list with a nil Window, which is how
+// `doorman check` tells "no afterhours" from "afterhours, all switched off" —
+// two states that behave identically at call time and mean very different
+// things to whoever wrote the file.
+type ScheduleWindows []CurfewWindow
+
+// Active reports whether any switched-on window contains t.
+func (s ScheduleWindows) Active(t time.Time) bool {
+	for _, w := range s {
+		if w.Window.Active(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// Live reports whether at least one named schedule is switched on, which is
+// whether the line can ever be in its afterhours state.
+func (s ScheduleWindows) Live() bool {
+	for _, w := range s {
+		if w.Window != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// IDs is the schedule ids, in the order written.
+func (s ScheduleWindows) IDs() []string {
+	out := make([]string, len(s))
+	for i, w := range s {
+		out[i] = w.ScheduleID
+	}
+	return out
+}
+
+// Describe renders the switched-on windows the way an operator wrote them,
+// joined by "; " — "17:00–09:00 every day; 09:00–17:00 SU SA". A switched-off
+// schedule contributes nothing; the caller says what that means.
+func (s ScheduleWindows) Describe() string {
+	parts := make([]string, 0, len(s))
+	for _, w := range s {
+		if w.Window != nil {
+			parts = append(parts, w.Window.Describe())
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
 // ResolvedExtension is an extension compiled into a runnable plan.
 type ResolvedExtension struct {
-	PIN        string
-	Label      string
-	Plan       RingPlan
-	Afterhours *Afterhours
-	// AfterhoursID is the schedule this extension named, retained for display
-	// only. It is set even when Afterhours is nil, which is how `doorman
-	// check` can tell "no schedule" from "a schedule that is switched off" —
-	// two states that behave identically at call time and mean very different
-	// things to whoever wrote the file.
-	AfterhoursID string
+	PIN   string
+	Label string
+	Plan  RingPlan
+	// Afterhours is the schedules the extension's afterhours names, empty
+	// when it names none.
+	Afterhours ScheduleWindows
 	// AfterhoursPlan is what rings during the window. Zero steps means the
 	// historical behaviour: straight to voicemail.
 	AfterhoursPlan RingPlan
@@ -369,6 +425,7 @@ type ResolvedExtension struct {
 
 // Policy is a validated policy file compiled into lookups.
 type Policy struct {
+	sourceDigest   string
 	actions        map[string]Action
 	actionOrder    []string
 	allow          map[string]KnownCaller
@@ -420,15 +477,13 @@ type Options struct {
 	// StrictUnknownKeys makes a key that matched no field a hard error rather
 	// than something to warn about.
 	//
-	// `doorman check` sets it and the daemon does not, and the split is the
-	// whole design. check is a linting tool with an operator reading its
-	// output, and staying quiet about a typo is precisely the defect it
-	// exists to catch. The daemon has the opposite duty: invariant 4 says an
-	// invalid policy must never take the phone down, and a reload that
-	// suddenly started refusing a file which loaded yesterday would mean an
-	// operator's edit silently stops applying after an upgrade — its own kind
-	// of confusion, and a worse one, because nobody is watching. It warns and
-	// carries on.
+	// `doorman check`, the daemon and the sync observer all set it, through
+	// configcheck.Options: one validator, so a file check passes is a file the
+	// daemon loads and sync accepts, and a file one refuses the others refuse
+	// (call-me-maybe#131). The daemon's duty under invariant 4 is met by the
+	// store, which keeps the last good policy when a reload is refused. A box
+	// that passes the upgrade smoke check (`doorman check` on the live files)
+	// already has no unknown keys, so no running box stops loading over this.
 	StrictUnknownKeys bool
 
 	// OnUnknownKey, when set, is called once per unrecognised key found,
@@ -439,18 +494,39 @@ type Options struct {
 	// Trunks is the inventory `[line] trunk` is checked against, or nil to
 	// leave the reference unchecked.
 	//
-	// The split matters. `doorman check` and `doorman render` always pass one —
-	// even an absent one, so a line naming a trunk with no trunks.toml gets
-	// told exactly that — because both have a person standing in front of them.
-	// The daemon passes nil, deliberately, and outbound routing by trunk was
-	// where that decision got revisited on purpose: the call path reads `[line]
-	// trunk` as a *string* and hands it to the dialplan, so nothing it does
-	// needs the inventory. Refusing to load a policy — and so refusing to
-	// answer that number at all — because a trunk id is unknown would be the
-	// trade invariant 4 forbids, and would take the phone down over a file the
-	// phone does not read. The daemon warns instead, at startup, where an
-	// operator sees it.
+	// `doorman check`, `doorman render` and sync always pass one — even an
+	// absent one, so a line naming a trunk with no trunks.toml gets told
+	// exactly that. The daemon passes TrunksPath instead, so the reference is
+	// checked against the file on disk at every reload, exactly as sync checks
+	// it.
 	Trunks *Trunks
+
+	// TrunksPath, when set, makes LoadSplitWith read the trunk inventory
+	// from this path on every load, in place of Trunks. A trunks.toml that
+	// does not load leaves the reference unchecked rather than refusing the
+	// policy: the daemon answers calls without reading that file, and check
+	// and sync already refuse the trunks.toml itself, by name.
+	TrunksPath string
+
+	// LastGood, when set, is where a Store keeps the last good copy of this
+	// line's files (see LastGoodPath): written each time a load is accepted,
+	// and loaded at startup when the current files are refused. Only stores
+	// use it.
+	LastGood string
+
+	// OnLastGoodError is told when a last good copy could not be written.
+	// The policy is in service regardless; only the safety net is missing.
+	OnLastGoodError func(error)
+
+	// previousRules compiles with the rules the v0.15 daemon applied: no
+	// bounds, disabled schedules not compiled. Set only by a Store's
+	// bootstrap fallback (see previousRulesOptions), never by a caller.
+	previousRules bool
+
+	// Bootstrap lets a Store whose current files are refused at startup, and
+	// which has no usable last good copy, run them under the previous
+	// release's rules instead of refusing to start (see PreviousRules).
+	Bootstrap bool
 }
 
 // decode is the single TOML entry point for both config files: it fills a
@@ -519,6 +595,12 @@ func LoadSplit(policyPath, handsetsPath string) (*Policy, error) {
 
 // LoadSplitWith is LoadSplit with explicit options.
 func LoadSplitWith(policyPath, handsetsPath string, o Options) (*Policy, error) {
+	if o.TrunksPath != "" {
+		o.Trunks = nil
+		if t, err := LoadTrunks(o.TrunksPath); err == nil {
+			o.Trunks = t
+		}
+	}
 	pdata, err := os.ReadFile(policyPath)
 	if err != nil {
 		return nil, err
@@ -533,7 +615,11 @@ func LoadSplitWith(policyPath, handsetsPath string, o Options) (*Policy, error) 
 			return nil, err
 		}
 	}
-	return fromSplitTOML(pdata, hdata, o)
+	p, err := fromSplitTOML(pdata, hdata, o)
+	if err == nil {
+		p.sourceDigest = SourceDigest(pdata, hdata)
+	}
+	return p, err
 }
 
 // SplitLayout reports whether a handsets file is actually in play — used by
@@ -546,31 +632,49 @@ func SplitLayout(handsetsPath string) bool {
 	return err == nil
 }
 
+// decodeSplit is the one place a policy/handsets pair is decoded and the
+// files' section ownership is enforced. fromSplitTOML (the daemon and `doorman
+// check`) and LintSplitWith (the sync observer, the hosted validator and the
+// language server) both start here, so the two cannot drift on what a valid
+// pair of files is. misplaced is non-empty when a section is in the wrong file.
+func decodeSplit(policyData, handsetsData []byte) (pf File, unknown []UnknownKey, misplaced []string, err error) {
+	pf, unknown, err = decode(policyData, "policy")
+	if err != nil {
+		return File{}, nil, nil, err
+	}
+	if handsetsData == nil {
+		return pf, unknown, nil, nil
+	}
+	hf, hUnknown, err := decode(handsetsData, "handsets")
+	if err != nil {
+		return File{}, nil, nil, err
+	}
+	unknown = append(unknown, hUnknown...)
+
+	// Each file owns its sections exclusively; anything in the wrong file
+	// is an error, not a merge — silent precedence is how two sources of
+	// truth drift apart.
+	if len(pf.Handsets) > 0 || len(pf.Groups) > 0 {
+		misplaced = append(misplaced, "handsets/groups belong in handsets.toml now — move them there")
+	}
+	if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 ||
+		len(hf.House.Handsets) > 0 || !hf.Line.empty() {
+		misplaced = append(misplaced, "extensions/people/schedules/house/line belong in policy.toml — move them there")
+	}
+	pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
+	return pf, unknown, misplaced, nil
+}
+
 func fromSplitTOML(policyData, handsetsData []byte, o Options) (*Policy, error) {
-	pf, unknown, err := decode(policyData, "policy")
+	pf, unknown, misplaced, err := decodeSplit(policyData, handsetsData)
 	if err != nil {
 		return nil, err
 	}
-
-	if handsetsData != nil {
-		hf, hUnknown, err := decode(handsetsData, "handsets")
-		if err != nil {
-			return nil, err
+	if len(misplaced) > 0 {
+		if strings.HasPrefix(misplaced[0], "handsets/groups") {
+			return nil, fmt.Errorf("policy: %s", misplaced[0])
 		}
-		unknown = append(unknown, hUnknown...)
-
-		// Each file owns its sections exclusively; anything in the wrong file
-		// is an error, not a merge — silent precedence is how two sources of
-		// truth drift apart.
-		if len(pf.Handsets) > 0 || len(pf.Groups) > 0 {
-			return nil, fmt.Errorf("policy: handsets/groups belong in handsets.toml now — move them there")
-		}
-		if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 ||
-			len(hf.House.Handsets) > 0 || !hf.Line.empty() {
-			return nil, fmt.Errorf("handsets: extensions/people/schedules/house/line belong in policy.toml — move them there")
-		}
-
-		pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
+		return nil, fmt.Errorf("handsets: %s", misplaced[0])
 	}
 
 	// Reported before the strictness decision, so the daemon still hears
@@ -614,6 +718,12 @@ func LoadHandsets(path string) ([]Handset, []Group, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	return HandsetsFromTOML(data)
+}
+
+// HandsetsFromTOML is LoadHandsets for bytes already read, so a validator
+// checks exactly the content it was handed.
+func HandsetsFromTOML(data []byte) ([]Handset, []Group, error) {
 	hf, unknown, err := decode(data, "handsets")
 	if err != nil {
 		return nil, nil, err
@@ -738,13 +848,21 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 			fail("duplicate schedule id %q", sc.ID)
 			continue
 		}
-		if sc.Enabled != nil && !*sc.Enabled {
-			// Present but off: references resolve to nil, i.e. inert. This
-			// is the holiday switch.
-			schedules[sc.ID] = nil
+		// Compiled whether or not it is enabled: a disabled schedule is still
+		// configuration, one edit away from being live, and every reader of
+		// the file — check, the daemon and sync — must agree that it is valid.
+		disabled := sc.Enabled != nil && !*sc.Enabled
+		if disabled && o.previousRules {
+			schedules[sc.ID] = nil // v0.15 never compiled a disabled schedule
 			continue
 		}
-		schedules[sc.ID] = compileWindow("schedule "+sc.ID, sc.Start, sc.End, sc.Days, fail)
+		window := compileWindow("schedule "+sc.ID, sc.Start, sc.End, sc.Days, fail)
+		if disabled {
+			// Present but off: references resolve to nil, i.e. inert. This
+			// is the holiday switch.
+			window = nil
+		}
+		schedules[sc.ID] = window
 	}
 
 	// A handset's curfew is a cross-file reference — handsets.toml naming
@@ -992,7 +1110,9 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 			}
 		}
 		if _, dup := exts[key]; dup {
-			fail("duplicate pin %q", e.PIN)
+			// Never the PIN itself: this message reaches the daemon's log and
+			// sync's status report as well as a terminal.
+			fail("duplicate pin: extension %q has the same pin as an earlier extension", e.Label)
 			continue
 		}
 		if e.Label == "" {
@@ -1004,24 +1124,12 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 			fail("%s voicemail %q must be lowercase alphanumeric/dash/underscore", where, e.Voicemail)
 		}
 
-		var ah *Afterhours
-		var ahID string
-		switch ref := e.Afterhours.(type) {
-		case nil:
-		case string:
-			ahID = ref
-			window, known := schedules[ref]
-			if !known {
-				fail("%s references unknown schedule %q", where, ref)
-			}
-			ah = window // nil when the schedule is disabled: inert
-			// A caller during quiet hours needs somewhere to go: either a
-			// mailbox, or another phone to ring.
-			if known && window != nil && e.Voicemail == "" && len(e.AfterhoursRing) == 0 {
-				fail("%s has afterhours but no voicemail and no afterhours_ring — an afterhours caller needs somewhere to go", where)
-			}
-		default:
-			fail("%s: afterhours is now a named schedule — define [[schedules]] with id/start/end/days and set afterhours = \"<id>\"", where)
+		ah := compileAfterhours(where, e.Afterhours, schedules, o.previousRules, fail)
+		// A caller during quiet hours needs somewhere to go: either a
+		// mailbox, or another phone to ring. Only a window that can open
+		// asks, so the holiday switch never makes a file invalid.
+		if ah.Live() && e.Voicemail == "" && len(e.AfterhoursRing) == 0 {
+			fail("%s has afterhours but no voicemail and no afterhours_ring — an afterhours caller needs somewhere to go", where)
 		}
 
 		var plan RingPlan
@@ -1072,8 +1180,12 @@ func compileChecked(f File, o Options) (*Policy, []string) {
 		}
 		exts[key] = ResolvedExtension{
 			PIN: e.PIN, Label: e.Label, Plan: plan,
-			Afterhours: ah, AfterhoursID: ahID, AfterhoursPlan: ahPlan,
+			Afterhours: ah, AfterhoursPlan: ahPlan,
 		}
+	}
+
+	if !o.previousRules {
+		checkBounds(f, fail)
 	}
 
 	if len(problems) > 0 {
@@ -1135,31 +1247,13 @@ func LintSplit(policyData, handsetsData []byte) []string {
 // at the result who would rather know. Options.StrictUnknownKeys governs the
 // *load* path, where the daemon's duty to stay up cuts the other way.
 func LintSplitWith(policyData, handsetsData []byte, o Options) []string {
-	pf, unknown, err := decode(policyData, "policy")
+	pf, unknown, misplaced, err := decodeSplit(policyData, handsetsData)
 	if err != nil {
 		return []string{err.Error()}
 	}
-	if handsetsData != nil {
-		hf, hUnknown, err := decode(handsetsData, "handsets")
-		if err != nil {
-			return []string{err.Error()}
-		}
-		unknown = append(unknown, hUnknown...)
-
-		var problems []string
-		if len(pf.Handsets) > 0 || len(pf.Groups) > 0 {
-			problems = append(problems, "handsets/groups belong in handsets.toml now — move them there")
-		}
-		if len(hf.Extensions) > 0 || len(hf.People) > 0 || len(hf.Schedules) > 0 ||
-			len(hf.House.Handsets) > 0 || !hf.Line.empty() {
-			problems = append(problems, "extensions/people/schedules/house/line belong in policy.toml — move them there")
-		}
-		if len(problems) > 0 {
-			return problems
-		}
-		pf.Handsets, pf.Groups = hf.Handsets, hf.Groups
+	if len(misplaced) > 0 {
+		return misplaced
 	}
-
 	var problems []string
 	for _, u := range unknown {
 		problems = append(problems, u.String())
@@ -1168,17 +1262,74 @@ func LintSplitWith(policyData, handsetsData []byte, o Options) []string {
 	return append(problems, semantic...)
 }
 
+// retiredAfterhours is the message for any afterhours that is neither a
+// schedule id nor a list of them — the inline table above all, which is what
+// afterhours used to be.
+const retiredAfterhours = "%s: afterhours is now a named schedule — define [[schedules]] with id/start/end/days and set afterhours = \"<id>\""
+
+// compileAfterhours resolves an extension's afterhours — one schedule id or a
+// list of them — against the policy's schedules. A switched-off schedule
+// resolves to a nil window: present and inert, so the holiday switch works
+// for one schedule in a list and for all of them.
+func compileAfterhours(where string, ref any, schedules map[string]*Afterhours, previousRules bool, fail func(string, ...any)) ScheduleWindows {
+	var ids []string
+	switch ref := ref.(type) {
+	case nil:
+		return nil
+	case string:
+		ids = []string{ref}
+	case []any:
+		if previousRules {
+			// The v0.15 daemon took exactly one id, and the bootstrap
+			// fallback must be no looser than it was.
+			fail(retiredAfterhours, where)
+			return nil
+		}
+		if len(ref) == 0 {
+			fail("%s afterhours = [] names no schedule — list at least one [[schedules]] id, or leave afterhours out", where)
+			return nil
+		}
+		for _, item := range ref {
+			id, ok := item.(string)
+			if !ok {
+				fail("%s afterhours must list [[schedules]] ids, which are strings", where)
+				return nil
+			}
+			ids = append(ids, id)
+		}
+	default:
+		fail(retiredAfterhours, where)
+		return nil
+	}
+	out := make(ScheduleWindows, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			fail("%s names afterhours schedule %q twice", where, id)
+			continue
+		}
+		seen[id] = true
+		window, known := schedules[id]
+		if !known {
+			fail("%s references unknown schedule %q", where, id)
+			continue
+		}
+		out = append(out, CurfewWindow{ScheduleID: id, Window: window})
+	}
+	return out
+}
+
 func compileWindow(where, startStr, endStr string, dayList []string, fail func(string, ...any)) *Afterhours {
 	parse := func(field, v string) (int, bool) {
 		m := clockPattern.FindStringSubmatch(v)
 		if m == nil {
-			fail("%s %s %q must be HH:MM", where, field, v)
+			fail("%s %s %q must be HH:MM, 00:00 to 23:59", where, field, truncateForMessage(v))
 			return 0, false
 		}
 		h, _ := strconv.Atoi(m[1])
 		min, _ := strconv.Atoi(m[2])
 		if h > 23 || min > 59 {
-			fail("%s %s %q is not a time of day", where, field, v)
+			fail("%s %s %q is not a time of day (00:00 to 23:59)", where, field, v)
 			return 0, false
 		}
 		return h*60 + min, true
@@ -1195,10 +1346,10 @@ func compileWindow(where, startStr, endStr string, dayList []string, fail func(s
 	for _, d := range dayList {
 		i, ok := dayIndex[strings.ToUpper(d)]
 		if !ok {
-			fail("%s day %q must be one of SU MO TU WE TH FR SA", where, d)
+			fail("%s day %q must be one of SU MO TU WE TH FR SA", where, truncateForMessage(d))
 			continue
 		}
-		days[i] = true
+		days[i] = true // a repeated day is harmless, and has always loaded
 	}
 	return &Afterhours{StartMin: start, EndMin: end, Days: days}
 }

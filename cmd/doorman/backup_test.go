@@ -29,6 +29,10 @@ func TestBackupLifecycle(t *testing.T) {
 	state := filepath.Join(root, "state")
 	os.MkdirAll(filepath.Join(state, "provision"), 0o700)
 	os.WriteFile(filepath.Join(state, "provision", "cert.pem"), []byte("CERT"), 0o600)
+	os.MkdirAll(filepath.Join(state, "account"), 0o700)
+	for _, name := range []string{"tokens.bin", "transport-private.key"} {
+		os.WriteFile(filepath.Join(state, "account", name), []byte("SYNTHETIC DEVICE CREDENTIAL"), 0o600)
+	}
 	vm := filepath.Join(root, "vm")
 	os.MkdirAll(filepath.Join(vm, "household", "family", "INBOX"), 0o755)
 	os.WriteFile(filepath.Join(vm, "household", "family", "INBOX", "msg0000.wav"), []byte("RIFF"), 0o644)
@@ -174,6 +178,9 @@ func TestBackupLifecycle(t *testing.T) {
 	if strings.Contains(out, "identity.key") || strings.Contains(out, "last.json") {
 		t.Error("the backup state directory must never be in a bundle")
 	}
+	if strings.Contains(out, "tokens.bin") || strings.Contains(out, "transport-private.key") {
+		t.Error("account credentials must never be in a bundle")
+	}
 	// An identity file left somewhere a bundle collects is flagged.
 	t.Setenv("BACKUP_IDENTITY_FILE", filepath.Join(state, "provision", "identity.key"))
 	if line, ok := describeBackup(state, time.Now(), secretsFrom(map[string]string{"BACKUP_RECIPIENT": "age1x"})); ok || !strings.Contains(line, "lies where bundles are collected") {
@@ -193,6 +200,9 @@ func TestBackupLifecycle(t *testing.T) {
 	}
 	if c, _ := os.ReadFile(filepath.Join(other, state, "provision", "cert.pem")); string(c) != "CERT" {
 		t.Error("the provisioning certificate did not come back")
+	}
+	if _, err := os.Stat(filepath.Join(other, state, "account")); !os.IsNotExist(err) {
+		t.Errorf("restore must not create source account credentials: %v", err)
 	}
 	// Onto a box that already has a .env: refused without --force.
 	out = capture(t, func() {
@@ -226,7 +236,7 @@ func TestTheBackupPackageIsReachableFromItsCommandsOnly(t *testing.T) {
 	}
 	files, _ := filepath.Glob("*.go")
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") || f == "backup.go" {
+		if strings.HasSuffix(f, "_test.go") || f == "backup.go" || f == "recovery.go" {
 			continue
 		}
 		b, _ := os.ReadFile(f)

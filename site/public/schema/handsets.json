@@ -158,7 +158,7 @@
             ]
           },
           "phonebook": {
-            "description": "Which directories this phone shows: \"house\" (every handset with a number and the feature codes), \"people\" (policy.toml's [[people]]), or a contacts.toml source id — a whole address book, which is why it is opt-in per phone. Absent means house and people. A child's phone might be just [\"house\"].",
+            "description": "Which directories this phone shows: \"house\" (every handset with a number and the feature codes), \"people\" (policy.toml's [[people]]), a contacts.toml source id — a whole address book, which is why it is opt-in per phone — or an acct-\u003cid\u003e book delivered by sync from the account the box is enrolled with (PHONEBOOK_DIR/account), which may include other account books and the house and is composed when the directory is rendered: its own contacts, then each include, one group per book, each account contact once. Absent means house and people. A child's phone might be just [\"house\"]. Directory only: being in a book admits nobody. The account's lobby pass book (role = \"lobby-pass\") is the reverse — read by admission, never shown — and may not be selected here.",
             "type": "array",
             "items": {
               "type": "string",
@@ -170,7 +170,9 @@
             ],
             "x-rules": [
               "Entries may not repeat.",
-              "A contacts.toml source id is checked by `doorman check` against that file; the loader only checks the shape."
+              "A contacts.toml source id is checked by `doorman check` against that file; the loader only checks the shape.",
+              "An acct- book must be one the box holds; what a phone's account books compose to may not exceed its directory limit (1000 contacts until a model's capacity is measured).",
+              "The lobby pass book (role = \"lobby-pass\") may not be selected."
             ]
           }
         },

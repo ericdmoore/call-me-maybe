@@ -25,6 +25,11 @@ caller can ask for one room rather than all of them. Pressing nothing rings
 the house the moment the prompt ends, and nothing done at the keypad can cost
 an allow\-listed caller that ring.
 .PP
+A caller in the account's lobby pass book (below) is a known caller too,
+welcomed by the contact's name, unless
+.B [[people]]
+names the number first.
+.PP
 Everyone else meets the lobby: dial a 6\-digit extension within the dial
 window, or get whatever
 .B [line] on_no_input
@@ -88,6 +93,32 @@ removes finished recordings as the Asterisk user, hourly through
 .B --spool
 selects a non\-default Asterisk spool directory (default /var/spool/asterisk).
 The menu/deliver AGI modes are invoked by the generated dialplan, not operators.
+.B *2665
+opens Books: nine recordings or chapters per page, pound for the next page
+(or the page picker on the last page), star to repeat, zero to go back.
+.B doorman books prepare --source catalog.json
+prepares existing local recordings and offline spoken menu labels.
+It requires FFmpeg and espeak-ng;
+.B --library
+defaults to /var/spool/asterisk/cmm-books/library.
+.B doorman books prompts --library directory [--voice Samantha]
+renders complete menu pages offline with macOS say and FFmpeg.
+A staging copy of the prepared catalog.json is sufficient. Install menu-audio
+first and menus.json last; rebuild after catalog changes.
+.B books prepare
+moves a stale menus.json aside to menus.json.stale, and calls fall back to
+the compatibility prompts until it is rebuilt. The voice must appear in
+say \-v '?'. No runtime synthesis
+or speech API is used. See docs/BOOKS.md.
+.B doorman books list
+prints that prepared catalog as JSON.
+The AGI menu uses ASTSPOOLDIR and needs a private, Asterisk-writable
+cmm-books/progress directory beside the library.
+During playback, 1/3 changes chapter, 2/8 changes speed by 0.1x,
+4/6 seeks ten seconds, 5 pauses, star repeats help and zero returns
+to the book menu. Speed ranges from 0.5x to 2.0x without changing pitch.
+Progress belongs to the handset, language and recording revision.
+Books respects curfew and needs no cloud connection or persistent service.
 .B *88
 adds a number to the phone that dialled it: the digits, then the spoken
 name; the number is in that phone's directory within a minute and named
@@ -143,11 +174,14 @@ resolved to nothing, which is how a misspelled optional key becomes visible:
 you configured quiet hours and the output says there are none. PINs are shown
 only as their length, never their value.
 .IP
-A key that matches no field in the schema is an error here, and only here.
-The daemon warns about the same key and carries on, because a policy it
-loaded yesterday must not start taking the phone down today; this command is
-a linting tool with an operator reading its output, where silence about a
-typo is the whole defect. Suggestions are offered \(em
+A key that matches no field in the schema is an error. This command, the
+daemon's reload and
+.B doorman sync
+apply one validator and refuse the same files; a reload that is refused keeps
+the last good policy in service, and at startup the daemon runs its last good
+copy (\fIpolicy.last-good/\fR beside \fIpolicy.toml\fR) when the current files
+are refused, or, with no copy yet, runs them under the previous release's
+rules. Suggestions are offered \(em
 .B afterhous
 is told about
 .BR afterhours .
@@ -206,6 +240,15 @@ entry does nothing \(em a contradiction for an operator to resolve rather than
 a ranking to accept silently. That one exits non\-zero and prints the
 allow\-list name, which the operator typed themselves, beside a redacted
 number.
+.IP
+When the box holds the account's lobby pass book it reports it as counts: the
+book's id and revision, how many holders and numbers it lists, and per line
+how many of those numbers it admits, how many that line's
+.B [[people]]
+already names (which wins), and how many a block source shuts out. Never a
+name or a number. Account books the shared rules refuse \(em a pass book a
+handset selects or a book includes, a second pass book \(em exit non\-zero.
+Silent when the box holds no pass book.
 This is the authority on whether a configuration is usable.
 .TP
 .BI "doorman schema [" name ]
@@ -381,6 +424,101 @@ sets
 in .env; \fBnone\fR clears it. Only the phonebook job reads it, on its next
 run, so no restart.
 .TP
+.B doorman login \fR[\fB\-\-state\fR \fIdirectory\fR] [\fB\-\-env\fR \fIfile\fR]
+Enrol this device through a browser/passkey approval. Run as the backup
+service user. The device generates its own transport key and checks the
+displayed code against it. Scoped credentials are saved atomically with
+mode 0600 under the state directory's account subdirectory, excluded from
+backups. Set \fBBACKUP_CLOUD=true\fR to opt in to encrypted uploads.
+The request suggests a name for the box:
+.B BOX_NAME
+from the environment or the \fB\-\-env\fR file (default
+/opt/call\-me\-maybe/.env), otherwise the hostname; none for
+.IR localhost .
+The household can rename it on the account.
+.TP
+.B doorman account \fBstatus\fR|\fBrotate\fR
+Show identifiers, capabilities and enrolment time, never credential values.
+\fBstatus \-\-json\fR is machine readable. \fBrotate \-\-capability backup|sync\fR
+persists a pending successor before first use commits it. No predecessor
+fallback occurs after an ambiguous first use; invalid credentials require login.
+When the service answers \fBbox_removed\fR (the owner removed this box from
+its account), every credential is forgotten and \fBstatus\fR says so, with
+the time. Calls are unaffected; \fBdoorman login\fR enrols the box again,
+as a new box, and clears the state. \fBdoorman check\fR shows it too.
+.TP
+.B doorman sync \fBrun\fR|\fBonce\fR|\fBsnapshot\fR
+Observe validated files into a private SQLite echo, publish secret-free
+snapshots, and receive typed changes with durable receipts. Requires account
+enrolment. \fBrun\fR observes every second and polls every five seconds,
+backing off with jitter to five minutes (or the service's Retry\-After) while
+passes fail; an unchanged snapshot is not re\-sent.
+The status report carries the suggested box name
+.RB ( BOX_NAME ,
+otherwise the hostname) until one report carrying it has been accepted for the
+enrolment, recorded in the sync state directory, and never again after that.
+With the sync capability, \fBrun\fR also keeps the \fIbell\fR: an outbound,
+normally quiet WebSocket on which the service only says "sync now". A ring
+runs the ordinary pass at once (rings during a pass merge into one more pass);
+a ping every 25 seconds keeps it alive and a missing pong reconnects it, with
+backoff from one second to five minutes. While the bell is up, polling slows to
+.B SYNC_BELL_POLL_S
+(default 300 seconds); while it is down, refused or not offered, polling is
+every five seconds as before. Nothing on the socket is configuration or a
+command. A refused credential is not retried until it changes; only state
+changes are logged.
+.B SYNC_BELL=false
+turns the bell off.
+\fBonce\fR performs one exchange; \fBsnapshot\fR prints the redacted snapshot
+(contact names and numbers are included, so treat this output as private).
+The state directory defaults to /var/lib/doorman; \fB\-\-state\fR overrides it.
+Content inventory is measured every 30 seconds from <state>/content/library;
+\fB\-\-content\fR overrides the root. Reports contain relative names, import
+provenance and measured sizes, never media bodies or implied phone mounts.
+Policy, handset, trunk and contact inventory paths accept explicit flags.
+The \fB\-\-phonebooks\fR directory defaults to PHONEBOOK_DIR or
+<state>/phonebook. Handset-filed and shared imported cards enter the snapshot
+as directory additions; they never become call-admission rules.
+Books the account manages arrive as typed deliveries and are kept under
+<phonebooks>/account/acct\-<id>.toml: directory only, composed with the
+house when a phone's directory is rendered, never edited by hand (a changed
+copy is reported as a conflict rather than overwritten).
+One account book may carry
+.BR "role = \(dqlobby\-pass\(dq" :
+the lobby pass book, the reverse of the others. It is never shown in a
+directory \(em no handset may select it, no book may include it, and it
+includes nothing \(em and it is the one book call admission reads: a caller
+whose number it lists skips the lobby, welcomed by the contact's name, after
+a block source and
+.B [[people]]
+have had their say. A box holds at most one, of up to 5000 contacts (other
+books keep 2000). It is delivered, echoed (with its role), replaced and
+removed exactly as any book is, and the daemon reloads it within a second,
+keeping the last good one when the books are refused (with a copy at
+<phonebooks>/account/.lobby\-pass.last\-good for a restart). Its receipt is
+applied once the daemon admits from exactly the delivered bytes.
+A queue item may
+carry an ordered list of verbs, applied together with one receipt; a refused
+verb writes nothing.
+Policy schedule edits and phonebook assignments validate the real files,
+preserve unrelated TOML and comments, and use ordinary automatic hot reload.
+Invalid or conflicting input leaves the working files unchanged.
+Saved receipts become applied only when the running daemon confirms the
+compiled file revision through its private Unix socket. This is not proof
+that a handset has refreshed its screen. The sync ledger is excluded from
+backups; a replacement enrols independently.
+A removed box logs one line and exits 6, which doorman\-sync.service treats
+as a clean stop: no restart, no retry against the service. After
+\fBdoorman login\fR, start the unit again.
+.TP
+.B doorman sync \fBinventory\fR
+Print a read-only local library report without account enrolment or network
+access. Accepts \fB\-\-state\fR and \fB\-\-content\fR.
+Missing roots and unreadable
+entries remain explicitly unavailable or partial, not zero-sized libraries.
+See docs/CONTENT-INVENTORY.md for the optional
+local .content-source.json import record.
+.TP
 .B doorman backup \fBinit\fR|\fBrun\fR|\fBlist\fR|\fBverify\fR
 The house as one sealed file. \fBinit\fR makes the keypair: the public half
 into .env as
@@ -388,10 +526,32 @@ into .env as
 the private half printed once and never stored. \fBrun\fR bundles .env, the
 TOMLs, the state directory (the journal snapshotted), voicemail, the *88
 spool and the hand-written Asterisk files, age\-encrypted, and delivers it
-to every destination (\fBBACKUP_PATH\fR), pruning by
+to every configured file/S3 destination, pruning by
 .BR BACKUP_KEEP_DAILY / WEEKLY ;
 doorman\-backup.timer runs it nightly. \fBverify\fR opens the newest with
 the private key (\fBBACKUP_IDENTITY_FILE\fR, or typed).
+\fBBACKUP_CLOUD=true\fR additionally uploads through the enrolled account.
+Cloud retention belongs to the service; upload credentials cannot list,
+read or delete bundles. Successful cloud delivery reports stored, not verified.
+On a box removed from its account the cloud destination reports stopped,
+not failed, and asks the service nothing; file and S3 copies continue. If
+cloud was the only destination nothing was backed up, and the run exits 1.
+View metadata at https://app.dialdoorman.cc/backups/.
+Printed-phrase recovery uses the separate recovery commands below.
+.TP
+.B doorman recovery authorize|setup|restore|confirm|cancel|status
+Printed-phrase cloud recovery. Enrol the device independently, then authorize
+with a separate account passkey approval. Setup prints a private HTML sheet
+path;
+save or print it and confirm by entering its new phrase at the hidden prompt.
+Restore takes the old phrase and requires a new absolute \fB\-\-root\fR;
+it prepares a replacement sheet before confirmation stages and verifies files.
+Use root for confirmation to restore recorded owners. No services are started
+and no source device is retired. \fB\-\-phrase-file\fR accepts a private
+regular
+file instead of terminal input; never put a phrase in command arguments.
+Cancel abandons only an unconfirmed operation and keeps the current phrase.
+See docs/CLOUD-BACKUP-PROTOCOL.md for interruption recovery and limits.
 .TP
 .B doorman restore \fIbundle\fR|\fB\-\-latest\fR
 A box from a bundle. \fB\-\-dry\-run\fR shows the manifest and what would
@@ -585,11 +745,16 @@ from
 .B api_username
 and
 .B api_password_env
-on each trunk, and the threshold from
+on each trunk \(em or
+.B api_key_env
+instead, for a provider whose API takes one key, such as Telnyx \(em and the
+threshold from
 .B balance_min
 there or
 .B \-\-min
 here.
+.B doorman check
+refuses a trunk whose credentials are the shape its provider does not take.
 .PP
 .BR "The daemon never reads those credentials" .
 A provider API key manages DIDs, sub\-accounts and billing, which is
@@ -634,6 +799,39 @@ runs the command every morning.
 Flags:
 .BR \-\-trunks ", " \-\-env ", " \-\-min ", " \-\-json ", " \-\-timeout ", "
 .BR \-\-ring ", " \-\-handsets ", " \-\-repeat ", " \-\-ring\-timeout ", " \-\-state ", " \-\-prom .
+.TP
+.BI "doorman numbers [\-trunks " path "] [\-json] [" policy ]
+Which phone numbers each trunk's account holds, asked of the provider's API,
+against the numbers the policy files claim for that trunk:
+.B [line] number
+and
+.B [line] outbound_cid
+on every line whose
+.B [line] trunk
+names it. Each claim is reported as on the account and assigned to the
+connection the trunk registers as; on the account but assigned to no
+connection, or to one another SIP username registers as; not active yet; or
+not on the account at all. Numbers on the account that no policy file names
+are listed too, and one claimed for another trunk on the same account names
+that trunk. A number a line only presents needs to be held, not routed.
+.PP
+Telnyx today, through
+.B api_key_env
+on the trunk. A provider doorman cannot ask (VoIP.ms) is reported with its
+claims unchecked, never failed. The numbers are the household's own and are
+printed in full, as
+.B doorman check
+prints them. The key can buy and release numbers;
+.BR "the daemon never reads it" .
+.PP
+Flags:
+.BR \-\-trunks ", " \-\-handsets ", " \-\-env ", " \-\-json ", " \-\-timeout .
+Exit status as for
+.BR "doorman balance" :
+1 when a claimed number is not where the policy says, 3 when a trunk could not
+be checked \(em including one whose API credentials are not the kind its
+provider takes. A missing policy file is exit 2: with no claims, every number
+would otherwise read as unclaimed and the run would pass.
 .PP
 .BI "doorman e164 " number
 Show how a raw caller ID normalises to E.164. Use this when a known caller
@@ -725,10 +923,35 @@ Old versions are retained. Never remove a version referenced by the default
 or a per-line prefix. doorman check reports the configured default, not a
 live playback probe. See docs/PACKS.md and docs/STORY-PACKS.md for the archive,
 source/audio bindings, cache rules and audio level targets.
+.SH SANDBOX PREVIEW MEDIA
+.B doorman sync media list|once --source https://trusted-sandbox-origin
+runs the explicit, command-side preview lane. The approved origin receives the
+box's sync credential; redirects and cross-origin download addresses
+are refused.
+It is separate from configuration sync and never runs on call admission.
+.B list
+shows offers without signed URLs.
+.B once
+verifies and installs bounded previews into the local Books library,
+with durable
+installation receipts. Options are --state and --library. No timer is installed.
+.PP
+.B doorman books install-preview --archive local.cmmpack
+uses the same free local importer without an account. Previews are limited to
+1 MiB archives and two minutes. Full books require compressed playback support;
+this importer deliberately refuses them. An installed receipt is not proof of
+handset playback. See docs/media-preview.md for limits and recovery semantics.
 .SH FILES
 .TP
 .I policy.toml
 The rules: line identity, allow\-list, extensions, ringer ladders, schedules.
+An extension's
+.B afterhours
+names one
+.B [[schedules]]
+id or a list of them, and the line is quiet while any is active \(em
+weekdays 9\(en5 is
+.BR "afterhours = [\(dqnights\(dq, \(dqweekend\-days\(dq]" .
 Changes weekly and is safe to hand\-edit \(em when
 .B POLICY_WATCH
 is enabled, edits go live without a restart, and a file that fails
@@ -766,8 +989,9 @@ belong outside any repository, mode 0600. With one, the lobby walks a ladder
 and the first match wins: a block source (dismissed, and never hears the
 lobby), then
 .BR [[people]] ,
-then a personal contact (both straight through), then a published contact and
-everybody else (the lobby). Nothing here is authoritative:
+then the account's lobby pass book when the box holds one, then a personal
+contact (all straight through), then a published contact and everybody else
+(the lobby). Nothing here is authoritative:
 .B [[people]]
 in
 .I policy.toml
@@ -798,7 +1022,8 @@ must be terminals. Checks overlap the command within a one-second startup
 budget. Failures are silent; failed commands never print notices. The daemon,
 LSP, CI, pipes and source builds (git distance or dirty stamps) never check.
 Only strictly newer semantic versions are advertised. Nothing auto-updates.
-Upgrade using install.sh on a workstation, or scp per docs/RUNBOOK.md on the Pi.
+Upgrade using install.sh on a workstation; on the Pi, download and verify
+the release binary per docs/RUNBOOK.md.
 State is stored in $XDG_STATE_HOME/doorman/update-check.json, defaulting to
 ~/.local/state/doorman/update-check.json (0600 file, 0700 directory).
 A successful fetch is cached even before the command finishes, for later runs.
@@ -832,6 +1057,26 @@ application named in
 .TP
 .BR POLICY_PATH ", " HANDSETS_PATH ", " TRUNKS_PATH ", " CONTACTS_PATH ", " POLICY_WATCH
 Where the config files are, and whether to reload them on change.
+.TP
+.B BOX_NAME
+The name this box suggests to its connected account; unset suggests the
+hostname, and
+.I localhost
+or an empty name suggests none. Trimmed and cut on a character boundary to at
+most 64 characters. Sent by
+.B doorman login
+at enrolment and once in a sync status report; after it is accepted the
+account owns the name, so changing this renames nothing. Only ever sent to the
+household's own connected account; never logged.
+.TP
+.BR SYNC_BELL ", " SYNC_BELL_POLL_S
+Read by
+.B doorman sync run
+only. The sync bell is on by default for a box enrolled with the sync
+capability; false turns it off and sync polls every five seconds exactly as
+before. While the bell is up, sync polls every
+.B SYNC_BELL_POLL_S
+seconds (default 300, 5 to 3600) as a safety net.
 .I CONTACTS_PATH
 is optional and a missing file is the normal state, in which nothing is read,
 nothing is logged, and the lobby admits exactly who
@@ -945,14 +1190,25 @@ unwritable output directory.
 The command line was wrong.
 .PP
 .B doorman balance
-uses the same 0, 1 and 2 and adds one:
+and
+.B doorman numbers
+use the same 0, 1 and 2 and add one:
 .TP
 .B 3
-Nothing was below its threshold, but at least one trunk could not be checked at
-all. Separate from 1 on purpose \(em an expired API key and an empty account
+Nothing was below its threshold (or, for
+.BR numbers ,
+out of place), but at least one trunk could not be checked at all.
+Separate from 1 on purpose \(em an expired API key and an empty account
 look identical from here, and treating one as the other is how a real outage
 gets dismissed as a broken cron job. 1 wins when both happen, because a balance
 known to be low is more actionable than one that is unknown.
+.PP
+.B doorman sync
+adds one:
+.TP
+.B 6
+The account owner removed this box. Sync has stopped for good, on purpose;
+\fBdoorman login\fR enrols the box again.
 .SH EXAMPLES
 Validate a configuration before trusting it:
 .PP
@@ -1105,3 +1361,15 @@ An explicitly configured journal must open at startup; runtime failures remain
 nonfatal to calls. check --policy-only skips local service environment/storage
 checks when validating examples.
 Normal check reports policy before environment.
+
+.SH MANAGED WEBHOOK
+The optional private webhook.toml beside policy.toml accepts domain (HTTP or
+HTTPS origin) and path_prefix. See doorman schema webhook. The daemon POSTs
+JSON event payloads to domain + path_prefix + /cc.dialdoorman/events for
+ringing and completed calls. Managed delivery redacts caller numbers and
+never inherits WEBHOOK_TOKEN. Empty values disable managed delivery; an
+absent file preserves the environment default. The separate journal doorbell
+is unchanged. Keep this file and its .last-good copy mode 0600. Invalid edits
+keep the last good endpoint across restart; doorman check validates the file.
+Sync applies encrypted, revision-checked changes and reports applied only
+after the running daemon accepts the exact file revision.

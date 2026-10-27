@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; connect-src 'none'">
+  <title>Backup decryption phrase — Doorman</title>
+  <style>
+    :root { color-scheme: light; --ground: #efe9dc; --raised: #faf7f0; --text: #16171c; --soft: #55565e; --rule: #cbbfa6; --accent: #8a6a1f; }
+    * { box-sizing: border-box; }
+    body { margin: 2rem auto; padding: 1.5rem; max-width: 48rem; background: var(--ground); color: var(--text); font: 0.95rem/1.6 "Avenir Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    p { margin: 0; }
+    header { border-top: 3px solid var(--accent); border-bottom: 1px solid var(--rule); padding: 1rem 0; }
+    .brand, .purpose { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+    .brand { color: var(--accent); }
+    .purpose { color: var(--soft); }
+    h1 { font: 500 2rem/1.3 Futura, "Avenir Next", "Century Gothic", "Trebuchet MS", sans-serif; margin: 0.45rem 0; }
+    h2 { font-size: 1rem; margin: 0 0 0.5rem; }
+    .intro { margin-top: 1rem; }
+    .distinction { border-left: 3px solid var(--accent); padding: 0.65rem 0.9rem; margin: 1rem 0; background: var(--raised); }
+    .factor { border: 1px solid var(--rule); padding: 1rem; margin: 1rem 0; break-inside: avoid; }
+    .factor-label { font-size: 0.8rem; color: var(--soft); }
+    .phrase { font: 600 1.2rem/1.8 ui-monospace, "SF Mono", Menlo, Consolas, monospace; margin-top: 0.4rem; }
+    .qr { display: flex; align-items: center; gap: 1rem; margin-top: 0.7rem; }
+    .qr img { width: 7rem; height: 7rem; flex: none; }
+    .qr p { font-size: 0.8rem; max-width: 26rem; }
+    ol { padding-left: 1.3rem; margin: 0.5rem 0 1rem; }
+    li + li { margin-top: 0.3rem; }
+    code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.85em; overflow-wrap: anywhere; }
+    dl { margin: 1rem 0; font-size: 0.7rem; color: var(--soft); overflow-wrap: anywhere; }
+    dl > div { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: 0.4rem; }
+    dt { font-weight: 600; } dd { margin: 0; }
+    footer { font-size: 0.8rem; border-top: 1px solid var(--rule); padding-top: 0.8rem; break-inside: avoid; }
+    footer p + p { margin-top: 0.4rem; }
+    @media (max-width: 30rem) { body { margin: 0; padding: 1rem; } .qr { align-items: flex-start; } .qr img { width: 6rem; height: 6rem; } }
+    @media print {
+      @page { margin: 12mm; }
+      :root { --ground: #fff; --raised: #fff; --text: #000; --soft: #333; --rule: #999; --accent: #000; }
+      body { max-width: none; margin: 0; padding: 0; font-size: 10.5pt; line-height: 1.45; }
+      header { padding: 3mm 0; } h1 { font-size: 24pt; }
+      .distinction { margin: 3mm 0; } .factor { padding: 3mm; margin: 4mm 0; }
+      .qr img { width: 27mm; height: 27mm; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="brand">Doorman · Recovery</p>
+      <h1>Backup decryption phrase</h1>
+      <p class="purpose">Use in your terminal · One phrase, eight groups</p>
+    </header>
+    <p class="intro">To unlock your encrypted backup, enter <strong>the entire phrase</strong> at the hidden prompt in the Doorman CLI. Keep a printed or safely saved copy away from your phone box.</p>
+    <p class="distinction"><strong>For backup contents.</strong> This phrase cannot sign you in to your account. Account access uses your passkey or the separate <strong>Account sign-in codes</strong> sheet.</p>
+    <section class="factor" aria-label="Your backup decryption phrase">
+      <p class="factor-label">Enter all eight groups together</p>
+      <p class="phrase">{{.Phrase}}</p>
+      <div class="qr">
+        <img src="{{.QR}}" alt="QR code containing the same backup decryption phrase">
+        <p>Scanning shows this same phrase on your device. It does not sign you in or start a restore. The phrase stays in the link fragment and is cleared from the address bar.</p>
+      </div>
+    </section>
+    <section>
+      <h2>When you need to restore</h2>
+      <ol>
+        <li>Sign in on the replacement box with <code>doorman login</code>, selecting the house shown below.</li>
+        <li>Run <code>doorman recovery authorize</code> and approve access with your account passkey.</li>
+        <li>Run <code>doorman recovery restore --root /your/inspection/folder</code> and enter this phrase privately.</li>
+      </ol>
+      <p>The restore prepares a replacement sheet. Save it, then run <code>doorman recovery confirm</code> with that <strong>new sheet's phrase</strong>. Files are restored for inspection; services are not started.</p>
+    </section>
+    <dl>
+      <div><dt>Account ID</dt><dd>{{.Scope.Account}}</dd></div>
+      <div><dt>House ID</dt><dd>{{.Scope.House}}</dd></div>
+      <div><dt>Sheet ID</dt><dd>{{.Scope.Generation}}</dd></div>
+    </dl>
+    <footer>
+      <p><strong>Keep this sheet private.</strong> Anyone with the phrase and encrypted recovery material can unlock your backups. Account recovery alone cannot decrypt them.</p>
+      <p>A previous backup phrase remains active until its replacement is confirmed. Rotation cannot erase copies already downloaded. Your account sign-in codes are managed separately.</p>
+    </footer>
+  </main>
+</body>
+</html>

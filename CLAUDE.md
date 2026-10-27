@@ -64,7 +64,7 @@ they do not.
 ## Environment
 
 Go, stdlib-first: `BurntSushi/toml` and `gopkg.in/yaml.v3` for configuration
-and templates, `gorilla/websocket` for the ARI event stream. The deliverable is
+and templates, `gorilla/websocket` for the ARI event stream and the sync bell. The deliverable is
 one static binary — no runtime on the
 Pi, no node_modules, nothing to install but the file. This project is a
 deliberate exception to the owner's TypeScript-first standard: it is a leaf
@@ -81,7 +81,11 @@ Layout:
   whole call state machine, one goroutine per call. `fake_ari_test.go` is the
   harness that drives it without an Asterisk.
 - `internal/policy` — TOML schema, E.164 normalisation, hot reload, PIN
-  rotation.
+  rotation. `internal/configcheck` is the one rule set over it: `doorman
+  check`, the daemon's reload and the sync observer (and the hosted validator
+  built from this source) all take their options from there, so they accept
+  and refuse the same files. Validation messages leave the box or reach a log
+  only through `policy.RedactProblem`.
 - `internal/ari` — thin typed ARI client: REST + reconnecting WebSocket.
 - `internal/lsp` — language server for the config files; diagnostics
   reuse `policy.LintSplit`, one problem per squiggle. stdout is protocol —
@@ -161,7 +165,28 @@ Layout:
   the queue before defaulting; pinned selections survive restart and retries.
   `PHONEBOOK_DIR/shared` is directory
   storage, never an admission source; it is separate from the *88 writer.
+- `internal/accountbook` — books the account manages, delivered by sync to
+  `PHONEBOOK_DIR/account/acct-<id>.toml` and composed into handset
+  directories. Directory only — with one exception: the single book with
+  `role = "lobby-pass"` is never selectable, never included, never rendered
+  into any directory, includes nothing, holds up to 5000 contacts, and is the
+  one book admission reads (`cmd/doorman/lobbypass.go`, through
+  `lobby.Passes`). It is validated with the rest by
+  `configcheck.AccountBooks`, so the daemon admits from exactly the set sync
+  reports, reloads within a second, and keeps the last good pass book
+  (`account/.lobby-pass.last-good` across a restart).
 - `internal/config` — env parsing; names match `examples/.env.example` exactly.
+- `internal/syncmachine` — command-side file observer, SQLite echo, and durable
+  typed changes. The account transport is injected by `cmd/doorman/sync.go`;
+  neither package runs on call admission. `internal/activation` exposes only
+  compiled source digests over a private local Unix socket so receipts can
+  distinguish saved files from a policy accepted by the running daemon.
+- `internal/bell` — the sync bell: an outbound, normally quiet WebSocket on
+  which the account service says only "sync now". `doorman sync run` holds
+  it; a ring runs the ordinary HTTPS pass, and while it is up polling slows to
+  `SYNC_BELL_POLL_S`. Nothing read from it is configuration or a command, and
+  the credential stays in `internal/account` (`DialBell`). Unrelated to the
+  journal's `doorbell` webhook mode, which runs the other way.
 
 Config interfaces: `.env` (secrets + tuning), `handsets.toml` (hardware
 inventory — source of truth for the generated Asterisk config), `policy.toml`
@@ -181,7 +206,10 @@ Without one nothing is read, nothing is logged, and the admission ladder is the
 two tiers it has always been: `[[people]]`, then the lobby. With one it becomes
 five — a block source, `[[people]]`, a personal contact, a published contact,
 everybody else — first match wins. Block beats `[[people]]`, and a number in
-both fails `doorman check` rather than being ranked in silence.
+both fails `doorman check` rather than being ranked in silence. A box holding
+the account's lobby pass book adds one rung directly after `[[people]]`:
+`[[people]]` wins over a pass, a block wins over both, and an ordinary
+account book never admits anyone.
 
 **No `trunks.toml` is the normal state and the compatibility gate.** Without
 one, `doorman render` generates only the handset files and the hand-written
@@ -208,9 +236,13 @@ Break these and the phone fails in ways that look like working software.
    in the state machine selects on `ctx.Done()`. Do not add state flags, and
    do not add an exit path that skips the defer.
 4. **An invalid `policy.toml` must never take the phone down.** The store
-   keeps the last good policy on a failed reload, and `RotatePins` validates
-   before writing and writes atomically. Preserve both properties on any
-   change to those paths.
+   keeps the last good policy on a failed reload, at startup it runs the last
+   good copy (`policy.last-good/<line>`, saved atomically on every accepted
+   load) when the current files are refused — or, with no copy, the current
+   files under the previous release's rules (never a copy source) — and
+   `RotatePins` validates
+   before writing and writes atomically. Preserve all three on any change to
+   those paths.
 5. **PIN comparison stays exact-match against a map.** No prefix matching, no
    fuzzy fallback. Extensions are credentials; `RotatePins` generates them
    with crypto/rand for the same reason.
@@ -287,6 +319,16 @@ Break these and the phone fails in ways that look like working software.
    default. Entered digits and PINs are still absolute: a record says
    whether a PIN was valid, never what was typed.
 
+10a. **A phonebook is not a door, except the one that says so.** Being in a
+   handset's directory — `house`, a contacts source shown on a phone, an
+   `own/` or `shared/` book, an ordinary account book — admits nobody. The
+   only account data admission reads is the single book with
+   `role = "lobby-pass"`, which no directory may show (no selection, no
+   include; refused by `configcheck.AccountBooks`, skipped by the directory
+   even so). It is read into memory off the call path and consulted after
+   a block source and `[[people]]`; a call never reads a file or the network
+   for it, and a refused set never replaces the pass book in service.
+
 9a. **Generated files are outputs.** `asterisk/generated/*` and the
    installed `*_handsets.conf` and `*_trunks.conf` come from `doorman
    render`; never hand-edit them or commit them (both PJSIP ones hold real
@@ -313,6 +355,11 @@ Break these and the phone fails in ways that look like working software.
 - Comments explain *why*, not *what*.
 - British spelling appears in identifiers (`normalise`); match the surrounding
   file rather than converting.
+- A box runs release binaries only: a published `vX.Y.Z` asset verified
+  against its `checksums.txt` on the box, never a local, branch or `make cross`
+  build copied over. Unreleased work ships by merging and cutting a release.
+  `docs/RUNBOOK.md`, "Deploying upgrades", has the procedure, the smoke
+  checkpoints and the one rollback exception.
 
 ## Development without a phone system
 
@@ -373,3 +420,19 @@ local inventory too. The `.example` variants are the committed ones. Never
 commit a real VoIP.ms sub-account password, trunk password, handset password,
 ARI password, or a real PIN — including in a test fixture or a commit message. Test fixtures use `555-01xx` numbers, which are reserved for
 fiction.
+
+Managed event webhooks use optional `webhook.toml` beside `policy.toml` (see
+`doorman schema webhook`). Set `domain` to an HTTP(S) origin and `path_prefix`
+to an optional path. The daemon sends ringing and completed event payloads as
+JSON POSTs to `<domain><path_prefix>/cc.dialdoorman/events`, without an event
+type suffix. Caller numbers are redacted and environment bearer tokens are
+not forwarded. Missing file preserves the legacy environment setting; an
+empty domain and prefix explicitly disable managed delivery. This does not
+change the separate event-journal doorbell.
+
+Treat the file and its `.last-good` copy as private (0600). Reload occurs
+within a second; invalid edits retain the last good endpoint across restart.
+`doorman check` validates it. Hosted changes arrive encrypted to the enrolled
+transport key, through the revision-checked sync queue. Snapshots expose only
+domain/configured state; private prefix edits still advance the revision.
+An applied receipt requires the running daemon's exact accepted file digest.

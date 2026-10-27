@@ -94,13 +94,32 @@
         "type": "object",
         "properties": {
           "afterhours": {
-            "description": "Id of a [[schedules]] entry. During the window the line does not ring normally: it either redirects to afterhours_ring, or goes to voicemail.",
-            "type": "string",
+            "description": "Id of a [[schedules]] entry, or a list of them. While a named window is active the line does not ring normally: it either redirects to afterhours_ring, or goes to voicemail. A list because one window crosses midnight at most once per day it lists: weekdays 9–5 is afterhours = [\"nights\", \"weekend-days\"], with nights 17:00–09:00 every day and weekend-days 09:00–17:00 SA SU.",
+            "oneOf": [
+              {
+                "description": "One [[schedules]] id.",
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]*$"
+              },
+              {
+                "description": "Several [[schedules]] ids, in any order.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]*$"
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              }
+            ],
             "x-cross-references": [
               "policy.toml [[schedules]].id"
             ],
             "x-rules": [
               "The inline-table form is retired; use a named schedule id.",
+              "A list is a union: the line is in its afterhours state while ANY named schedule is active.",
+              "Every id must name a [[schedules]] entry, and only once; an empty list fails `doorman check`.",
+              "A schedule with enabled = false is inert, alone or in a list; with every named schedule off the line rings at any hour, and `doorman check` says so.",
               "Requires either voicemail or afterhours_ring, so the caller has somewhere to go."
             ]
           },
@@ -434,19 +453,19 @@
             "default": true
           },
           "end": {
-            "description": "Local time, HH:MM. May be earlier than start, which means the window crosses midnight.",
+            "description": "Local time, HH:MM from 00:00 to 23:59. May be earlier than start, which means the window crosses midnight.",
             "type": "string",
-            "pattern": "^\\d{1,2}:\\d{2}$"
+            "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$"
           },
           "id": {
-            "description": "Referenced as afterhours = \"\u003cid\u003e\" from an extension, or in curfew = [\"\u003cid\u003e\", …] on a handset in handsets.toml.",
+            "description": "Referenced as afterhours = \"\u003cid\u003e\" (or afterhours = [\"\u003cid\u003e\", …]) from an extension, or in curfew = [\"\u003cid\u003e\", …] on a handset in handsets.toml.",
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9_-]*$"
           },
           "start": {
-            "description": "Local time, HH:MM.",
+            "description": "Local time, HH:MM from 00:00 to 23:59. A one-digit hour (7:00) means the same as 07:00.",
             "type": "string",
-            "pattern": "^\\d{1,2}:\\d{2}$"
+            "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$"
           }
         },
         "required": [
@@ -454,7 +473,10 @@
           "start",
           "end"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "x-rules": [
+          "Validated whether or not it is enabled: a disabled schedule with an impossible time fails `doorman check`, is refused by the daemon's reload and by sync, exactly as an enabled one is."
+        ]
       }
     }
   },
@@ -463,6 +485,9 @@
     "Reloaded live when POLICY_WATCH is true; an invalid file is rejected, never applied.",
     "One file per phone number. A box answering several numbers puts each extra line in policy.\u003cline\u003e.toml beside policy.toml, and the dialplan names the line with Stasis(app,line,\u003cname\u003e). Bare policy.toml is the default line and serves every call that names none. The schema is the same for all of them; handsets.toml is shared.",
     "Extensions are credentials. Treat a PIN like a password and prefer `doorman rotate` over choosing one.",
-    "Allow-listed numbers may be written in any format; they normalise to E.164 at load time. An unparseable number is a load error, not a silent never-match."
+    "Allow-listed numbers may be written in any format; they normalise to E.164 at load time. An unparseable number is a load error, not a silent never-match.",
+    "`doorman check`, the daemon's reload and sync apply one validator, so they accept and refuse the same files. Unknown keys are errors in all three.",
+    "Bounds: ids at most 60 characters; handset, extension and line labels at most 128; a person's name at most 256 and at most 32 numbers; at most 100 handsets, 100 schedules per policy and 100 handsets in any one list; any other value at most 2048 characters and any list at most 1000 entries. A ladder step's rings is 1-1000 and seconds 1-86400 when set.",
+    "At startup the daemon falls back to its last good copy (policy.last-good/ beside policy.toml) when the current files are refused, or, with none, runs the current files under the previous release's rules; it refuses to start only on a file that release refused too."
   ]
 }

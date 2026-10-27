@@ -1,0 +1,32 @@
+{
+  "box": "00000000-0000-7000-8000-000000000001",
+  "privateKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+  "publicKey": "E75P6uryBMf9M1j8nAByGIHRdCeBKCJ-xnTzf3_pe20",
+  "pkcs8": "MC4CAQAwBQYDK2VuBCIEIAcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcH",
+  "config": {
+    "domain": "https://receiver.example",
+    "pathPrefix": "/test-secret"
+  },
+  "item": {
+    "id": "00000000-0000-7000-8000-000000000020",
+    "base": {
+      "generation": "00000000-0000-7000-8000-000000000004",
+      "revision": "1"
+    },
+    "notAfter": 60000,
+    "createdAt": 1000,
+    "author": {
+      "kind": "person",
+      "person": "00000000-0000-7000-8000-000000000001"
+    },
+    "verb": {
+      "name": "webhook.set",
+      "domain": "https://receiver.example",
+      "envelope": {
+        "ephemeralKey": "umTcwHyGssKH6vToWQ1F4JSMQs79DZPzxDhujhmmjFM",
+        "nonce": "7BcCuW7bwbxVVNtT",
+        "ciphertext": "Zr2tm-PT8n_vdzwakCuaQPBer_HFezv-kq4cmXvsqokdyouW3J7WT0WuBAAjIufEoQkwgBdekLYTQOO2Wmsl762pNTcnK9FsGFeVbrt5tnit"
+      }
+    }
+  }
+}

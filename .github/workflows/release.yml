@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -41,6 +41,30 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      # Same tools as CI's test job: without them the Books audio
+      # integration tests skip and the coverage floor fails only here.
+      # A pinned static ffmpeg and cached espeak-ng packages, with bounded,
+      # retried apt only as the fallback: a stalled Ubuntu mirror once held
+      # this step for hours. See scripts/ci-audio-tools.sh.
+      # ImageOS is a runner process variable, not an automatic env context.
+      # Read the actual distro so ubuntu-latest upgrades cannot share .debs.
+      - name: Identify audio package image
+        id: audio-image
+        shell: bash
+        run: |
+          . /etc/os-release
+          printf 'identity=%s-%s-%s\n' "$ID" "$VERSION_ID" "$(dpkg --print-architecture)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache offline Books audio tools
+        uses: actions/cache@v4
+        with:
+          path: ~/audio-tools
+          key: audio-tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.audio-image.outputs.identity }}-${{ hashFiles('scripts/ci-audio-tools.sh') }}
+
+      - name: offline Books audio tools
+        timeout-minutes: 10
+        run: bash scripts/ci-audio-tools.sh ~/audio-tools
 
       - name: Gate on the same checks as CI
         run: |

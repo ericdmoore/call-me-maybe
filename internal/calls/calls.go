@@ -90,9 +90,11 @@ const (
 // A Record is one call. Field names are short because they are read by people
 // and by models more often than by code.
 // Via values. ViaContacts is a prefix: "contacts/eric" names the source.
+// ViaLobbyPass is the lobby pass list the account delivers.
 const (
-	ViaPeople   = "people"
-	ViaContacts = "contacts/"
+	ViaPeople    = "people"
+	ViaContacts  = "contacts/"
+	ViaLobbyPass = "lobby-pass"
 )
 
 type Record struct {
@@ -125,8 +127,9 @@ type Record struct {
 	// and a reader looking for a name should not have to know which list it
 	// came from.
 	Known string `json:"known,omitempty"`
-	// Via says which list Known came from: ViaPeople for [[people]], or
-	// ViaContacts followed by the contacts.toml source id. It is the answer
+	// Via says which list Known came from: ViaPeople for [[people]],
+	// ViaLobbyPass for the account's lobby pass list, or ViaContacts
+	// followed by the contacts.toml source id. It is the answer
 	// to "why did the phone ring for someone I never allow-listed", and it
 	// is empty on every record written before address books existed.
 	Via string `json:"via,omitempty"`
