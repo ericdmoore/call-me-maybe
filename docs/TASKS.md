@@ -593,3 +593,41 @@ and service activation remain operator steps. Script tests and ShellCheck
 cover the provisioning logic. Rehearse on a fresh Ubuntu Server VM before
 treating the mini x86 hub deployment as validated; other distro adapters also
 need live installation and call-flow verification.
+
+## CLI reference pages — one source for `help`, the man page, `llms.txt` and the site
+
+The subcommand surface is typed in four places — the dispatch `switch`, the
+`usage` constant, the man page's `SUBCOMMANDS`, and the command block in
+`llms.txt` — and nothing asserts they agree. The schema side already has the
+right shape (`doorman schema` → `make site-assets` → CI diff); the commands
+need the same. Design and reasoning in [`cli-reference.md`](cli-reference.md).
+
+Acceptance criteria:
+
+1. A command registry in `cmd/doorman` with name, summary, synopsis, flags,
+   needs (env, files, daemon), exit codes and examples. Each subcommand's flag
+   set is built by a function separate from its run, so flags are introspected
+   with `FlagSet.VisitAll` and nothing executes.
+2. `cmd/doorman/main_test.go` asserts every dispatch case is registered and
+   every registered command dispatches.
+3. `doorman help --json` emits the registry; `doorman help <command>` prints
+   one command; plain `doorman help` renders from it and the `usage` constant
+   is gone. Defaults are the literal text the code states — never an expanded
+   env var, never a path from the generating machine.
+4. `make site-assets` writes `site/public/cli/commands.json`; the existing
+   *site assets are current* CI step catches a stale copy.
+5. `/doorman/` and `/doorman/<command>/` on the site, from a `commands`
+   content collection joined to the JSON at build. The build fails on a
+   command with no prose file and on a prose file with no command. Every
+   command shows its flags, or none does.
+6. `/cli` and `/cli/` 301 to `/doorman/` via `site/public/_redirects`,
+   verified under `npm run cf:preview`.
+7. A Markdown twin per page from the same data; `llms.txt` links the index in
+   place of its hand-typed command block.
+8. Read-only examples from the registry run in CI.
+9. The man page's `SEE ALSO` names `https://callmemaybe.cc/doorman/`, and a
+   test asserts every registered command appears in `docs/doorman.1` and
+   `llms.txt`.
+
+Deferred: rendering the man page's `SUBCOMMANDS` and the `llms.txt` block from
+the JSON. The test in 9 says when that becomes worth doing.
