@@ -70,6 +70,9 @@ func menuTexts(root string, c Catalog) map[string]string {
 					heading += " Pound to choose a page."
 				}
 			}
+			if count > 1 {
+				heading += " Star then pound to choose a page."
+			}
 			heading += " Star to repeat. Zero to go back."
 			texts[pageKey(root, kind, titles, page)] = heading
 		}
