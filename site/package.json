@@ -14,7 +14,7 @@
     "cf:whoami": "wrangler whoami"
   },
   "devDependencies": {
-    "astro": "^7.2.8",
+    "astro": "^7.3.3",
     "wrangler": "^4.153.0"
   }
 }
