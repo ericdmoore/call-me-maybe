@@ -309,6 +309,27 @@ func TestTemplateFormatDocumentsEveryKey(t *testing.T) {
 	}
 }
 
+// policy.toml's afterhours takes a list; a template's emitted extension does
+// not. The schema has to say which, or a template that validates against it
+// fails in `doorman template lint` with a decode error.
+func TestTemplateAfterhoursMatchesTheTemplateStruct(t *testing.T) {
+	ext := schema.TemplateFormat().Properties["emit"].Properties["extensions"].Items
+	prop := ext.Properties["afterhours"]
+	if prop == nil {
+		t.Fatal("emit.extensions does not document afterhours")
+	}
+	field, ok := reflect.TypeOf(tmpl.EmitExtension{}).FieldByName("Afterhours")
+	if !ok {
+		t.Fatal("tmpl.EmitExtension has no Afterhours")
+	}
+	if field.Type.Kind() == reflect.String && (prop.Type != "string" || prop.OneOf != nil) {
+		t.Errorf("tmpl takes one schedule id, but the template schema says %+v", prop)
+	}
+	if field.Type.Kind() != reflect.String && prop.OneOf == nil {
+		t.Errorf("tmpl takes %s, but the template schema still says one id", field.Type)
+	}
+}
+
 func TestTemplateSchemaIsSelectable(t *testing.T) {
 	s, err := schema.Get("template")
 	if err != nil {

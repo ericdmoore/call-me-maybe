@@ -798,11 +798,16 @@ from
 .B api_username
 and
 .B api_password_env
-on each trunk, and the threshold from
+on each trunk \(em or
+.B api_key_env
+instead, for a provider whose API takes one key, such as Telnyx \(em and the
+threshold from
 .B balance_min
 there or
 .B \-\-min
 here.
+.B doorman check
+refuses a trunk whose credentials are the shape its provider does not take.
 .PP
 .BR "The daemon never reads those credentials" .
 A provider API key manages DIDs, sub\-accounts and billing, which is
@@ -847,6 +852,39 @@ runs the command every morning.
 Flags:
 .BR \-\-trunks ", " \-\-env ", " \-\-min ", " \-\-json ", " \-\-timeout ", "
 .BR \-\-ring ", " \-\-handsets ", " \-\-repeat ", " \-\-ring\-timeout ", " \-\-state ", " \-\-prom .
+.TP
+.BI "doorman numbers [\-trunks " path "] [\-json] [" policy ]
+Which phone numbers each trunk's account holds, asked of the provider's API,
+against the numbers the policy files claim for that trunk:
+.B [line] number
+and
+.B [line] outbound_cid
+on every line whose
+.B [line] trunk
+names it. Each claim is reported as on the account and assigned to the
+connection the trunk registers as; on the account but assigned to no
+connection, or to one another SIP username registers as; not active yet; or
+not on the account at all. Numbers on the account that no policy file names
+are listed too, and one claimed for another trunk on the same account names
+that trunk. A number a line only presents needs to be held, not routed.
+.PP
+Telnyx today, through
+.B api_key_env
+on the trunk. A provider doorman cannot ask (VoIP.ms) is reported with its
+claims unchecked, never failed. The numbers are the household's own and are
+printed in full, as
+.B doorman check
+prints them. The key can buy and release numbers;
+.BR "the daemon never reads it" .
+.PP
+Flags:
+.BR \-\-trunks ", " \-\-handsets ", " \-\-env ", " \-\-json ", " \-\-timeout .
+Exit status as for
+.BR "doorman balance" :
+1 when a claimed number is not where the policy says, 3 when a trunk could not
+be checked \(em including one whose API credentials are not the kind its
+provider takes. A missing policy file is exit 2: with no claims, every number
+would otherwise read as unclaimed and the run would pass.
 .PP
 .BI "doorman e164 " number
 Show how a raw caller ID normalises to E.164. Use this when a known caller
@@ -858,10 +896,35 @@ Print the version. A release binary reports its git tag.
 .TP
 .B doorman help
 Print a usage summary.
+.SH SANDBOX PREVIEW MEDIA
+.B doorman sync media list|once --source https://trusted-sandbox-origin
+runs the explicit, command-side preview lane. The approved origin receives the
+box's sync credential; redirects and cross-origin download addresses
+are refused.
+It is separate from configuration sync and never runs on call admission.
+.B list
+shows offers without signed URLs.
+.B once
+verifies and installs bounded previews into the local Books library,
+with durable
+installation receipts. Options are --state and --library. No timer is installed.
+.PP
+.B doorman books install-preview --archive local.cmmpack
+uses the same free local importer without an account. Previews are limited to
+1 MiB archives and two minutes. Full books require compressed playback support;
+this importer deliberately refuses them. An installed receipt is not proof of
+handset playback. See docs/media-preview.md for limits and recovery semantics.
 .SH FILES
 .TP
 .I policy.toml
 The rules: line identity, allow\-list, extensions, ringer ladders, schedules.
+An extension's
+.B afterhours
+names one
+.B [[schedules]]
+id or a list of them, and the line is quiet while any is active \(em
+weekdays 9\(en5 is
+.BR "afterhours = [\(dqnights\(dq, \(dqweekend\-days\(dq]" .
 Changes weekly and is safe to hand\-edit \(em when
 .B POLICY_WATCH
 is enabled, edits go live without a restart, and a file that fails
@@ -1116,11 +1179,15 @@ unwritable output directory.
 The command line was wrong.
 .PP
 .B doorman balance
-uses the same 0, 1 and 2 and adds one:
+and
+.B doorman numbers
+use the same 0, 1 and 2 and add one:
 .TP
 .B 3
-Nothing was below its threshold, but at least one trunk could not be checked at
-all. Separate from 1 on purpose \(em an expired API key and an empty account
+Nothing was below its threshold (or, for
+.BR numbers ,
+out of place), but at least one trunk could not be checked at all.
+Separate from 1 on purpose \(em an expired API key and an empty account
 look identical from here, and treating one as the other is how a real outage
 gets dismissed as a broken cron job. 1 wins when both happen, because a balance
 known to be low is more actionable than one that is unknown.
@@ -1283,3 +1350,15 @@ An explicitly configured journal must open at startup; runtime failures remain
 nonfatal to calls. check --policy-only skips local service environment/storage
 checks when validating examples.
 Normal check reports policy before environment.
+
+.SH MANAGED WEBHOOK
+The optional private webhook.toml beside policy.toml accepts domain (HTTP or
+HTTPS origin) and path_prefix. See doorman schema webhook. The daemon POSTs
+JSON event payloads to domain + path_prefix + /cc.dialdoorman/events for
+ringing and completed calls. Managed delivery redacts caller numbers and
+never inherits WEBHOOK_TOKEN. Empty values disable managed delivery; an
+absent file preserves the environment default. The separate journal doorbell
+is unchanged. Keep this file and its .last-good copy mode 0600. Invalid edits
+keep the last good endpoint across restart; doorman check validates the file.
+Sync applies encrypted, revision-checked changes and reports applied only
+after the running daemon accepts the exact file revision.

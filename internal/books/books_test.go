@@ -558,3 +558,51 @@ func TestPlayerChapterKeysPauseTimeoutAndConversionFailure(t *testing.T) {
 		t.Fatal("failure leaked buffers")
 	}
 }
+
+func TestStarPoundPagePicker(t *testing.T) {
+	for _, kind := range []string{"books", "chapters"} {
+		for _, scenario := range []struct {
+			name       string
+			keys       []int
+			want, page int
+		}{
+			{"jump-four", []int{'*', '#', '4', '#', '2'}, 28, 3},
+			{"jump-fourteen", []int{'*', '#', '1', '4', '#', '3'}, 119, 13},
+			{"cancel", []int{'*', '#', '0', '2'}, 1, 0},
+			{"invalid-page-retry", []int{'*', '#', '9', '9', '#', '4', '#', '1'}, 27, 3},
+			{"ordinary-next", []int{'#', '2'}, 10, 1},
+			{"ordinary-repeat", []int{'*', '2'}, 1, 0},
+			{"repeated-star", []int{'*', '*', '#', '4', '#', '2'}, 28, 3},
+			{"timeout-clears-prefix", []int{'*', 0, 0, '#', '2'}, 10, 1},
+			{"invalid-key-clears-prefix", []int{'*', 'x', '#', '2'}, 10, 1},
+		} {
+			t.Run(kind+"/"+scenario.name, func(t *testing.T) {
+				keys := append([]int(nil), scenario.keys...)
+				m, tr := testMenu(t, func(cmd string) string {
+					if strings.Contains(cmd, "/"+kind+"\"") || strings.Contains(cmd, "/pick-page\"") || strings.HasPrefix(cmd, "WAIT FOR DIGIT") {
+						if len(keys) == 0 {
+							t.Error("unexpected keypad request")
+							return result('0')
+						}
+						k := keys[0]
+						keys = keys[1:]
+						return result(k)
+					}
+					return result(0)
+				})
+				titles := make([]string, 120)
+				for i := range titles {
+					titles[i] = fmt.Sprintf("title-%d", i)
+				}
+				page := 0
+				got, err := m.browse(kind, titles, &page)
+				if err != nil || got != scenario.want || page != scenario.page || len(keys) != 0 {
+					t.Fatalf("got %d page %d remaining %v err %v", got, page, keys, err)
+				}
+				if strings.HasPrefix(scenario.name, "jump-") && strings.Count(tr.text(), "/"+kind+"\"") != 3 {
+					t.Fatal("shortcut should repeat current page then jump directly")
+				}
+			})
+		}
+	}
+}

@@ -7,8 +7,12 @@ work; this change does not claim those dial codes or replace their engines.
 
 The menu reads nine titles per page in catalog order. Choose with `1`–`9`,
 including while the announcements are playing. `#` advances to the next page;
-on the last page it asks for a page number followed by `#`. `*` repeats and
-`0` backs up one level. Zero in the page picker returns to its originating
+on the last page it asks for a page number followed by `#`. `*` repeats
+immediately. Press `#` during that repeat (`*#`) to open the
+page picker from any book or chapter page, then enter a page number followed
+by `#` (for example, `*#4#` goes to page 4). Any other next input, including
+a timeout, clears the shortcut prefix. `0` backs up one level. Zero in the
+page picker returns to its originating
 page; zero at the Books root ends this directly dialed call. Three invalid or
 unanswered attempts back out. A browse session freezes its title order and
 page count, but checks a selected recording is still installed before playing.

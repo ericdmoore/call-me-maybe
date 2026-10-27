@@ -151,7 +151,14 @@ func AnalyseWithTrunks(policyText string, handsetsText, trunksText *string) (pol
 		// document places the squiggle. Problems with no locatable token
 		// land at the top of the policy file, where the rules live.
 		placed := false
+		if r, ok := locateAfterhours(policyText, problem); ok {
+			d.Range, placed = r, true
+			policyDiags = append(policyDiags, d)
+		}
 		for _, token := range quotedTokensReversed(problem) {
+			if placed {
+				break
+			}
 			// Handsets doc first: an id that exists there makes this an
 			// inventory problem (duplicate number, bad endpoint). A policy
 			// problem's offending token — an unknown id, a bad schedule —
@@ -215,6 +222,56 @@ func quotedTokensReversed(message string) []string {
 		out = append(out, matches[i][1])
 	}
 	return out
+}
+
+var (
+	extensionProblem = regexp.MustCompile(`^extension "([^"]*)"`)
+	extensionsHeader = regexp.MustCompile(`^\s*\[\[\s*extensions\s*\]\]`)
+	tableHeader      = regexp.MustCompile(`^\s*\[`)
+	labelKey         = regexp.MustCompile(`^\s*label\s*=`)
+	afterhoursKey    = regexp.MustCompile(`^\s*afterhours\s*=`)
+)
+
+// locateAfterhours places a problem about an extension's afterhours on that
+// extension's afterhours line. The schedule id it quotes is also where the
+// schedule is defined, and in any handset curfew naming it, and both usually
+// come first — so the generic search would squiggle a definition that is
+// fine, or put the problem in handsets.toml. It applies only when the last
+// quoted token is on the afterhours line of the extension the problem names.
+func locateAfterhours(text, problem string) (Range, bool) {
+	m := extensionProblem.FindStringSubmatch(problem)
+	tokens := quotedTokensReversed(problem)
+	if m == nil || len(tokens) < 2 {
+		return Range{}, false
+	}
+	quotedLabel, quotedToken := `"`+m[1]+`"`, `"`+tokens[0]+`"`
+	lines := strings.Split(text, "\n")
+	for i := 0; i < len(lines); i++ {
+		if !extensionsHeader.MatchString(lines[i]) {
+			continue
+		}
+		// One [[extensions]] block: its keys run to the next table header,
+		// since anything after [[extensions.steps]] belongs to the step.
+		var at Range
+		labelled, found := false, false
+		for j := i + 1; j < len(lines) && !tableHeader.MatchString(lines[j]); j++ {
+			line := lines[j]
+			if labelKey.MatchString(line) && strings.Contains(line, quotedLabel) {
+				labelled = true
+			}
+			if col := strings.Index(line, quotedToken); col >= 0 && afterhoursKey.MatchString(line) && !found {
+				at = Range{
+					Start: Position{Line: j, Character: col + 1},
+					End:   Position{Line: j, Character: col + 1 + len(tokens[0])},
+				}
+				found = true
+			}
+		}
+		if labelled && found {
+			return at, true
+		}
+	}
+	return Range{}, false
 }
 
 // locate finds the first occurrence of token as a quoted value or bare word
@@ -339,8 +396,9 @@ type CompletionItem struct {
 }
 
 var (
-	handsetsCtx   = regexp.MustCompile(`handsets\s*=\s*\[[^\]]*$`)
-	afterhoursCtx = regexp.MustCompile(`afterhours\s*=\s*"[^"]*$`)
+	handsetsCtx = regexp.MustCompile(`handsets\s*=\s*\[[^\]]*$`)
+	// One schedule id, or anywhere inside a list of them.
+	afterhoursCtx = regexp.MustCompile(`afterhours\s*=\s*("[^"]*|\[[^\]]*)$`)
 	daysCtx       = regexp.MustCompile(`days\s*=\s*\[[^\]]*$`)
 	mailboxCtx    = regexp.MustCompile(`(voicemail|mailbox)\s*=\s*"[^"]*$`)
 	// Matches both `trunk = "` in [line] and `emergency_trunk = "` in

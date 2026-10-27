@@ -119,8 +119,8 @@ func describeChoice(p *policy.Policy, m policy.ResolvedMenu, c policy.ResolvedCh
 		if ext.Plan.Mailbox != "" {
 			out += ", then mailbox " + ext.Plan.Mailbox
 		}
-		if ext.AfterhoursID != "" {
-			out += "; afterhours " + ext.AfterhoursID
+		if len(ext.Afterhours) > 0 {
+			out += "; afterhours " + strings.Join(ext.Afterhours.IDs(), ", ")
 		}
 	case policy.ChoiceRecording:
 		out = "plays recordings/" + c.Target + ", then "

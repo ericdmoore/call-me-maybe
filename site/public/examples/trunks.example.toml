@@ -105,20 +105,40 @@ balance_min      = 25.0                    # exit 1 below this. Pick a number
 # being your bad afternoon. Porting is the other one — stand the new provider
 # up beside the old, move numbers, retire the old registration.
 #
+# Telnyx: a SIP Connection with CREDENTIALS authentication — outbound
+# registration, no inbound port, no IP allow-list. In the portal, create the
+# connection with credentials auth, assign the number to it, give it an
+# outbound voice profile, and leave the inbound destination number format on a
+# number (+E.164 is the default) rather than "SIP Username": the generated
+# dialplan routes on the digits. docs/RUNBOOK.md, "Adding a Telnyx line", has
+# the steps. Written from Telnyx's documentation and not yet tried against a
+# live account.
+#
 #[[trunks]]
 #id       = "telnyx"
-#provider = "telnyx"
+#provider = "telnyx"         # also what `doorman numbers` and `doorman balance`
+#                            # pick the API client by
 #host     = "sip.telnyx.com"
-#username = "cmm-home"
-#password_env = "TRUNK_TELNYX_PASSWORD"
+#username = "cmm-home"       # the connection's SIP username
+#password_env = "TRUNK_TELNYX_PASSWORD"   # the connection's SIP password
 #context  = "from-telnyx"    # optional; defaults to from-<id>
 #from_user   = "cmm-home"    # optional; defaults to username. Some providers
 #from_domain = "sip.telnyx.com"  # authenticate as one name and expect another
 #expiration  = 300           # optional; seconds. Some providers throttle
 #e911     = false            # NOT every provider offers E911 everywhere. A
-                             # provider without it means a phone that cannot
-                             # call for help — a reason to reject the provider,
-                             # not a line item to skip.
+#                            # provider without it means a phone that cannot
+#                            # call for help — a reason to reject the provider,
+#                            # not a line item to skip. On Telnyx it is enabled
+#                            # per number, with an address, in the portal.
+#
+# Telnyx's API authenticates with ONE key rather than a login and a password,
+# so it takes api_key_env instead of api_username + api_password_env — never
+# both. With it, `doorman numbers` lists the numbers on the account and which
+# connection each is assigned to, against the numbers your policy files claim
+# for this trunk, and `doorman balance` reports the available credit. The key
+# can buy and release numbers: the daemon never reads it.
+#api_key_env = "TRUNK_TELNYX_API_KEY"     # the NAME of a .env variable
+#balance_min = 10.0
 
 # ── Pointing a line at a trunk ───────────────────────────────
 # In policy.toml (or policy.<line>.toml), the [line] section names which of

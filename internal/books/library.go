@@ -211,6 +211,11 @@ func Prepare(ctx context.Context, source, root string) error {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return err
 	}
+	unlock, err := lockLibrary(root)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	for i := range c.Books {
 		b := &c.Books[i]
 		stage, err := os.MkdirTemp(root, ".prepare-")
@@ -360,8 +365,8 @@ var prompts = map[string]string{
 	"chapters":    "Here is your menu of chapters.",
 	"page":        "Page",
 	"of":          "of",
-	"next":        "Press a number to choose. Pound for the next page. Star to repeat. Zero to go back.",
-	"last":        "Press a number to choose. Pound to choose a page. Star to repeat. Zero to go back.",
+	"next":        "Press a number to choose. Pound for the next page. Star then pound to choose a page. Star to repeat. Zero to go back.",
+	"last":        "Press a number to choose. Pound to choose a page. Star then pound to choose a page. Star to repeat. Zero to go back.",
 	"pick-page":   "Enter the page number, then pound. Star to repeat these instructions. Zero to go back.",
 	"invalid":     "That choice is not available.",
 	"empty":       "There are no books ready to play. Zero to go back.",

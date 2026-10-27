@@ -35,6 +35,9 @@ type Schema struct {
 	Type  string `json:"type,omitempty"`
 	Enum  []any  `json:"enum,omitempty"`
 	Const any    `json:"const,omitempty"`
+	// OneOf is for the keys that take more than one shape — afterhours, one
+	// schedule id or a list of them.
+	OneOf []*Schema `json:"oneOf,omitempty"`
 
 	// Strings
 	Pattern   string `json:"pattern,omitempty"`
@@ -51,8 +54,9 @@ type Schema struct {
 	AdditionalProperties *bool              `json:"additionalProperties,omitempty"`
 
 	// Arrays
-	Items    *Schema `json:"items,omitempty"`
-	MinItems *int    `json:"minItems,omitempty"`
+	Items       *Schema `json:"items,omitempty"`
+	MinItems    *int    `json:"minItems,omitempty"`
+	UniqueItems bool    `json:"uniqueItems,omitempty"`
 
 	Default any `json:"default,omitempty"`
 
@@ -82,7 +86,7 @@ var (
 )
 
 // Names are the selectable schema names for `doorman schema <name>`.
-var Names = []string{"policy", "handsets", "trunks", "contacts", "messages", "env", "template"}
+var Names = []string{"policy", "handsets", "trunks", "contacts", "messages", "webhook", "env", "template"}
 
 // Get returns one schema by name.
 func Get(name string) (*Schema, error) {
@@ -97,6 +101,8 @@ func Get(name string) (*Schema, error) {
 		return Contacts(), nil
 	case "messages":
 		return Messages(), nil
+	case "webhook":
+		return Webhook(), nil
 	case "env":
 		return Env(), nil
 	case "template":
@@ -119,6 +125,7 @@ func All(version string) *Bundle {
 			"trunks.toml":   Trunks(),
 			"contacts.toml": Contacts(),
 			"messages.toml": Messages(),
+			"webhook.toml":  Webhook(),
 			"env":           Env(),
 			"template":      TemplateFormat(),
 		},
@@ -285,8 +292,8 @@ func Trunks() *Schema {
 			"from_user is emitted only when it differs from username. Defaulted to the sub-account it makes VoIP.ms answer 503 on every outbound call; left alone, the DID from [line] outbound_cid rides in From.",
 			"One inbound dialplan context per trunk, because each registration binds to its own endpoint with its own context=. Inside it, one route per DID, generated from [line] number and [line] trunk across every policy file.",
 			"A trunk id may not collide with a handset id: both become a PJSIP endpoint named after the id.",
-			"Secrets are named here, never written here. password_env and api_password_env hold the NAME of a .env variable; the loader refuses anything that is not shaped like one, so a pasted password fails loudly instead of being committed.",
-			"A trunk may also carry provider API credentials (api_username, api_password_env) so `doorman balance` can report what is left on a prepaid account. That key is considerably more privilege than the SIP password — it manages DIDs, sub-accounts and billing — and the daemon never reads it: balance checking is a CLI, best run wherever alerting already lives rather than on the Pi.",
+			"Secrets are named here, never written here. password_env, api_password_env and api_key_env hold the NAME of a .env variable; the loader refuses anything that is not shaped like one, so a pasted password fails loudly instead of being committed.",
+			"A trunk may also carry provider API credentials — api_username and api_password_env, or api_key_env for a provider such as Telnyx that uses one bearer key — so `doorman balance` can report what is left on a prepaid account and `doorman numbers` can list the numbers the account holds. That key is considerably more privilege than the SIP password — it manages DIDs, sub-accounts and billing — and the daemon never reads it: balance checking is a CLI, best run wherever alerting already lives rather than on the Pi.",
 			"Deleting trunks.toml is the whole rollback. There is no migration and no stored state.",
 		},
 		Properties: map[string]*Schema{
@@ -418,13 +425,28 @@ func trunkItem() *Schema {
 				},
 				CrossRefs: []string{"the environment, and examples/.env.example"},
 			},
+			"api_key_env": {
+				Type:    "string",
+				Pattern: "^[A-Z][A-Z0-9_]*$",
+				Description: "Name of the .env variable holding a provider API key, for a provider that authenticates with one bearer key rather than a login and a password — Telnyx. Read by `doorman balance` and `doorman numbers` and by nothing else. " +
+					"The alternative to api_username + api_password_env, never beside them: a trunk is one account, and one account has one way in.",
+				Rules: []string{
+					"HIGHER PRIVILEGE THAN THE SIP PASSWORD, exactly like api_password_env: a Telnyx API key can buy and release numbers and reconfigure every connection on the account. The daemon never reads it.",
+					"Names a variable; never put the key here. The pattern is enforced so a pasted key fails the load rather than reaching a commit.",
+					"Convention: TRUNK_<ID>_API_KEY.",
+					"Must match the provider: `doorman check` refuses api_key_env on a provider whose API signs in with a login (VoIP.ms), and api_username/api_password_env on one that takes a key (Telnyx). A provider doorman has no API client for is not checked.",
+					"Mutually exclusive with api_username and api_password_env.",
+					"On Telnyx it is a key from the API Keys page of the Mission Control portal — not the SIP connection's password, which is password_env.",
+				},
+				CrossRefs: []string{"the environment, and examples/.env.example", "`doorman numbers`", "`doorman balance`"},
+			},
 			"balance_min": {
 				Type:        "number",
 				Minimum:     ptr(0),
 				Description: "The balance below which `doorman balance` exits 1, in whatever currency the account is held in. Unset means this trunk is reported and never fails — a threshold nobody chose fires at the wrong time, and the command is meant to run untended from cron.",
 				Rules: []string{
 					"Choose a number that leaves time to act. A warning at zero is a death rattle, not an alert: a prepaid trunk that reaches zero stops inbound calls arriving with no error anywhere.",
-					"Requires api_username and api_password_env — a threshold nothing can evaluate is refused at load, because it is the same silent failure the check exists to remove.",
+					"Requires api_username and api_password_env, or api_key_env — a threshold nothing can evaluate is refused at load, because it is the same silent failure the check exists to remove.",
 					"`doorman balance --min` supplies a default for trunks that declare none; a trunk's own balance_min always wins.",
 				},
 				CrossRefs: []string{"`doorman balance`, exit code 1"},
@@ -980,7 +1002,7 @@ func schedule() *Schema {
 		Type:     "object",
 		Required: []string{"id", "start", "end"},
 		Properties: map[string]*Schema{
-			"id": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Referenced as afterhours = \"<id>\" from an extension, or in curfew = [\"<id>\", …] on a handset in handsets.toml."},
+			"id": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "Referenced as afterhours = \"<id>\" (or afterhours = [\"<id>\", …]) from an extension, or in curfew = [\"<id>\", …] on a handset in handsets.toml."},
 			"enabled": {
 				Type:        "boolean",
 				Default:     true,
@@ -1049,10 +1071,19 @@ func extension() *Schema {
 				CrossRefs:   []string{"asterisk/voicemail.conf [household] context"},
 			},
 			"afterhours": {
-				Type:        "string",
-				Description: "Id of a [[schedules]] entry. During the window the line does not ring normally: it either redirects to afterhours_ring, or goes to voicemail.",
+				OneOf: []*Schema{
+					{Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$", Description: "One [[schedules]] id."},
+					{Type: "array", MinItems: one, UniqueItems: true, Items: &Schema{Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]*$"}, Description: "Several [[schedules]] ids, in any order."},
+				},
+				Description: "Id of a [[schedules]] entry, or a list of them. While a named window is active the line does not ring normally: it either redirects to afterhours_ring, or goes to voicemail. A list because one window crosses midnight at most once per day it lists: weekdays 9–5 is afterhours = [\"nights\", \"weekend-days\"], with nights 17:00–09:00 every day and weekend-days 09:00–17:00 SA SU.",
 				CrossRefs:   []string{"policy.toml [[schedules]].id"},
-				Rules:       []string{"The inline-table form is retired; use a named schedule id.", "Requires either voicemail or afterhours_ring, so the caller has somewhere to go."},
+				Rules: []string{
+					"The inline-table form is retired; use a named schedule id.",
+					"A list is a union: the line is in its afterhours state while ANY named schedule is active.",
+					"Every id must name a [[schedules]] entry, and only once; an empty list fails `doorman check`.",
+					"A schedule with enabled = false is inert, alone or in a list; with every named schedule off the line rings at any hour, and `doorman check` says so.",
+					"Requires either voicemail or afterhours_ring, so the caller has somewhere to go.",
+				},
 			},
 			"afterhours_ring": {
 				Type:        "array",
@@ -1270,11 +1301,27 @@ func TemplateFormat() *Schema {
 						Items: &Schema{Type: "object", Description: "Same shape as policy.toml [[schedules]]. A colliding id is suffixed and references are rewritten."},
 					},
 					"extensions": {
-						Type:  "array",
-						Items: &Schema{Type: "object", Description: "Same shape as policy.toml [[extensions]], except pin must be \"$generate.pin\"."},
+						Type: "array",
+						Items: &Schema{
+							Type:        "object",
+							Description: "Same shape as policy.toml [[extensions]], except pin must be \"$generate.pin\" and afterhours names one schedule.",
+							Properties: map[string]*Schema{
+								// policy.toml takes a list here; a template does
+								// not, and saying so is what stops a template that
+								// validates against this schema failing in the CLI.
+								"afterhours": {Type: "string", Description: "One [[schedules]] id, emitted or already in the policy. A template names a single schedule; a list of them is written in policy.toml."},
+							},
+						},
 					},
 				},
 			},
 		},
 	}
+}
+
+// Webhook describes the private optional sibling of policy.toml.
+func Webhook() *Schema {
+	return &Schema{SchemaURI: "https://json-schema.org/draft/2020-12/schema", ID: "https://callmemaybe.cc/schema/webhook.json", Title: "webhook.toml — managed event destination", Type: "object", AdditionalProperties: falsy,
+		Properties: map[string]*Schema{"domain": {Type: "string", MaxLength: ptr(1024), Description: "HTTP(S) origin, including optional port. Empty disables managed delivery."}, "path_prefix": {Type: "string", MaxLength: ptr(1024), Description: "Optional path prefix. The fixed /cc.dialdoorman/events suffix is appended. Treat this value as a secret."}},
+		Rules:      []string{"No credentials, query, fragment, traversal or escaped separators. Both fields empty disables managed delivery. Missing file uses the legacy environment setting.", "One POST per ringing or completed call, application/json, JSON(payload). Managed destinations receive redacted caller numbers and no inherited bearer token.", "Hot reload keeps the last good file, including across restart. Saved receipts become applied only when the daemon reports the exact accepted file digest."}}
 }

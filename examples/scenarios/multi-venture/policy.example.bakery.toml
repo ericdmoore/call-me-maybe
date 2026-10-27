@@ -91,7 +91,8 @@ name = "Flour supplier"
 numbers = ["(512) 555-0181"]
 
 # A bakery closes early and opens early: shut from mid-afternoon until
-# before dawn. Still one crossing of midnight, still no weekend.
+# before dawn. Still one crossing of midnight; a weekend would be a second
+# schedule in the extension's afterhours list.
 [[schedules]]
 id = "closed"
 enabled = true

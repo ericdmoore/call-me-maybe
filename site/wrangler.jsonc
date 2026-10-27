@@ -12,7 +12,8 @@
   // the rest of this project treats configuration.
   //
   //   npm run cf:preview   build, then serve through the real Workers runtime
-  //   npm run deploy       build, then publish
+  //   npm run deploy       build, then publish by hand; a merge to main does
+  //                        this itself via .github/workflows/site-deploy.yml
   //
   // Credentials come from the environment; this repo's .env carries them. .env
   // is gitignored and the pre-push hook refuses a push that tracks it.

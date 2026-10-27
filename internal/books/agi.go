@@ -223,6 +223,7 @@ func (m *menu) shelf(list []Book) error {
 // -1 means back (including three unanswered/invalid attempts).
 func (m *menu) browse(kind string, titles []string, savedPage *int) (int, error) {
 	page, failures := *savedPage, 0
+	repeatArmed := false
 	defer func() { *savedPage = page }()
 	for failures < 3 {
 		key, err := m.announce(kind, titles, page)
@@ -235,6 +236,10 @@ func (m *menu) browse(kind string, titles []string, savedPage *int) (int, error)
 				return -1, err
 			}
 		}
+		// Star repeats immediately. Pound as the next input during that repeat
+		// opens the picker; any other input (including silence) clears the prefix.
+		picker := repeatArmed && key == '#'
+		repeatArmed = key == '*'
 		switch {
 		case key == '0':
 			return -1, nil
@@ -242,7 +247,7 @@ func (m *menu) browse(kind string, titles []string, savedPage *int) (int, error)
 			failures = 0
 		case key == '#' && len(titles) > 0:
 			pages := (len(titles) + 8) / 9
-			if page+1 < pages {
+			if !picker && page+1 < pages {
 				page++
 				failures = 0
 				continue

@@ -37,7 +37,8 @@ name = "County permits desk"
 numbers = ["(512) 555-0171"]
 
 # A CLOSED window: evenings and overnight. One crossing of midnight per
-# window, one window per extension, so the weekend cannot be written.
+# window, so the weekend takes a second schedule beside it in the
+# extension's afterhours list — see the solo-business example.
 [[schedules]]
 id = "closed"
 enabled = true

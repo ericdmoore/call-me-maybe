@@ -102,7 +102,7 @@ If someone has one number, write one `policy.toml` and do not mention lines.
     handsets = ["kitchen"]             # simple form: one ring stage
     # steps = [...]                    # ladder form — MUTUALLY EXCLUSIVE with handsets
     voicemail = "family"               # where an unanswered call lands
-    afterhours = "quiet-hours"         # a [[schedules]] id
+    afterhours = "quiet-hours"         # a [[schedules]] id, or a list: quiet while ANY is active
     afterhours_ring = [...]            # ring these during the window instead of voicemail
     enabled = true                      # default true
 
@@ -151,7 +151,10 @@ If someone has one number, write one `policy.toml` and do not mention lines.
    simple form or the ladder form.
 2. Every handset id must exist in handsets.toml. Group ids work anywhere a
    handset id does.
-3. `afterhours` must name a `[[schedules]]` id that exists.
+3. `afterhours` must name a `[[schedules]]` id that exists, or a non-empty
+   list of them, each once. A list is a union — weekdays 9–5 is
+   `["nights", "weekend-days"]`, because one window crosses midnight at most
+   once per day it lists.
 4. PINs must be unique across extensions, and are matched exact — no prefixes,
    no fuzzy fallback.
 5. An invalid policy.toml is **rejected on reload and the last good one stays in
@@ -451,6 +454,9 @@ providers × numbers. `doorman render` generates all of it.
     api_password_env = "TRUNK_VOIPMS_API_PASSWORD"   # the NAME of a .env variable
     balance_min  = 25.0                # optional; `doorman balance` exits 1
                                        # below this
+    # api_key_env = "TRUNK_TELNYX_API_KEY"  # INSTEAD of api_username +
+                                       # api_password_env, for a provider whose
+                                       # API takes one key (Telnyx)
 
 **Never put a password in `password_env`.** It holds the NAME of a `.env`
 variable; `doorman render` substitutes the value. The loader refuses anything
@@ -498,7 +504,26 @@ Rules a schema cannot express:
 - A trunk whose provider doorman has no client for is still reported by
   `doorman balance`, never skipped. Do not promise that adding
   `api_username` to any provider makes a balance appear: today it can ask
-  VoIP.ms.
+  VoIP.ms and Telnyx.
+- **Telnyx takes `api_key_env`, not `api_username` + `api_password_env`** —
+  its API authenticates with one bearer key. The two shapes are mutually
+  exclusive on one trunk, and `doorman check` refuses the shape the
+  trunk's provider does not take (a key on VoIP.ms, a login on Telnyx). The key has the same high privilege (it can buy and
+  release numbers) and the same rule: read by `doorman balance` and `doorman
+  numbers`, never by the daemon. It is not the SIP connection's password,
+  which stays in `password_env`.
+- `doorman numbers` lists the numbers a trunk's account holds and which
+  connection each is assigned to, against every `[line] number` and
+  `[line] outbound_cid` that names that trunk, and exits 1 when one is not on
+  the account (or a number a line answers is assigned to no connection, or to
+  a connection some other SIP username registers as). Today it can ask
+  Telnyx; for VoIP.ms it reports the claims as unchecked, never as missing.
+  Suggest it after somebody types a DID into a policy file by hand.
+- A Telnyx SIP Connection must use **credentials** authentication, with the
+  inbound destination number format left on a number (+E.164 by default) —
+  never "SIP Username", which leaves the generated dialplan no digits to route
+  on. Nothing Telnyx-specific is rendered: `host = "sip.telnyx.com"` and the
+  connection's username and password are the whole difference.
 
 ## The address books — contacts.toml
 
