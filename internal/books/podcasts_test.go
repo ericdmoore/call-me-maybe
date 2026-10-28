@@ -36,6 +36,15 @@ func TestPodcastOpusPlaybackAndHandsetProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := c.Books[0]
+	// Ogg stream serial numbers must not create another edition when a job
+	// retries after conversion but before publishing its complete catalog.
+	if err := Prepare(context.Background(), source, root); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Load(root)
+	if err != nil || again.Books[0].Revision != b.Revision {
+		t.Fatal("retry created a duplicate Opus edition", err)
+	}
 	state := filepath.Join(spool, "progress")
 	_ = os.MkdirAll(state, 0700)
 	m := &menu{handset: "kitchen", state: state}

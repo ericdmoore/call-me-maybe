@@ -349,7 +349,7 @@ func prepareBook(ctx context.Context, source, stage string, b *Book) error {
 		job, cancel := context.WithTimeout(ctx, 30*time.Minute)
 		args := []string{"-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe", "-i", input, "-map", "0:a:0", "-vn"}
 		if b.Origin == "podcast" {
-			args = append(args, "-t", "7200", "-ac", "2", "-ar", "48000", "-c:a", "libopus", "-b:a", "48k", "-vbr", "on", "-f", "opus")
+			args = append(args, "-t", "7200", "-ac", "2", "-ar", "48000", "-c:a", "libopus", "-b:a", "48k", "-vbr", "on", "-fflags", "+bitexact", "-map_metadata", "-1", "-f", "opus")
 		} else {
 			args = append(args, "-ac", "1", "-ar", "16000", "-f", "s16le")
 		}
