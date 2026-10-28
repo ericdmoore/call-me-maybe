@@ -1,0 +1,10 @@
+[Unit]
+Description=Call Me Maybe — prepare podcast episodes after subscription sync
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

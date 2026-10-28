@@ -134,8 +134,9 @@ type menu struct {
 	clips                map[string]string
 	// public is an outside caller (listen.go): no handset, so no bookmark
 	// survives the call. Positions live in memory, for this call alone.
-	public bool
-	memory map[string]Position
+	allowed func(string) bool
+	public  bool
+	memory  map[string]Position
 	// story plays one title with no browsing and no spoken help first.
 	story bool
 }
@@ -149,7 +150,17 @@ func (m *menu) prompt(name string) (int, error) {
 
 // Run trusts the authenticated PJSIP endpoint and a renderer-set marker, never
 // caller ID. Trunks and Local channels cannot borrow a handset's bookmarks.
-func Run(ctx context.Context, a *AGI) error {
+func Run(ctx context.Context, a *AGI) error { return runLibrary(ctx, a, "cmm-books", nil) }
+
+// RunPodcasts reuses the offline player, but authorises the handset before
+// showing its catalog and at every playback window. No caller ID trust.
+func RunPodcasts(ctx context.Context, a *AGI, allowed func(string) bool) error {
+	if allowed == nil {
+		return errors.New("podcast subscriptions unavailable")
+	}
+	return runLibrary(ctx, a, "cmm-media-cache/podcasts", allowed)
+}
+func runLibrary(ctx context.Context, a *AGI, subdir string, allowed func(string) bool) error {
 	handset, err := a.variable("${CHANNEL(endpoint)}")
 	if err != nil {
 		return err
@@ -168,7 +179,11 @@ func Run(ctx context.Context, a *AGI) error {
 	if !filepath.IsAbs(spool) || filepath.Clean(spool) != spool || strings.ContainsAny(spool, "\r\n\x00") {
 		return errors.New("invalid Asterisk spool")
 	}
-	m := &menu{a: a, root: filepath.Join(spool, "cmm-books", "library"), state: filepath.Join(spool, "cmm-books", "progress"), handset: handset, ctx: ctx}
+	if allowed != nil && !allowed(handset) {
+		_, err = a.play("vm-nomessages")
+		return err
+	}
+	m := &menu{a: a, root: filepath.Join(spool, subdir, "library"), state: filepath.Join(spool, subdir, "progress"), handset: handset, ctx: ctx, allowed: allowed}
 	if err := os.MkdirAll(m.state, 0o700); err != nil {
 		return err
 	}
@@ -207,7 +222,7 @@ func (m *menu) shelf(list []Book) error {
 			_, err = m.prompt("goodbye")
 			return err
 		}
-		if !ready(m.root, list[index]) {
+		if (m.allowed != nil && !m.allowed(m.handset)) || !ready(m.root, list[index]) {
 			if _, err := m.prompt("unavailable"); err != nil {
 				return err
 			}

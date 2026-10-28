@@ -112,6 +112,8 @@ func runCommand() int {
 			os.Exit(runPhonebook(os.Args[2:]))
 		case "reminders":
 			return runReminders(os.Args[2:])
+		case "podcasts":
+			return runPodcasts(os.Args[2:])
 		case "books":
 			return runBooks(os.Args[2:])
 		case "inbox":
@@ -337,6 +339,8 @@ CI, pipes or source builds; a one-second startup budget, no automatic updates.
   doorman reminders prune       remove finished reminder recordings (Asterisk user);
                                 --spool overrides /var/spool/asterisk. The
                                 *80/*81/*82 menus run through Asterisk AGI.
+  doorman podcasts refresh     prepare the Brains On pilot for subscribed handsets;
+  doorman podcasts menu        authenticated local *7637 AGI;
   doorman books prepare        prepare existing recordings for the *2665 Books menu;
                                 --source catalog.json, --library directory.
                                 Offline preparation needs ffmpeg and espeak-ng.

@@ -81,7 +81,12 @@ func startStream(ctx context.Context, state, input string, seconds float64, spee
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	s := &stream{windows: make(chan window), cancel: cancel, done: make(chan struct{}), dir: dir}
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-f", "s16le", "-ar", "16000", "-ac", "1", "-ss", fmt.Sprintf("%.6f", seconds), "-i", input, "-af", fmt.Sprintf("atempo=%.1f", float64(speed)/10), "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1")
+	args := []string{"-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe"}
+	if filepath.Ext(input) != ".opus" {
+		args = append(args, "-f", "s16le", "-ar", "16000", "-ac", "1")
+	}
+	args = append(args, "-ss", fmt.Sprintf("%.6f", seconds), "-i", input, "-af", fmt.Sprintf("atempo=%.1f", float64(speed)/10), "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1")
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	pipe, err := cmd.StdoutPipe()
 	if err == nil {
 		err = cmd.Start()
@@ -162,6 +167,9 @@ func (m *menu) listen(b Book, p *Position) error {
 	defer stop()
 	defer func() { _ = m.saveProgress(b, *p) }()
 	for {
+		if m.allowed != nil && !m.allowed(m.handset) {
+			return errors.New("podcast subscription ended")
+		}
 		if err := m.ctx.Err(); err != nil {
 			return err
 		}
