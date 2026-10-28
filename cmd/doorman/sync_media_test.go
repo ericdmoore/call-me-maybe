@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -36,5 +37,15 @@ func TestBooksInstallPreviewRequiresValidLocalArchive(t *testing.T) {
 	}
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		t.Fatal("invalid archive changed library")
+	}
+}
+
+func TestSyncMediaExplainsInvalidAudiobookSKU(t *testing.T) {
+	code := 0
+	out := captureStderr(t, func() {
+		code = runSyncMedia([]string{"list", "--source", "https://example.invalid", "--audiobook-sku", "Sandbox_Book"})
+	})
+	if code != 2 || !strings.Contains(out, "invalid audiobook SKU") || strings.Contains(out, "source is required") {
+		t.Fatal(code, out)
 	}
 }
