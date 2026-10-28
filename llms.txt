@@ -213,3 +213,13 @@ within a second; invalid edits retain the last good endpoint across restart.
 transport key, through the revision-checked sync queue. Snapshots expose only
 domain/configured state; private prefix edits still advance the revision.
 An applied receipt requires the running daemon's exact accepted file digest.
+
+## Podcast pilot
+
+`doorman schema podcasts` describes optional per-handset subscriptions, persisted
+by revision-checked sync. `doorman podcasts check --config <file> --handsets <file>`
+validates local JSON and inventory references. The separate podcast timer prepares
+two pinned Brains On episodes into a shared Opus pool; *PODS (*7637) uses the local
+player with independent handset bookmarks. See docs/PODCASTS.md. No feed, network
+or speech service runs on call admission. This prototype does not yet rotate new
+episodes, generate transcripts, evict audio or back up podcast bookmarks.

@@ -436,3 +436,8 @@ within a second; invalid edits retain the last good endpoint across restart.
 transport key, through the revision-checked sync queue. Snapshots expose only
 domain/configured state; private prefix edits still advance the revision.
 An applied receipt requires the running daemon's exact accepted file digest.
+
+Podcast pilot: `doorman schema podcasts` describes the separate handset subscription
+JSON; validate with `doorman podcasts check --config <file> --handsets <inventory>`.
+See docs/PODCASTS.md for the shared Opus pool, optional worker and *7637 trial. The
+calling daemon never refreshes a feed or prepares an episode.

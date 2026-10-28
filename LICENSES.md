@@ -75,6 +75,9 @@ DCO sign-off (`git commit -s`) is welcome but not enforced. See
 
 ## Third-party components
 
+- `github.com/mmcdole/gofeed` — MIT; bounded podcast RSS parsing off the call path. Publisher podcast audio is not bundled and retains its own terms.
+
+
 Direct Go dependencies are permissively licensed:
 
 - `github.com/google/uuid` — BSD 3-Clause

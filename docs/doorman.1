@@ -1503,3 +1503,14 @@ is unchanged. Keep this file and its .last-good copy mode 0600. Invalid edits
 keep the last good endpoint across restart; doorman check validates the file.
 Sync applies encrypted, revision-checked changes and reports applied only
 after the running daemon accepts the exact file revision.
+.SH PODCAST PILOT
+.B doorman schema podcasts
+prints the optional handset subscription JSON schema.
+.B doorman podcasts check --config file --handsets inventory
+checks its shape and handset references.
+.B doorman podcasts refresh
+prepares two pinned Brains On episodes off the call path;
+.B doorman podcasts status
+prints readiness separately from subscription sync.
+The local *PODS (*7637) AGI shares Opus audio and keeps per-handset bookmarks.
+See docs/PODCASTS.md for release installation and a real handset trial.

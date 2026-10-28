@@ -19,13 +19,13 @@ func TestBooksAreLocalAndRespectCurfew(t *testing.T) {
 	if !strings.Contains(menu, "[handsets-internal](+)") {
 		t.Fatal("books must append to local context")
 	}
-	for _, want := range []string{"exten => *2665,1,Answer()", "Set(AGISIGHUP=no)", "AGI(/opt/call-me-maybe/bin/doorman,books,menu)"} {
+	for _, want := range []string{"exten => *7637,1,Answer()", "AGI(/opt/call-me-maybe/bin/doorman,podcasts,menu)", "exten => *2665,1,Answer()", "Set(AGISIGHUP=no)", "AGI(/opt/call-me-maybe/bin/doorman,books,menu)"} {
 		if !strings.Contains(menu, want) {
 			t.Fatal("missing", want)
 		}
 	}
 	curfew := f.Dialplan[strings.Index(f.Dialplan, "[curfew-kids-room]"):]
-	if strings.Contains(curfew, "exten => *2665") || strings.Contains(menu, "cmm-reminder") || strings.Contains(menu, "CALLERID") {
+	if strings.Contains(curfew, "exten => *7637") || strings.Contains(curfew, "exten => *2665") || strings.Contains(menu, "cmm-reminder") || strings.Contains(menu, "CALLERID") {
 		t.Fatal("books bypasses curfew or trusts caller ID")
 	}
 }

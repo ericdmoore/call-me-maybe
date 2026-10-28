@@ -23,6 +23,7 @@ import (
 	"callmemaybe/internal/configcheck"
 	contactbook "callmemaybe/internal/contacts"
 	"callmemaybe/internal/ownbook"
+	"callmemaybe/internal/podcastconfig"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/syncwire"
 	"callmemaybe/internal/webhookconfig"
@@ -44,6 +45,7 @@ type Paths struct {
 	CountryCode string
 	Phonebooks  string
 	Webhook     string
+	Podcasts    string
 }
 
 type observed struct {
@@ -619,7 +621,29 @@ func observe(paths Paths) (*observed, error) {
 		out.webhookDigest = webhookconfig.Hash(data)
 		webhook = &syncwire.WebhookState{Domain: c.Domain, Configured: c.Domain != ""}
 	}
-	digest, err := json.Marshal(map[string]any{"handsets": handsets, "contacts": boxContacts, "phonebooks": boxBooks, "policies": policies, "validation": context})
+	var subscriptions []podcastconfig.Subscription
+	if paths.Podcasts != "" {
+		data, err := j.read(paths.Podcasts)
+		if err != nil && !errors.Is(err, errMissing) {
+			return nil, j.unreadable(paths.Podcasts, err)
+		}
+		c, err := podcastconfig.Parse(data)
+		if err != nil {
+			return nil, j.reject(paths.Podcasts, "invalid podcast subscriptions")
+		}
+		known := map[string]bool{}
+		for _, raw := range handsets {
+			known[str(raw.(map[string]any), "id")] = true
+		}
+		for _, sub := range c.Subscriptions {
+			if !known[sub.Handset] {
+				return nil, j.reject(paths.Podcasts, "unknown podcast handset")
+			}
+		}
+		subscriptions = c.Subscriptions
+		out.files[paths.Podcasts] = data
+	}
+	digest, err := json.Marshal(map[string]any{"podcasts": subscriptions, "handsets": handsets, "contacts": boxContacts, "phonebooks": boxBooks, "policies": policies, "validation": context})
 	if err != nil {
 		return nil, j.reject(paths.Policy, "sync cannot represent the configuration")
 	}
@@ -627,6 +651,9 @@ func observe(paths Paths) (*observed, error) {
 	configuration := map[string]any{"handsets": handsets, "contacts": contacts, "phonebooks": books, "policies": policies, "validation": context}
 	if webhook != nil {
 		configuration["webhook"] = webhook
+	}
+	if paths.Podcasts != "" {
+		configuration["podcasts"] = subscriptions
 	}
 	data, err := json.Marshal(configuration)
 	if err != nil {
