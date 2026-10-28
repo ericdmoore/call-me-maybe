@@ -59,17 +59,24 @@ same opt-in header, approved origin, sync bearer and redirect refusal. Old
 preview clients continue using v1 and are not silently offered large archives.
 
 The archive streams into a private mode-0600 temporary file, capped at 256 MiB.
-Both transport and receiver verify the exact size and SHA-256 before import.
+Transport enforces the exact size; the receiver verifies SHA-256 while staging before import.
 Before ZIP parsing, the importer bounds the real central directory to 4,096 entries
-and 8 MiB of metadata, refusing ZIP64/multi-disk forms. It validates at most 512 MiB expanded,
+and 8 MiB of metadata, refusing ZIP64/multi-disk forms and ambiguous extra EOCD signatures. It validates at most 512 MiB expanded,
 a 2 MiB manifest and 1 MiB for each other member. Every member must be checksummed;
-every audio segment must be referenced exactly once and decode within 120 ms of
+members are inflated once for verification and staging. Every audio segment must be referenced exactly once and decode within 120 ms of
 its declared length. Segments are at most 45 seconds; recordings are at most 48
 hours, with at most 999 chapters. Independent millisecond rounding at adjacent
 manifest timestamps is allowed within 1 ms, not as an arbitrary timing gap.
 
+Full recordings use a consistently namespaced ID, independently of manifest ID length.
+A preview cannot replace a full recording, including through a legacy ID collision.
+Catalog count and conservative JSON-size checks run before staging/decoding. A locked
+import sweeps abandoned `.audiobook-*` and `.preview-*` stages without following links.
+Missing `ffmpeg` / `espeak-ng` is reported as unsupported tooling; disk exhaustion is
+reported as `no_space`, rather than a network failure.
+
 Compressed Opus segments remain the baseline. Generated, path-restricted chapter
-playlists feed the existing FFmpeg player, which retains only its playing and
+playlists use decoded sample durations (also used for chapter lengths) and feed the existing FFmpeg player, which retains only its playing and
 prefetched 30-second PCM windows. The whole novel is never expanded to PCM or
 duplicated per speed/handset. Import has a 30-minute deadline and per-segment decode
 limits. Temporary downloads are removed on every completed/failed attempt; a subsequent
@@ -90,6 +97,10 @@ The same mechanism works free and offline, without a Store purchase:
 doorman books install-audiobook --archive ./recorded.cmmpack \
   --library ./library --menu-bundle ./prepared-menu
 ```
+
+The receiver hashes while writing its private staging file. The importer performs
+one on-disk archive hash for its immutable revision; the local CLI does not pre-hash
+a file just to compare it to itself.
 
 This local command validates/imports the archive but does not send commerce
 receipts or grant hosted ownership. Deploy only a published release binary per

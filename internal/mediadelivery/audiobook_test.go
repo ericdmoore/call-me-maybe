@@ -2,13 +2,16 @@ package mediadelivery
 
 import (
 	"bytes"
+	"callmemaybe/internal/mediaformat"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -103,5 +106,38 @@ func TestAudiobookReceiveRemovesInterruptedArchiveWithoutFollowingLinks(t *testi
 	}
 	if info, err := os.Lstat(filepath.Join(dir, ".archive-link")); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatal("followed staging symlink", err)
+	}
+}
+
+type brokenDiskSource struct {
+	*diskSource
+	err error
+}
+
+func (s *brokenDiskSource) DownloadTo(context.Context, Offer, io.Writer) error { return s.err }
+func TestAudiobookFailuresRetainTheirCauseCodes(t *testing.T) {
+	for _, phase := range []string{"download-disk", "install-disk", "tools"} {
+		t.Run(phase, func(t *testing.T) {
+			payload := []byte("audio")
+			base := &diskSource{fakeSource: fake(), payload: payload}
+			base.offer.Bytes = int64(len(payload))
+			base.offer.SHA256 = fmt.Sprintf("%x", sha256.Sum256(payload))
+			var source FileSource = base
+			failure := error(syscall.ENOSPC)
+			want := "no_space"
+			if phase == "download-disk" {
+				source = &brokenDiskSource{base, failure}
+			} else if phase == "tools" {
+				failure = mediaformat.ErrUnsupported
+				want = "unsupported"
+			}
+			err := ReceiveAudiobook(t.Context(), source, filepath.Join(t.TempDir(), "journal"), func(context.Context, string, string) error { return failure })
+			if err == nil || base.offer.State != "failed" || base.codes[len(base.codes)-1] != want {
+				t.Fatal("misclassified failure", base.codes, err)
+			}
+			if phase != "download-disk" && (!strings.Contains(err.Error(), "audiobook") || errors.Is(err, ErrChecksum)) {
+				t.Fatal("preview-specific failure", err)
+			}
+		})
 	}
 }

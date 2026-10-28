@@ -2,22 +2,28 @@ package account
 
 import (
 	"bytes"
+	"callmemaybe/internal/mediadelivery"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
 
-func TestAudiobookTransportRequiresExplicitSKUAndStreamsVerifiedBytes(t *testing.T) {
+func TestAudiobookTransportRequiresExplicitSKUAndStreamsApprovedBytes(t *testing.T) {
 	payload := bytes.Repeat([]byte("opus"), 300000)
 	hash := fmt.Sprintf("%x", sha256.Sum256(payload))
 	id := strings.Repeat("b", 43)
 	var origin string
 	corrupt := false
 	redirect := false
+	broken := false
 	c := clientServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Doorman-Media-Format") != "audiobook-v1" {
 			t.Error("missing full-book opt-in")
@@ -36,6 +42,11 @@ func TestAudiobookTransportRequiresExplicitSKUAndStreamsVerifiedBytes(t *testing
 				http.Redirect(w, r, "https://outside.invalid/private", 302)
 				return
 			}
+			if broken {
+				w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+				w.Write([]byte("short"))
+				return
+			}
 			if corrupt {
 				w.Write([]byte("bad"))
 				return
@@ -49,7 +60,7 @@ func TestAudiobookTransportRequiresExplicitSKUAndStreamsVerifiedBytes(t *testing
 	})
 	origin = c.origin
 	seed(t, c)
-	if _, err := c.SandboxAudiobook(origin, "../escape"); err != ErrProtocol {
+	if _, err := c.SandboxAudiobook(origin, "../escape"); err != ErrAudiobookSKU {
 		t.Fatal("accepted invalid SKU")
 	}
 	s, err := c.SandboxAudiobook(origin, "sandbox-full-book")
@@ -64,6 +75,19 @@ func TestAudiobookTransportRequiresExplicitSKUAndStreamsVerifiedBytes(t *testing
 	if err := s.DownloadTo(t.Context(), offers[0], &dst); err != nil || !bytes.Equal(dst.Bytes(), payload) {
 		t.Fatal("download", err)
 	}
+	for _, cause := range []error{syscall.ENOSPC, io.ErrShortWrite, mediadelivery.ErrChecksum} {
+		if err := s.DownloadTo(t.Context(), offers[0], failureMediaWriter{cause}); !errors.Is(err, cause) {
+			t.Fatal("hid disk/writer error", err)
+		}
+	}
+	if err := s.DownloadTo(t.Context(), offers[0], failureMediaWriter{}); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatal("lost silent short write", err)
+	}
+	broken = true
+	if err := s.DownloadTo(t.Context(), offers[0], &bytes.Buffer{}); !errors.Is(err, ErrNetwork) {
+		t.Fatal("reader failure misclassified", err)
+	}
+	broken = false
 	if _, err := s.Download(t.Context(), offers[0]); err == nil {
 		t.Fatal("large book reached buffered preview API")
 	}
@@ -80,3 +104,7 @@ func TestAudiobookTransportRequiresExplicitSKUAndStreamsVerifiedBytes(t *testing
 		t.Fatal("followed or leaked redirect")
 	}
 }
+
+type failureMediaWriter struct{ err error }
+
+func (w failureMediaWriter) Write([]byte) (int, error) { return 0, w.err }

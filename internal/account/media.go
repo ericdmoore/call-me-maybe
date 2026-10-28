@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -19,6 +20,7 @@ import (
 const mediaPath = "/v1/store/sandbox/packs"
 const MaxPreviewBytes = mediadelivery.MaxPreviewBytes
 
+var ErrAudiobookSKU = errors.New("media: invalid audiobook SKU; use lowercase letters, digits and hyphens")
 var mediaID = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 var mediaHash = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
@@ -46,7 +48,7 @@ func (c *Client) SandboxMedia(origin string) (*MediaSource, error) {
 // clients keep their original size limits and never receive a large offer.
 func (c *Client) SandboxAudiobook(origin, sku string) (*MediaSource, error) {
 	if !regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`).MatchString(sku) {
-		return nil, ErrProtocol
+		return nil, ErrAudiobookSKU
 	}
 	source, err := c.SandboxMedia(origin)
 	if err != nil {
@@ -200,8 +202,8 @@ func (s *MediaSource) Receipt(ctx context.Context, p MediaOffer, sequence int64,
 	return nil
 }
 
-// DownloadTo streams into private staging storage and checks the complete body
-// before the receiver can publish it. Provider URLs and credentials stay here.
+// DownloadTo streams an approved response with an exact byte bound. The receiver
+// hashes while staging before publication. Provider URLs and credentials stay here.
 func (s *MediaSource) DownloadTo(ctx context.Context, p MediaOffer, dst io.Writer) error {
 	download := s.downloads[p.Delivery+"/"+p.SHA256]
 	if s.fullBookSKU == "" || p.SKU != s.fullBookSKU || !strings.HasPrefix(download, mediaPath+"/download?") || p.Bytes <= 0 || p.Bytes > mediadelivery.MaxAudiobookBytes || !mediaHash.MatchString(p.SHA256) {
@@ -215,13 +217,32 @@ func (s *MediaSource) DownloadTo(ctx context.Context, p MediaOffer, dst io.Write
 	if resp.ContentLength >= 0 && resp.ContentLength != p.Bytes {
 		return mediadelivery.ErrChecksum
 	}
-	hash := sha256.New()
-	n, err := io.Copy(io.MultiWriter(dst, hash), io.LimitReader(resp.Body, p.Bytes+1))
+	writer := &mediaWriter{dst: dst}
+	n, err := io.Copy(writer, io.LimitReader(resp.Body, p.Bytes+1))
+	if writer.err != nil {
+		return writer.err
+	}
 	if err != nil {
 		return ErrNetwork
 	}
-	if n != p.Bytes || hex.EncodeToString(hash.Sum(nil)) != p.SHA256 {
+	if n != p.Bytes {
 		return mediadelivery.ErrChecksum
 	}
 	return nil
+}
+
+type mediaWriter struct {
+	dst io.Writer
+	err error
+}
+
+func (w *mediaWriter) Write(data []byte) (int, error) {
+	n, err := w.dst.Write(data)
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		w.err = err
+	}
+	return n, err
 }

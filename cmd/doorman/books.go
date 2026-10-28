@@ -60,19 +60,8 @@ func runBooks(args []string) int {
 			fmt.Fprintln(os.Stderr, "books install-audiobook requires --archive")
 			return 2
 		}
-		f, err := os.Open(*archive)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "books: cannot read audiobook archive")
-			return 1
-		}
-		hash := sha256.New()
-		n, err := io.Copy(hash, io.LimitReader(f, books.MaxAudiobookBytes+1))
-		f.Close()
-		if err != nil || n > books.MaxAudiobookBytes {
-			fmt.Fprintln(os.Stderr, "books: audiobook archive exceeds limit or cannot be read")
-			return 1
-		}
-		if err := books.ImportAudiobook(ctx, *archive, fmt.Sprintf("%x", hash.Sum(nil)), *library, *menuBundle); err != nil {
+
+		if err := books.ImportAudiobook(ctx, *archive, "", *library, *menuBundle); err != nil {
 			fmt.Fprintln(os.Stderr, "books: audiobook installation failed:", err)
 			return 1
 		}

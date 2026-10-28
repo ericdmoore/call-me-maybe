@@ -376,8 +376,18 @@ func runSyncMedia(args []string) int {
 		source, err = account.New(*state).SandboxAudiobook(*origin, *audiobookSKU)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "sync media: an explicit trusted HTTPS source is required")
+		if errors.Is(err, account.ErrAudiobookSKU) {
+			fmt.Fprintln(os.Stderr, "sync media:", err)
+		} else {
+			fmt.Fprintln(os.Stderr, "sync media: an explicit trusted HTTPS source is required")
+		}
 		return 2
+	}
+	if args[0] == "once" && *audiobookSKU != "" {
+		if err := books.CheckAudiobookTools(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

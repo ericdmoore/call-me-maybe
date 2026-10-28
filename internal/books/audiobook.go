@@ -2,6 +2,8 @@ package books
 
 import (
 	"archive/zip"
+	"bytes"
+	"callmemaybe/internal/mediaformat"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -13,7 +15,6 @@ import (
 	"math"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -21,7 +22,7 @@ import (
 	"time"
 )
 
-const MaxAudiobookBytes = 256 << 20
+const MaxAudiobookBytes = mediaformat.MaxAudiobookBytes
 
 var ErrAudiobookArchive = errors.New("books: invalid or unsupported audiobook archive")
 var compressedSegment = regexp.MustCompile(`^segment-[0-9]{6}\.opus$`)
@@ -60,14 +61,17 @@ type recordedManifest struct {
 // and publishes only after checksums, decoding and offline prompts are ready.
 // It never expands the novel to PCM or downloads content on the call path.
 func ImportAudiobook(ctx context.Context, archive, hash, root, menus string) error {
-	if !revisionPattern.MatchString(hash) {
+	if hash != "" && !revisionPattern.MatchString(hash) {
 		return ErrAudiobookArchive
+	}
+	if err := CheckAudiobookTools(); err != nil {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 	input, err := os.Open(archive)
 	if err != nil {
-		return ErrAudiobookArchive
+		return errors.New("books: cannot read audiobook archive")
 	}
 	defer input.Close()
 	info, err := input.Stat()
@@ -76,9 +80,11 @@ func ImportAudiobook(ctx context.Context, archive, hash, root, menus string) err
 	}
 	digest := sha256.New()
 	n, err := io.Copy(digest, io.LimitReader(input, MaxAudiobookBytes+1))
-	if err != nil || n != info.Size() || hex.EncodeToString(digest.Sum(nil)) != hash {
+	actualHash := hex.EncodeToString(digest.Sum(nil))
+	if err != nil || n != info.Size() || (hash != "" && actualHash != hash) {
 		return ErrAudiobookArchive
 	}
+	hash = actualHash
 	if !boundedZipDirectory(input, info.Size()) {
 		return ErrAudiobookArchive
 	}
@@ -86,53 +92,20 @@ func ImportAudiobook(ctx context.Context, archive, hash, root, menus string) err
 	if err != nil || len(z.File) < 3 || len(z.File) > 4096 {
 		return ErrAudiobookArchive
 	}
-	files := map[string]*zip.File{}
-	var expanded uint64
-	for _, f := range z.File {
-		name := f.Name
-		limit := uint64(1 << 20)
-		if name == "pack.json" {
-			limit = maxJSONBytes
-		}
-		if name == "" || path.Clean(name) != name || strings.HasPrefix(name, "/") || strings.HasPrefix(name, "../") || strings.ContainsAny(name, "\\\x00\r\n") || !f.Mode().IsRegular() || files[name] != nil || f.UncompressedSize64 > limit {
-			return ErrAudiobookArchive
-		}
-		expanded += f.UncompressedSize64
-		if expanded > 512<<20 {
-			return ErrAudiobookArchive
-		}
-		files[name] = f
+	files, err := packMembers(z, 4096, 1<<20, maxJSONBytes, 512<<20)
+	if err != nil {
+		return ErrAudiobookArchive
+	}
+	sums, err := packChecksums(files)
+	if err != nil {
+		return ErrAudiobookArchive
 	}
 	read := func(name string) ([]byte, error) {
-		f := files[name]
-		if f == nil {
-			return nil, ErrAudiobookArchive
-		}
-		r, err := f.Open()
+		data, err := verifiedPackMember(files, sums, name)
 		if err != nil {
 			return nil, ErrAudiobookArchive
 		}
-		defer r.Close()
-		data, err := io.ReadAll(io.LimitReader(r, int64(f.UncompressedSize64)+1))
-		if err != nil || uint64(len(data)) != f.UncompressedSize64 {
-			return nil, ErrAudiobookArchive
-		}
 		return data, nil
-	}
-	sums, err := read("SHA256SUMS")
-	if err != nil {
-		return err
-	}
-	expected := map[string]string{}
-	for _, line := range strings.Split(strings.TrimSpace(string(sums)), "\n") {
-		sum, name, ok := strings.Cut(line, "  ")
-		if !ok || !revisionPattern.MatchString(sum) || files[name] == nil || name == "SHA256SUMS" || expected[name] != "" {
-			return ErrAudiobookArchive
-		}
-		expected[name] = sum
-	}
-	if len(expected) != len(files)-1 {
-		return ErrAudiobookArchive
 	}
 	manifest, err := read("pack.json")
 	if err != nil {
@@ -175,43 +148,32 @@ func ImportAudiobook(ctx context.Context, archive, hash, root, menus string) err
 		return err
 	}
 	defer unlock()
+	if err := cleanImportStages(root); err != nil {
+		return err
+	}
 	catalog, err := Load(root)
 	if os.IsNotExist(err) {
 		catalog = Catalog{Schema: 1}
 	} else if err != nil {
 		return err
 	}
-	id := m.ID
-	if len(id) > 64 {
-		sum := sha256.Sum256([]byte(id))
-		id = "recorded-" + hex.EncodeToString(sum[:16])
-	}
+	identity := sha256.Sum256([]byte(m.ID))
+	id := "recorded-" + hex.EncodeToString(identity[:16])
 	b := Book{ID: id, Title: m.Name, Language: m.Audiobook.Work.Language, Origin: "store", Storage: "opus", Revision: hash}
+	for i, ch := range m.Audiobook.Chapters {
+		b.Chapters = append(b.Chapters, Chapter{Title: ch.Title, Audio: chapterName(i) + ".ffconcat", Seconds: float64(ch.DurationMS) / 1000})
+	}
+	if err := preflightRecordedCatalog(catalog, b); err != nil {
+		return err
+	}
 	stage, err := os.MkdirTemp(root, ".audiobook-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	for name, f := range files {
-		if name == "SHA256SUMS" {
-			continue
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		r, err := f.Open()
-		if err != nil {
-			return ErrAudiobookArchive
-		}
-		h := sha256.New()
-		_, err = io.Copy(h, io.LimitReader(r, int64(f.UncompressedSize64)+1))
-		r.Close()
-		if err != nil || hex.EncodeToString(h.Sum(nil)) != expected[name] {
-			return ErrAudiobookArchive
-		}
-	}
 	segment := 0
 	for i, ch := range m.Audiobook.Chapters {
+		var samples int64
 		var playlist strings.Builder
 		playlist.WriteString("ffconcat version 1.0\n")
 		for _, seg := range ch.Segments {
@@ -235,7 +197,8 @@ func ImportAudiobook(ctx context.Context, archive, hash, root, menus string) err
 			if err != nil || bounded.n%2 != 0 || abs64(ms-seg.DurationMS) > 120 {
 				return ErrAudiobookArchive
 			}
-			fmt.Fprintf(&playlist, "file %s\nduration %.6f\n", name, float64(seg.DurationMS)/1000)
+			fmt.Fprintf(&playlist, "file %s\nduration %.6f\n", name, float64(bounded.n)/(sampleRate*2))
+			samples += bounded.n
 		}
 		name := chapterName(i) + ".ffconcat"
 		if err := os.WriteFile(filepath.Join(stage, name), []byte(playlist.String()), 0644); err != nil {
@@ -244,7 +207,7 @@ func ImportAudiobook(ctx context.Context, archive, hash, root, menus string) err
 		if err := speak(ctx, filepath.Join(stage, chapterName(i)+"-title.sln16"), ch.Title); err != nil {
 			return err
 		}
-		b.Chapters = append(b.Chapters, Chapter{Title: ch.Title, Audio: name, Seconds: float64(ch.DurationMS) / 1000})
+		b.Chapters[i].Seconds = float64(samples) / (sampleRate * 2)
 	}
 	if err := speak(ctx, filepath.Join(stage, "title.sln16"), b.Title); err != nil {
 		return err
@@ -276,6 +239,9 @@ func boundedZipDirectory(reader io.ReaderAt, size int64) bool {
 	}
 	tail := make([]byte, n)
 	if _, err := reader.ReadAt(tail, size-n); err != nil {
+		return false
+	}
+	if bytes.Count(tail, []byte{0x50, 0x4b, 0x05, 0x06}) != 1 {
 		return false
 	}
 	pos := -1
@@ -341,7 +307,7 @@ func compressedChapterReady(dir string, ch Chapter) bool {
 			return false
 		}
 		value, err := strconv.ParseFloat(duration, 64)
-		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || value > 45 {
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || value > 45.120 {
 			return false
 		}
 		seconds += value

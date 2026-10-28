@@ -8,11 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -42,35 +40,7 @@ func ImportPreviewWithMenus(ctx context.Context, data []byte, hash, root, menuSo
 	if err != nil {
 		return err
 	}
-	var m struct {
-		ID        string `json:"id"`
-		Name      string `json:"name"`
-		Kind      string `json:"kind"`
-		Audiobook struct {
-			Work struct {
-				Language string `json:"language"`
-			} `json:"work"`
-			Recording struct {
-				DurationMS int64 `json:"duration_ms"`
-			} `json:"recording"`
-			Audio struct {
-				Codec      string `json:"codec"`
-				Container  string `json:"container"`
-				SampleRate int    `json:"sample_rate"`
-				Channels   int    `json:"channels"`
-			} `json:"audio"`
-			Chapters []struct {
-				Number     int    `json:"number"`
-				Title      string `json:"title"`
-				DurationMS int64  `json:"duration_ms"`
-				Segments   []struct {
-					File       string `json:"file"`
-					StartMS    int64  `json:"start_ms"`
-					DurationMS int64  `json:"duration_ms"`
-				} `json:"segments"`
-			} `json:"chapters"`
-		} `json:"audiobook"`
-	}
+	var m recordedManifest
 	if json.Unmarshal(files["pack.json"], &m) != nil || m.Kind != "audiobook" || !archiveID.MatchString(m.ID) || !validText(m.Name) || !idPattern.MatchString(m.Audiobook.Work.Language) || m.Audiobook.Audio.Codec != "opus" || m.Audiobook.Audio.Container != "ogg" || m.Audiobook.Audio.SampleRate != 16000 || m.Audiobook.Audio.Channels != 1 || len(m.Audiobook.Chapters) == 0 || len(m.Audiobook.Chapters) > 8 || m.Audiobook.Recording.DurationMS <= 0 || m.Audiobook.Recording.DurationMS > 120000 {
 		return ErrPreviewArchive
 	}
@@ -104,6 +74,9 @@ func ImportPreviewWithMenus(ctx context.Context, data []byte, hash, root, menuSo
 		return err
 	}
 	defer unlock()
+	if err := cleanImportStages(root); err != nil {
+		return err
+	}
 	catalog, err := Load(root)
 	if os.IsNotExist(err) {
 		catalog = Catalog{Schema: 1}
@@ -168,6 +141,11 @@ func ImportPreviewWithMenus(ctx context.Context, data []byte, hash, root, menuSo
 }
 
 func publishImported(ctx context.Context, root string, b Book, stage, menuSource string, catalog Catalog) error {
+	next, err := importedCatalog(catalog, b)
+	if err != nil {
+		return err
+	}
+	catalog = next
 	entries, err := os.ReadDir(stage)
 	if err != nil {
 		return err
@@ -201,7 +179,7 @@ func publishImported(ctx context.Context, root string, b Book, stage, menuSource
 			return err
 		}
 	} else if statErr != nil || !info.IsDir() {
-		return errors.New("books: existing preview revision requires repair")
+		return errRecordingRepair
 	} else {
 		// A prior attempt may have published audio but lost its receipt/index.
 		// Reuse only identical validated bytes, never a same-sized corrupt cache.
@@ -216,11 +194,11 @@ func publishImported(ctx context.Context, root string, b Book, stage, menuSource
 			}
 			info, err := os.Lstat(filepath.Join(target, entry.Name()))
 			if err != nil || !info.Mode().IsRegular() || info.Size() != int64(len(expected)) {
-				return ErrPreviewArchive
+				return errRecordingRepair
 			}
 			actual, err := os.ReadFile(filepath.Join(target, entry.Name()))
 			if err != nil || !bytes.Equal(actual, expected) {
-				return ErrPreviewArchive
+				return errRecordingRepair
 			}
 		}
 	}
@@ -232,17 +210,6 @@ func publishImported(ctx context.Context, root string, b Book, stage, menuSource
 	parent.Close()
 	if err != nil {
 		return err
-	}
-	replaced := false
-	for i, old := range catalog.Books {
-		if old.ID == b.ID {
-			catalog.Books[i] = b
-			replaced = true
-			break
-		}
-	}
-	if !replaced {
-		catalog.Books = append(catalog.Books, b)
 	}
 	if err := validate(catalog, true); err != nil {
 		return err
@@ -328,43 +295,27 @@ func (w *previewPCM) Write(p []byte) (int, error) {
 
 func previewFiles(data []byte) (map[string][]byte, error) {
 	z, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil || len(z.File) < 3 || len(z.File) > 128 {
+	if err != nil {
+		return nil, ErrPreviewArchive
+	}
+	members, err := packMembers(z, 128, 1<<20, 1<<20, 2<<20)
+	if err != nil {
+		return nil, ErrPreviewArchive
+	}
+	sums, err := packChecksums(members)
+	if err != nil {
 		return nil, ErrPreviewArchive
 	}
 	files := map[string][]byte{}
-	total := int64(0)
-	for _, f := range z.File {
-		name := f.Name
-		if name == "" || path.Clean(name) != name || strings.HasPrefix(name, "/") || strings.HasPrefix(name, "../") || strings.ContainsAny(name, "\\\x00\r\n") || !f.Mode().IsRegular() || files[name] != nil || f.UncompressedSize64 > 1<<20 {
+	for name := range members {
+		if name == "SHA256SUMS" {
+			continue
+		}
+		data, err := verifiedPackMember(members, sums, name)
+		if err != nil {
 			return nil, ErrPreviewArchive
 		}
-		rc, e := f.Open()
-		if e != nil {
-			return nil, ErrPreviewArchive
-		}
-		b, e := io.ReadAll(io.LimitReader(rc, (1<<20)+1))
-		rc.Close()
-		total += int64(len(b))
-		if e != nil || len(b) > 1<<20 || total > 2<<20 {
-			return nil, ErrPreviewArchive
-		}
-		files[name] = b
-	}
-	sums := map[string]bool{}
-	for _, line := range strings.Split(strings.TrimSpace(string(files["SHA256SUMS"])), "\n") {
-		hash, name, ok := strings.Cut(line, "  ")
-		b, exists := files[name]
-		if !ok || !exists || name == "SHA256SUMS" || sums[name] {
-			return nil, ErrPreviewArchive
-		}
-		sum := sha256.Sum256(b)
-		if hash != fmt.Sprintf("%x", sum) {
-			return nil, ErrPreviewArchive
-		}
-		sums[name] = true
-	}
-	if len(sums) != len(files)-1 || files["pack.json"] == nil {
-		return nil, ErrPreviewArchive
+		files[name] = data
 	}
 	return files, nil
 }

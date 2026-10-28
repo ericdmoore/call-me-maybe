@@ -3,6 +3,7 @@
 package mediadelivery
 
 import (
+	"callmemaybe/internal/mediaformat"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -51,7 +52,7 @@ func (e *JournalError) Is(target error) bool             { return target == ErrJ
 func journalFailure(operation string, cause error) error { return &JournalError{operation, cause} }
 
 const MaxPreviewBytes = 1 << 20
-const MaxAudiobookBytes = 256 << 20
+const MaxAudiobookBytes = mediaformat.MaxAudiobookBytes
 
 type receiptSource interface {
 	List(context.Context) ([]Offer, error)
@@ -75,7 +76,7 @@ type pending struct {
 // interruption replays the same sequence instead of inventing a new transition.
 // The installer must be atomic and idempotent for the exact archive hash.
 func Receive(ctx context.Context, source Source, dir string, install Install) error {
-	return receive(ctx, source, dir, func(ctx context.Context, p Offer) (func() error, func(), error) {
+	return receive(ctx, source, dir, "preview", func(ctx context.Context, p Offer) (func() error, func(), error) {
 		archive, err := source.Download(ctx, p)
 		if err != nil {
 			return nil, nil, err
@@ -88,7 +89,7 @@ func Receive(ctx context.Context, source Source, dir string, install Install) er
 }
 
 func ReceiveAudiobook(ctx context.Context, source FileSource, dir string, install FileInstall) error {
-	return receive(ctx, source, dir, func(ctx context.Context, p Offer) (func() error, func(), error) {
+	return receive(ctx, source, dir, "audiobook", func(ctx context.Context, p Offer) (func() error, func(), error) {
 		if p.Bytes <= 0 || p.Bytes > MaxAudiobookBytes {
 			return nil, nil, ErrChecksum
 		}
@@ -97,8 +98,9 @@ func ReceiveAudiobook(ctx context.Context, source FileSource, dir string, instal
 			return nil, nil, errors.New("media: private archive staging failed")
 		}
 		cleanup := func() { file.Close(); os.Remove(file.Name()) }
+		hash := sha256.New()
 		if err = file.Chmod(0600); err == nil {
-			err = source.DownloadTo(ctx, p, &archiveWriter{dst: file, remaining: p.Bytes})
+			err = source.DownloadTo(ctx, p, &archiveWriter{dst: io.MultiWriter(file, hash), remaining: p.Bytes})
 		}
 		if err == nil {
 			err = file.Sync()
@@ -107,13 +109,8 @@ func ReceiveAudiobook(ctx context.Context, source FileSource, dir string, instal
 			cleanup()
 			return nil, nil, err
 		}
-		if _, err = file.Seek(0, io.SeekStart); err != nil {
-			cleanup()
-			return nil, nil, ErrChecksum
-		}
-		hash := sha256.New()
-		n, err := io.Copy(hash, io.LimitReader(file, p.Bytes+1))
-		if err != nil || n != p.Bytes || hex.EncodeToString(hash.Sum(nil)) != p.SHA256 {
+		info, statErr := file.Stat()
+		if statErr != nil || info.Size() != p.Bytes || hex.EncodeToString(hash.Sum(nil)) != p.SHA256 {
 			cleanup()
 			return nil, nil, ErrChecksum
 		}
@@ -125,7 +122,7 @@ func ReceiveAudiobook(ctx context.Context, source FileSource, dir string, instal
 	})
 }
 
-func receive(ctx context.Context, source receiptSource, dir string, prepare prepareInstall) error {
+func receive(ctx context.Context, source receiptSource, dir, kind string, prepare prepareInstall) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return journalFailure("create-directory", err)
 	}
@@ -226,6 +223,8 @@ func receive(ctx context.Context, source receiptSource, dir string, prepare prep
 			code := "network"
 			if errors.Is(err, ErrChecksum) {
 				code = "checksum"
+			} else if errors.Is(err, syscall.ENOSPC) {
+				code = "no_space"
 			}
 			if receiptErr := report("failed", code); receiptErr != nil {
 				return receiptErr
@@ -241,10 +240,16 @@ func receive(ctx context.Context, source receiptSource, dir string, prepare prep
 				return err
 			}
 			if err := install(); err != nil {
-				if receiptErr := report("failed", "install"); receiptErr != nil {
+				code := "install"
+				if errors.Is(err, mediaformat.ErrUnsupported) {
+					code = "unsupported"
+				} else if errors.Is(err, syscall.ENOSPC) {
+					code = "no_space"
+				}
+				if receiptErr := report("failed", code); receiptErr != nil {
 					return receiptErr
 				}
-				return errors.New("media: preview installation failed")
+				return errors.New("media: " + kind + " installation failed")
 			}
 			return report("installed", "")
 		}
