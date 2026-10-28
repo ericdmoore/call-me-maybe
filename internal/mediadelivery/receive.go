@@ -4,10 +4,14 @@ package mediadelivery
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -47,6 +51,7 @@ func (e *JournalError) Is(target error) bool             { return target == ErrJ
 func journalFailure(operation string, cause error) error { return &JournalError{operation, cause} }
 
 const MaxPreviewBytes = 1 << 20
+const MaxRecordedBytes int64 = 256 << 20
 
 type pending struct {
 	Sequence int64  `json:"sequence"`
@@ -59,6 +64,17 @@ type pending struct {
 // interruption replays the same sequence instead of inventing a new transition.
 // The installer must be atomic and idempotent for the exact archive hash.
 func Receive(ctx context.Context, source Source, dir string, install Install) error {
+	return receive(ctx, source, dir, install, nil)
+}
+
+// ReceiveFiles keeps archives in private scratch storage rather than a byte slice.
+// It shares the preview outbox and sequence reconciliation, so retries cannot
+// duplicate or regress an existing delivery's installation receipt.
+func ReceiveFiles(ctx context.Context, source Source, dir string, install func(context.Context, string, string) error) error {
+	return receive(ctx, source, dir, nil, install)
+}
+
+func receive(ctx context.Context, source Source, dir string, install Install, installFile func(context.Context, string, string) error) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return journalFailure("create-directory", err)
 	}
@@ -78,6 +94,19 @@ func Receive(ctx context.Context, source Source, dir string, install Install) er
 		return journalFailure("lock", err)
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	if installFile != nil {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return journalFailure("read-scratch", err)
+		}
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), ".archive-") {
+				if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil {
+					return journalFailure("remove-scratch", err)
+				}
+			}
+		}
+	}
 	offers, err := source.List(ctx)
 	if err != nil {
 		return err
@@ -131,36 +160,78 @@ func Receive(ctx context.Context, source Source, dir string, install Install) er
 		if err := report("downloading", ""); err != nil {
 			return err
 		}
-		archive, err := source.Download(ctx, p)
-		if err != nil {
-			code := "network"
-			if errors.Is(err, ErrChecksum) {
-				code = "checksum"
+		err = func() error {
+			var archive []byte
+			var file string
+			var err error
+			if installFile != nil {
+				transport, ok := source.(interface {
+					DownloadFile(context.Context, Offer, string) (string, error)
+				})
+				if !ok {
+					return errors.New("media: file transport unavailable")
+				}
+				file, err = transport.DownloadFile(ctx, p, dir)
+				if err == nil && file == "" {
+					err = ErrChecksum
+				}
+				if file != "" {
+					if filepath.Dir(file) != filepath.Clean(dir) || !strings.HasPrefix(filepath.Base(file), ".archive-") {
+						return ErrChecksum
+					}
+					defer os.Remove(file)
+					f, openErr := os.Open(file)
+					if openErr != nil {
+						return ErrChecksum
+					}
+					stat, statErr := f.Stat()
+					h := sha256.New()
+					n, hashErr := io.Copy(h, io.LimitReader(f, MaxRecordedBytes+1))
+					f.Close()
+					if statErr != nil || !stat.Mode().IsRegular() || p.Bytes <= 0 || p.Bytes > MaxRecordedBytes || n != p.Bytes || hashErr != nil || hex.EncodeToString(h.Sum(nil)) != p.SHA256 {
+						err = ErrChecksum
+					}
+				}
+			} else {
+				archive, err = source.Download(ctx, p)
 			}
-			if receiptErr := report("failed", code); receiptErr != nil {
-				return receiptErr
-			}
-			return err
-		}
-		// The transport already bounds the stream. Check the Source contract
-		// here as well so alternate sources cannot pass bad bytes to install.
-		if p.Bytes <= 0 || p.Bytes > MaxPreviewBytes || int64(len(archive)) != p.Bytes {
-			if err := report("failed", "checksum"); err != nil {
+			if err != nil {
+				code := "network"
+				if errors.Is(err, ErrChecksum) {
+					code = "checksum"
+				}
+				if receiptErr := report("failed", code); receiptErr != nil {
+					return receiptErr
+				}
 				return err
 			}
-			return ErrChecksum
-		}
-		if err := report("downloaded", ""); err != nil {
-			return err
-		}
-		if err := report("installing", ""); err != nil {
-			return err
-		}
-		if err := install(ctx, archive, p.SHA256); err != nil {
-			if receiptErr := report("failed", "install"); receiptErr != nil {
-				return receiptErr
+			if installFile == nil && (p.Bytes <= 0 || p.Bytes > MaxPreviewBytes || int64(len(archive)) != p.Bytes) {
+				if err := report("failed", "checksum"); err != nil {
+					return err
+				}
+				return ErrChecksum
 			}
-			return errors.New("media: preview installation failed")
+			if err := report("downloaded", ""); err != nil {
+				return err
+			}
+			if err := report("installing", ""); err != nil {
+				return err
+			}
+			if installFile != nil {
+				err = installFile(ctx, file, p.SHA256)
+			} else {
+				err = install(ctx, archive, p.SHA256)
+			}
+			if err != nil {
+				if receiptErr := report("failed", "install"); receiptErr != nil {
+					return receiptErr
+				}
+				return errors.New("media: recording installation failed")
+			}
+			return nil
+		}()
+		if err != nil {
+			return err
 		}
 		if err := report("installed", ""); err != nil {
 			return err

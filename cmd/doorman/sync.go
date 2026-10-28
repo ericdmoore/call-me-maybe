@@ -366,11 +366,15 @@ func runSyncMedia(args []string) int {
 	origin := fs.String("source", "", "operator-approved sandbox HTTPS origin (receives the sync credential)")
 	state := fs.String("state", "/var/lib/doorman", "private account state directory")
 	library := fs.String("library", books.DefaultLibrary, "prepared local playback library")
-	menuBundle := fs.String("menu-bundle", "", "prepared menu bundle matching the next preview catalog")
+	menuBundle := fs.String("menu-bundle", "", "prepared menu bundle matching the next recording catalog")
+	fullBooks := fs.Bool("full-books", false, "opt into disk-streamed complete recordings (up to 256 MiB)")
 	if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
 		return 2
 	}
 	source, err := account.New(*state).SandboxMedia(*origin)
+	if *fullBooks {
+		source, err = account.New(*state).RecordedMedia(*origin)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sync media: an explicit trusted HTTPS source is required")
 		return 2
@@ -389,10 +393,29 @@ func runSyncMedia(args []string) int {
 		return 0
 	}
 	var installErr error
-	err = mediadelivery.Receive(ctx, source, filepath.Join(*state, "media-preview"), func(ctx context.Context, data []byte, hash string) error {
-		installErr = books.ImportPreviewWithMenus(ctx, data, hash, *library, *menuBundle)
-		return installErr
-	})
+	if *fullBooks {
+		err = mediadelivery.ReceiveFiles(ctx, source, filepath.Join(*state, "media-preview"), func(ctx context.Context, file, hash string) error {
+			info, statErr := os.Stat(file)
+			if statErr != nil {
+				return statErr
+			}
+			if info.Size() <= mediadelivery.MaxPreviewBytes {
+				data, readErr := os.ReadFile(file)
+				if readErr != nil {
+					return readErr
+				}
+				installErr = books.ImportPreviewWithMenus(ctx, data, hash, *library, *menuBundle)
+			} else {
+				installErr = books.ImportRecordedWithMenus(ctx, file, hash, *library, *menuBundle)
+			}
+			return installErr
+		})
+	} else {
+		err = mediadelivery.Receive(ctx, source, filepath.Join(*state, "media-preview"), func(ctx context.Context, data []byte, hash string) error {
+			installErr = books.ImportPreviewWithMenus(ctx, data, hash, *library, *menuBundle)
+			return installErr
+		})
+	}
 	if err != nil {
 		if errors.Is(installErr, books.ErrMenuRefresh) {
 			fmt.Fprintln(os.Stderr, books.ErrMenuRefresh)
@@ -401,6 +424,6 @@ func runSyncMedia(args []string) int {
 		}
 		return 1
 	}
-	fmt.Fprintln(os.Stdout, "Sandbox preview pass complete; installation receipts reflect local playback readiness, not a handset listening test.")
+	fmt.Fprintln(os.Stdout, "Sandbox media pass complete; installation receipts reflect local playback readiness, not a handset listening test.")
 	return 0
 }

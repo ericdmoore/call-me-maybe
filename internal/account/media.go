@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ type MediaSource struct {
 	account   *Client
 	origin    string
 	downloads map[string]string
+	maxBytes  int64
 }
 
 type MediaOffer = mediadelivery.Offer
@@ -38,7 +40,7 @@ func (c *Client) SandboxMedia(origin string) (*MediaSource, error) {
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return nil, ErrProtocol
 	}
-	return &MediaSource{account: c, origin: strings.TrimSuffix(origin, "/"), downloads: map[string]string{}}, nil
+	return &MediaSource{account: c, origin: strings.TrimSuffix(origin, "/"), downloads: map[string]string{}, maxBytes: MaxPreviewBytes}, nil
 }
 
 func (s *MediaSource) request(ctx context.Context, method, path string, data []byte, limit int64) ([]byte, error) {
@@ -98,7 +100,7 @@ func (s *MediaSource) List(ctx context.Context) ([]MediaOffer, error) {
 	seen := map[string]bool{}
 	for _, p := range wire.Packs {
 		u, e := url.Parse(p.Download.URL)
-		if e != nil || u.Scheme+"://"+u.Host != s.origin || u.User != nil || u.Fragment != "" || u.Path != mediaPath+"/download" || p.Download.Authorization != "sync-bearer" || p.Download.ExpiresAt <= time.Now().UnixMilli() || p.Receipts != mediaPath+"/receipts" || !mediaID.MatchString(p.Delivery) || seen[p.Delivery] || !mediaHash.MatchString(p.SHA256) || p.Bytes <= 0 || p.Bytes > MaxPreviewBytes || p.Sequence < 0 || p.Sequence >= 1_000_000_000 || len(p.SKU) == 0 || len(p.SKU) > 128 || len(p.Version) == 0 || len(p.Version) > 64 || !mediaState(p.State) {
+		if e != nil || u.Scheme+"://"+u.Host != s.origin || u.User != nil || u.Fragment != "" || u.Path != mediaPath+"/download" || p.Download.Authorization != "sync-bearer" || p.Download.ExpiresAt <= time.Now().UnixMilli() || p.Receipts != mediaPath+"/receipts" || !mediaID.MatchString(p.Delivery) || seen[p.Delivery] || !mediaHash.MatchString(p.SHA256) || p.Bytes <= 0 || p.Bytes > s.maxBytes || p.Sequence < 0 || p.Sequence >= 1_000_000_000 || len(p.SKU) == 0 || len(p.SKU) > 128 || len(p.Version) == 0 || len(p.Version) > 64 || !mediaState(p.State) {
 			return nil, ErrProtocol
 		}
 		seen[p.Delivery] = true
@@ -164,4 +166,70 @@ func (s *MediaSource) Receipt(ctx context.Context, p MediaOffer, sequence int64,
 		return ErrProtocol
 	}
 	return nil
+}
+
+// RecordedMedia is a separate operator opt-in. Preview callers retain their
+// original 1 MiB limit; the full-book lane streams at most 256 MiB to disk.
+func (c *Client) RecordedMedia(origin string) (*MediaSource, error) {
+	source, err := c.SandboxMedia(origin)
+	if err == nil {
+		source.maxBytes = mediadelivery.MaxRecordedBytes
+	}
+	return source, err
+}
+
+// DownloadFile never persists signed addresses or credentials. A failed,
+// interrupted, oversized or hash-mismatched transfer deletes its scratch file.
+func (s *MediaSource) DownloadFile(ctx context.Context, p MediaOffer, dir string) (name string, err error) {
+	download := s.downloads[p.Delivery+"/"+p.SHA256]
+	if !strings.HasPrefix(download, mediaPath+"/download?") || p.Bytes <= 0 || p.Bytes > s.maxBytes || !mediaHash.MatchString(p.SHA256) {
+		return "", ErrProtocol
+	}
+	_, _, token, err := s.account.syncCredential(ctx)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.origin+download, nil)
+	if err != nil {
+		return "", ErrProtocol
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	client := *s.account.http
+	client.Timeout = 10 * time.Minute
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", ErrNetwork
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", &ServiceError{Status: resp.StatusCode, Code: "media_refused"}
+	}
+	if resp.ContentLength >= 0 && resp.ContentLength != p.Bytes {
+		return "", mediadelivery.ErrChecksum
+	}
+	f, err := os.CreateTemp(dir, ".archive-")
+	if err != nil {
+		return "", ErrNetwork
+	}
+	name = f.Name()
+	defer func() {
+		f.Close()
+		if err != nil {
+			os.Remove(name)
+			name = ""
+		}
+	}()
+	hash := sha256.New()
+	n, copyErr := io.Copy(io.MultiWriter(f, hash), io.LimitReader(resp.Body, p.Bytes+1))
+	if copyErr != nil {
+		return name, ErrNetwork
+	}
+	if n != p.Bytes || hex.EncodeToString(hash.Sum(nil)) != p.SHA256 {
+		return name, mediadelivery.ErrChecksum
+	}
+	if f.Sync() != nil {
+		return name, ErrNetwork
+	}
+	return name, nil
 }

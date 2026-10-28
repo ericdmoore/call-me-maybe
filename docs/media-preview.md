@@ -77,3 +77,47 @@ Rehearse a successful install and repeated pass, a failed checksum/conversion,
 receipt loss/replay and interrupted publication. Listen on a real handset,
 including pause/resume and speed controls, before claiming playback acceptance.
 A simulated AGI test or an installed receipt alone is insufficient.
+
+## Complete recorded books
+
+Complete Ogg Opus audiobooks use an explicit operator opt-in:
+
+```sh
+doorman sync media once --source https://sandbox.example.invalid --full-books
+# Free local installation, with no account or hosted purchase:
+doorman books install-recorded --archive ./book.cmmpack --library ./library
+```
+
+The full-book lane downloads at most 256 MiB into private scratch storage, hashes
+while writing, and independently checks size/hash again before installation. It
+retains the same durable receipt outbox as previews; interrupted transfers restart
+from the beginning and abandoned scratch files are removed under the receiver's
+lock. Redirect refusal, origin pinning and credential handling are unchanged.
+The ordinary media command and `install-preview` retain their preview bounds.
+When `--full-books` encounters a small preview, it still uses the preview installer.
+
+Recorded archives allow at most 4,096 regular ZIP members, 2 MiB per member,
+300 MiB expanded compressed data, 999 chapters and 48 hours total. Every member
+must be checksummed, paths must be safe, chapter numbers must be contiguous,
+and segment timing must be coherent. Starts and lengths rounded independently
+by the builder may differ by at most one millisecond at a boundary. FFmpeg
+actually decodes each segment with a 30-second process deadline and at most
+46 seconds of output, checking its declared duration within 120 milliseconds.
+No decoded book PCM is retained at installation.
+
+Each immutable revision contains the verified Opus segments and one generated
+FFmpeg concat playlist per chapter. Playlists use only validated relative audio
+paths. Playback decodes and applies pitch-preserving tempo processing into the
+existing two-window buffer (playing plus prefetched, 30 seconds each), rather
+than storing an entire decoded novel or one copy per speed. Seeking, pause,
+chapter navigation, cancellation and revision-specific bookmarks use the same
+player as existing PCM books. Local and hosted imports use identical playback;
+origin records where the import came from, not permission to play it.
+
+The existing prepared-menu safeguard also covers full books. An unmatched menu
+bundle leaves the current catalog active and exports
+`preview-catalog.pending.json` (the compatibility filename also used for full
+books). Render that candidate offline and retry with `--menu-bundle`. Failed
+imports never replace the previous playable revision. Immutable unactivated or
+superseded revisions are retained; operators should remove them only when no
+active call uses them. Installation is not evidence of a handset listening test.

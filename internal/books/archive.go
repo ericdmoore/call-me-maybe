@@ -164,6 +164,10 @@ func ImportPreviewWithMenus(ctx context.Context, data []byte, hash, root, menuSo
 	if err := os.Chmod(stage, 0755); err != nil {
 		return err
 	}
+	return publishImported(ctx, root, stage, b, catalog, menuSource)
+}
+
+func publishImported(ctx context.Context, root, stage string, b Book, catalog Catalog, menuSource string) error {
 	target := bookDir(root, b)
 	if info, statErr := os.Lstat(target); os.IsNotExist(statErr) {
 		if err := os.Rename(stage, target); err != nil {
@@ -174,23 +178,31 @@ func ImportPreviewWithMenus(ctx context.Context, data []byte, hash, root, menuSo
 	} else {
 		// A prior attempt may have published audio but lost its receipt/index.
 		// Reuse only identical validated bytes, never a same-sized corrupt cache.
-		entries, err := os.ReadDir(stage)
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			expected, err := os.ReadFile(filepath.Join(stage, entry.Name()))
+		err := filepath.WalkDir(stage, func(name string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			rel, err := filepath.Rel(stage, name)
 			if err != nil {
 				return err
 			}
-			info, err := os.Lstat(filepath.Join(target, entry.Name()))
-			if err != nil || !info.Mode().IsRegular() || info.Size() != int64(len(expected)) {
+			other := filepath.Join(target, rel)
+			info, err := os.Lstat(other)
+			expected, readErr := os.ReadFile(name)
+			if err != nil || readErr != nil || !info.Mode().IsRegular() || info.Size() != int64(len(expected)) {
 				return ErrPreviewArchive
 			}
-			actual, err := os.ReadFile(filepath.Join(target, entry.Name()))
+			actual, err := os.ReadFile(other)
 			if err != nil || !bytes.Equal(actual, expected) {
 				return ErrPreviewArchive
 			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
 	}
 	replaced := false

@@ -1503,3 +1503,11 @@ is unchanged. Keep this file and its .last-good copy mode 0600. Invalid edits
 keep the last good endpoint across restart; doorman check validates the file.
 Sync applies encrypted, revision-checked changes and reports applied only
 after the running daemon accepts the exact file revision.
+.SH COMPLETE RECORDED AUDIOBOOKS
+.B doorman books install-recorded --archive book.cmmpack
+verifies and installs a local recorded audiobook without an account.
+.B doorman sync media once --source https://trusted.example --full-books
+opts into disk-streamed complete recordings (256 MiB maximum).
+Both retain compressed Opus audio and use bounded playback conversion.
+Prepared menu voices require a matching offline bundle before catalog activation;
+see docs/media-preview.md for the candidate catalog and --menu-bundle workflow.

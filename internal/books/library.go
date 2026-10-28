@@ -51,10 +51,18 @@ type Book struct {
 	Chapters []Chapter `json:"chapters"`
 }
 
-type Chapter struct {
-	Title   string  `json:"title"`
+type Segment struct {
 	Audio   string  `json:"audio"`
-	Seconds float64 `json:"seconds,omitempty"`
+	Bytes   int64   `json:"bytes"`
+	SHA256  string  `json:"sha256"`
+	Seconds float64 `json:"seconds"`
+}
+
+type Chapter struct {
+	Segments []Segment `json:"segments,omitempty"`
+	Title    string    `json:"title"`
+	Audio    string    `json:"audio"`
+	Seconds  float64   `json:"seconds,omitempty"`
 }
 
 func readJSON(path string, dst any) error {
@@ -141,7 +149,7 @@ func validate(c Catalog, prepared bool) error {
 			if !validText(ch.Title) || ch.Audio == "" || strings.ContainsAny(ch.Audio, "\r\n\x00") {
 				return errors.New("invalid chapter")
 			}
-			if prepared && (ch.Audio != chapterName(i)+".sln16" || ch.Seconds <= 0 || ch.Seconds > 86400) {
+			if prepared && (!validChapterAudio(ch, i) || ch.Seconds <= 0 || ch.Seconds > 86400) {
 				return errors.New("invalid prepared chapter")
 			}
 		}
@@ -179,9 +187,23 @@ func ready(root string, b Book) bool {
 		return false
 	}
 	for _, ch := range b.Chapters {
-		s, err := os.Lstat(filepath.Join(bookDir(root, b), ch.Audio))
-		if err != nil || !s.Mode().IsRegular() || s.Size() != int64(math.Round(ch.Seconds*sampleRate*2)) {
-			return false
+		if len(ch.Segments) == 0 {
+			st, err := os.Lstat(filepath.Join(bookDir(root, b), ch.Audio))
+			if err != nil || !st.Mode().IsRegular() || st.Size() != int64(math.Round(ch.Seconds*sampleRate*2)) {
+				return false
+			}
+		} else {
+			expected := concatChapter(ch)
+			actual, err := os.ReadFile(filepath.Join(bookDir(root, b), ch.Audio))
+			if err != nil || string(actual) != expected {
+				return false
+			}
+			for _, seg := range ch.Segments {
+				st, err := os.Lstat(filepath.Join(bookDir(root, b), seg.Audio))
+				if err != nil || !st.Mode().IsRegular() || st.Size() != seg.Bytes {
+					return false
+				}
+			}
 		}
 	}
 	return true
@@ -285,6 +307,7 @@ func preflightCatalog(c Catalog) error {
 		b.Chapters = append([]Chapter(nil), b.Chapters...)
 		for j := range b.Chapters {
 			b.Chapters[j].Audio = chapterName(j) + ".sln16"
+			b.Chapters[j].Segments = nil
 			b.Chapters[j].Seconds = 1
 		}
 		prepared.Books[i] = b
@@ -329,6 +352,7 @@ func prepareBook(ctx context.Context, source, stage string, b *Book) error {
 			return errors.New("empty or invalid chapter audio")
 		}
 		ch.Audio, ch.Seconds = filepath.Base(output), float64(n)/(sampleRate*2)
+		ch.Segments = nil
 		if ch.Seconds > 86400 {
 			return errors.New("chapter exceeds one day")
 		}
