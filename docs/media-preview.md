@@ -94,7 +94,20 @@ retains the same durable receipt outbox as previews; interrupted transfers resta
 from the beginning and abandoned scratch files are removed under the receiver's
 lock. Redirect refusal, origin pinning and credential handling are unchanged.
 The ordinary media command and `install-preview` retain their preview bounds.
-When `--full-books` encounters a small preview, it still uses the preview installer.
+`--full-books` declares `X-Doorman-Media: recorded-v1`; services must withhold
+larger offers and their delivery rows from older clients. Preview clients skip
+otherwise valid larger offers while preserving compatible previews.
+
+Excerpt provenance, rather than compressed byte count, selects the preview
+installer. A small complete recording retains its full-book identity. Before a
+streamed GET, expiring signed URLs are refreshed. Transfers have a one-minute
+inactivity deadline and caller cancellation, with no fixed total time limit.
+
+Segment details live in a checksummed `recording.json` per immutable book. The
+shared catalog holds chapter summaries and the index hash, keeping a large shelf
+within its existing size bound. Copying, decoding and chapter speech finish in a
+private stage before the publication lock is acquired; the current catalog is
+loaded under that lock to preserve concurrent changes.
 
 Recorded archives allow at most 4,096 regular ZIP members, 2 MiB per member,
 300 MiB expanded compressed data, 999 chapters and 48 hours total. Every member
