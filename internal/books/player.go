@@ -81,7 +81,14 @@ func startStream(ctx context.Context, state, input string, seconds float64, spee
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	s := &stream{windows: make(chan window), cancel: cancel, done: make(chan struct{}), dir: dir}
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-f", "s16le", "-ar", "16000", "-ac", "1", "-ss", fmt.Sprintf("%.6f", seconds), "-i", input, "-af", fmt.Sprintf("atempo=%.1f", float64(speed)/10), "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1")
+	args := []string{"-nostdin", "-v", "error"}
+	if filepath.Ext(input) == ".ffconcat" {
+		args = append(args, "-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "1")
+	} else {
+		args = append(args, "-f", "s16le", "-ar", "16000", "-ac", "1")
+	}
+	args = append(args, "-ss", fmt.Sprintf("%.6f", seconds), "-i", input, "-af", fmt.Sprintf("atempo=%.1f", float64(speed)/10), "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1")
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	pipe, err := cmd.StdoutPipe()
 	if err == nil {
 		err = cmd.Start()

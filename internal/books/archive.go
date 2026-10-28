@@ -164,6 +164,37 @@ func ImportPreviewWithMenus(ctx context.Context, data []byte, hash, root, menuSo
 	if err := os.Chmod(stage, 0755); err != nil {
 		return err
 	}
+	return publishImported(ctx, root, b, stage, menuSource, catalog)
+}
+
+func publishImported(ctx context.Context, root string, b Book, stage, menuSource string, catalog Catalog) error {
+	entries, err := os.ReadDir(stage)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		file, err := os.Open(filepath.Join(stage, entry.Name()))
+		if err != nil {
+			return err
+		}
+		err = file.Sync()
+		closeErr := file.Close()
+		if err != nil {
+			return err
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	directory, err := os.Open(stage)
+	if err != nil {
+		return err
+	}
+	err = directory.Sync()
+	directory.Close()
+	if err != nil {
+		return err
+	}
 	target := bookDir(root, b)
 	if info, statErr := os.Lstat(target); os.IsNotExist(statErr) {
 		if err := os.Rename(stage, target); err != nil {
@@ -192,6 +223,15 @@ func ImportPreviewWithMenus(ctx context.Context, data []byte, hash, root, menuSo
 				return ErrPreviewArchive
 			}
 		}
+	}
+	parent, err := os.Open(root)
+	if err != nil {
+		return err
+	}
+	err = parent.Sync()
+	parent.Close()
+	if err != nil {
+		return err
 	}
 	replaced := false
 	for i, old := range catalog.Books {

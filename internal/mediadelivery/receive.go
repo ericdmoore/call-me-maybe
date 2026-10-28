@@ -4,10 +4,14 @@ package mediadelivery
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -47,6 +51,18 @@ func (e *JournalError) Is(target error) bool             { return target == ErrJ
 func journalFailure(operation string, cause error) error { return &JournalError{operation, cause} }
 
 const MaxPreviewBytes = 1 << 20
+const MaxAudiobookBytes = 256 << 20
+
+type receiptSource interface {
+	List(context.Context) ([]Offer, error)
+	Receipt(context.Context, Offer, int64, string, string) error
+}
+type FileSource interface {
+	receiptSource
+	DownloadTo(context.Context, Offer, io.Writer) error
+}
+type FileInstall func(context.Context, string, string) error
+type prepareInstall func(context.Context, Offer) (func() error, func(), error)
 
 type pending struct {
 	Sequence int64  `json:"sequence"`
@@ -59,6 +75,57 @@ type pending struct {
 // interruption replays the same sequence instead of inventing a new transition.
 // The installer must be atomic and idempotent for the exact archive hash.
 func Receive(ctx context.Context, source Source, dir string, install Install) error {
+	return receive(ctx, source, dir, func(ctx context.Context, p Offer) (func() error, func(), error) {
+		archive, err := source.Download(ctx, p)
+		if err != nil {
+			return nil, nil, err
+		}
+		if p.Bytes <= 0 || p.Bytes > MaxPreviewBytes || int64(len(archive)) != p.Bytes {
+			return nil, nil, ErrChecksum
+		}
+		return func() error { return install(ctx, archive, p.SHA256) }, func() {}, nil
+	})
+}
+
+func ReceiveAudiobook(ctx context.Context, source FileSource, dir string, install FileInstall) error {
+	return receive(ctx, source, dir, func(ctx context.Context, p Offer) (func() error, func(), error) {
+		if p.Bytes <= 0 || p.Bytes > MaxAudiobookBytes {
+			return nil, nil, ErrChecksum
+		}
+		file, err := os.CreateTemp(dir, ".archive-")
+		if err != nil {
+			return nil, nil, errors.New("media: private archive staging failed")
+		}
+		cleanup := func() { file.Close(); os.Remove(file.Name()) }
+		if err = file.Chmod(0600); err == nil {
+			err = source.DownloadTo(ctx, p, &archiveWriter{dst: file, remaining: p.Bytes})
+		}
+		if err == nil {
+			err = file.Sync()
+		}
+		if err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+		if _, err = file.Seek(0, io.SeekStart); err != nil {
+			cleanup()
+			return nil, nil, ErrChecksum
+		}
+		hash := sha256.New()
+		n, err := io.Copy(hash, io.LimitReader(file, p.Bytes+1))
+		if err != nil || n != p.Bytes || hex.EncodeToString(hash.Sum(nil)) != p.SHA256 {
+			cleanup()
+			return nil, nil, ErrChecksum
+		}
+		if err = file.Close(); err != nil {
+			cleanup()
+			return nil, nil, errors.New("media: archive staging failed")
+		}
+		return func() error { return install(ctx, file.Name(), p.SHA256) }, cleanup, nil
+	})
+}
+
+func receive(ctx context.Context, source receiptSource, dir string, prepare prepareInstall) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return journalFailure("create-directory", err)
 	}
@@ -78,6 +145,29 @@ func Receive(ctx context.Context, source Source, dir string, install Install) er
 		return journalFailure("lock", err)
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	// A killed downloader cannot run its deferred cleanup. The exclusive journal
+	// lock proves no other pass owns these private temporary archives now.
+	directory, err := os.Open(dir)
+	if err != nil {
+		return journalFailure("clean-archive", err)
+	}
+	defer directory.Close()
+	for {
+		entries, readErr := directory.ReadDir(64)
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), ".archive-") && entry.Type().IsRegular() {
+				if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil {
+					return journalFailure("clean-archive", err)
+				}
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return journalFailure("clean-archive", readErr)
+		}
+	}
 	offers, err := source.List(ctx)
 	if err != nil {
 		return err
@@ -131,7 +221,7 @@ func Receive(ctx context.Context, source Source, dir string, install Install) er
 		if err := report("downloading", ""); err != nil {
 			return err
 		}
-		archive, err := source.Download(ctx, p)
+		install, cleanup, err := prepare(ctx, p)
 		if err != nil {
 			code := "network"
 			if errors.Is(err, ErrChecksum) {
@@ -142,27 +232,23 @@ func Receive(ctx context.Context, source Source, dir string, install Install) er
 			}
 			return err
 		}
-		// The transport already bounds the stream. Check the Source contract
-		// here as well so alternate sources cannot pass bad bytes to install.
-		if p.Bytes <= 0 || p.Bytes > MaxPreviewBytes || int64(len(archive)) != p.Bytes {
-			if err := report("failed", "checksum"); err != nil {
+		apply := func() error {
+			defer cleanup()
+			if err := report("downloaded", ""); err != nil {
 				return err
 			}
-			return ErrChecksum
-		}
-		if err := report("downloaded", ""); err != nil {
-			return err
-		}
-		if err := report("installing", ""); err != nil {
-			return err
-		}
-		if err := install(ctx, archive, p.SHA256); err != nil {
-			if receiptErr := report("failed", "install"); receiptErr != nil {
-				return receiptErr
+			if err := report("installing", ""); err != nil {
+				return err
 			}
-			return errors.New("media: preview installation failed")
+			if err := install(); err != nil {
+				if receiptErr := report("failed", "install"); receiptErr != nil {
+					return receiptErr
+				}
+				return errors.New("media: preview installation failed")
+			}
+			return report("installed", "")
 		}
-		if err := report("installed", ""); err != nil {
+		if err := apply(); err != nil {
 			return err
 		}
 	}
@@ -203,4 +289,19 @@ func save(file string, p pending) error {
 		return journalFailure("sync-directory", err)
 	}
 	return nil
+}
+
+// Enforce the receiver's disk bound even for an alternate FileSource.
+type archiveWriter struct {
+	dst       io.Writer
+	remaining int64
+}
+
+func (w *archiveWriter) Write(p []byte) (int, error) {
+	if int64(len(p)) > w.remaining {
+		return 0, ErrChecksum
+	}
+	n, err := w.dst.Write(p)
+	w.remaining -= int64(n)
+	return n, err
 }
