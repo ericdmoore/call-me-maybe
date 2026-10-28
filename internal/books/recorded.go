@@ -2,6 +2,7 @@ package books
 
 import (
 	"archive/zip"
+	"callmemaybe/internal/mediadelivery"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -19,7 +20,9 @@ import (
 	"time"
 )
 
-const MaxRecordedBytes int64 = 256 << 20
+const MaxRecordedBytes = mediadelivery.MaxRecordedBytes
+const segmentToleranceMS int64 = 120
+const maxSegmentMS int64 = 45000
 
 var ErrRecordedArchive = errors.New("books: invalid or unsupported recorded archive")
 var segmentName = regexp.MustCompile(`^audio/[0-9]{2,4}/[0-9]{4}\.opus$`)
@@ -65,15 +68,18 @@ func concatChapter(ch Chapter) string {
 
 func validChapterAudio(ch Chapter, i int) bool {
 	if len(ch.Segments) == 0 {
-		return ch.Audio == chapterName(i)+".sln16"
+		if ch.SegmentCount > 0 {
+			return ch.SegmentCount <= 4094 && ch.Audio == chapterName(i)+".ffconcat"
+		}
+		return ch.SegmentCount == 0 && ch.Audio == chapterName(i)+".sln16"
 	}
-	if ch.Audio != chapterName(i)+".ffconcat" || len(ch.Segments) > 4094 {
+	if ch.Audio != chapterName(i)+".ffconcat" || len(ch.Segments) > 4094 || ch.SegmentCount != len(ch.Segments) {
 		return false
 	}
 	total := 0.0
 	seen := map[string]bool{}
 	for _, seg := range ch.Segments {
-		if !segmentName.MatchString(seg.Audio) || seen[seg.Audio] || seg.Bytes <= 0 || seg.Bytes > 2<<20 || !revisionPattern.MatchString(seg.SHA256) || math.IsNaN(seg.Seconds) || seg.Seconds <= 0 || seg.Seconds > 45 {
+		if !segmentName.MatchString(seg.Audio) || seen[seg.Audio] || seg.Bytes <= 0 || seg.Bytes > 2<<20 || !revisionPattern.MatchString(seg.SHA256) || math.IsNaN(seg.Seconds) || seg.Seconds <= 0 || seg.Seconds > float64(maxSegmentMS+segmentToleranceMS)/1000 {
 			return false
 		}
 		seen[seg.Audio] = true
@@ -107,7 +113,14 @@ func importRecorded(ctx context.Context, archive, hash, root, menuSource, origin
 		return ErrRecordedArchive
 	}
 	h := sha256.New()
-	if _, err = io.Copy(h, io.NewSectionReader(f, 0, st.Size())); err != nil || hex.EncodeToString(h.Sum(nil)) != hash {
+	if _, err = io.Copy(h, io.NewSectionReader(f, 0, st.Size())); err != nil {
+		return ErrRecordedArchive
+	}
+	actualHash := hex.EncodeToString(h.Sum(nil))
+	if origin == "cli" && hash == "" {
+		hash = actualHash
+	}
+	if actualHash != hash {
 		return ErrRecordedArchive
 	}
 	z, err := zip.NewReader(f, st.Size())
@@ -174,7 +187,7 @@ func importRecorded(ctx context.Context, archive, hash, root, menuSource, origin
 		}
 		chapterMS := int64(0)
 		for _, seg := range ch.Segments {
-			if !segmentName.MatchString(seg.File) || seen[seg.File] || files[seg.File] == nil || absMS(seg.StartMS-chapterMS) > 1 || seg.DurationMS <= 0 || seg.DurationMS > 45000 {
+			if !segmentName.MatchString(seg.File) || seen[seg.File] || files[seg.File] == nil || absMS(seg.StartMS-chapterMS) > 1 || seg.DurationMS <= 0 || seg.DurationMS > maxSegmentMS {
 				return ErrRecordedArchive
 			}
 			seen[seg.File] = true
@@ -189,17 +202,6 @@ func importRecorded(ctx context.Context, archive, hash, root, menuSource, origin
 		return ErrRecordedArchive
 	}
 	if err = os.MkdirAll(root, 0755); err != nil {
-		return err
-	}
-	unlock, err := lockLibrary(root)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	catalog, err := Load(root)
-	if os.IsNotExist(err) {
-		catalog = Catalog{Schema: 1}
-	} else if err != nil {
 		return err
 	}
 	id := m.ID
@@ -252,8 +254,7 @@ func importRecorded(ctx context.Context, archive, hash, root, menuSource, origin
 			cmd.Stdout = decoded
 			e = cmd.Run()
 			cancel()
-			ms := decoded.n * 1000 / (sampleRate * 2)
-			if e != nil || decoded.n%2 != 0 || ms < seg.DurationMS-120 || ms > seg.DurationMS+120 {
+			if e != nil || decoded.n%2 != 0 || decoded.n*1000 < (seg.DurationMS-segmentToleranceMS)*(sampleRate*2) || decoded.n*1000 > (seg.DurationMS+segmentToleranceMS)*(sampleRate*2) {
 				return ErrRecordedArchive
 			}
 			chapter.Seconds += float64(decoded.n) / (sampleRate * 2)
@@ -265,12 +266,37 @@ func importRecorded(ctx context.Context, archive, hash, root, menuSource, origin
 		if err = speak(ctx, filepath.Join(stage, chapterName(i)+"-title.sln16"), ch.Title); err != nil {
 			return err
 		}
+		chapter.SegmentCount = len(chapter.Segments)
 		book.Chapters = append(book.Chapters, chapter)
 	}
 	if err = speak(ctx, filepath.Join(stage, "title.sln16"), book.Title); err != nil {
 		return err
 	}
 	if err = os.Chmod(stage, 0755); err != nil {
+		return err
+	}
+	index := recordedIndex{Chapters: make([][]Segment, len(book.Chapters))}
+	for i, ch := range book.Chapters {
+		index.Chapters[i] = ch.Segments
+	}
+	data, err := encodeJSON(index)
+	if err != nil {
+		return err
+	}
+	indexSum := sha256.Sum256(data)
+	book.IndexSHA256 = hex.EncodeToString(indexSum[:])
+	if err := os.WriteFile(filepath.Join(stage, "recording.json"), data, 0644); err != nil {
+		return err
+	}
+	unlock, err := lockLibrary(root)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	catalog, err := Load(root)
+	if os.IsNotExist(err) {
+		catalog = Catalog{Schema: 1}
+	} else if err != nil {
 		return err
 	}
 	return publishImported(ctx, root, stage, book, catalog, menuSource)
@@ -283,4 +309,80 @@ func absMS(n int64) int64 {
 		return -n
 	}
 	return n
+}
+
+// ImportMediaWithMenus chooses the excerpt lane from the manifest, never from
+// compressed byte count: a full recording can be smaller than a preview.
+func ImportMediaWithMenus(ctx context.Context, archive, hash, root, menuSource string) error {
+	z, err := zip.OpenReader(archive)
+	if err != nil {
+		return ErrRecordedArchive
+	}
+	defer z.Close()
+	for _, entry := range z.File {
+		if entry.Name != "pack.json" {
+			continue
+		}
+		if entry.UncompressedSize64 > 2<<20 {
+			return ErrRecordedArchive
+		}
+		r, err := entry.Open()
+		if err != nil {
+			return ErrRecordedArchive
+		}
+		data, err := io.ReadAll(io.LimitReader(r, (2<<20)+1))
+		r.Close()
+		var manifest struct {
+			Audiobook struct {
+				Provenance struct {
+					Excerpt *json.RawMessage `json:"excerpt"`
+				} `json:"provenance"`
+			} `json:"audiobook"`
+		}
+		if err != nil || json.Unmarshal(data, &manifest) != nil {
+			return ErrRecordedArchive
+		}
+		if manifest.Audiobook.Provenance.Excerpt != nil {
+			info, err := os.Stat(archive)
+			if err != nil || info.Size() > mediadelivery.MaxPreviewBytes {
+				return ErrPreviewArchive
+			}
+			data, err = os.ReadFile(archive)
+			if err != nil {
+				return err
+			}
+			return ImportPreviewWithMenus(ctx, data, hash, root, menuSource)
+		}
+		return ImportRecordedWithMenus(ctx, archive, hash, root, menuSource)
+	}
+	return ErrRecordedArchive
+}
+
+// The catalog holds chapter summaries. Segment details live once per immutable
+// book, so browsing a shelf never parses every segment in the whole library.
+type recordedIndex struct {
+	Chapters [][]Segment `json:"chapters"`
+}
+
+func hydrateRecorded(root string, book Book) (Book, error) {
+	var index recordedIndex
+	if err := readJSON(filepath.Join(bookDir(root, book), "recording.json"), &index); err != nil {
+		return book, err
+	}
+	data, err := encodeJSON(index)
+	if err != nil {
+		return book, err
+	}
+	sum := sha256.Sum256(data)
+	if hex.EncodeToString(sum[:]) != book.IndexSHA256 || len(index.Chapters) != len(book.Chapters) {
+		return book, ErrRecordedArchive
+	}
+	book.Chapters = append([]Chapter(nil), book.Chapters...)
+	for i := range book.Chapters {
+		book.Chapters[i].Segments = index.Chapters[i]
+		if book.Chapters[i].SegmentCount != len(index.Chapters[i]) || !validChapterAudio(book.Chapters[i], i) {
+			return book, ErrRecordedArchive
+		}
+	}
+	return book, nil
 }

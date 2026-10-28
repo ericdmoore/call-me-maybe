@@ -4,11 +4,8 @@ package mediadelivery
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,6 +65,8 @@ func Receive(ctx context.Context, source Source, dir string, install Install) er
 }
 
 // ReceiveFiles keeps archives in private scratch storage rather than a byte slice.
+// DownloadFile must verify the declared length and SHA-256 while streaming; the
+// installer must verify the archive again before publishing any library files.
 // It shares the preview outbox and sequence reconciliation, so retries cannot
 // duplicate or regress an existing delivery's installation receipt.
 func ReceiveFiles(ctx context.Context, source Source, dir string, install func(context.Context, string, string) error) error {
@@ -169,27 +168,22 @@ func receive(ctx context.Context, source Source, dir string, install Install, in
 					DownloadFile(context.Context, Offer, string) (string, error)
 				})
 				if !ok {
-					return errors.New("media: file transport unavailable")
-				}
-				file, err = transport.DownloadFile(ctx, p, dir)
-				if err == nil && file == "" {
-					err = ErrChecksum
-				}
-				if file != "" {
-					if filepath.Dir(file) != filepath.Clean(dir) || !strings.HasPrefix(filepath.Base(file), ".archive-") {
-						return ErrChecksum
-					}
-					defer os.Remove(file)
-					f, openErr := os.Open(file)
-					if openErr != nil {
-						return ErrChecksum
-					}
-					stat, statErr := f.Stat()
-					h := sha256.New()
-					n, hashErr := io.Copy(h, io.LimitReader(f, MaxRecordedBytes+1))
-					f.Close()
-					if statErr != nil || !stat.Mode().IsRegular() || p.Bytes <= 0 || p.Bytes > MaxRecordedBytes || n != p.Bytes || hashErr != nil || hex.EncodeToString(h.Sum(nil)) != p.SHA256 {
+					err = errors.New("media: file transport unavailable")
+				} else {
+					file, err = transport.DownloadFile(ctx, p, dir)
+					if err == nil && file == "" {
 						err = ErrChecksum
+					}
+					if file != "" {
+						if filepath.Dir(file) != filepath.Clean(dir) || !strings.HasPrefix(filepath.Base(file), ".archive-") {
+							err = ErrChecksum
+						} else {
+							defer os.Remove(file)
+							stat, statErr := os.Lstat(file)
+							if statErr != nil || !stat.Mode().IsRegular() || p.Bytes <= 0 || p.Bytes > MaxRecordedBytes || stat.Size() != p.Bytes {
+								err = ErrChecksum
+							}
+						}
 					}
 				}
 			} else {
@@ -225,6 +219,9 @@ func receive(ctx context.Context, source Source, dir string, install Install, in
 			if err != nil {
 				if receiptErr := report("failed", "install"); receiptErr != nil {
 					return receiptErr
+				}
+				if installFile == nil {
+					return errors.New("media: preview installation failed")
 				}
 				return errors.New("media: recording installation failed")
 			}

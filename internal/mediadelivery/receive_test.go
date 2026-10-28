@@ -218,9 +218,12 @@ func TestJournalErrorsDistinguishStorageLockAndInvalidDataWithoutPaths(t *testin
 
 type fileSource struct{ *fakeSource }
 
-func (s *fileSource) DownloadFile(_ context.Context, _ Offer, dir string) (string, error) {
+func (s *fileSource) DownloadFile(_ context.Context, offer Offer, dir string) (string, error) {
 	if s.downloadErr != nil {
 		return "", s.downloadErr
+	}
+	if int64(len(s.payload)) != offer.Bytes || fmt.Sprintf("%x", sha256.Sum256(s.payload)) != offer.SHA256 {
+		return "", ErrChecksum
 	}
 	f, err := os.CreateTemp(dir, ".archive-")
 	if err != nil {
@@ -286,5 +289,42 @@ func TestRecordedReceiveVerificationRecoveryAndCleanup(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "journal")
 	if err := ReceiveFiles(t.Context(), source, dir, func(context.Context, string, string) error { t.Fatal("installed wrong hash"); return nil }); !errors.Is(err, ErrChecksum) {
 		t.Fatal(err)
+	}
+}
+
+type brokenFileSource struct {
+	*fakeSource
+	path func(string) string
+}
+
+func (s *brokenFileSource) DownloadFile(_ context.Context, _ Offer, dir string) (string, error) {
+	return s.path(dir), nil
+}
+func TestRecordedEarlyFailuresReportFailure(t *testing.T) {
+	for _, kind := range []string{"unsupported", "outside", "missing", "empty", "directory"} {
+		t.Run(kind, func(t *testing.T) {
+			base := fake()
+			var source Source = base
+			if kind != "unsupported" {
+				source = &brokenFileSource{base, func(dir string) string {
+					switch kind {
+					case "outside":
+						return filepath.Join(t.TempDir(), "outside")
+					case "empty":
+						return ""
+					case "directory":
+						p := filepath.Join(dir, ".archive-directory")
+						os.Mkdir(p, 0700)
+						return p
+					default:
+						return filepath.Join(dir, ".archive-missing")
+					}
+				}}
+			}
+			err := ReceiveFiles(t.Context(), source, filepath.Join(t.TempDir(), "journal"), func(context.Context, string, string) error { t.Fatal("installed invalid scratch"); return nil })
+			if err == nil || !reflect.DeepEqual(base.events, []string{"downloading", "failed"}) {
+				t.Fatal("left delivery downloading", err, base.events)
+			}
+		})
 	}
 }

@@ -42,13 +42,14 @@ type Catalog struct {
 }
 
 type Book struct {
-	ID       string    `json:"id"`
-	Title    string    `json:"title"`
-	Language string    `json:"language"`
-	Origin   string    `json:"origin"`
-	Preview  bool      `json:"preview,omitempty"`
-	Revision string    `json:"revision,omitempty"`
-	Chapters []Chapter `json:"chapters"`
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Language    string    `json:"language"`
+	Origin      string    `json:"origin"`
+	Preview     bool      `json:"preview,omitempty"`
+	Revision    string    `json:"revision,omitempty"`
+	IndexSHA256 string    `json:"indexSha256,omitempty"`
+	Chapters    []Chapter `json:"chapters"`
 }
 
 type Segment struct {
@@ -59,10 +60,11 @@ type Segment struct {
 }
 
 type Chapter struct {
-	Segments []Segment `json:"segments,omitempty"`
-	Title    string    `json:"title"`
-	Audio    string    `json:"audio"`
-	Seconds  float64   `json:"seconds,omitempty"`
+	Segments     []Segment `json:"-"`
+	SegmentCount int       `json:"segmentCount,omitempty"`
+	Title        string    `json:"title"`
+	Audio        string    `json:"audio"`
+	Seconds      float64   `json:"seconds,omitempty"`
 }
 
 func readJSON(path string, dst any) error {
@@ -145,6 +147,13 @@ func validate(c Catalog, prepared bool) error {
 		if prepared && !revisionPattern.MatchString(b.Revision) {
 			return errors.New("invalid recording revision")
 		}
+		compressed := false
+		for _, ch := range b.Chapters {
+			compressed = compressed || ch.SegmentCount > 0
+		}
+		if prepared && ((compressed && !revisionPattern.MatchString(b.IndexSHA256)) || (!compressed && b.IndexSHA256 != "")) {
+			return errors.New("invalid recording index")
+		}
 		for i, ch := range b.Chapters {
 			if !validText(ch.Title) || ch.Audio == "" || strings.ContainsAny(ch.Audio, "\r\n\x00") {
 				return errors.New("invalid chapter")
@@ -185,6 +194,12 @@ func ready(root string, b Book) bool {
 	}
 	if !found {
 		return false
+	}
+	if b.IndexSHA256 != "" {
+		b, err = hydrateRecorded(root, b)
+		if err != nil {
+			return false
+		}
 	}
 	for _, ch := range b.Chapters {
 		if len(ch.Segments) == 0 {
@@ -308,6 +323,8 @@ func preflightCatalog(c Catalog) error {
 		for j := range b.Chapters {
 			b.Chapters[j].Audio = chapterName(j) + ".sln16"
 			b.Chapters[j].Segments = nil
+			b.Chapters[j].SegmentCount = 0
+			b.IndexSHA256 = ""
 			b.Chapters[j].Seconds = 1
 		}
 		prepared.Books[i] = b
@@ -353,6 +370,8 @@ func prepareBook(ctx context.Context, source, stage string, b *Book) error {
 		}
 		ch.Audio, ch.Seconds = filepath.Base(output), float64(n)/(sampleRate*2)
 		ch.Segments = nil
+		ch.SegmentCount = 0
+		b.IndexSHA256 = ""
 		if ch.Seconds > 86400 {
 			return errors.New("chapter exceeds one day")
 		}

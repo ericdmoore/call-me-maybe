@@ -60,19 +60,7 @@ func runBooks(args []string) int {
 			fmt.Fprintln(os.Stderr, "books install-recorded requires --archive")
 			return 2
 		}
-		f, err := os.Open(*archive)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "books: cannot read recorded archive")
-			return 1
-		}
-		h := sha256.New()
-		n, err := io.Copy(h, io.LimitReader(f, books.MaxRecordedBytes+1))
-		f.Close()
-		if err != nil || n <= 0 || n > books.MaxRecordedBytes {
-			fmt.Fprintln(os.Stderr, "books: recorded archive exceeds limit or cannot be read")
-			return 1
-		}
-		if err = books.ImportLocalRecordedWithMenus(ctx, *archive, fmt.Sprintf("%x", h.Sum(nil)), *library, *menuBundle); err != nil {
+		if err := books.ImportLocalRecordedWithMenus(ctx, *archive, "", *library, *menuBundle); err != nil {
 			fmt.Fprintln(os.Stderr, "books: recorded installation failed:", err)
 			return 1
 		}

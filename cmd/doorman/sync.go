@@ -395,19 +395,7 @@ func runSyncMedia(args []string) int {
 	var installErr error
 	if *fullBooks {
 		err = mediadelivery.ReceiveFiles(ctx, source, filepath.Join(*state, "media-preview"), func(ctx context.Context, file, hash string) error {
-			info, statErr := os.Stat(file)
-			if statErr != nil {
-				return statErr
-			}
-			if info.Size() <= mediadelivery.MaxPreviewBytes {
-				data, readErr := os.ReadFile(file)
-				if readErr != nil {
-					return readErr
-				}
-				installErr = books.ImportPreviewWithMenus(ctx, data, hash, *library, *menuBundle)
-			} else {
-				installErr = books.ImportRecordedWithMenus(ctx, file, hash, *library, *menuBundle)
-			}
+			installErr = books.ImportMediaWithMenus(ctx, file, hash, *library, *menuBundle)
 			return installErr
 		})
 	} else {

@@ -38,6 +38,10 @@ func TestRecordedImportAndCompressedPlayback(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := catalog.Books[0]
+	b, err = hydrateRecorded(root, b)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if b.Preview || !ready(root, b) || len(b.Chapters[0].Segments) != 1 {
 		t.Fatal("recording not ready", b)
 	}
@@ -140,6 +144,10 @@ func TestLocalRecordedImportAndInvalidMetadata(t *testing.T) {
 		t.Fatal("local recording mislabelled", err)
 	}
 	b := catalog.Books[0]
+	b, err = hydrateRecorded(root, b)
+	if err != nil {
+		t.Fatal(err)
+	}
 	os.WriteFile(filepath.Join(bookDir(root, b), b.Chapters[0].Audio), []byte("unsafe playlist"), 0644)
 	if ready(root, b) {
 		t.Fatal("accepted a changed chapter playlist")
@@ -187,5 +195,95 @@ func TestOperatorCompleteRecordingPlayback(t *testing.T) {
 				t.Fatalf("chapter %d speed %d: %v", chapter+1, speed, first.err)
 			}
 		}
+	}
+}
+
+func TestRecordedDurationToleranceAndCatalogScale(t *testing.T) {
+	ch := Chapter{Audio: "chapter-001.ffconcat", Seconds: 45.0004, SegmentCount: 1, Segments: []Segment{{Audio: "audio/01/0001.opus", Bytes: 100, SHA256: strings.Repeat("a", 64), Seconds: 45.0004}}}
+	if !validChapterAudio(ch, 0) {
+		t.Fatal("rejected valid decoder padding")
+	}
+	ch.Seconds = 45.121
+	ch.Segments[0].Seconds = ch.Seconds
+	if validChapterAudio(ch, 0) {
+		t.Fatal("accepted excess padding")
+	}
+	catalog := Catalog{Schema: 1}
+	for i := range 128 {
+		b := Book{ID: fmt.Sprintf("book-%d", i), Title: "A complete recording", Language: "en", Origin: "store", Revision: strings.Repeat("a", 64), IndexSHA256: strings.Repeat("b", 64)}
+		for j := range 61 {
+			b.Chapters = append(b.Chapters, Chapter{Title: fmt.Sprintf("Chapter %d", j+1), Audio: chapterName(j) + ".ffconcat", Seconds: 720, SegmentCount: 24})
+		}
+		catalog.Books = append(catalog.Books, b)
+	}
+	if err := validate(catalog, true); err != nil {
+		t.Fatal(err)
+	}
+	data, err := encodeJSON(catalog)
+	if err != nil {
+		t.Fatal("128 full books overflow catalog", err)
+	}
+	if strings.Contains(string(data), `"segments"`) {
+		t.Fatal("embedded segment details in shared catalog")
+	}
+}
+
+func TestMediaImporterUsesManifestForSmallCompleteBook(t *testing.T) {
+	data, hash := recordedFixture(t)
+	// This complete-book fixture is far below 1 MiB; it must keep full-book
+	// identity, storage and preview=false regardless of compressed byte count.
+	file := filepath.Join(t.TempDir(), "small.cmmpack")
+	os.WriteFile(file, data, 0600)
+	root := t.TempDir()
+	if err := ImportMediaWithMenus(t.Context(), file, hash, root, ""); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(root)
+	if err != nil || c.Books[0].Preview || c.Books[0].IndexSHA256 == "" {
+		t.Fatal("selected excerpt importer", err)
+	}
+	b := c.Books[0]
+	os.WriteFile(filepath.Join(bookDir(root, b), "recording.json"), []byte(`{"chapters":[]}`), 0644)
+	if ready(root, b) {
+		t.Fatal("changed segment index remained playable")
+	}
+}
+
+func TestMediaImporterExcerptAndMalformedManifest(t *testing.T) {
+	data, _ := recordedFixture(t)
+	files, err := previewFiles(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := strings.Replace(string(files["pack.json"]), `"audiobook":{`, `"audiobook":{"provenance":{"excerpt":{"source_pack_id":"source"}},`, 1)
+	excerpt := previewArchive(t, map[string][]byte{"pack.json": []byte(manifest), "audio/01/0001.opus": files["audio/01/0001.opus"]})
+	file := filepath.Join(t.TempDir(), "excerpt.cmmpack")
+	os.WriteFile(file, excerpt, 0600)
+	root := t.TempDir()
+	if err := ImportMediaWithMenus(t.Context(), file, fmt.Sprintf("%x", sha256.Sum256(excerpt)), root, ""); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(root)
+	if err != nil || !c.Books[0].Preview || c.Books[0].IndexSHA256 != "" {
+		t.Fatal("lost excerpt identity", err)
+	}
+	for _, broken := range [][]byte{[]byte("not a zip"), previewArchive(t, map[string][]byte{"other": []byte("missing manifest")}), previewArchive(t, map[string][]byte{"pack.json": []byte("invalid json")})} {
+		os.WriteFile(file, broken, 0600)
+		if err := ImportMediaWithMenus(t.Context(), file, fmt.Sprintf("%x", sha256.Sum256(broken)), t.TempDir(), ""); err == nil {
+			t.Fatal("accepted malformed manifest")
+		}
+	}
+	os.Remove(file)
+	if err := ImportMediaWithMenus(t.Context(), file, "", t.TempDir(), ""); err == nil {
+		t.Fatal("accepted missing archive")
+	}
+	os.WriteFile(file, data, 0600)
+	root = t.TempDir()
+	if err := ImportLocalRecordedWithMenus(t.Context(), file, "", root, ""); err != nil {
+		t.Fatal("local importer did not derive revision", err)
+	}
+	c, err = Load(root)
+	if err != nil || c.Books[0].Revision != fmt.Sprintf("%x", sha256.Sum256(data)) {
+		t.Fatal("wrong local revision", err)
 	}
 }

@@ -124,7 +124,7 @@ func TestMediaRejectsUntrustedOffers(t *testing.T) {
 				case "hash":
 					p["sha256"] = "wrong"
 				case "size":
-					p["bytes"] = MaxPreviewBytes + 1
+					p["bytes"] = mediadelivery.MaxRecordedBytes + 1
 				case "sequence":
 					p["sequence"] = -1
 				case "state":
@@ -188,8 +188,8 @@ func TestRecordedDownloadStreamsToPrivateFile(t *testing.T) {
 	origin = c.origin
 	seed(t, c)
 	preview, _ := c.SandboxMedia(origin)
-	if _, err := preview.List(t.Context()); err == nil {
-		t.Fatal("preview accepted full recording")
+	if offers, err := preview.List(t.Context()); err != nil || len(offers) != 0 {
+		t.Fatal("preview did not skip full recording", err)
 	}
 	source, err := c.RecordedMedia(origin)
 	if err != nil {
@@ -222,5 +222,96 @@ func TestRecordedDownloadStreamsToPrivateFile(t *testing.T) {
 		if len(entries) != 0 {
 			t.Fatal("left failed download scratch", mode)
 		}
+	}
+}
+
+func TestMediaCapabilitiesAndPreviewFiltering(t *testing.T) {
+	var origin string
+	full := false
+	c := clientServer(t, func(w http.ResponseWriter, r *http.Request) {
+		want := ""
+		if full {
+			want = "recorded-v1"
+		}
+		if r.Header.Get("X-Doorman-Media") != want {
+			t.Error("wrong capability")
+		}
+		packs := []any{}
+		for i, size := range []int64{12, MaxPreviewBytes + 1} {
+			packs = append(packs, map[string]any{"delivery": strings.Repeat(string(rune('a'+i)), 43), "sku": "book", "version": "1", "sha256": strings.Repeat("b", 64), "bytes": size, "state": "offered", "sequence": 0, "download": map[string]any{"url": origin + mediaPath + "/download?signature=PRIVATE", "expiresAt": time.Now().Add(time.Hour).UnixMilli(), "authorization": "sync-bearer"}, "receipts": mediaPath + "/receipts"})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"schema": "sandbox-pack-delivery-v1", "packs": packs})
+	})
+	origin = c.origin
+	seed(t, c)
+	preview, _ := c.SandboxMedia(origin)
+	if offers, err := preview.List(t.Context()); err != nil || len(offers) != 1 {
+		t.Fatal("preview blocked", err)
+	}
+	full = true
+	source, _ := c.RecordedMedia(origin)
+	if offers, err := source.List(t.Context()); err != nil || len(offers) != 2 {
+		t.Fatal("full capability failed", err)
+	}
+}
+
+func TestRecordedDownloadRefreshAndIdleDeadline(t *testing.T) {
+	for _, stall := range []bool{false, true} {
+		t.Run(fmt.Sprint(stall), func(t *testing.T) {
+			payload := []byte("abcdefgh")
+			hash := fmt.Sprintf("%x", sha256.Sum256(payload))
+			id := strings.Repeat("a", 43)
+			var origin string
+			lists := 0
+			c := clientServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == mediaPath {
+					lists++
+					json.NewEncoder(w).Encode(map[string]any{"schema": "sandbox-pack-delivery-v1", "packs": []any{map[string]any{"delivery": id, "sku": "book", "version": "1", "sha256": hash, "bytes": len(payload), "state": "offered", "sequence": 0, "download": map[string]any{"url": origin + mediaPath + "/download?fresh=yes", "expiresAt": time.Now().Add(time.Hour).UnixMilli(), "authorization": "sync-bearer"}, "receipts": mediaPath + "/receipts"}}})
+					return
+				}
+				if r.URL.Query().Get("fresh") != "yes" {
+					t.Error("used expired address")
+				}
+				w.WriteHeader(200)
+				w.(http.Flusher).Flush()
+				if stall {
+					<-r.Context().Done()
+					return
+				}
+				for _, b := range payload {
+					w.Write([]byte{b})
+					w.(http.Flusher).Flush()
+					time.Sleep(15 * time.Millisecond)
+				}
+			})
+			origin = c.origin
+			seed(t, c)
+			source, _ := c.RecordedMedia(origin)
+			source.idleTimeout = 80 * time.Millisecond
+			source.downloads[id+"/"+hash] = mediaPath + "/download?expired=yes"
+			source.expires = map[string]int64{id + "/" + hash: time.Now().Add(-time.Minute).UnixMilli()}
+			dir := t.TempDir()
+			file, err := source.DownloadFile(t.Context(), MediaOffer{Delivery: id, SHA256: hash, Bytes: int64(len(payload))}, dir)
+			if lists != 1 {
+				t.Fatal("did not refresh before download")
+			}
+			if stall {
+				if err == nil || file != "" {
+					t.Fatal("stalled transfer succeeded")
+				}
+				entries, _ := os.ReadDir(dir)
+				if len(entries) != 0 {
+					t.Fatal("stalled scratch retained")
+				}
+			} else {
+				if err != nil {
+					t.Fatal("progressing transfer cut off", err)
+				}
+				data, _ := os.ReadFile(file)
+				if string(data) != string(payload) {
+					t.Fatal("wrong data")
+				}
+			}
+		})
 	}
 }
