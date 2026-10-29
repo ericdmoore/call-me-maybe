@@ -97,8 +97,43 @@ func (f *passFixture) pass(contacts ...accountbook.Contact) accountbook.Book {
 	return accountbook.Book{ID: acctPasses, Revision: 1, Label: "Lobby pass", Role: accountbook.RoleLobbyPass, Contacts: contacts}
 }
 
+func (f *passFixture) logger() *slog.Logger {
+	// Privacy assertions inspect payloads, not a clock's milliseconds or the
+	// random suffix in t.TempDir. Preserve all unexpected application values.
+	return slog.New(slog.NewTextHandler(f.log, &slog.HandlerOptions{ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+		if len(groups) == 0 {
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			if a.Key == "dir" && a.Value.String() == f.dir {
+				return slog.String("dir", "/fixture/phonebook/account")
+			}
+		}
+		return a
+	}}))
+}
 func (f *passFixture) open() *passList {
-	return openPasses(f.dir, f.inventory, slog.New(slog.NewTextHandler(f.log, nil)))
+	return openPasses(f.dir, f.inventory, f.logger())
+}
+
+func TestPassPrivacyLogIgnoresOnlyNondeterministicMetadata(t *testing.T) {
+	f := newPassFixture(t)
+	f.dir = filepath.Join(f.dir, "random555")
+	record := slog.NewRecord(time.Date(2026, time.October, 29, 15, 27, 14, 555000000, time.UTC), slog.LevelWarn, "account books refused", 0)
+	record.AddAttrs(slog.String("dir", f.dir), slog.Int("holders", 2))
+	if err := f.logger().Handler().Handle(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(f.log.String(), "555") || strings.Contains(f.log.String(), "time=") {
+		t.Fatalf("nondeterministic metadata reached privacy assertion: %s", f.log.String())
+	}
+	if !strings.Contains(f.log.String(), "account books refused") || !strings.Contains(f.log.String(), "holders=2") {
+		t.Fatal("payload removed")
+	}
+	f.logger().Warn("private fixture", "number", "+15550100142")
+	if !strings.Contains(f.log.String(), "+15550100142") {
+		t.Fatal("fixture logger masked a real payload leak")
+	}
 }
 
 func admitted(p *passList, number string) string {
