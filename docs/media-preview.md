@@ -91,6 +91,10 @@ bundle is supplied. Render it with the intended voice (for example
 `Zoe (Premium)` on macOS), then retry with `--menu-bundle`. Neither receipt nor
 catalog publication is proof of real handset listening.
 
+Prepared menu bundles may contain up to 256 MiB of referenced PCM clips, with
+at most 8 MiB per clip. This includes menus for the existing library, not just
+the new book; clips are copied one at a time rather than loaded as a bundle.
+
 The same mechanism works free and offline, without a Store purchase:
 
 ```sh
