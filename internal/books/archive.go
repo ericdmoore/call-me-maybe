@@ -350,7 +350,10 @@ func copyPreviewMenus(source, root string, c Catalog) (menuBundle, error) {
 			return bundle, ErrMenuRefresh
 		}
 		total += info.Size()
-		if total > 64<<20 {
+		// A full library includes chapter-page prompts for every existing book.
+		// Keep a disk bound without refusing ordinary hundred-book libraries;
+		// each clip is still read separately under the 8 MiB bound above.
+		if total > 256<<20 {
 			return bundle, ErrMenuRefresh
 		}
 		data, err := os.ReadFile(from)

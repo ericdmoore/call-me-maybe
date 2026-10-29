@@ -19,6 +19,45 @@ func menuCatalog(n int) Catalog {
 	return c
 }
 
+func TestCopyMenusForLargeExistingLibrary(t *testing.T) {
+	source, target := t.TempDir(), t.TempDir()
+	c := menuCatalog(120)
+	// Hundreds of spoken chapter/book pages can exceed the old 64 MiB
+	// aggregate limit even when every individual clip is short.
+	pcm := make([]byte, 256<<10)
+	if err := buildMenus(source, c, "Prepared voice", func(_ string, path string) error {
+		return os.WriteFile(path, pcm, 0644)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var original menuBundle
+	if err := readJSON(filepath.Join(source, "menus.json"), &original); err != nil {
+		t.Fatal(err)
+	}
+	if len(original.Clips)*len(pcm) <= 64<<20 {
+		t.Fatal("fixture must exceed the former bundle limit")
+	}
+	bundle, err := copyPreviewMenus(source, target, c)
+	if err != nil || bundle.Catalog != digest(c) || bundle.Voice != "Prepared voice" {
+		t.Fatal("large prepared library refused", err)
+	}
+	if err := publishJSON(filepath.Join(target, "menus.json"), bundle, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadMenus(target, c); err != nil {
+		t.Fatal("copied menus are not ready", err)
+	}
+	for _, hash := range original.Clips {
+		if err := os.Truncate(filepath.Join(source, "menu-audio", hash+".sln16"), (8<<20)+2); err != nil {
+			t.Fatal(err)
+		}
+		break
+	}
+	if _, err := copyPreviewMenus(source, t.TempDir(), c); !errors.Is(err, ErrMenuRefresh) {
+		t.Fatal("oversized clip accepted", err)
+	}
+}
+
 func TestMenuPagesAndPortableKeys(t *testing.T) {
 	for _, n := range []int{1, 9, 10, 24} {
 		c := menuCatalog(n)
