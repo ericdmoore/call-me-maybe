@@ -51,8 +51,9 @@ func (e *JournalError) Unwrap() error                    { return e.cause }
 func (e *JournalError) Is(target error) bool             { return target == ErrJournal }
 func journalFailure(operation string, cause error) error { return &JournalError{operation, cause} }
 
-const MaxPreviewBytes = 1 << 20
+const MaxPreviewBytes = mediaformat.MaxPreviewBytes
 const MaxAudiobookBytes = mediaformat.MaxAudiobookBytes
+const MaxRecordedBytes = MaxAudiobookBytes
 
 type receiptSource interface {
 	List(context.Context) ([]Offer, error)
@@ -85,6 +86,40 @@ func Receive(ctx context.Context, source Source, dir string, install Install) er
 			return nil, nil, ErrChecksum
 		}
 		return func() error { return install(ctx, archive, p.SHA256) }, func() {}, nil
+	})
+}
+
+// ReceiveFiles supports the recorded-v1 transport using the same durable outbox
+// as previews and audiobook-v1. The source and installer verify archive hashes.
+func ReceiveFiles(ctx context.Context, source Source, dir string, install FileInstall) error {
+	return receive(ctx, source, dir, "recording", func(ctx context.Context, p Offer) (func() error, func(), error) {
+		transport, ok := source.(interface {
+			DownloadFile(context.Context, Offer, string) (string, error)
+		})
+		if !ok {
+			return nil, nil, errors.New("media: file transport unavailable")
+		}
+		file, err := transport.DownloadFile(ctx, p, dir)
+		if file == "" {
+			if err != nil {
+				return nil, nil, err
+			}
+			return nil, nil, ErrChecksum
+		}
+		if filepath.Dir(file) != filepath.Clean(dir) || !strings.HasPrefix(filepath.Base(file), ".archive-") {
+			return nil, nil, ErrChecksum
+		}
+		cleanup := func() { os.Remove(file) }
+		if err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+		info, err := os.Lstat(file)
+		if err != nil || !info.Mode().IsRegular() || p.Bytes <= 0 || p.Bytes > MaxRecordedBytes || info.Size() != p.Bytes {
+			cleanup()
+			return nil, nil, ErrChecksum
+		}
+		return func() error { return install(ctx, file, p.SHA256) }, cleanup, nil
 	})
 }
 

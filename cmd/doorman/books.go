@@ -35,7 +35,7 @@ func runBooks(args []string) int {
 		}
 		return 0
 	}
-	if len(args) == 0 || (args[0] != "prepare" && args[0] != "list" && args[0] != "prompts" && args[0] != "install-preview" && args[0] != "install-audiobook") {
+	if len(args) == 0 || (args[0] != "prepare" && args[0] != "list" && args[0] != "prompts" && args[0] != "install-preview" && args[0] != "install-audiobook" && args[0] != "install-recorded") {
 		fmt.Fprintln(os.Stderr, "usage: doorman books prepare --source catalog.json [--library directory] | books list [--library directory] | books prompts --library directory [--voice Samantha] [--shelf id,id ...] | books install-preview --archive local.cmmpack [--library directory] | books install-audiobook --archive local.cmmpack [--library directory]")
 		return 2
 	}
@@ -54,6 +54,18 @@ func runBooks(args []string) int {
 	})
 	if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
 		return 2
+	}
+	if args[0] == "install-recorded" {
+		if *archive == "" {
+			fmt.Fprintln(os.Stderr, "books install-recorded requires --archive")
+			return 2
+		}
+		if err := books.ImportLocalRecordedWithMenus(ctx, *archive, "", *library, *menuBundle); err != nil {
+			fmt.Fprintln(os.Stderr, "books: recorded installation failed:", err)
+			return 1
+		}
+		fmt.Fprintln(os.Stdout, "Recording installed in the local Books library.")
+		return 0
 	}
 	if args[0] == "install-audiobook" {
 		if *archive == "" {

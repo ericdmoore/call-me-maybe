@@ -25,6 +25,9 @@ func TestAudiobookTransportRequiresExplicitSKUAndStreamsApprovedBytes(t *testing
 	redirect := false
 	broken := false
 	c := clientServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Doorman-Media") != "" {
+			t.Error("mixed full-book protocols")
+		}
 		if r.Header.Get("X-Doorman-Media-Format") != "audiobook-v1" {
 			t.Error("missing full-book opt-in")
 		}

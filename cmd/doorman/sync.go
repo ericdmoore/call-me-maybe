@@ -367,11 +367,19 @@ func runSyncMedia(args []string) int {
 	state := fs.String("state", "/var/lib/doorman", "private account state directory")
 	library := fs.String("library", books.DefaultLibrary, "prepared local playback library")
 	menuBundle := fs.String("menu-bundle", "", "prepared menu bundle matching the next catalog")
+	fullBooks := fs.Bool("full-books", false, "opt into recorded-v1 delivery and disk-backed installation")
 	audiobookSKU := fs.String("audiobook-sku", "", "explicitly opt into a full recorded audiobook SKU and disk-backed installation")
 	if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
 		return 2
 	}
+	if *fullBooks && *audiobookSKU != "" {
+		fmt.Fprintln(os.Stderr, "sync media: select either --full-books or --audiobook-sku")
+		return 2
+	}
 	source, err := account.New(*state).SandboxMedia(*origin)
+	if *fullBooks {
+		source, err = account.New(*state).RecordedMedia(*origin)
+	}
 	if *audiobookSKU != "" {
 		source, err = account.New(*state).SandboxAudiobook(*origin, *audiobookSKU)
 	}
@@ -383,7 +391,7 @@ func runSyncMedia(args []string) int {
 		}
 		return 2
 	}
-	if args[0] == "once" && *audiobookSKU != "" {
+	if args[0] == "once" && (*audiobookSKU != "" || *fullBooks) {
 		if err := books.CheckAudiobookTools(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
@@ -403,7 +411,12 @@ func runSyncMedia(args []string) int {
 		return 0
 	}
 	var installErr error
-	if *audiobookSKU != "" {
+	if *fullBooks {
+		err = mediadelivery.ReceiveFiles(ctx, source, filepath.Join(*state, "media-preview"), func(ctx context.Context, file, hash string) error {
+			installErr = books.ImportMediaWithMenus(ctx, file, hash, *library, *menuBundle)
+			return installErr
+		})
+	} else if *audiobookSKU != "" {
 		err = mediadelivery.ReceiveAudiobook(ctx, source, filepath.Join(*state, "media-audiobook"), func(ctx context.Context, file, hash string) error {
 			installErr = books.ImportAudiobook(ctx, file, hash, *library, *menuBundle)
 			return installErr

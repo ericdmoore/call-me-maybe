@@ -146,31 +146,7 @@ func publishImported(ctx context.Context, root string, b Book, stage, menuSource
 		return err
 	}
 	catalog = next
-	entries, err := os.ReadDir(stage)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		file, err := os.Open(filepath.Join(stage, entry.Name()))
-		if err != nil {
-			return err
-		}
-		err = file.Sync()
-		closeErr := file.Close()
-		if err != nil {
-			return err
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-	}
-	directory, err := os.Open(stage)
-	if err != nil {
-		return err
-	}
-	err = directory.Sync()
-	directory.Close()
-	if err != nil {
+	if err := syncImportTree(stage); err != nil {
 		return err
 	}
 	target := bookDir(root, b)
@@ -183,23 +159,40 @@ func publishImported(ctx context.Context, root string, b Book, stage, menuSource
 	} else {
 		// A prior attempt may have published audio but lost its receipt/index.
 		// Reuse only identical validated bytes, never a same-sized corrupt cache.
-		entries, err := os.ReadDir(stage)
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			expected, err := os.ReadFile(filepath.Join(stage, entry.Name()))
+		err := filepath.WalkDir(stage, func(name string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			rel, err := filepath.Rel(stage, name)
 			if err != nil {
 				return err
 			}
-			info, err := os.Lstat(filepath.Join(target, entry.Name()))
-			if err != nil || !info.Mode().IsRegular() || info.Size() != int64(len(expected)) {
+			other := filepath.Join(target, rel)
+			info, err := os.Lstat(other)
+			if err != nil {
 				return errRecordingRepair
 			}
-			actual, err := os.ReadFile(filepath.Join(target, entry.Name()))
+			if entry.IsDir() {
+				if !info.IsDir() {
+					return errRecordingRepair
+				}
+				return nil
+			}
+			expected, err := os.ReadFile(name)
+			if err != nil {
+				return err
+			}
+			if !info.Mode().IsRegular() || info.Size() != int64(len(expected)) {
+				return errRecordingRepair
+			}
+			actual, err := os.ReadFile(other)
 			if err != nil || !bytes.Equal(actual, expected) {
 				return errRecordingRepair
 			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
 	}
 	parent, err := os.Open(root)
@@ -382,4 +375,29 @@ func copyPreviewMenus(source, root string, c Catalog) (menuBundle, error) {
 		}
 	}
 	return bundle, nil
+}
+
+// Recordings may contain nested segment directories. Flush children before the
+// stage directory, preserving the publication durability of flat audiobooks.
+func syncImportTree(stage string) error {
+	var directories []string
+	err := filepath.WalkDir(stage, func(name string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			directories = append(directories, name)
+			return nil
+		}
+		return syncFile(name)
+	})
+	if err != nil {
+		return err
+	}
+	for i := len(directories) - 1; i >= 0; i-- {
+		if err := syncFile(directories[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }

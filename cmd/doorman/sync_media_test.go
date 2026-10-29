@@ -49,3 +49,13 @@ func TestSyncMediaExplainsInvalidAudiobookSKU(t *testing.T) {
 		t.Fatal(code, out)
 	}
 }
+
+func TestSyncMediaRejectsConflictingFullBookProtocols(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "unopened")
+	if runSyncMedia([]string{"once", "--source", "https://example.invalid", "--state", state, "--full-books", "--audiobook-sku", "sandbox-book"}) != 2 {
+		t.Fatal("accepted conflicting protocols")
+	}
+	if _, err := os.Stat(state); !os.IsNotExist(err) {
+		t.Fatal("opened enrolment for ambiguous protocol")
+	}
+}

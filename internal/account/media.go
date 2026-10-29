@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -28,10 +29,13 @@ var mediaHash = regexp.MustCompile(`^[a-f0-9]{64}$`)
 // service response. Credentials remain inside account, and redirects are refused.
 // Constructing one does not enable background downloads or change ordinary sync.
 type MediaSource struct {
+	fullBookSKU string
 	account     *Client
 	origin      string
-	fullBookSKU string
 	downloads   map[string]string
+	expires     map[string]int64
+	maxBytes    int64
+	idleTimeout time.Duration
 }
 
 type MediaOffer = mediadelivery.Offer
@@ -41,7 +45,7 @@ func (c *Client) SandboxMedia(origin string) (*MediaSource, error) {
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return nil, ErrProtocol
 	}
-	return &MediaSource{account: c, origin: strings.TrimSuffix(origin, "/"), downloads: map[string]string{}}, nil
+	return &MediaSource{account: c, origin: strings.TrimSuffix(origin, "/"), downloads: map[string]string{}, maxBytes: MaxPreviewBytes}, nil
 }
 
 // SandboxAudiobook is an explicit opt-in to a selected full-book SKU. Old preview
@@ -55,10 +59,11 @@ func (c *Client) SandboxAudiobook(origin, sku string) (*MediaSource, error) {
 		return nil, err
 	}
 	source.fullBookSKU = sku
+	source.maxBytes = mediadelivery.MaxAudiobookBytes
 	return source, nil
 }
 
-func (s *MediaSource) response(ctx context.Context, method, path string, data []byte) (*http.Response, error) {
+func (s *MediaSource) response(ctx context.Context, method, path string, data []byte, stream bool) (*http.Response, error) {
 	_, _, token, err := s.account.syncCredential(ctx)
 	if err != nil {
 		return nil, err
@@ -71,8 +76,13 @@ func (s *MediaSource) response(ctx context.Context, method, path string, data []
 	req.Header.Set("Content-Type", "application/json")
 	if s.fullBookSKU != "" {
 		req.Header.Set("X-Doorman-Media-Format", "audiobook-v1")
+	} else if s.maxBytes > MaxPreviewBytes {
+		req.Header.Set("X-Doorman-Media", "recorded-v1")
 	}
 	client := *s.account.http
+	if stream {
+		client.Timeout = 0
+	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := client.Do(req)
 	if err != nil {
@@ -86,8 +96,9 @@ func (s *MediaSource) response(ctx context.Context, method, path string, data []
 	}
 	return resp, nil
 }
+
 func (s *MediaSource) request(ctx context.Context, method, path string, data []byte, limit int64) ([]byte, error) {
-	resp, err := s.response(ctx, method, path, data)
+	resp, err := s.response(ctx, method, path, data, false)
 	if err != nil {
 		return nil, err
 	}
@@ -105,11 +116,9 @@ func (s *MediaSource) request(ctx context.Context, method, path string, data []b
 func (s *MediaSource) List(ctx context.Context) ([]MediaOffer, error) {
 	path := mediaPath
 	expectedSchema := "sandbox-pack-delivery-v1"
-	maxBytes := int64(MaxPreviewBytes)
 	if s.fullBookSKU != "" {
 		path += "?sku=" + url.QueryEscape(s.fullBookSKU)
 		expectedSchema = "sandbox-pack-delivery-v2"
-		maxBytes = mediadelivery.MaxAudiobookBytes
 	}
 	data, err := s.request(ctx, http.MethodGet, path, nil, 64<<10)
 	if err != nil {
@@ -130,14 +139,23 @@ func (s *MediaSource) List(ctx context.Context) ([]MediaOffer, error) {
 	if json.Unmarshal(data, &wire) != nil || wire.Schema != expectedSchema || len(wire.Packs) > 16 {
 		return nil, ErrProtocol
 	}
+	s.downloads = map[string]string{}
+	s.expires = map[string]int64{}
 	offers := make([]MediaOffer, 0, len(wire.Packs))
 	seen := map[string]bool{}
 	for _, p := range wire.Packs {
 		u, e := url.Parse(p.Download.URL)
-		if e != nil || u.Scheme+"://"+u.Host != s.origin || u.User != nil || u.Fragment != "" || u.Path != mediaPath+"/download" || p.Download.Authorization != "sync-bearer" || p.Download.ExpiresAt <= time.Now().UnixMilli() || p.Receipts != mediaPath+"/receipts" || !mediaID.MatchString(p.Delivery) || seen[p.Delivery] || !mediaHash.MatchString(p.SHA256) || p.Bytes <= 0 || p.Bytes > maxBytes || (s.fullBookSKU != "" && p.SKU != s.fullBookSKU) || p.Sequence < 0 || p.Sequence >= 1_000_000_000 || len(p.SKU) == 0 || len(p.SKU) > 128 || len(p.Version) == 0 || len(p.Version) > 64 || !mediaState(p.State) {
+		if e != nil || u.Scheme+"://"+u.Host != s.origin || u.User != nil || u.Fragment != "" || u.Path != mediaPath+"/download" || p.Download.Authorization != "sync-bearer" || p.Download.ExpiresAt <= time.Now().UnixMilli() || p.Receipts != mediaPath+"/receipts" || !mediaID.MatchString(p.Delivery) || seen[p.Delivery] || !mediaHash.MatchString(p.SHA256) || p.Bytes <= 0 || p.Bytes > mediadelivery.MaxRecordedBytes || (s.fullBookSKU != "" && p.SKU != s.fullBookSKU) || p.Sequence < 0 || p.Sequence >= 1_000_000_000 || len(p.SKU) == 0 || len(p.SKU) > 128 || len(p.Version) == 0 || len(p.Version) > 64 || !mediaState(p.State) {
 			return nil, ErrProtocol
 		}
 		seen[p.Delivery] = true
+		if p.Bytes > s.maxBytes {
+			continue
+		}
+		if s.expires == nil {
+			s.expires = map[string]int64{}
+		}
+		s.expires[p.Delivery+"/"+p.SHA256] = p.Download.ExpiresAt
 		s.downloads[p.Delivery+"/"+p.SHA256] = u.RequestURI()
 		offers = append(offers, p.MediaOffer)
 	}
@@ -202,6 +220,72 @@ func (s *MediaSource) Receipt(ctx context.Context, p MediaOffer, sequence int64,
 	return nil
 }
 
+// RecordedMedia is a separate operator opt-in. Preview callers retain their
+// original 1 MiB limit; the full-book lane streams at most 256 MiB to disk.
+func (c *Client) RecordedMedia(origin string) (*MediaSource, error) {
+	source, err := c.SandboxMedia(origin)
+	if err == nil {
+		source.maxBytes = mediadelivery.MaxRecordedBytes
+	}
+	return source, err
+}
+
+// DownloadFile never persists signed addresses or credentials. A failed,
+// interrupted, oversized or hash-mismatched transfer deletes its scratch file.
+func (s *MediaSource) DownloadFile(ctx context.Context, p MediaOffer, dir string) (name string, err error) {
+	download := s.downloads[p.Delivery+"/"+p.SHA256]
+	if !strings.HasPrefix(download, mediaPath+"/download?") || p.Bytes <= 0 || p.Bytes > s.maxBytes || !mediaHash.MatchString(p.SHA256) {
+		return "", ErrProtocol
+	}
+	resp, cleanup, err := s.openDownload(ctx, p)
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+	if resp.ContentLength >= 0 && resp.ContentLength != p.Bytes {
+		return "", mediadelivery.ErrChecksum
+	}
+	f, err := os.CreateTemp(dir, ".archive-")
+	if err != nil {
+		return "", ErrNetwork
+	}
+	name = f.Name()
+	defer func() {
+		f.Close()
+		if err != nil {
+			os.Remove(name)
+			name = ""
+		}
+	}()
+	hash := sha256.New()
+	n, copyErr := io.Copy(io.MultiWriter(f, hash), io.LimitReader(resp.Body, p.Bytes+1))
+	if copyErr != nil {
+		return name, ErrNetwork
+	}
+	if n != p.Bytes || hex.EncodeToString(hash.Sum(nil)) != p.SHA256 {
+		return name, mediadelivery.ErrChecksum
+	}
+	if f.Sync() != nil {
+		return name, ErrNetwork
+	}
+	return name, nil
+}
+
+// progressReader resets the inactivity deadline only after receiving bytes.
+type progressReader struct {
+	io.Reader
+	timer *time.Timer
+	idle  time.Duration
+}
+
+func (r progressReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if n > 0 {
+		r.timer.Reset(r.idle)
+	}
+	return n, err
+}
+
 // DownloadTo streams an approved response with an exact byte bound. The receiver
 // hashes while staging before publication. Provider URLs and credentials stay here.
 func (s *MediaSource) DownloadTo(ctx context.Context, p MediaOffer, dst io.Writer) error {
@@ -209,11 +293,11 @@ func (s *MediaSource) DownloadTo(ctx context.Context, p MediaOffer, dst io.Write
 	if s.fullBookSKU == "" || p.SKU != s.fullBookSKU || !strings.HasPrefix(download, mediaPath+"/download?") || p.Bytes <= 0 || p.Bytes > mediadelivery.MaxAudiobookBytes || !mediaHash.MatchString(p.SHA256) {
 		return ErrProtocol
 	}
-	resp, err := s.response(ctx, http.MethodGet, download, nil)
+	resp, cleanup, err := s.openDownload(ctx, p)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer cleanup()
 	if resp.ContentLength >= 0 && resp.ContentLength != p.Bytes {
 		return mediadelivery.ErrChecksum
 	}
@@ -245,4 +329,39 @@ func (w *mediaWriter) Write(data []byte) (int, error) {
 		w.err = err
 	}
 	return n, err
+}
+
+func (s *MediaSource) openDownload(ctx context.Context, p MediaOffer) (*http.Response, func(), error) {
+	download := s.downloads[p.Delivery+"/"+p.SHA256]
+	if expiry, ok := s.expires[p.Delivery+"/"+p.SHA256]; ok && expiry <= time.Now().Add(30*time.Second).UnixMilli() {
+		if _, err := s.List(ctx); err != nil {
+			return nil, nil, err
+		}
+		download = s.downloads[p.Delivery+"/"+p.SHA256]
+		if s.expires[p.Delivery+"/"+p.SHA256] <= time.Now().UnixMilli() {
+			return nil, nil, ErrProtocol
+		}
+	}
+	// A progressing transfer may take hours on a slow link. Cancel only
+	// when the caller stops it or the connection makes no progress for a minute.
+	transfer, cancel := context.WithCancel(ctx)
+	idle := s.idleTimeout
+	if idle <= 0 {
+		idle = time.Minute
+	}
+	timer := time.AfterFunc(idle, cancel)
+	resp, err := s.response(transfer, http.MethodGet, download, nil, true)
+	if err != nil {
+		timer.Stop()
+		cancel()
+		return nil, nil, err
+	}
+	original := resp.Body
+	resp.Body = progressReadCloser{Reader: progressReader{original, timer, idle}, Closer: original}
+	return resp, func() { original.Close(); timer.Stop(); cancel() }, nil
+}
+
+type progressReadCloser struct {
+	io.Reader
+	io.Closer
 }
