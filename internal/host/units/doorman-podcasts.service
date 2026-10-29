@@ -1,0 +1,24 @@
+[Unit]
+Description=Call Me Maybe — prepare subscribed podcast episodes
+After=network-online.target asterisk.service
+Wants=network-online.target
+ConditionPathExists=/var/spool/call-me-maybe/podcasts/subscriptions.json
+
+[Service]
+Type=oneshot
+User=asterisk
+Group=doorman
+ExecStart=/opt/call-me-maybe/bin/doorman podcasts refresh --scheduled
+TimeoutStartSec=45min
+Nice=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/var/spool/call-me-maybe/podcasts
+ReadWritePaths=/var/spool/asterisk
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=512M
+TasksMax=64
+StandardOutput=journal
+StandardError=journal

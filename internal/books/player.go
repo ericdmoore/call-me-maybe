@@ -81,10 +81,10 @@ func startStream(ctx context.Context, state, input string, seconds float64, spee
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	s := &stream{windows: make(chan window), cancel: cancel, done: make(chan struct{}), dir: dir}
-	args := []string{"-nostdin", "-v", "error"}
+	args := []string{"-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe"}
 	if filepath.Ext(input) == ".ffconcat" {
-		args = append(args, "-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "1")
-	} else {
+		args = append(args, "-f", "concat", "-safe", "1")
+	} else if filepath.Ext(input) != ".opus" {
 		args = append(args, "-f", "s16le", "-ar", "16000", "-ac", "1")
 	}
 	args = append(args, "-ss", fmt.Sprintf("%.6f", seconds), "-i", input, "-af", fmt.Sprintf("atempo=%.1f", float64(speed)/10), "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1")
@@ -169,6 +169,9 @@ func (m *menu) listen(b Book, p *Position) error {
 	defer stop()
 	defer func() { _ = m.saveProgress(b, *p) }()
 	for {
+		if (m.allowed != nil && !m.allowed(m.handset)) || (m.allowedBook != nil && !m.allowedBook(m.handset, b)) {
+			return errors.New("podcast subscription ended")
+		}
 		if err := m.ctx.Err(); err != nil {
 			return err
 		}

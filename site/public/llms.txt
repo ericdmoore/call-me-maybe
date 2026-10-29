@@ -215,3 +215,21 @@ within a second; invalid edits retain the last good endpoint across restart.
 transport key, through the revision-checked sync queue. Snapshots expose only
 domain/configured state; private prefix edits still advance the revision.
 An applied receipt requires the running daemon's exact accepted file digest.
+
+## Public podcast subscriptions
+
+`doorman schema podcasts` and `doorman podcasts check` describe and validate the
+optional JSON subscription file. `doorman podcasts subscribe --handset <id>
+--feed-url <public-HTTPS-url> --title <show>` configures a feed; `unsubscribe`
+removes that handset/feed pair. Schema 1 preserves the pinned Brains On pilot;
+schema 2 supports eight public feeds and multiple shows per handset. Generic
+sync uses the separate `podcast.subscribeFeed` capability, never assumed from
+pilot support. A background worker prepares up to two eligible episodes per
+show; *7637 plays only that handset's subscriptions. Shared Opus cache, separate
+bookmarks, bounded fetching and last-good-on-failure are in docs/PODCASTS.md.
+
+Scheduled podcast refresh notices subscription changes every minute but polls
+existing feeds hourly with validators. Publisher failures retain only that
+source's last-good episodes; other shows still refresh. Invalid optional podcast
+configuration does not stop policy/phonebook/webhook sync. Public-only metadata
+is readable by the Asterisk AGI inside protected service-owned directories.

@@ -13,6 +13,7 @@ import (
 
 	"callmemaybe/internal/accountbook"
 	"callmemaybe/internal/configcheck"
+	"callmemaybe/internal/podcastconfig"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/syncwire"
 )
@@ -149,7 +150,7 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 	if saved {
 		// A saved receipt is already the server's answer. Later edits can only
 		// stop it being upgraded; they never turn it into a conflict.
-		if landed && m.Applied != nil && m.Applied(m.paths, o.files) {
+		if landed && m.applied(o.files, item) {
 			result.Status = syncwire.ReceiptStatusApplied
 			return save()
 		}
@@ -163,7 +164,7 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 		result.Status = syncwire.ReceiptStatusSaved
 		result.Revision = &current.Revision
 		result.Problem = nil
-		if m.Applied != nil && m.Applied(m.paths, o.files) {
+		if m.applied(o.files, item) {
 			result.Status = syncwire.ReceiptStatusApplied
 		}
 		return save()
@@ -235,11 +236,11 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 		var done bool
 		switch {
 		case w.Before == "":
-			done, err = atomicCreateMode(w.Path, view[w.Path], w.Path == m.paths.Webhook)
+			done, err = atomicCreateMode(w.Path, view[w.Path], w.Path == m.paths.Webhook, w.Path == m.paths.Podcasts)
 		case w.After == "":
 			done, err = atomicRemove(w.Path, o.files[w.Path])
 		default:
-			done, err = atomicReplaceMode(w.Path, o.files[w.Path], view[w.Path], w.Path == m.paths.Webhook)
+			done, err = atomicReplaceMode(w.Path, o.files[w.Path], view[w.Path], w.Path == m.paths.Webhook, w.Path == m.paths.Podcasts)
 		}
 		if err != nil && done {
 			// Leave prepared intent intact. The next pass recognises the
@@ -274,7 +275,7 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 			result.Status, result.Problem = syncwire.ReceiptStatusConflict, problem(syncwire.BaseChanged)
 		}
 	}
-	if result.Status == syncwire.ReceiptStatusSaved && m.Applied != nil && m.Applied(m.paths, next.files) {
+	if result.Status == syncwire.ReceiptStatusSaved && m.applied(next.files, item) {
 		result.Status = syncwire.ReceiptStatusApplied
 	}
 	return save()
@@ -355,6 +356,45 @@ func (m *Machine) plan(item syncwire.QueueItem, list []syncwire.Verb, current sy
 	for _, v := range list {
 		raw, _ := v.MarshalJSON()
 		switch verbName(raw) {
+		case "podcast.subscribe", "podcast.subscribeFeed":
+			if len(list) != 1 || m.paths.Podcasts == "" || current.Configuration.Podcasts == nil {
+				return refuse(syncwire.Unsupported)
+			}
+			var sub struct {
+				Handset string          `json:"handset"`
+				Feed    json.RawMessage `json:"feed"`
+				Enabled bool            `json:"enabled"`
+			}
+			if json.Unmarshal(raw, &sub) != nil {
+				return refuse(syncwire.Invalid)
+			}
+			known := false
+			for _, h := range current.Configuration.Handsets {
+				known = known || h.Id == sub.Handset
+			}
+			if !known {
+				return refuse(syncwire.Invalid)
+			}
+			var after []byte
+			var err error
+			if verbName(raw) == podcastconfig.FeedCapability {
+				var source podcastconfig.Source
+				if json.Unmarshal(sub.Feed, &source) != nil {
+					return refuse(syncwire.Invalid)
+				}
+				after, err = podcastconfig.SelectFeed(view[m.paths.Podcasts], sub.Handset, source, sub.Enabled)
+			} else {
+				var feed string
+				if json.Unmarshal(sub.Feed, &feed) != nil {
+					return refuse(syncwire.Invalid)
+				}
+				after, err = podcastconfig.Select(view[m.paths.Podcasts], sub.Handset, feed, sub.Enabled)
+			}
+			if err != nil {
+				return refuse(syncwire.Invalid)
+			}
+			view[m.paths.Podcasts] = after
+			touch(m.paths.Podcasts)
 		case "webhook.set":
 			if len(list) != 1 || m.paths.Webhook == "" || m.OpenWebhook == nil {
 				return refuse(syncwire.Unsupported)
@@ -533,6 +573,7 @@ func (m *Machine) validate(o *observed, view map[string][]byte) *refusal {
 	if err != nil {
 		return refuse(syncwire.Invalid)
 	}
+
 	books := map[string][]byte{}
 	if m.paths.Phonebooks != "" {
 		dir := filepath.Join(m.paths.Phonebooks, accountbook.Dir)
@@ -546,4 +587,15 @@ func (m *Machine) validate(o *observed, view map[string][]byte) *refusal {
 		return refuse(syncwire.Invalid)
 	}
 	return nil
+}
+
+func (m *Machine) applied(files map[string][]byte, item syncwire.QueueItem) bool {
+	list, ok := verbs(item)
+	if ok && len(list) == 1 {
+		raw, _ := list[0].MarshalJSON()
+		if verbName(raw) == podcastconfig.Capability || verbName(raw) == podcastconfig.FeedCapability {
+			return true
+		}
+	}
+	return m.Applied != nil && m.Applied(m.paths, files)
 }

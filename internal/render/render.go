@@ -674,6 +674,13 @@ exten => *2665,1,Answer()
  same => n,AGI(/opt/call-me-maybe/bin/doorman,books,menu)
  same => n,Hangup()
 
+; *PODS shares the authenticated endpoint marker and curfew admission.
+exten => *7637,1,Answer()
+ same => n,Set(CHANNEL(accountcode)=cmm-podcasts)
+ same => n,Set(AGISIGHUP=no)
+ same => n,AGI(/opt/call-me-maybe/bin/doorman,podcasts,menu)
+ same => n,Hangup()
+
 ; Dial-a-Story (#155): a caller on a public line who chose a shelf. doorman
 ; releases them here (ARI continue) with the shelf and the line's limits set
 ; as channel variables; nothing includes this context and no handset can dial

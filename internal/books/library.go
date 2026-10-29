@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -42,6 +43,8 @@ type Catalog struct {
 }
 
 type Book struct {
+	SourceHash  string    `json:"sourceHash,omitempty"`
+	Feed        string    `json:"feed,omitempty"`
 	Storage     string    `json:"storage,omitempty"`
 	ID          string    `json:"id"`
 	Title       string    `json:"title"`
@@ -66,6 +69,7 @@ type Chapter struct {
 	Title        string    `json:"title"`
 	Audio        string    `json:"audio"`
 	Seconds      float64   `json:"seconds,omitempty"`
+	Bytes        int64     `json:"bytes,omitempty"`
 }
 
 func readJSON(path string, dst any) error {
@@ -142,8 +146,14 @@ func validate(c Catalog, prepared bool) error {
 			return errors.New("invalid book identity or chapters")
 		}
 		seen[b.ID] = true
-		if b.Origin != "cli" && b.Origin != "store" && b.Origin != "browser" {
+		if b.Origin != "cli" && b.Origin != "store" && b.Origin != "browser" && b.Origin != "podcast" {
 			return errors.New("book origin must be explicit")
+		}
+		if b.SourceHash != "" && (b.Origin != "podcast" || !revisionPattern.MatchString(b.SourceHash)) {
+			return errors.New("invalid podcast source revision")
+		}
+		if b.Feed != "" && (b.Origin != "podcast" || !idPattern.MatchString(b.Feed)) {
+			return errors.New("invalid podcast source")
 		}
 		if b.Storage != "" && (!prepared || b.Storage != "opus" || b.IndexSHA256 != "") {
 			return errors.New("unsupported recording storage")
@@ -165,6 +175,9 @@ func validate(c Catalog, prepared bool) error {
 			audioValid := validChapterAudio(ch, i)
 			if b.Storage == "opus" {
 				audioValid = ch.Audio == chapterName(i)+".ffconcat" && ch.SegmentCount == 0
+			}
+			if b.Origin == "podcast" {
+				audioValid = ch.Audio == chapterName(i)+".opus" && ch.SegmentCount == 0
 			}
 			if prepared && (!audioValid || ch.Seconds <= 0 || ch.Seconds > 86400) {
 				return errors.New("invalid prepared chapter")
@@ -188,21 +201,48 @@ func Load(root string) (Catalog, error) {
 	return c, err
 }
 
-func ready(root string, b Book) bool {
-	c, err := Load(root)
-	if err != nil {
-		return false
-	}
-	found := false
-	for _, live := range c.Books {
-		if live.ID == b.ID && live.Revision == b.Revision {
-			found = true
-			break
+func ready(root string, b Book) bool { return artifactReady(root, b, true) }
+func artifactReady(root string, b Book, live bool) bool {
+	if b.Origin == "podcast" {
+		paths := []string{filepath.Join(bookDir(root, b), "title.sln16")}
+		for i := range b.Chapters {
+			paths = append(paths, filepath.Join(bookDir(root, b), chapterName(i)+"-title.sln16"))
+		}
+		for name := range prompts {
+			if !live {
+				continue
+			}
+			set := "prompts-v1"
+			if _, err := os.Stat(filepath.Join(root, "prompts-podcasts-v2")); err == nil {
+				set = "prompts-podcasts-v2"
+			}
+			paths = append(paths, filepath.Join(root, set, name+".sln16"))
+		}
+		for _, path := range paths {
+			st, err := os.Lstat(path)
+			if err != nil || !st.Mode().IsRegular() || st.Size() == 0 {
+				return false
+			}
 		}
 	}
-	if !found {
-		return false
+	var err error
+	if live {
+		c, err := Load(root)
+		if err != nil {
+			return false
+		}
+		found := false
+		for _, live := range c.Books {
+			if live.ID == b.ID && live.Revision == b.Revision {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
 	}
+
 	if b.IndexSHA256 != "" {
 		b, err = hydrateRecorded(root, b)
 		if err != nil {
@@ -218,7 +258,7 @@ func ready(root string, b Book) bool {
 		}
 		if len(ch.Segments) == 0 {
 			st, err := os.Lstat(filepath.Join(bookDir(root, b), ch.Audio))
-			if err != nil || !st.Mode().IsRegular() || st.Size() != int64(math.Round(ch.Seconds*sampleRate*2)) {
+			if err != nil || !st.Mode().IsRegular() || !audioSizeOK(b, ch, st.Size()) {
 				return false
 			}
 		} else {
@@ -243,6 +283,20 @@ func ready(root string, b Book) bool {
 // Old revisions are deliberately retained; remove them only when no call uses
 // them. This is an import, never a live TTS or paid synthesis operation.
 func Prepare(ctx context.Context, source, root string) error {
+	return prepare(ctx, source, root, nil)
+}
+
+// PreparePodcasts retains already verified immutable episodes and publishes the
+// complete next catalog once. A failed addition never replaces the live catalog.
+func PreparePodcasts(ctx context.Context, source, root string, retained []Book) error {
+	for _, b := range retained {
+		if b.Origin != "podcast" || !artifactReady(root, b, false) {
+			return errors.New("retained podcast unavailable")
+		}
+	}
+	return prepare(ctx, source, root, retained)
+}
+func prepare(ctx context.Context, source, root string, retained []Book) error {
 	var c Catalog
 	if err := readJSON(source, &c); err != nil {
 		return err
@@ -268,39 +322,16 @@ func Prepare(ctx context.Context, source, root string) error {
 	}
 	defer unlock()
 	for i := range c.Books {
-		b := &c.Books[i]
-		stage, err := os.MkdirTemp(root, ".prepare-")
-		if err != nil {
-			return err
-		}
-		err = prepareBook(ctx, source, stage, b)
-		if err == nil {
-			target := bookDir(root, *b)
-			if info, statErr := os.Lstat(target); os.IsNotExist(statErr) {
-				err = os.Chmod(stage, 0o755)
-				if err == nil {
-					err = os.Rename(stage, target)
-				}
-			} else if statErr != nil || !info.IsDir() {
-				err = errors.New("recording revision directory unavailable")
-			} else {
-				// Do not publish an index pointing at a damaged old revision.
-				for _, ch := range b.Chapters {
-					st, e := os.Lstat(filepath.Join(target, ch.Audio))
-					if e != nil || !st.Mode().IsRegular() || st.Size() != int64(math.Round(ch.Seconds*sampleRate*2)) {
-						err = errors.New("existing recording revision is damaged")
-						break
-					}
-				}
-			}
-		}
-		_ = os.RemoveAll(stage)
-		if err != nil {
+		if err := prepareEdition(ctx, source, root, &c.Books[i]); err != nil {
 			return err
 		}
 	}
 	// Version the small common prompt set independently of recording editions.
-	promptRoot := filepath.Join(root, "prompts-v1")
+	promptSet := "prompts-v1"
+	if len(c.Books) > 0 && c.Books[0].Origin == "podcast" || len(retained) > 0 {
+		promptSet = "prompts-podcasts-v2"
+	}
+	promptRoot := filepath.Join(root, promptSet)
 	if _, err := os.Stat(promptRoot); os.IsNotExist(err) {
 		stage, err := os.MkdirTemp(root, ".prompts-")
 		if err != nil {
@@ -308,6 +339,16 @@ func Prepare(ctx context.Context, source, root string) error {
 		}
 		defer os.RemoveAll(stage)
 		for name, words := range prompts {
+			if promptSet == "prompts-podcasts-v2" {
+				switch name {
+				case "books":
+					words = "Here are your podcast episodes."
+				case "empty":
+					words = "There are no podcast episodes ready. Zero to go back."
+				case "book":
+					words = "Two: start from the beginning. Star to repeat. Zero: back to episodes."
+				}
+			}
 			if err := speak(ctx, filepath.Join(stage, name+".sln16"), words); err != nil {
 				return err
 			}
@@ -319,10 +360,67 @@ func Prepare(ctx context.Context, source, root string) error {
 			return err
 		}
 	}
+	c.Books = append(c.Books, retained...)
+	if err := validate(c, true); err != nil {
+		return err
+	}
 	if err := publishJSON(filepath.Join(root, "catalog.json"), c, 0o644); err != nil {
 		return err
 	}
 	return retireStaleMenus(root)
+}
+
+// StagePodcast prepares one immutable edition without publishing a new menu.
+// The worker can bound the working set and isolate episode failures before committing.
+func StagePodcast(ctx context.Context, root string, b Book) (Book, error) {
+	if b.Origin != "podcast" {
+		return b, errors.New("not a podcast")
+	}
+	if err := validate(Catalog{Schema: 1, Books: []Book{b}}, false); err != nil {
+		return b, err
+	}
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return b, err
+	}
+	unlock, err := lockLibrary(root)
+	if err != nil {
+		return b, err
+	}
+	defer unlock()
+	err = prepareEdition(ctx, "", root, &b)
+	return b, err
+}
+func prepareEdition(ctx context.Context, source, root string, b *Book) error {
+	stage, err := os.MkdirTemp(root, ".prepare-")
+	if err != nil {
+		return err
+	}
+	err = prepareBook(ctx, source, stage, b)
+	if err == nil {
+		target := bookDir(root, *b)
+		if info, statErr := os.Lstat(target); os.IsNotExist(statErr) {
+			err = os.Chmod(stage, 0o755)
+			if err == nil {
+				err = os.Rename(stage, target)
+			}
+		} else if statErr != nil || !info.IsDir() {
+			err = errors.New("recording revision directory unavailable")
+		} else {
+			// Do not publish an index pointing at a damaged old revision.
+			for _, ch := range b.Chapters {
+				st, e := os.Lstat(filepath.Join(target, ch.Audio))
+				if e != nil || !st.Mode().IsRegular() || !audioSizeOK(*b, ch, st.Size()) {
+					err = errors.New("existing recording revision is damaged")
+					break
+				}
+			}
+		}
+	}
+	_ = os.RemoveAll(stage)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // Reject catalogs that cannot fit even with the shortest duration encoding,
@@ -365,9 +463,23 @@ func prepareBook(ctx context.Context, source, stage string, b *Book) error {
 		if err != nil || !st.Mode().IsRegular() {
 			return errors.New("chapter source must be a local regular file")
 		}
-		output := filepath.Join(stage, chapterName(i)+".sln16")
+		sourceSeconds := float64(0)
+		if b.Origin == "podcast" {
+			sourceSeconds, err = sourceDuration(ctx, input)
+			if err != nil {
+				return err
+			}
+		}
+		output := filepath.Join(stage, chapterName(i)+audioSuffix(*b))
 		job, cancel := context.WithTimeout(ctx, 30*time.Minute)
-		err = exec.CommandContext(job, "ffmpeg", "-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe", "-i", input, "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "-y", output).Run()
+		args := []string{"-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe", "-i", input, "-map", "0:a:0", "-vn"}
+		if b.Origin == "podcast" {
+			args = append(args, "-t", "7200", "-ac", "2", "-ar", "48000", "-c:a", "libopus", "-b:a", "48k", "-vbr", "on", "-fflags", "+bitexact", "-map_metadata", "-1", "-f", "opus")
+		} else {
+			args = append(args, "-ac", "1", "-ar", "16000", "-f", "s16le")
+		}
+		args = append(args, "-y", output)
+		err = exec.CommandContext(job, "ffmpeg", args...).Run()
 		cancel()
 		if err != nil {
 			return errors.New("chapter audio conversion failed")
@@ -379,10 +491,23 @@ func prepareBook(ctx context.Context, source, stage string, b *Book) error {
 		fmt.Fprintf(hash, "\x00%s\x00", ch.Title)
 		n, err := io.Copy(hash, f)
 		_ = f.Close()
-		if err != nil || n == 0 || n%2 != 0 {
+		if err != nil || n == 0 || (b.Origin != "podcast" && n%2 != 0) {
 			return errors.New("empty or invalid chapter audio")
 		}
 		ch.Audio, ch.Seconds = filepath.Base(output), float64(n)/(sampleRate*2)
+		if b.Origin == "podcast" {
+			if n > 64<<20 {
+				return errors.New("podcast artifact exceeds limit")
+			}
+			ch.Bytes = n
+			ch.Seconds, err = verifyOpus(ctx, output)
+			if err != nil {
+				return err
+			}
+			if math.Abs(ch.Seconds-sourceSeconds) > 1 {
+				return errors.New("Opus conversion changed episode duration")
+			}
+		}
 		ch.Segments = nil
 		ch.SegmentCount = 0
 		b.IndexSHA256 = ""
@@ -436,4 +561,69 @@ var prompts = map[string]string{
 	"point":       "point",
 	"finished":    "You have reached the end of this recording.",
 	"goodbye":     "Goodbye.",
+}
+
+func audioSuffix(b Book) string {
+	if b.Origin == "podcast" {
+		return ".opus"
+	}
+	return ".sln16"
+}
+func audioSizeOK(b Book, ch Chapter, n int64) bool {
+	if b.Origin == "podcast" {
+		return ch.Bytes > 0 && n == ch.Bytes && n <= 64<<20
+	}
+	return n == int64(math.Round(ch.Seconds*sampleRate*2))
+}
+func verifyOpus(ctx context.Context, path string) (float64, error) {
+	job, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	data, err := exec.CommandContext(job, "ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name:format=duration,format_name", "-of", "json", path).Output()
+	var probe struct {
+		Streams []struct {
+			Codec string `json:"codec_name"`
+		} `json:"streams"`
+		Format struct {
+			Duration string `json:"duration"`
+			Name     string `json:"format_name"`
+		} `json:"format"`
+	}
+	if err != nil || json.Unmarshal(data, &probe) != nil || len(probe.Streams) != 1 || probe.Streams[0].Codec != "opus" || probe.Format.Name != "ogg" {
+		return 0, errors.New("invalid Opus artifact")
+	}
+	seconds, err := strconv.ParseFloat(probe.Format.Duration, 64)
+	if err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 || seconds > 7201 {
+		return 0, errors.New("invalid Opus duration")
+	}
+	if exec.CommandContext(job, "ffmpeg", "-nostdin", "-v", "error", "-xerror", "-protocol_whitelist", "file,pipe", "-i", path, "-map", "0:a:0", "-f", "null", "-").Run() != nil {
+		return 0, errors.New("Opus decode verification failed")
+	}
+	return seconds, nil
+}
+
+// Ready verifies the selected immutable edition is still in the live catalog.
+func Ready(root string, b Book) bool { return ready(root, b) }
+
+// Container duration is only an estimate for headerless VBR MP3. Count decoded
+// samples instead; the bounded stream is discarded rather than stored as PCM.
+func sourceDuration(ctx context.Context, path string) (float64, error) {
+	job, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	count := &sampleCounter{}
+	cmd := exec.CommandContext(job, "ffmpeg", "-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe", "-i", path, "-map", "0:a:0", "-vn", "-t", "7201", "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1")
+	cmd.Stdout = count
+	if cmd.Run() != nil || count.n == 0 || count.n > 7200*16000 {
+		return 0, errors.New("podcast exceeds two hours or cannot decode")
+	}
+	return float64(count.n) / 16000, nil
+}
+
+type sampleCounter struct{ n int64 }
+
+func (c *sampleCounter) Write(p []byte) (int, error) {
+	c.n += int64(len(p))
+	if c.n > 7200*16000 {
+		return 0, errors.New("podcast duration limit")
+	}
+	return len(p), nil
 }

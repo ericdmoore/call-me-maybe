@@ -53,6 +53,7 @@ type Schema struct {
 	Required             []string           `json:"required,omitempty"`
 	AdditionalProperties *bool              `json:"additionalProperties,omitempty"`
 
+	MaxItems *int `json:"maxItems,omitempty"`
 	// Arrays
 	Items       *Schema `json:"items,omitempty"`
 	MinItems    *int    `json:"minItems,omitempty"`
@@ -86,7 +87,7 @@ var (
 )
 
 // Names are the selectable schema names for `doorman schema <name>`.
-var Names = []string{"policy", "handsets", "trunks", "contacts", "messages", "webhook", "env", "template"}
+var Names = []string{"policy", "handsets", "trunks", "contacts", "messages", "webhook", "podcasts", "env", "template"}
 
 // Get returns one schema by name.
 func Get(name string) (*Schema, error) {
@@ -101,6 +102,8 @@ func Get(name string) (*Schema, error) {
 		return Contacts(), nil
 	case "messages":
 		return Messages(), nil
+	case "podcasts":
+		return Podcasts(), nil
 	case "webhook":
 		return Webhook(), nil
 	case "env":
@@ -120,14 +123,15 @@ func All(version string) *Bundle {
 			"validity: it applies cross-file reference checks and semantic rules that " +
 			"JSON Schema cannot express. Always run `doorman check` before relying on a config.",
 		Schemas: map[string]*Schema{
-			"policy.toml":   Policy(),
-			"handsets.toml": Handsets(),
-			"trunks.toml":   Trunks(),
-			"contacts.toml": Contacts(),
-			"messages.toml": Messages(),
-			"webhook.toml":  Webhook(),
-			"env":           Env(),
-			"template":      TemplateFormat(),
+			"policy.toml":                Policy(),
+			"handsets.toml":              Handsets(),
+			"trunks.toml":                Trunks(),
+			"contacts.toml":              Contacts(),
+			"messages.toml":              Messages(),
+			"webhook.toml":               Webhook(),
+			"podcast-subscriptions.json": Podcasts(),
+			"env":                        Env(),
+			"template":                   TemplateFormat(),
 		},
 	}
 }
@@ -1325,4 +1329,16 @@ func Webhook() *Schema {
 	return &Schema{SchemaURI: "https://json-schema.org/draft/2020-12/schema", ID: "https://callmemaybe.cc/schema/webhook.json", Title: "webhook.toml — managed event destination", Type: "object", AdditionalProperties: falsy,
 		Properties: map[string]*Schema{"domain": {Type: "string", MaxLength: ptr(1024), Description: "HTTP(S) origin, including optional port. Empty disables managed delivery."}, "path_prefix": {Type: "string", MaxLength: ptr(1024), Description: "Optional path prefix. The fixed /cc.dialdoorman/events suffix is appended. Treat this value as a secret."}},
 		Rules:      []string{"No credentials, query, fragment, traversal or escaped separators. Both fields empty disables managed delivery. Missing file uses the legacy environment setting.", "One POST per ringing or completed call, application/json, JSON(payload). Managed destinations receive redacted caller numbers and no inherited bearer token.", "Hot reload keeps the last good file, including across restart. Saved receipts become applied only when the daemon reports the exact accepted file digest."}}
+}
+
+// Podcasts is a separate opt-in JSON file; no podcast work runs on admission.
+func Podcasts() *Schema {
+	source := &Schema{Type: "object", AdditionalProperties: falsy, Required: []string{"id", "url", "title"}, Properties: map[string]*Schema{
+		"id": {Type: "string", Pattern: "^(brains-on|feed-[a-f0-9]{32})$"}, "url": {Type: "string", MaxLength: ptr(2048), Description: "Canonical public HTTPS URL, no credentials, query or fragment."}, "title": {Type: "string", MinLength: ptr(1), MaxLength: ptr(240)},
+	}}
+	return &Schema{SchemaURI: "https://json-schema.org/draft/2020-12/schema", ID: "https://callmemaybe.cc/schema/podcasts.json", Title: "Podcast handset subscriptions", Type: "object", AdditionalProperties: falsy, Required: []string{"schema", "subscriptions"}, Properties: map[string]*Schema{
+		"schema":        {Type: "integer", Enum: []any{1, 2}},
+		"feeds":         {Type: "array", MaxItems: ptr(8), Items: source},
+		"subscriptions": {Type: "array", MaxItems: ptr(100), Items: &Schema{Type: "object", AdditionalProperties: falsy, Required: []string{"handset", "feed"}, Properties: map[string]*Schema{"handset": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]{0,63}$", MaxLength: ptr(64), CrossRefs: []string{"handsets.toml [[handsets]].id"}}, "feed": {Type: "string", Pattern: "^(brains-on|feed-[a-f0-9]{32})$"}}}},
+	}, Rules: []string{"Schema 1 retains the pinned Brains On pilot. Schema 2 requires 1–8 unique public feeds, each ID computed from its canonical URL; the pilot remains optional.", "At most 100 unique handset/feed pairs. Handsets must exist; each non-pilot feed must be defined. Audio is shared; bookmarks remain per handset and episode revision.", "Default file: /var/spool/call-me-maybe/podcasts/subscriptions.json. Missing file means no subscriptions.", "Use doorman podcasts subscribe/unsubscribe --handset <id> --feed-url <url> --title <show>; check validates the same runtime rules."}}
 }

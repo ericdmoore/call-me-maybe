@@ -23,6 +23,8 @@ import (
 	"callmemaybe/internal/config"
 	"callmemaybe/internal/contentinventory"
 	"callmemaybe/internal/mediadelivery"
+	"callmemaybe/internal/podcastconfig"
+	"callmemaybe/internal/podcasts"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/syncmachine"
 	"callmemaybe/internal/syncwire"
@@ -84,6 +86,7 @@ func runSync(args []string) int {
 		}
 	}
 	paths := syncmachine.Paths{Policy: policyPathArg(*p), Handsets: handsetsPathArg(*h), Trunks: trunksPathArg(*tr), Contacts: contactsPathArg(*contacts), CountryCode: defaultCountryCode(), Phonebooks: *phonebooks}
+	paths.Podcasts = podcasts.DefaultConfig
 	paths.Webhook = filepath.Join(filepath.Dir(paths.Policy), "webhook.toml")
 	dir := filepath.Join(*state, "sync")
 	m, err := syncmachine.Open(dir, status.Box, paths)
@@ -97,8 +100,15 @@ func runSync(args []string) int {
 	m.OpenWebhook = client.OpenWebhook
 	m.SampleStatus = func() syncwire.Status {
 		sample := stats.Sample(*state, version)
-		caps := []string{webhookconfig.Capability}
+		caps := []string{webhookconfig.Capability, podcastconfig.Capability, podcastconfig.FeedCapability}
 		sample.Capabilities = &caps
+		if ps := podcasts.ReadStatus(podcasts.DefaultRoot); ps != nil {
+			data, _ := json.Marshal(ps)
+			var wire syncwire.PodcastStatus
+			if json.Unmarshal(data, &wire) == nil {
+				sample.Podcasts = &wire
+			}
+		}
 		sample.ContentInventory = inventory.Sample()
 		return sample
 	}

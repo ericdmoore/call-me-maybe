@@ -149,7 +149,7 @@ func atomicReplace(path string, before, after []byte) (renamed bool, err error) 
 	return atomicReplaceMode(path, before, after, false)
 }
 
-func atomicReplaceMode(path string, before, after []byte, private bool) (bool, error) {
+func atomicReplaceMode(path string, before, after []byte, private bool, readable ...bool) (bool, error) {
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() {
 		return false, ErrFiles
@@ -161,6 +161,9 @@ func atomicReplaceMode(path string, before, after []byte, private bool) (bool, e
 	defer os.Remove(f.Name())
 	defer f.Close()
 	mode := info.Mode().Perm()
+	if len(readable) > 0 && readable[0] {
+		mode = 0o644
+	}
 	if private {
 		mode = 0o600
 	}
@@ -201,7 +204,7 @@ func atomicCreate(path string, after []byte) (created bool, err error) {
 	return atomicCreateMode(path, after, false)
 }
 
-func atomicCreateMode(path string, after []byte, private bool) (bool, error) {
+func atomicCreateMode(path string, after []byte, private bool, readable ...bool) (bool, error) {
 	dir := filepath.Dir(path)
 	parent, err := os.Stat(filepath.Dir(dir))
 	if err != nil || !parent.IsDir() {
@@ -219,6 +222,9 @@ func atomicCreateMode(path string, after []byte, private bool) (bool, error) {
 	defer os.Remove(f.Name())
 	defer f.Close()
 	mode := os.FileMode(0o640)
+	if len(readable) > 0 && readable[0] {
+		mode = 0o644
+	}
 	if private {
 		mode = 0o600
 		parent, err = os.Stat(dir)

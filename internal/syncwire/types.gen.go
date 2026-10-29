@@ -159,6 +159,30 @@ func (e PhonebookRole) Valid() bool {
 	}
 }
 
+// Defines values for PodcastStatusState.
+const (
+	PodcastStatusStateError     PodcastStatusState = "error"
+	PodcastStatusStateIdle      PodcastStatusState = "idle"
+	PodcastStatusStatePreparing PodcastStatusState = "preparing"
+	PodcastStatusStateReady     PodcastStatusState = "ready"
+)
+
+// Valid indicates whether the value is a known member of the PodcastStatusState enum.
+func (e PodcastStatusState) Valid() bool {
+	switch e {
+	case PodcastStatusStateError:
+		return true
+	case PodcastStatusStateIdle:
+		return true
+	case PodcastStatusStatePreparing:
+		return true
+	case PodcastStatusStateReady:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PolicyValuesActionsConfirm.
 const (
 	None    PolicyValuesActionsConfirm = "none"
@@ -567,6 +591,51 @@ func (e Verb9Name) Valid() bool {
 	}
 }
 
+// Defines values for Verb10Feed.
+const (
+	BrainsOn Verb10Feed = "brains-on"
+)
+
+// Valid indicates whether the value is a known member of the Verb10Feed enum.
+func (e Verb10Feed) Valid() bool {
+	switch e {
+	case BrainsOn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for Verb10Name.
+const (
+	PodcastSubscribe Verb10Name = "podcast.subscribe"
+)
+
+// Valid indicates whether the value is a known member of the Verb10Name enum.
+func (e Verb10Name) Valid() bool {
+	switch e {
+	case PodcastSubscribe:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for Verb11Name.
+const (
+	PodcastSubscribeFeed Verb11Name = "podcast.subscribeFeed"
+)
+
+// Valid indicates whether the value is a known member of the Verb11Name enum.
+func (e Verb11Name) Valid() bool {
+	switch e {
+	case PodcastSubscribeFeed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SyncBellParamsUpgrade.
 const (
 	Websocket SyncBellParamsUpgrade = "websocket"
@@ -629,12 +698,14 @@ type ConfigRejection struct {
 
 // Configuration defines model for Configuration.
 type Configuration struct {
-	Contacts   []Contact          `json:"contacts"`
-	Handsets   []Handset          `json:"handsets"`
-	Phonebooks []Phonebook        `json:"phonebooks"`
-	Policies   []Policy           `json:"policies"`
-	Validation *ValidationContext `json:"validation,omitempty"`
-	Webhook    *WebhookState      `json:"webhook,omitempty"`
+	Contacts     []Contact              `json:"contacts"`
+	Handsets     []Handset              `json:"handsets"`
+	Phonebooks   []Phonebook            `json:"phonebooks"`
+	PodcastFeeds *[]PodcastFeed         `json:"podcastFeeds,omitempty"`
+	Podcasts     *[]PodcastSubscription `json:"podcasts,omitempty"`
+	Policies     []Policy               `json:"policies"`
+	Validation   *ValidationContext     `json:"validation,omitempty"`
+	Webhook      *WebhookState          `json:"webhook,omitempty"`
 }
 
 // Contact defines model for Contact.
@@ -753,6 +824,30 @@ type PhonebookOrigin string
 
 // PhonebookRole Present only on the account's lobby pass book.
 type PhonebookRole string
+
+// PodcastFeed defines model for PodcastFeed.
+type PodcastFeed struct {
+	Id    string `json:"id"`
+	Title string `json:"title"`
+	Url   string `json:"url"`
+}
+
+// PodcastStatus defines model for PodcastStatus.
+type PodcastStatus struct {
+	Bytes         int64              `json:"bytes"`
+	ReadyEpisodes int                `json:"readyEpisodes"`
+	State         PodcastStatusState `json:"state"`
+	UpdatedAt     int64              `json:"updatedAt"`
+}
+
+// PodcastStatusState defines model for PodcastStatus.State.
+type PodcastStatusState string
+
+// PodcastSubscription defines model for PodcastSubscription.
+type PodcastSubscription struct {
+	Feed    string `json:"feed"`
+	Handset string `json:"handset"`
+}
 
 // Policy defines model for Policy.
 type Policy struct {
@@ -969,11 +1064,12 @@ type Status struct {
 		Id                string `json:"id"`
 		Registered        bool   `json:"registered"`
 	} `json:"handsets,omitempty"`
-	MemoryAvailableBytes *int64 `json:"memoryAvailableBytes,omitempty"`
-	MemoryTotalBytes     *int64 `json:"memoryTotalBytes,omitempty"`
-	SampledAt            int64  `json:"sampledAt"`
-	Schema               int64  `json:"schema"`
-	Version              string `json:"version"`
+	MemoryAvailableBytes *int64         `json:"memoryAvailableBytes,omitempty"`
+	MemoryTotalBytes     *int64         `json:"memoryTotalBytes,omitempty"`
+	Podcasts             *PodcastStatus `json:"podcasts,omitempty"`
+	SampledAt            int64          `json:"sampledAt"`
+	Schema               int64          `json:"schema"`
+	Version              string         `json:"version"`
 }
 
 // StatusResult defines model for StatusResult.
@@ -1118,6 +1214,31 @@ type Verb9 struct {
 
 // Verb9Name defines model for Verb.9.Name.
 type Verb9Name string
+
+// Verb10 defines model for Verb.10.
+type Verb10 struct {
+	Enabled bool       `json:"enabled"`
+	Feed    Verb10Feed `json:"feed"`
+	Handset string     `json:"handset"`
+	Name    Verb10Name `json:"name"`
+}
+
+// Verb10Feed defines model for Verb.10.Feed.
+type Verb10Feed string
+
+// Verb10Name defines model for Verb.10.Name.
+type Verb10Name string
+
+// Verb11 defines model for Verb.11.
+type Verb11 struct {
+	Enabled bool        `json:"enabled"`
+	Feed    PodcastFeed `json:"feed"`
+	Handset string      `json:"handset"`
+	Name    Verb11Name  `json:"name"`
+}
+
+// Verb11Name defines model for Verb.11.Name.
+type Verb11Name string
 
 // Version defines model for Version.
 type Version struct {
@@ -1529,6 +1650,58 @@ func (t *Verb) FromVerb9(v Verb9) error {
 
 // MergeVerb9 performs a merge with any union data inside the Verb, using the provided Verb9
 func (t *Verb) MergeVerb9(v Verb9) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsVerb10 returns the union data inside the Verb as a Verb10
+func (t Verb) AsVerb10() (Verb10, error) {
+	var body Verb10
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromVerb10 overwrites any union data inside the Verb as the provided Verb10
+func (t *Verb) FromVerb10(v Verb10) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeVerb10 performs a merge with any union data inside the Verb, using the provided Verb10
+func (t *Verb) MergeVerb10(v Verb10) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsVerb11 returns the union data inside the Verb as a Verb11
+func (t Verb) AsVerb11() (Verb11, error) {
+	var body Verb11
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromVerb11 overwrites any union data inside the Verb as the provided Verb11
+func (t *Verb) FromVerb11(v Verb11) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeVerb11 performs a merge with any union data inside the Verb, using the provided Verb11
+func (t *Verb) MergeVerb11(v Verb11) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err

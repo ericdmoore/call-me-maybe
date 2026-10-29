@@ -23,6 +23,7 @@ import (
 	"callmemaybe/internal/configcheck"
 	contactbook "callmemaybe/internal/contacts"
 	"callmemaybe/internal/ownbook"
+	"callmemaybe/internal/podcastconfig"
 	"callmemaybe/internal/policy"
 	"callmemaybe/internal/syncwire"
 	"callmemaybe/internal/webhookconfig"
@@ -44,6 +45,7 @@ type Paths struct {
 	CountryCode string
 	Phonebooks  string
 	Webhook     string
+	Podcasts    string
 }
 
 type observed struct {
@@ -619,7 +621,33 @@ func observe(paths Paths) (*observed, error) {
 		out.webhookDigest = webhookconfig.Hash(data)
 		webhook = &syncwire.WebhookState{Domain: c.Domain, Configured: c.Domain != ""}
 	}
-	digest, err := json.Marshal(map[string]any{"handsets": handsets, "contacts": boxContacts, "phonebooks": boxBooks, "policies": policies, "validation": context})
+	var subscriptions []podcastconfig.Subscription
+	var podcastFeeds = []podcastconfig.Source{}
+	podcastAvailable := false
+	if paths.Podcasts != "" {
+		data, readErr := j.read(paths.Podcasts)
+		c, parseErr := podcastconfig.Parse(data)
+		// An optional media file must not stop policy/phonebook/webhook sync.
+		// Omit its capability projection on corruption; do not overwrite the file.
+		if (readErr == nil || errors.Is(readErr, errMissing)) && parseErr == nil {
+			podcastAvailable = true
+			subscriptions = []podcastconfig.Subscription{}
+			known := map[string]bool{}
+			for _, raw := range handsets {
+				known[str(raw.(map[string]any), "id")] = true
+			}
+			for _, sub := range c.Subscriptions {
+				if known[sub.Handset] {
+					subscriptions = append(subscriptions, sub)
+				}
+			}
+			if c.Feeds != nil {
+				podcastFeeds = c.Feeds
+			}
+			out.files[paths.Podcasts] = data
+		}
+	}
+	digest, err := json.Marshal(map[string]any{"podcasts": subscriptions, "podcastFeeds": podcastFeeds, "handsets": handsets, "contacts": boxContacts, "phonebooks": boxBooks, "policies": policies, "validation": context})
 	if err != nil {
 		return nil, j.reject(paths.Policy, "sync cannot represent the configuration")
 	}
@@ -627,6 +655,10 @@ func observe(paths Paths) (*observed, error) {
 	configuration := map[string]any{"handsets": handsets, "contacts": contacts, "phonebooks": books, "policies": policies, "validation": context}
 	if webhook != nil {
 		configuration["webhook"] = webhook
+	}
+	if podcastAvailable {
+		configuration["podcasts"] = subscriptions
+		configuration["podcastFeeds"] = podcastFeeds
 	}
 	data, err := json.Marshal(configuration)
 	if err != nil {

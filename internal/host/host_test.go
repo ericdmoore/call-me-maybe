@@ -77,7 +77,7 @@ func TestEveryEmbeddedUnitHasARuleAndTheDaemonComesFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(units) != 15 || units[0].Name != "doorman.service" {
+	if len(units) != 17 || units[0].Name != "doorman.service" {
 		t.Fatalf("units = %d, first %s", len(units), units[0].Name)
 	}
 	for _, u := range units {
@@ -127,11 +127,11 @@ func TestPlanInstallsEnablesAndIsIdempotent(t *testing.T) {
 	if err := Apply(ctx, x, p); err != nil {
 		t.Fatal(err)
 	}
-	if n := x.count("install", "-d"); n != 7 {
-		t.Errorf("directories created = %d, want 7 (six state dirs + the spool)", n)
+	if n := x.count("install", "-d"); n != 8 {
+		t.Errorf("directories created = %d, want 8 (six state dirs + shared spool + podcast subscriptions)", n)
 	}
-	if n := x.count("systemctl", "enable", "--now"); n != 4 {
-		t.Errorf("enabled = %d, want the daemon, both housekeeping timers and the inbox: %v", n, p.Enable)
+	if n := x.count("systemctl", "enable", "--now"); n != 5 {
+		t.Errorf("enabled = %d, want the daemon, three housekeeping timers and the inbox: %v", n, p.Enable)
 	}
 	if n := x.count("systemctl", "disable", "--now"); n != 6 {
 		t.Errorf("disabled = %d, want directory, sync, voicemail, digest, balance, backup: %v", n, p.Disable)
@@ -293,7 +293,7 @@ func TestInspectReportsWantAgainstHost(t *testing.T) {
 func TestEveryUnitHasShippedLegacyContentRegistered(t *testing.T) {
 	units, _ := Units()
 	for _, u := range units {
-		if strings.HasPrefix(u.Name, "doorman-backup.") || strings.HasPrefix(u.Name, "doorman-reminders.") || u.Name == "doorman-sync.service" || u.Name == "doorman-voicemail.service" {
+		if strings.HasPrefix(u.Name, "doorman-podcasts.") || strings.HasPrefix(u.Name, "doorman-backup.") || strings.HasPrefix(u.Name, "doorman-reminders.") || u.Name == "doorman-sync.service" || u.Name == "doorman-voicemail.service" {
 			continue // born with the marker; never shipped under scripts/
 		}
 		if len(legacyUnits[u.Name]) == 0 {
@@ -385,6 +385,36 @@ func TestTheVoicemailDirectoryAndUnit(t *testing.T) {
 		}
 		if n := strings.Count(c, "ReadWritePaths="); n != 1 {
 			t.Errorf("unit has %d ReadWritePaths lines; the layout's directory must be the only writable one", n)
+		}
+	}
+}
+
+func TestOptionalPodcastUnitAndMetadataMigration(t *testing.T) {
+	l := layout(t)
+	path := filepath.Join(l.Spool, "podcasts", "subscriptions.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"schema":1,"subscriptions":[]}`), 0640); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Build(context.Background(), &fakeExec{users: map[string]bool{"asterisk": true}}, l, Wants{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, step := range p.Steps {
+		if strings.Join(step.Argv, " ") == "chmod 0644 "+path {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("existing AGI metadata permissions not migrated")
+	}
+	units, _ := Units()
+	for _, u := range units {
+		if u.Name == "doorman-sync.service" && !strings.Contains(string(u.Content), "-/var/spool/call-me-maybe/podcasts") {
+			t.Fatal("optional path required")
 		}
 	}
 }
