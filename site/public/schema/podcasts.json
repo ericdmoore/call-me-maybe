@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://callmemaybe.cc/schema/podcasts.json",
+  "title": "Podcast handset subscriptions",
+  "type": "object",
+  "properties": {
+    "feeds": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^(brains-on|feed-[a-f0-9]{32})$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "url": {
+            "description": "Canonical public HTTPS URL, no credentials, query or fragment.",
+            "type": "string",
+            "maxLength": 2048
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "title"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "schema": {
+      "type": "integer",
+      "enum": [
+        1,
+        2
+      ]
+    },
+    "subscriptions": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "properties": {
+          "feed": {
+            "type": "string",
+            "pattern": "^(brains-on|feed-[a-f0-9]{32})$"
+          },
+          "handset": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+            "maxLength": 64,
+            "x-cross-references": [
+              "handsets.toml [[handsets]].id"
+            ]
+          }
+        },
+        "required": [
+          "handset",
+          "feed"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "subscriptions"
+  ],
+  "additionalProperties": false,
+  "x-rules": [
+    "Schema 1 retains the pinned Brains On pilot. Schema 2 requires 1–8 unique public feeds, each ID computed from its canonical URL; the pilot remains optional.",
+    "At most 100 unique handset/feed pairs. Handsets must exist; each non-pilot feed must be defined. Audio is shared; bookmarks remain per handset and episode revision.",
+    "Default file: /var/spool/call-me-maybe/podcasts/subscriptions.json. Missing file means no subscriptions.",
+    "Use doorman podcasts subscribe/unsubscribe --handset \u003cid\u003e --feed-url \u003curl\u003e --title \u003cshow\u003e; check validates the same runtime rules."
+  ]
+}
