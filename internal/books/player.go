@@ -81,9 +81,9 @@ func startStream(ctx context.Context, state, input string, seconds float64, spee
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	s := &stream{windows: make(chan window), cancel: cancel, done: make(chan struct{}), dir: dir}
-	args := []string{"-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe"}
+	args := []string{"-nostdin", "-v", "error"}
 	if filepath.Ext(input) == ".ffconcat" {
-		args = append(args, "-f", "concat", "-safe", "1")
+		args = append(args, "-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "1")
 	} else {
 		args = append(args, "-f", "s16le", "-ar", "16000", "-ac", "1")
 	}

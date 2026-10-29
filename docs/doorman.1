@@ -1040,6 +1040,19 @@ uses the same free local importer without an account. Previews are limited to
 1 MiB archives and two minutes. Full books require compressed playback support;
 this importer deliberately refuses them. An installed receipt is not proof of
 handset playback. See docs/media-preview.md for limits and recovery semantics.
+.PP
+.B doorman sync media list|once --source https://trusted-sandbox-origin --audiobook-sku sandbox-recorded-book-v1
+explicitly negotiates a selected complete audiobook through the v2 media format.
+Downloads stream to private disk and are size/hash verified before installation.
+The importer retains compressed Opus segments and bounds decoding, archive
+expansion and playback windows; it never expands the complete book to PCM.
+Supply --menu-bundle when the next catalog needs matching
+offline-prepared prompts.
+.PP
+.B doorman books install-audiobook --archive recorded.cmmpack
+uses that free full-book importer without an account or commerce receipts.
+Archives are capped at 256 MiB, expanded members at 512 MiB, and recordings at
+48 hours. The separate preview importer keeps its existing limits.
 .SH FILES
 .TP
 .I policy.toml

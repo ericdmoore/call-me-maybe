@@ -287,3 +287,41 @@ func TestMediaImporterExcerptAndMalformedManifest(t *testing.T) {
 		t.Fatal("wrong local revision", err)
 	}
 }
+
+func TestRecordedAndAudiobookRevisionsShareLibrary(t *testing.T) {
+	data, hash := recordedFixture(t)
+	file := filepath.Join(t.TempDir(), "book.cmmpack")
+	if err := os.WriteFile(file, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := ImportAudiobook(t.Context(), file, hash, root, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := ImportRecordedWithMenus(t.Context(), file, hash, root, ""); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := Load(root)
+	if err != nil || len(catalog.Books) != 2 {
+		t.Fatal("lost a recording format", err)
+	}
+	for _, book := range catalog.Books {
+		if !ready(root, book) {
+			t.Fatal("merged library cannot play", book.ID)
+		}
+	}
+	if catalog.Books[0].Storage != "opus" || catalog.Books[1].IndexSHA256 == "" {
+		t.Fatal("lost format metadata")
+	}
+	// Reusing nested segments must not follow an altered target directory.
+	nested := filepath.Join(bookDir(root, catalog.Books[1]), "audio", "01")
+	if err := os.Rename(nested, nested+"-saved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(nested+"-saved", nested); err != nil {
+		t.Fatal(err)
+	}
+	if err := ImportRecordedWithMenus(t.Context(), file, hash, root, ""); err == nil {
+		t.Fatal("followed existing revision symlink")
+	}
+}

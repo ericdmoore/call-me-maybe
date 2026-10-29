@@ -42,6 +42,7 @@ type Catalog struct {
 }
 
 type Book struct {
+	Storage     string    `json:"storage,omitempty"`
 	ID          string    `json:"id"`
 	Title       string    `json:"title"`
 	Language    string    `json:"language"`
@@ -144,6 +145,9 @@ func validate(c Catalog, prepared bool) error {
 		if b.Origin != "cli" && b.Origin != "store" && b.Origin != "browser" {
 			return errors.New("book origin must be explicit")
 		}
+		if b.Storage != "" && (!prepared || b.Storage != "opus" || b.IndexSHA256 != "") {
+			return errors.New("unsupported recording storage")
+		}
 		if prepared && !revisionPattern.MatchString(b.Revision) {
 			return errors.New("invalid recording revision")
 		}
@@ -158,7 +162,11 @@ func validate(c Catalog, prepared bool) error {
 			if !validText(ch.Title) || ch.Audio == "" || strings.ContainsAny(ch.Audio, "\r\n\x00") {
 				return errors.New("invalid chapter")
 			}
-			if prepared && (!validChapterAudio(ch, i) || ch.Seconds <= 0 || ch.Seconds > 86400) {
+			audioValid := validChapterAudio(ch, i)
+			if b.Storage == "opus" {
+				audioValid = ch.Audio == chapterName(i)+".ffconcat" && ch.SegmentCount == 0
+			}
+			if prepared && (!audioValid || ch.Seconds <= 0 || ch.Seconds > 86400) {
 				return errors.New("invalid prepared chapter")
 			}
 		}
@@ -202,6 +210,12 @@ func ready(root string, b Book) bool {
 		}
 	}
 	for _, ch := range b.Chapters {
+		if b.Storage == "opus" {
+			if !compressedChapterReady(bookDir(root, b), ch) {
+				return false
+			}
+			continue
+		}
 		if len(ch.Segments) == 0 {
 			st, err := os.Lstat(filepath.Join(bookDir(root, b), ch.Audio))
 			if err != nil || !st.Mode().IsRegular() || st.Size() != int64(math.Round(ch.Seconds*sampleRate*2)) {

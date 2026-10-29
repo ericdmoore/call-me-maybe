@@ -2,7 +2,7 @@ package books
 
 import (
 	"archive/zip"
-	"callmemaybe/internal/mediadelivery"
+	"callmemaybe/internal/mediaformat"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -20,42 +20,12 @@ import (
 	"time"
 )
 
-const MaxRecordedBytes = mediadelivery.MaxRecordedBytes
+const MaxRecordedBytes = mediaformat.MaxAudiobookBytes
 const segmentToleranceMS int64 = 120
 const maxSegmentMS int64 = 45000
 
 var ErrRecordedArchive = errors.New("books: invalid or unsupported recorded archive")
 var segmentName = regexp.MustCompile(`^audio/[0-9]{2,4}/[0-9]{4}\.opus$`)
-
-type recordedManifest struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Kind      string `json:"kind"`
-	Audiobook struct {
-		Work struct {
-			Language string `json:"language"`
-		} `json:"work"`
-		Recording struct {
-			DurationMS int64 `json:"duration_ms"`
-		} `json:"recording"`
-		Audio struct {
-			Codec      string `json:"codec"`
-			Container  string `json:"container"`
-			SampleRate int    `json:"sample_rate"`
-			Channels   int    `json:"channels"`
-		} `json:"audio"`
-		Chapters []struct {
-			Number     int    `json:"number"`
-			Title      string `json:"title"`
-			DurationMS int64  `json:"duration_ms"`
-			Segments   []struct {
-				File       string `json:"file"`
-				StartMS    int64  `json:"start_ms"`
-				DurationMS int64  `json:"duration_ms"`
-			} `json:"segments"`
-		} `json:"chapters"`
-	} `json:"audiobook"`
-}
 
 func concatChapter(ch Chapter) string {
 	var out strings.Builder
@@ -121,6 +91,9 @@ func importRecorded(ctx context.Context, archive, hash, root, menuSource, origin
 		hash = actualHash
 	}
 	if actualHash != hash {
+		return ErrRecordedArchive
+	}
+	if !boundedZipDirectory(f, st.Size()) {
 		return ErrRecordedArchive
 	}
 	z, err := zip.NewReader(f, st.Size())
@@ -299,7 +272,7 @@ func importRecorded(ctx context.Context, archive, hash, root, menuSource, origin
 	} else if err != nil {
 		return err
 	}
-	return publishImported(ctx, root, stage, book, catalog, menuSource)
+	return publishImported(ctx, root, book, stage, menuSource, catalog)
 }
 
 // The pack builder rounds starts and lengths independently to milliseconds.
@@ -344,7 +317,7 @@ func ImportMediaWithMenus(ctx context.Context, archive, hash, root, menuSource s
 		}
 		if manifest.Audiobook.Provenance.Excerpt != nil {
 			info, err := os.Stat(archive)
-			if err != nil || info.Size() > mediadelivery.MaxPreviewBytes {
+			if err != nil || info.Size() > mediaformat.MaxPreviewBytes {
 				return ErrPreviewArchive
 			}
 			data, err = os.ReadFile(archive)

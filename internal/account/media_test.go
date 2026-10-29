@@ -229,6 +229,9 @@ func TestMediaCapabilitiesAndPreviewFiltering(t *testing.T) {
 	var origin string
 	full := false
 	c := clientServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Doorman-Media-Format") != "" {
+			t.Error("mixed full-book protocols")
+		}
 		want := ""
 		if full {
 			want = "recorded-v1"

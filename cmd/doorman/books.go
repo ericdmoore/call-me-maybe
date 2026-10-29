@@ -35,15 +35,15 @@ func runBooks(args []string) int {
 		}
 		return 0
 	}
-	if len(args) == 0 || (args[0] != "prepare" && args[0] != "list" && args[0] != "prompts" && args[0] != "install-preview" && args[0] != "install-recorded") {
-		fmt.Fprintln(os.Stderr, "usage: doorman books prepare --source catalog.json [--library directory] | books list [--library directory] | books prompts --library directory [--voice Samantha] [--shelf id,id ...] | books install-preview|install-recorded --archive local.cmmpack [--library directory]")
+	if len(args) == 0 || (args[0] != "prepare" && args[0] != "list" && args[0] != "prompts" && args[0] != "install-preview" && args[0] != "install-audiobook" && args[0] != "install-recorded") {
+		fmt.Fprintln(os.Stderr, "usage: doorman books prepare --source catalog.json [--library directory] | books list [--library directory] | books prompts --library directory [--voice Samantha] [--shelf id,id ...] | books install-preview --archive local.cmmpack [--library directory] | books install-audiobook --archive local.cmmpack [--library directory]")
 		return 2
 	}
 	fs := flag.NewFlagSet("books "+args[0], flag.ContinueOnError)
 	library := fs.String("library", books.DefaultLibrary, "prepared library directory")
 	voice := fs.String("voice", "Samantha", "installed macOS say voice (prompts only)")
-	menuBundle := fs.String("menu-bundle", "", "prepared menu bundle matching the next preview catalog")
-	archive := fs.String("archive", "", "local .cmmpack (install-preview or install-recorded)")
+	menuBundle := fs.String("menu-bundle", "", "prepared menu bundle matching the next imported catalog")
+	archive := fs.String("archive", "", "local .cmmpack (install-preview or install-audiobook)")
 	source := fs.String("source", "", "local recording catalog JSON (prepare only)")
 	// A public line's [[shelves]] titles, so its shelf pages are rendered in
 	// the same voice (#155). Repeat it once per shelf.
@@ -65,6 +65,19 @@ func runBooks(args []string) int {
 			return 1
 		}
 		fmt.Fprintln(os.Stdout, "Recording installed in the local Books library.")
+		return 0
+	}
+	if args[0] == "install-audiobook" {
+		if *archive == "" {
+			fmt.Fprintln(os.Stderr, "books install-audiobook requires --archive")
+			return 2
+		}
+
+		if err := books.ImportAudiobook(ctx, *archive, "", *library, *menuBundle); err != nil {
+			fmt.Fprintln(os.Stderr, "books: audiobook installation failed:", err)
+			return 1
+		}
+		fmt.Fprintln(os.Stdout, "Audiobook installed in the local Books library.")
 		return 0
 	}
 	if args[0] == "install-preview" {

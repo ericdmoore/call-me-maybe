@@ -1,5 +1,9 @@
 # Books on a handset
 
+For purchased or local `.cmmpack` recordings retained as compressed Opus, see
+[complete recorded audiobooks](media-preview.md#complete-recorded-audiobooks).
+The PCM `books prepare` workflow below remains available for local inputs.
+
 Dial **`*2665` (`*BOOK`)** from an authenticated local handset. This is the
 Books slice of [#116](https://github.com/ericdmoore/call-me-maybe/issues/116).
 Games (`*4263`) and Interactive Stories (`*24673`, `*CHOSE`) remain follow-up
