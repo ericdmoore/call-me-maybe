@@ -538,7 +538,8 @@ The household can rename it on the account.
 .TP
 .B doorman account \fBstatus\fR|\fBrotate\fR
 Show identifiers, capabilities and enrolment time, never credential values.
-\fBstatus \-\-json\fR is machine readable. \fBrotate \-\-capability backup|sync\fR
+\fBstatus \-\-json\fR is machine readable. \fBrotate \-\-capability
+backup|sync\fR
 persists a pending successor before first use commits it. No predecessor
 fallback occurs after an ambiguous first use; invalid credentials require login.
 When the service answers \fBbox_removed\fR (the owner removed this box from
@@ -1409,19 +1410,24 @@ lobby stricter for every other withheld number. That is the intended trade.
 .B doorman podcasts subscribe --handset id --feed-url https://publisher.example.org/show.xml --title "Show"
 adds a public HTTPS source and handset subscription atomically.
 .B doorman podcasts unsubscribe --handset id --feed-url URL
-removes only that handset/feed pair. Use --config and --handsets for nondefault paths.
-Schema 2 permits eight generic feeds and 100 handset/feed pairs; schema 1 preserves
-the pinned Brains On pilot. Generic sync requires podcast.subscribeFeed capability.
+removes only that handset/feed pair. Use --config and --handsets for
+nondefault paths.
+Schema 2 permits eight generic feeds and 100 handset/feed pairs;
+schema 1 preserves
+the pinned Brains On pilot. Generic sync requires
+podcast.subscribeFeed capability.
 The background worker selects two eligible items per show; preparation failure
 keeps the previous catalog. Per-feed menus and bookmarks are handset scoped;
-active playback delays cache collection. See docs/PODCASTS.md for bounds and rollout.
+active playback delays cache collection. See docs/PODCASTS.md for
+bounds and rollout.
 
 .PP
 The podcast timer uses refresh --scheduled: existing feeds poll hourly with HTTP
 validators, failed feeds retry after five minutes, and explicit refresh bypasses
 the interval. Episodes are staged one at a time and failures isolated by feed.
 Removing the last subscription reclaims cached audio after active menus end.
-Public metadata is readable by the AGI inside protected service-owned directories;
+Public metadata is readable by the AGI inside protected service-owned
+directories;
 invalid optional podcast configuration does not stop other sync.
 
 .SH SEE ALSO
