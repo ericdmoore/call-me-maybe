@@ -330,7 +330,9 @@
             "required": true,
             "schema": {
               "type": "string",
-              "enum": ["websocket"]
+              "enum": [
+                "websocket"
+              ]
             }
           }
         ],
@@ -403,7 +405,10 @@
             "pattern": "^(0|[1-9][0-9]{0,18})$"
           }
         },
-        "required": ["generation", "revision"]
+        "required": [
+          "generation",
+          "revision"
+        ]
       },
       "Contact": {
         "type": "object",
@@ -434,12 +439,19 @@
                   "pattern": "^\\+[1-9][0-9]{1,14}$"
                 }
               },
-              "required": ["label", "number"]
+              "required": [
+                "label",
+                "number"
+              ]
             },
             "maxItems": 32
           }
         },
-        "required": ["id", "name", "numbers"]
+        "required": [
+          "id",
+          "name",
+          "numbers"
+        ]
       },
       "Phonebook": {
         "type": "object",
@@ -474,11 +486,16 @@
           },
           "origin": {
             "type": "string",
-            "enum": ["box", "account"]
+            "enum": [
+              "box",
+              "account"
+            ]
           },
           "role": {
             "type": "string",
-            "enum": ["lobby-pass"],
+            "enum": [
+              "lobby-pass"
+            ],
             "description": "Present only on the account's lobby pass book."
           },
           "revision": {
@@ -492,7 +509,12 @@
             "pattern": "^[0-9a-f]{64}$"
           }
         },
-        "required": ["id", "label", "contacts", "includes"]
+        "required": [
+          "id",
+          "label",
+          "contacts",
+          "includes"
+        ]
       },
       "AccountContact": {
         "type": "object",
@@ -523,13 +545,20 @@
                   "pattern": "^\\+[1-9][0-9]{1,14}$"
                 }
               },
-              "required": ["label", "number"]
+              "required": [
+                "label",
+                "number"
+              ]
             },
             "minItems": 1,
             "maxItems": 8
           }
         },
-        "required": ["id", "name", "numbers"]
+        "required": [
+          "id",
+          "name",
+          "numbers"
+        ]
       },
       "AccountBook": {
         "type": "object",
@@ -551,7 +580,9 @@
           },
           "role": {
             "type": "string",
-            "enum": ["lobby-pass"],
+            "enum": [
+              "lobby-pass"
+            ],
             "description": "Absent: a directory book, shown on the handsets that select it and never read for admission. lobby-pass: the box's one lobby pass book, whose contacts skip the lobby; never selectable, never included, never shown in a directory, with no includes and up to 5000 contacts. Every other book keeps the 2000-contact limit."
           },
           "includes": {
@@ -571,7 +602,13 @@
             "maxItems": 5000
           }
         },
-        "required": ["id", "label", "revision", "includes", "contacts"]
+        "required": [
+          "id",
+          "label",
+          "revision",
+          "includes",
+          "contacts"
+        ]
       },
       "Handset": {
         "type": "object",
@@ -595,7 +632,11 @@
             "type": "boolean"
           }
         },
-        "required": ["id", "label", "pinSet"]
+        "required": [
+          "id",
+          "label",
+          "pinSet"
+        ]
       },
       "Schedule": {
         "type": "object",
@@ -620,7 +661,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
+              "enum": [
+                "MO",
+                "TU",
+                "WE",
+                "TH",
+                "FR",
+                "SA",
+                "SU"
+              ]
             },
             "maxItems": 7
           },
@@ -628,7 +677,13 @@
             "type": "boolean"
           }
         },
-        "required": ["id", "start", "end", "days", "enabled"]
+        "required": [
+          "id",
+          "start",
+          "end",
+          "days",
+          "enabled"
+        ]
       },
       "Policy": {
         "type": "object",
@@ -717,12 +772,25 @@
                   "description": "The schedule id an extension's afterhours names, or every id when it names several; the extension is quiet while any is active. One id is always sent as a string."
                 }
               },
-              "required": ["id", "label", "handsets", "pinSet", "enabled"]
+              "required": [
+                "id",
+                "label",
+                "handsets",
+                "pinSet",
+                "enabled"
+              ]
             },
             "maxItems": 1000
           }
         },
-        "required": ["id", "label", "houseHandsets", "people", "schedules", "extensions"]
+        "required": [
+          "id",
+          "label",
+          "houseHandsets",
+          "people",
+          "schedules",
+          "extensions"
+        ]
       },
       "Configuration": {
         "type": "object",
@@ -768,9 +836,21 @@
               "$ref": "#/components/schemas/PodcastSubscription"
             },
             "maxItems": 100
+          },
+          "podcastFeeds": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/components/schemas/PodcastFeed"
+            }
           }
         },
-        "required": ["handsets", "contacts", "phonebooks", "policies"]
+        "required": [
+          "handsets",
+          "contacts",
+          "phonebooks",
+          "policies"
+        ]
       },
       "Snapshot": {
         "type": "object",
@@ -778,7 +858,9 @@
         "properties": {
           "schema": {
             "type": "integer",
-            "enum": [1],
+            "enum": [
+              1
+            ],
             "minimum": -9007199254740991,
             "maximum": 9007199254740991,
             "x-go-type": "int64"
@@ -808,7 +890,13 @@
             "$ref": "#/components/schemas/Configuration"
           }
         },
-        "required": ["schema", "generation", "revision", "observedAt", "configuration"]
+        "required": [
+          "schema",
+          "generation",
+          "revision",
+          "observedAt",
+          "configuration"
+        ]
       },
       "ConfigRejection": {
         "type": "object",
@@ -833,7 +921,11 @@
             "description": "Unix milliseconds when the box first rejected this content."
           }
         },
-        "required": ["file", "message", "at"]
+        "required": [
+          "file",
+          "message",
+          "at"
+        ]
       },
       "Status": {
         "type": "object",
@@ -841,7 +933,9 @@
         "properties": {
           "schema": {
             "type": "integer",
-            "enum": [1],
+            "enum": [
+              1
+            ],
             "minimum": -9007199254740991,
             "maximum": 9007199254740991,
             "x-go-type": "int64"
@@ -905,7 +999,11 @@
                   "pattern": "^(0|[1-9][0-9]{0,18})$"
                 }
               },
-              "required": ["id", "registered", "directoryRevision"]
+              "required": [
+                "id",
+                "registered",
+                "directoryRevision"
+              ]
             },
             "maxItems": 100
           },
@@ -932,7 +1030,11 @@
             "$ref": "#/components/schemas/PodcastStatus"
           }
         },
-        "required": ["schema", "version", "sampledAt"]
+        "required": [
+          "schema",
+          "version",
+          "sampledAt"
+        ]
       },
       "Verb": {
         "oneOf": [
@@ -942,7 +1044,9 @@
             "properties": {
               "name": {
                 "type": "string",
-                "enum": ["policy.setSchedule"]
+                "enum": [
+                  "policy.setSchedule"
+                ]
               },
               "policy": {
                 "type": "string",
@@ -953,7 +1057,11 @@
                 "$ref": "#/components/schemas/Schedule"
               }
             },
-            "required": ["name", "policy", "schedule"]
+            "required": [
+              "name",
+              "policy",
+              "schedule"
+            ]
           },
           {
             "type": "object",
@@ -961,7 +1069,9 @@
             "properties": {
               "name": {
                 "type": "string",
-                "enum": ["phonebook.assign"]
+                "enum": [
+                  "phonebook.assign"
+                ]
               },
               "handset": {
                 "type": "string",
@@ -974,7 +1084,11 @@
                 "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$"
               }
             },
-            "required": ["name", "handset", "phonebook"]
+            "required": [
+              "name",
+              "handset",
+              "phonebook"
+            ]
           },
           {
             "type": "object",
@@ -982,13 +1096,18 @@
             "properties": {
               "name": {
                 "type": "string",
-                "enum": ["contacts.upsert"]
+                "enum": [
+                  "contacts.upsert"
+                ]
               },
               "contact": {
                 "$ref": "#/components/schemas/Contact"
               }
             },
-            "required": ["name", "contact"]
+            "required": [
+              "name",
+              "contact"
+            ]
           },
           {
             "type": "object",
@@ -996,10 +1115,14 @@
             "properties": {
               "name": {
                 "type": "string",
-                "enum": ["backup.run"]
+                "enum": [
+                  "backup.run"
+                ]
               }
             },
-            "required": ["name"]
+            "required": [
+              "name"
+            ]
           },
           {
             "type": "object",
@@ -1007,10 +1130,14 @@
             "properties": {
               "name": {
                 "type": "string",
-                "enum": ["contacts.refresh"]
+                "enum": [
+                  "contacts.refresh"
+                ]
               }
             },
-            "required": ["name"]
+            "required": [
+              "name"
+            ]
           },
           {
             "type": "object",
@@ -1018,7 +1145,9 @@
             "properties": {
               "name": {
                 "type": "string",
-                "enum": ["provision.notify"]
+                "enum": [
+                  "provision.notify"
+                ]
               },
               "handsets": {
                 "type": "array",
@@ -1030,7 +1159,10 @@
                 "maxItems": 100
               }
             },
-            "required": ["name", "handsets"]
+            "required": [
+              "name",
+              "handsets"
+            ]
           },
           {
             "type": "object",
@@ -1038,7 +1170,9 @@
             "properties": {
               "name": {
                 "type": "string",
-                "enum": ["phonebook.put"]
+                "enum": [
+                  "phonebook.put"
+                ]
               },
               "book": {
                 "$ref": "#/components/schemas/AccountBook"
@@ -1049,7 +1183,10 @@
                 "pattern": "^[0-9a-f]{64}$"
               }
             },
-            "required": ["name", "book"]
+            "required": [
+              "name",
+              "book"
+            ]
           },
           {
             "type": "object",
@@ -1057,7 +1194,9 @@
             "properties": {
               "name": {
                 "type": "string",
-                "enum": ["phonebook.remove"]
+                "enum": [
+                  "phonebook.remove"
+                ]
               },
               "book": {
                 "type": "string",
@@ -1070,7 +1209,11 @@
                 "pattern": "^(0|[1-9][0-9]{0,18})$"
               }
             },
-            "required": ["name", "book", "revision"]
+            "required": [
+              "name",
+              "book",
+              "revision"
+            ]
           },
           {
             "type": "object",
@@ -1078,7 +1221,9 @@
             "properties": {
               "name": {
                 "type": "string",
-                "enum": ["phonebook.select"]
+                "enum": [
+                  "phonebook.select"
+                ]
               },
               "handset": {
                 "type": "string",
@@ -1096,16 +1241,26 @@
                 "maxItems": 16
               }
             },
-            "required": ["name", "handset", "books"]
+            "required": [
+              "name",
+              "handset",
+              "books"
+            ]
           },
           {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "domain", "envelope"],
+            "required": [
+              "name",
+              "domain",
+              "envelope"
+            ],
             "properties": {
               "name": {
                 "type": "string",
-                "enum": ["webhook.set"]
+                "enum": [
+                  "webhook.set"
+                ]
               },
               "domain": {
                 "type": "string",
@@ -1122,7 +1277,9 @@
             "properties": {
               "name": {
                 "type": "string",
-                "enum": ["podcast.subscribe"]
+                "enum": [
+                  "podcast.subscribe"
+                ]
               },
               "handset": {
                 "type": "string",
@@ -1131,13 +1288,48 @@
               },
               "feed": {
                 "type": "string",
-                "enum": ["brains-on"]
+                "enum": [
+                  "brains-on"
+                ]
               },
               "enabled": {
                 "type": "boolean"
               }
             },
-            "required": ["name", "handset", "feed", "enabled"]
+            "required": [
+              "name",
+              "handset",
+              "feed",
+              "enabled"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "handset",
+              "feed",
+              "enabled"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "podcast.subscribeFeed"
+                ]
+              },
+              "handset": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "feed": {
+                "$ref": "#/components/schemas/PodcastFeed"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            }
           }
         ]
       },
@@ -1171,7 +1363,11 @@
             "maxItems": 32
           }
         },
-        "required": ["id", "base", "notAfter"]
+        "required": [
+          "id",
+          "base",
+          "notAfter"
+        ]
       },
       "QueueItem": {
         "type": "object",
@@ -1208,7 +1404,9 @@
             "properties": {
               "kind": {
                 "type": "string",
-                "enum": ["person"]
+                "enum": [
+                  "person"
+                ]
               },
               "person": {
                 "type": "string",
@@ -1216,7 +1414,10 @@
                 "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
               }
             },
-            "required": ["kind", "person"]
+            "required": [
+              "kind",
+              "person"
+            ]
           },
           "createdAt": {
             "type": "integer",
@@ -1225,7 +1426,13 @@
             "x-go-type": "int64"
           }
         },
-        "required": ["id", "base", "notAfter", "author", "createdAt"]
+        "required": [
+          "id",
+          "base",
+          "notAfter",
+          "author",
+          "createdAt"
+        ]
       },
       "Receipt": {
         "type": "object",
@@ -1271,7 +1478,11 @@
             ]
           }
         },
-        "required": ["id", "generation", "status"]
+        "required": [
+          "id",
+          "generation",
+          "status"
+        ]
       },
       "ReceiptBatch": {
         "type": "object",
@@ -1285,7 +1496,9 @@
             "maxItems": 100
           }
         },
-        "required": ["receipts"]
+        "required": [
+          "receipts"
+        ]
       },
       "PolicyValues": {
         "type": "object",
@@ -1297,7 +1510,10 @@
               "properties": {
                 "confirm": {
                   "type": "string",
-                  "enum": ["none", "passkey"],
+                  "enum": [
+                    "none",
+                    "passkey"
+                  ],
                   "maxLength": 2048
                 },
                 "done_when": {
@@ -1335,7 +1551,10 @@
                   "type": "boolean"
                 }
               },
-              "required": ["id", "people"],
+              "required": [
+                "id",
+                "people"
+              ],
               "additionalProperties": false
             },
             "maxItems": 1000
@@ -1415,7 +1634,9 @@
                         "x-go-type": "int64"
                       }
                     },
-                    "required": ["handsets"],
+                    "required": [
+                      "handsets"
+                    ],
                     "additionalProperties": false
                   },
                   "minItems": 1,
@@ -1430,7 +1651,10 @@
                   "type": "boolean"
                 }
               },
-              "required": ["pinSet", "label"],
+              "required": [
+                "pinSet",
+                "label"
+              ],
               "additionalProperties": false
             },
             "maxItems": 1000
@@ -1457,7 +1681,9 @@
                 "maxLength": 2048
               }
             },
-            "required": ["handsets"],
+            "required": [
+              "handsets"
+            ],
             "additionalProperties": false
           },
           "line": {
@@ -1481,7 +1707,11 @@
               },
               "on_no_input": {
                 "type": "string",
-                "enum": ["dismiss", "ring-house", "voicemail"],
+                "enum": [
+                  "dismiss",
+                  "ring-house",
+                  "voicemail"
+                ],
                 "maxLength": 2048
               },
               "outbound_cid": {
@@ -1538,7 +1768,10 @@
                   "maxItems": 1000
                 }
               },
-              "required": ["name", "numbers"],
+              "required": [
+                "name",
+                "numbers"
+              ],
               "additionalProperties": false
             },
             "maxItems": 1000
@@ -1552,7 +1785,15 @@
                   "type": "array",
                   "items": {
                     "type": "string",
-                    "enum": ["SU", "MO", "TU", "WE", "TH", "FR", "SA"],
+                    "enum": [
+                      "SU",
+                      "MO",
+                      "TU",
+                      "WE",
+                      "TH",
+                      "FR",
+                      "SA"
+                    ],
                     "maxLength": 2048
                   },
                   "maxItems": 1000
@@ -1576,7 +1817,11 @@
                   "maxLength": 2048
                 }
               },
-              "required": ["id", "start", "end"],
+              "required": [
+                "id",
+                "start",
+                "end"
+              ],
               "additionalProperties": false
             },
             "maxItems": 1000
@@ -1612,7 +1857,10 @@
                   "maxLength": 2048
                 }
               },
-              "required": ["id", "handsets"],
+              "required": [
+                "id",
+                "handsets"
+              ],
               "additionalProperties": false
             },
             "maxItems": 1000
@@ -1690,14 +1938,19 @@
                   "maxItems": 1000
                 }
               },
-              "required": ["id", "endpoint"],
+              "required": [
+                "id",
+                "endpoint"
+              ],
               "additionalProperties": false
             },
             "minItems": 1,
             "maxItems": 1000
           }
         },
-        "required": ["handsets"],
+        "required": [
+          "handsets"
+        ],
         "additionalProperties": false
       },
       "TrunkValues": {
@@ -1782,24 +2035,37 @@
                   "maxLength": 2048
                 }
               },
-              "required": ["id", "host", "username", "password_env"],
+              "required": [
+                "id",
+                "host",
+                "username",
+                "password_env"
+              ],
               "additionalProperties": false
             },
             "minItems": 1,
             "maxItems": 1000
           }
         },
-        "required": ["trunks"],
+        "required": [
+          "trunks"
+        ],
         "additionalProperties": false
       },
       "ValidationContext": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["validator", "handsets", "policies"],
+        "required": [
+          "validator",
+          "handsets",
+          "policies"
+        ],
         "properties": {
           "validator": {
             "type": "string",
-            "enum": ["doorman-37612e50d5d7"]
+            "enum": [
+              "doorman-37612e50d5d7"
+            ]
           },
           "handsets": {
             "$ref": "#/components/schemas/HandsetValues"
@@ -1810,7 +2076,10 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["id", "values"],
+              "required": [
+                "id",
+                "values"
+              ],
               "properties": {
                 "id": {
                   "type": "string",
@@ -1837,7 +2106,9 @@
             "maxLength": 2048
           }
         },
-        "required": ["href"]
+        "required": [
+          "href"
+        ]
       },
       "Links": {
         "type": "object",
@@ -1850,7 +2121,10 @@
             "$ref": "#/components/schemas/Link"
           }
         },
-        "required": ["self", "up"]
+        "required": [
+          "self",
+          "up"
+        ]
       },
       "SnapshotResult": {
         "type": "object",
@@ -1858,7 +2132,10 @@
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["accepted", "duplicate"]
+            "enum": [
+              "accepted",
+              "duplicate"
+            ]
           },
           "generation": {
             "type": "string",
@@ -1874,7 +2151,12 @@
             "$ref": "#/components/schemas/Links"
           }
         },
-        "required": ["status", "generation", "revision", "_links"]
+        "required": [
+          "status",
+          "generation",
+          "revision",
+          "_links"
+        ]
       },
       "StatusResult": {
         "type": "object",
@@ -1882,13 +2164,18 @@
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["accepted"]
+            "enum": [
+              "accepted"
+            ]
           },
           "_links": {
             "$ref": "#/components/schemas/Links"
           }
         },
-        "required": ["status", "_links"]
+        "required": [
+          "status",
+          "_links"
+        ]
       },
       "QueueResult": {
         "type": "object",
@@ -1911,7 +2198,11 @@
             "$ref": "#/components/schemas/Links"
           }
         },
-        "required": ["items", "pollAfterMs", "_links"]
+        "required": [
+          "items",
+          "pollAfterMs",
+          "_links"
+        ]
       },
       "ReceiptResult": {
         "type": "object",
@@ -1924,10 +2215,18 @@
           },
           "status": {
             "type": "string",
-            "enum": ["recorded", "duplicate", "unknown", "conflict"]
+            "enum": [
+              "recorded",
+              "duplicate",
+              "unknown",
+              "conflict"
+            ]
           }
         },
-        "required": ["id", "status"]
+        "required": [
+          "id",
+          "status"
+        ]
       },
       "ReceiptResults": {
         "type": "object",
@@ -1944,7 +2243,10 @@
             "$ref": "#/components/schemas/Links"
           }
         },
-        "required": ["receipts", "_links"]
+        "required": [
+          "receipts",
+          "_links"
+        ]
       },
       "Error": {
         "type": "object",
@@ -1955,7 +2257,9 @@
             "maxLength": 64
           }
         },
-        "required": ["error"]
+        "required": [
+          "error"
+        ]
       },
       "ContentItem": {
         "type": "object",
@@ -1975,15 +2279,28 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["audiobook", "game", "interactive", "file"]
+            "enum": [
+              "audiobook",
+              "game",
+              "interactive",
+              "file"
+            ]
           },
           "origin": {
             "type": "string",
-            "enum": ["store", "cli", "browser", "unknown"]
+            "enum": [
+              "store",
+              "cli",
+              "browser",
+              "unknown"
+            ]
           },
           "state": {
             "type": "string",
-            "enum": ["stored", "unreadable"]
+            "enum": [
+              "stored",
+              "unreadable"
+            ]
           },
           "fileCount": {
             "type": "integer",
@@ -2004,7 +2321,15 @@
             "x-go-type": "int64"
           }
         },
-        "required": ["id", "title", "path", "kind", "origin", "state", "fileCount"]
+        "required": [
+          "id",
+          "title",
+          "path",
+          "kind",
+          "origin",
+          "state",
+          "fileCount"
+        ]
       },
       "ContentInventory": {
         "type": "object",
@@ -2018,7 +2343,11 @@
           },
           "state": {
             "type": "string",
-            "enum": ["complete", "partial", "unavailable"]
+            "enum": [
+              "complete",
+              "partial",
+              "unavailable"
+            ]
           },
           "label": {
             "type": "string",
@@ -2068,7 +2397,13 @@
             "x-go-type": "int64"
           }
         },
-        "required": ["sampledAt", "state", "label", "items", "knownAllocatedBytes"]
+        "required": [
+          "sampledAt",
+          "state",
+          "label",
+          "items",
+          "knownAllocatedBytes"
+        ]
       },
       "BellSignal": {
         "type": "object",
@@ -2076,15 +2411,24 @@
         "properties": {
           "t": {
             "type": "string",
-            "enum": ["sync"]
+            "enum": [
+              "sync"
+            ]
           }
         },
-        "required": ["t"]
+        "required": [
+          "t"
+        ]
       },
       "WebhookProposal": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "base", "notAfter", "verb"],
+        "required": [
+          "id",
+          "base",
+          "notAfter",
+          "verb"
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -2103,11 +2447,17 @@
           "verb": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "domain", "pathPrefix"],
+            "required": [
+              "name",
+              "domain",
+              "pathPrefix"
+            ],
             "properties": {
               "name": {
                 "type": "string",
-                "enum": ["webhook.configure"]
+                "enum": [
+                  "webhook.configure"
+                ]
               },
               "domain": {
                 "type": "string",
@@ -2124,7 +2474,11 @@
       "WebhookEnvelope": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["ephemeralKey", "nonce", "ciphertext"],
+        "required": [
+          "ephemeralKey",
+          "nonce",
+          "ciphertext"
+        ],
         "properties": {
           "ephemeralKey": {
             "type": "string",
@@ -2146,7 +2500,10 @@
       "WebhookState": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["domain", "configured"],
+        "required": [
+          "domain",
+          "configured"
+        ],
         "properties": {
           "domain": {
             "type": "string",
@@ -2160,7 +2517,10 @@
       "WebhookInput": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["domain", "pathPrefix"],
+        "required": [
+          "domain",
+          "pathPrefix"
+        ],
         "properties": {
           "domain": {
             "type": "string",
@@ -2183,10 +2543,14 @@
           },
           "feed": {
             "type": "string",
-            "enum": ["brains-on"]
+            "pattern": "^(brains-on|feed-[a-f0-9]{32})$",
+            "maxLength": 37
           }
         },
-        "required": ["handset", "feed"]
+        "required": [
+          "handset",
+          "feed"
+        ]
       },
       "PodcastStatus": {
         "type": "object",
@@ -2194,12 +2558,17 @@
         "properties": {
           "state": {
             "type": "string",
-            "enum": ["idle", "preparing", "ready", "error"]
+            "enum": [
+              "idle",
+              "preparing",
+              "ready",
+              "error"
+            ]
           },
           "readyEpisodes": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 2
+            "maximum": 18
           },
           "bytes": {
             "type": "integer",
@@ -2214,7 +2583,37 @@
             "x-go-type": "int64"
           }
         },
-        "required": ["state", "readyEpisodes", "bytes", "updatedAt"]
+        "required": [
+          "state",
+          "readyEpisodes",
+          "bytes",
+          "updatedAt"
+        ]
+      },
+      "PodcastFeed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "url",
+          "title"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^(brains-on|feed-[a-f0-9]{32})$",
+            "maxLength": 37
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          }
+        }
       }
     }
   }

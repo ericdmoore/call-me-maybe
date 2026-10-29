@@ -356,14 +356,14 @@ func (m *Machine) plan(item syncwire.QueueItem, list []syncwire.Verb, current sy
 	for _, v := range list {
 		raw, _ := v.MarshalJSON()
 		switch verbName(raw) {
-		case "podcast.subscribe":
+		case "podcast.subscribe", "podcast.subscribeFeed":
 			if len(list) != 1 || m.paths.Podcasts == "" {
 				return refuse(syncwire.Unsupported)
 			}
 			var sub struct {
-				Handset string `json:"handset"`
-				Feed    string `json:"feed"`
-				Enabled bool   `json:"enabled"`
+				Handset string          `json:"handset"`
+				Feed    json.RawMessage `json:"feed"`
+				Enabled bool            `json:"enabled"`
 			}
 			if json.Unmarshal(raw, &sub) != nil {
 				return refuse(syncwire.Invalid)
@@ -375,7 +375,21 @@ func (m *Machine) plan(item syncwire.QueueItem, list []syncwire.Verb, current sy
 			if !known {
 				return refuse(syncwire.Invalid)
 			}
-			after, err := podcastconfig.Select(view[m.paths.Podcasts], sub.Handset, sub.Feed, sub.Enabled)
+			var after []byte
+			var err error
+			if verbName(raw) == podcastconfig.FeedCapability {
+				var source podcastconfig.Source
+				if json.Unmarshal(sub.Feed, &source) != nil {
+					return refuse(syncwire.Invalid)
+				}
+				after, err = podcastconfig.SelectFeed(view[m.paths.Podcasts], sub.Handset, source, sub.Enabled)
+			} else {
+				var feed string
+				if json.Unmarshal(sub.Feed, &feed) != nil {
+					return refuse(syncwire.Invalid)
+				}
+				after, err = podcastconfig.Select(view[m.paths.Podcasts], sub.Handset, feed, sub.Enabled)
+			}
 			if err != nil {
 				return refuse(syncwire.Invalid)
 			}
@@ -593,7 +607,7 @@ func (m *Machine) applied(files map[string][]byte, item syncwire.QueueItem) bool
 	list, ok := verbs(item)
 	if ok && len(list) == 1 {
 		raw, _ := list[0].MarshalJSON()
-		if verbName(raw) == podcastconfig.Capability {
+		if verbName(raw) == podcastconfig.Capability || verbName(raw) == podcastconfig.FeedCapability {
 			return true
 		}
 	}

@@ -70,7 +70,7 @@ site-assets: build
 	@cp llms.txt site/public/llms.txt
 	@cp llms-policy.txt site/public/llms-policy.txt
 	@cp install.sh site/public/install.sh
-	@for n in policy handsets trunks contacts messages webhook env; do \
+	@for n in policy handsets trunks contacts messages webhook podcasts env; do \
 		./bin/doorman schema $$n > site/public/schema/$$n.json; \
 	done
 	@# The examples, beside the schema, so a model can fetch a worked

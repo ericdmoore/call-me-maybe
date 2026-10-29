@@ -622,6 +622,7 @@ func observe(paths Paths) (*observed, error) {
 		webhook = &syncwire.WebhookState{Domain: c.Domain, Configured: c.Domain != ""}
 	}
 	var subscriptions []podcastconfig.Subscription
+	var podcastFeeds = []podcastconfig.Source{}
 	if paths.Podcasts != "" {
 		data, err := j.read(paths.Podcasts)
 		if err != nil && !errors.Is(err, errMissing) {
@@ -641,9 +642,12 @@ func observe(paths Paths) (*observed, error) {
 			}
 		}
 		subscriptions = c.Subscriptions
+		if c.Feeds != nil {
+			podcastFeeds = c.Feeds
+		}
 		out.files[paths.Podcasts] = data
 	}
-	digest, err := json.Marshal(map[string]any{"podcasts": subscriptions, "handsets": handsets, "contacts": boxContacts, "phonebooks": boxBooks, "policies": policies, "validation": context})
+	digest, err := json.Marshal(map[string]any{"podcasts": subscriptions, "podcastFeeds": podcastFeeds, "handsets": handsets, "contacts": boxContacts, "phonebooks": boxBooks, "policies": policies, "validation": context})
 	if err != nil {
 		return nil, j.reject(paths.Policy, "sync cannot represent the configuration")
 	}
@@ -654,6 +658,7 @@ func observe(paths Paths) (*observed, error) {
 	}
 	if paths.Podcasts != "" {
 		configuration["podcasts"] = subscriptions
+		configuration["podcastFeeds"] = podcastFeeds
 	}
 	data, err := json.Marshal(configuration)
 	if err != nil {

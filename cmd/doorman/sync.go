@@ -100,7 +100,7 @@ func runSync(args []string) int {
 	m.OpenWebhook = client.OpenWebhook
 	m.SampleStatus = func() syncwire.Status {
 		sample := stats.Sample(*state, version)
-		caps := []string{webhookconfig.Capability, podcastconfig.Capability}
+		caps := []string{webhookconfig.Capability, podcastconfig.Capability, podcastconfig.FeedCapability}
 		sample.Capabilities = &caps
 		if ps := podcasts.ReadStatus(podcasts.DefaultRoot); ps != nil {
 			data, _ := json.Marshal(ps)

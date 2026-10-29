@@ -43,6 +43,8 @@ type Catalog struct {
 }
 
 type Book struct {
+	SourceHash  string    `json:"sourceHash,omitempty"`
+	Feed        string    `json:"feed,omitempty"`
 	Storage     string    `json:"storage,omitempty"`
 	ID          string    `json:"id"`
 	Title       string    `json:"title"`
@@ -147,6 +149,12 @@ func validate(c Catalog, prepared bool) error {
 		if b.Origin != "cli" && b.Origin != "store" && b.Origin != "browser" && b.Origin != "podcast" {
 			return errors.New("book origin must be explicit")
 		}
+		if b.SourceHash != "" && (b.Origin != "podcast" || !revisionPattern.MatchString(b.SourceHash)) {
+			return errors.New("invalid podcast source revision")
+		}
+		if b.Feed != "" && (b.Origin != "podcast" || !idPattern.MatchString(b.Feed)) {
+			return errors.New("invalid podcast source")
+		}
 		if b.Storage != "" && (!prepared || b.Storage != "opus" || b.IndexSHA256 != "") {
 			return errors.New("unsupported recording storage")
 		}
@@ -200,7 +208,11 @@ func ready(root string, b Book) bool {
 			paths = append(paths, filepath.Join(bookDir(root, b), chapterName(i)+"-title.sln16"))
 		}
 		for name := range prompts {
-			paths = append(paths, filepath.Join(root, "prompts-v1", name+".sln16"))
+			set := "prompts-v1"
+			if _, err := os.Stat(filepath.Join(root, "prompts-podcasts-v2")); err == nil {
+				set = "prompts-podcasts-v2"
+			}
+			paths = append(paths, filepath.Join(root, set, name+".sln16"))
 		}
 		for _, path := range paths {
 			st, err := os.Lstat(path)
@@ -263,6 +275,20 @@ func ready(root string, b Book) bool {
 // Old revisions are deliberately retained; remove them only when no call uses
 // them. This is an import, never a live TTS or paid synthesis operation.
 func Prepare(ctx context.Context, source, root string) error {
+	return prepare(ctx, source, root, nil)
+}
+
+// PreparePodcasts retains already verified immutable episodes and publishes the
+// complete next catalog once. A failed addition never replaces the live catalog.
+func PreparePodcasts(ctx context.Context, source, root string, retained []Book) error {
+	for _, b := range retained {
+		if b.Origin != "podcast" || !Ready(root, b) {
+			return errors.New("retained podcast unavailable")
+		}
+	}
+	return prepare(ctx, source, root, retained)
+}
+func prepare(ctx context.Context, source, root string, retained []Book) error {
 	var c Catalog
 	if err := readJSON(source, &c); err != nil {
 		return err
@@ -320,7 +346,11 @@ func Prepare(ctx context.Context, source, root string) error {
 		}
 	}
 	// Version the small common prompt set independently of recording editions.
-	promptRoot := filepath.Join(root, "prompts-v1")
+	promptSet := "prompts-v1"
+	if len(c.Books) > 0 && c.Books[0].Origin == "podcast" || len(retained) > 0 {
+		promptSet = "prompts-podcasts-v2"
+	}
+	promptRoot := filepath.Join(root, promptSet)
 	if _, err := os.Stat(promptRoot); os.IsNotExist(err) {
 		stage, err := os.MkdirTemp(root, ".prompts-")
 		if err != nil {
@@ -328,10 +358,10 @@ func Prepare(ctx context.Context, source, root string) error {
 		}
 		defer os.RemoveAll(stage)
 		for name, words := range prompts {
-			if len(c.Books) > 0 && c.Books[0].Origin == "podcast" {
+			if promptSet == "prompts-podcasts-v2" {
 				switch name {
 				case "books":
-					words = "Here are your Brains On episodes."
+					words = "Here are your podcast episodes."
 				case "empty":
 					words = "There are no podcast episodes ready. Zero to go back."
 				case "book":
@@ -348,6 +378,10 @@ func Prepare(ctx context.Context, source, root string) error {
 		if err := os.Rename(stage, promptRoot); err != nil {
 			return err
 		}
+	}
+	c.Books = append(c.Books, retained...)
+	if err := validate(c, true); err != nil {
+		return err
 	}
 	if err := publishJSON(filepath.Join(root, "catalog.json"), c, 0o644); err != nil {
 		return err

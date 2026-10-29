@@ -2,21 +2,24 @@
 package podcasts
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"callmemaybe/internal/books"
 	"callmemaybe/internal/podcastconfig"
@@ -44,7 +47,7 @@ func ReadStatus(root string) *Status {
 		return nil
 	}
 	var s Status
-	if json.Unmarshal(data, &s) != nil || s.ReadyEpisodes < 0 || s.ReadyEpisodes > 2 || s.Bytes < 0 || s.Bytes > MaxCacheBytes {
+	if json.Unmarshal(data, &s) != nil || s.ReadyEpisodes < 0 || s.ReadyEpisodes > 18 || s.Bytes < 0 || s.Bytes > MaxCacheBytes {
 		return nil
 	}
 	switch s.State {
@@ -84,44 +87,65 @@ func publish(path string, value any) error {
 // resolved IP is dialled, so a second DNS resolution cannot reach the LAN.
 func publicURL(raw string) error {
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || (u.Port() != "" && u.Port() != "443") {
+	if err != nil || len(raw) > 4096 || u.Fragment != "" {
+		return errors.New("podcast requires public HTTPS")
+	}
+	// Public enclosure URLs may contain publisher signatures; never log them.
+	candidate := *u
+	candidate.RawQuery = ""
+	candidate.ForceQuery = false
+	if _, err = podcastconfig.CanonicalURL(candidate.String()); err != nil {
 		return errors.New("podcast requires public HTTPS")
 	}
 	return nil
 }
 func publicIP(ip net.IP) bool {
-	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast()
+	addr, ok := netip.AddrFromSlice(ip)
+	return ok && podcastconfig.PublicIP(addr)
+}
+
+type feedRequestKey struct{}
+type lookupFunc func(context.Context, string) ([]net.IPAddr, error)
+type dialFunc func(context.Context, string, string) (net.Conn, error)
+
+func dialPublic(ctx context.Context, network, address string, lookup lookupFunc, dial dialFunc) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || port != "443" {
+		return nil, errors.New("invalid podcast address")
+	}
+	ips, err := lookup(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return nil, errors.New("podcast DNS unavailable")
+	}
+	for _, ip := range ips {
+		if !publicIP(ip.IP) {
+			return nil, errors.New("podcast address is not public")
+		}
+	}
+	for _, ip := range ips {
+		conn, err := dial(ctx, network, net.JoinHostPort(ip.IP.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	return nil, errors.New("podcast server unavailable")
 }
 func Client() *http.Client {
 	transport := &http.Transport{TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 30 * time.Second, DisableCompression: true, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil || port != "443" {
-			return nil, errors.New("invalid podcast address")
-		}
-		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-		if err != nil || len(ips) == 0 {
-			return nil, errors.New("podcast DNS unavailable")
-		}
-		for _, ip := range ips {
-			if !publicIP(ip.IP) {
-				return nil, errors.New("podcast address is not public")
-			}
-		}
-		d := net.Dialer{Timeout: 15 * time.Second}
-		for _, ip := range ips {
-			conn, err := d.DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
-			if err == nil {
-				return conn, nil
-			}
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-		}
-		return nil, errors.New("podcast server unavailable")
+		dialer := net.Dialer{Timeout: 15 * time.Second}
+		return dialPublic(ctx, network, address, net.DefaultResolver.LookupIPAddr, dialer.DialContext)
 	}}
 	return &http.Client{Transport: transport, Timeout: 10 * time.Minute, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 12 {
 			return errors.New("too many podcast redirects")
+		}
+		if req.Context().Value(feedRequestKey{}) == true {
+			if _, err := podcastconfig.CanonicalURL(req.URL.String()); err != nil {
+				return errors.New("invalid public feed redirect")
+			}
 		}
 		return publicURL(req.URL.String())
 	}}
@@ -149,8 +173,9 @@ func fetch(ctx context.Context, client *http.Client, raw string, out io.Writer, 
 	}
 	return nil
 }
-func episodeID(guid string) string {
-	sum := sha256.Sum256([]byte(podcastconfig.Feed + "\x00" + guid))
+func episodeID(guid string) string { return episodeIDFor(podcastconfig.Feed, guid) }
+func episodeIDFor(feed, guid string) string {
+	sum := sha256.Sum256([]byte(feed + "\x00" + guid))
 	return "pod-" + hex.EncodeToString(sum[:])[:32]
 }
 func diskBytes(root string) (int64, error) {
@@ -228,13 +253,21 @@ func refresh(ctx context.Context, configPath, root string, client *http.Client) 
 	if len(c.Subscriptions) == 0 {
 		return status("idle")
 	}
-	if n, _ := cached(root); n == len(pilotGUIDs) {
-		return status("ready")
+
+	// Pinned pilot episodes do not need another feed download once both are ready.
+	if len(c.Feeds) == 0 {
+		live, loadErr := books.Load(filepath.Join(root, "library"))
+		pilotOnly := loadErr == nil && len(live.Books) == len(pilotGUIDs)
+		for _, b := range live.Books {
+			pilotOnly = pilotOnly && (b.ID == episodeID(pilotGUIDs[0]) || b.ID == episodeID(pilotGUIDs[1])) && (b.Feed == "" || b.Feed == podcastconfig.Feed)
+		}
+		if n, _ := cached(root); pilotOnly && n == len(pilotGUIDs) {
+			return status("ready")
+		}
 	}
 	if err = status("preparing"); err != nil {
 		return err
 	}
-	// The lock proves no other worker owns these interrupted staging directories.
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return err
@@ -246,75 +279,178 @@ func refresh(ctx context.Context, configPath, root string, client *http.Client) 
 			}
 		}
 	}
-	used, err := diskBytes(root)
-	if err != nil || used > MaxCacheBytes-(272<<20) {
-		return errors.New("podcast pool needs space")
+	library := filepath.Join(root, "library")
+	if err = books.ReapPodcasts(library); err != nil {
+		return err
 	}
 	stage, err := os.MkdirTemp(root, ".refresh-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	feedFile, err := os.Create(filepath.Join(stage, "feed.xml"))
-	if err != nil {
-		return err
+	old := map[string]books.Book{}
+	if live, e := books.Load(library); e == nil {
+		for _, b := range live.Books {
+			old[b.ID] = b
+		}
+	} else if !os.IsNotExist(e) {
+		return errors.New("podcast catalog unavailable")
 	}
-	job, cancel := context.WithTimeout(ctx, time.Minute)
-	err = fetch(job, client, podcastconfig.FeedURL, feedFile, 8<<20)
-	cancel()
-	_ = feedFile.Close()
-	if err != nil {
-		return err
+	sources := map[string]podcastconfig.Source{}
+	for _, sub := range c.Subscriptions {
+		if sub.Feed == podcastconfig.Feed {
+			sources[sub.Feed] = podcastconfig.Source{ID: podcastconfig.Feed, URL: podcastconfig.FeedURL, Title: "Brains On!"}
+		}
 	}
-	feedFile, err = os.Open(filepath.Join(stage, "feed.xml"))
-	if err != nil {
-		return err
-	}
-	feed, err := gofeed.NewParser().Parse(feedFile)
-	_ = feedFile.Close()
-	if err != nil {
-		return errors.New("invalid podcast feed")
-	}
-	catalog := books.Catalog{Schema: 1, Books: []books.Book{}}
-	for _, guid := range pilotGUIDs {
-		var item *gofeed.Item
-		for _, candidate := range feed.Items {
-			if candidate.GUID == guid {
-				item = candidate
+	for _, source := range c.Feeds {
+		for _, sub := range c.Subscriptions {
+			if sub.Feed == source.ID {
+				sources[source.ID] = source
 				break
 			}
 		}
-		if item == nil || len(item.Enclosures) == 0 {
-			return errors.New("pilot episode missing from feed")
-		}
-		title := strings.Join(strings.Fields(item.Title), " ")
-		if len(title) == 0 || len(title) > 240 {
-			return errors.New("invalid podcast title")
-		}
-		source := filepath.Join(stage, episodeID(guid)+".source")
-		f, err := os.Create(source)
+	}
+	ids := []string{}
+	for id := range sources {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	next := books.Catalog{Schema: 1, Books: []books.Book{}}
+	retained := []books.Book{}
+	for _, id := range ids {
+		source := sources[id]
+		var body bytes.Buffer
+		job, cancel := context.WithTimeout(ctx, time.Minute)
+		err = fetch(context.WithValue(job, feedRequestKey{}, true), client, source.URL, &body, 8<<20)
+		cancel()
 		if err != nil {
 			return err
 		}
-		err = fetch(ctx, client, item.Enclosures[0].URL, f, 64<<20)
-		closeErr := f.Close()
-		if err != nil {
-			return err
+		parsed, e := gofeed.NewParser().Parse(bytes.NewReader(body.Bytes()))
+		if e != nil || len(parsed.Items) > 5000 {
+			return errors.New("invalid or oversized podcast feed")
 		}
-		if closeErr != nil {
-			return closeErr
+		selected, e := selectEpisodes(parsed, id)
+		if e != nil {
+			return e
 		}
-		catalog.Books = append(catalog.Books, books.Book{ID: episodeID(guid), Title: title, Language: "en", Origin: "podcast", Chapters: []books.Chapter{{Title: title, Audio: source}}})
+		for _, item := range selected {
+			identity := item.GUID
+			if identity == "" {
+				identity = item.Link
+			}
+			if identity == "" || len(identity) > 2048 {
+				return errors.New("podcast episode needs stable identity")
+			}
+			episode := episodeIDFor(id, identity)
+			signature := episodeSource(item)
+			if b, ok := old[episode]; ok && b.SourceHash == signature && books.Ready(library, b) {
+				retained = append(retained, b)
+				continue
+			}
+			title := strings.Join(strings.Fields(item.Title), " ")
+			if len(title) == 0 || len(title) > 240 {
+				return errors.New("invalid podcast title")
+			}
+			// Include the show in spoken episode titles; menus remain a bounded flat list.
+			spoken := title
+			if id != podcastconfig.Feed {
+				spoken = source.Title + ": " + title
+			}
+			for len(spoken) > 240 {
+				_, n := utf8.DecodeLastRuneInString(spoken)
+				spoken = spoken[:len(spoken)-n]
+			}
+			used, e := diskBytes(root)
+			if e != nil || used > MaxCacheBytes-(64<<20) {
+				return errors.New("podcast pool needs space")
+			}
+			audio := filepath.Join(stage, episode+".source")
+			f, e := os.Create(audio)
+			if e != nil {
+				return e
+			}
+			e = fetch(ctx, client, item.Enclosures[0].URL, f, 64<<20)
+			closeErr := f.Close()
+			if e != nil {
+				return e
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+			next.Books = append(next.Books, books.Book{ID: episode, Feed: id, SourceHash: signature, Title: spoken, Language: "en", Origin: "podcast", Chapters: []books.Chapter{{Title: spoken, Audio: audio}}})
+			used, e = diskBytes(root)
+			if e != nil || used+int64(len(next.Books))*(68<<20) > MaxCacheBytes {
+				return errors.New("podcast pool needs preparation space")
+			}
+		}
 	}
 	source := filepath.Join(stage, "catalog.json")
-	if err = publish(source, catalog); err != nil {
+	if err = publish(source, next); err != nil {
 		return err
 	}
-	if err = books.Prepare(ctx, source, filepath.Join(root, "library")); err != nil {
-		return fmt.Errorf("podcast preparation: %w", err)
+	if err = books.PreparePodcasts(ctx, source, library, retained); err != nil {
+		return errors.New("podcast preparation failed")
 	}
-	if n, _ := cached(root); n != len(pilotGUIDs) {
+	if n, _ := cached(root); n != len(next.Books)+len(retained) {
 		return errors.New("podcast artifacts or prompts unavailable")
 	}
+	// Publication is complete. Active menus hold a lease; stale editions can wait
+	// until the next refresh rather than disrupting playback or deleting bookmarks.
+	if err = books.ReapPodcasts(library); err != nil {
+		return err
+	}
 	return status("ready")
+}
+func selectEpisodes(feed *gofeed.Feed, id string) ([]*gofeed.Item, error) {
+	selected := []*gofeed.Item{}
+	if id == podcastconfig.Feed {
+		for _, guid := range pilotGUIDs {
+			for _, item := range feed.Items {
+				if item.GUID == guid {
+					selected = append(selected, item)
+					break
+				}
+			}
+		}
+		if len(selected) != len(pilotGUIDs) {
+			return nil, errors.New("pilot episode missing from feed")
+		}
+	} else {
+		// Feed order is publisher order. Trailers/bonus items are excluded when tagged;
+		// absence of a tag is not a promise that an episode has no advertising.
+		seen := map[string]bool{}
+		for _, item := range feed.Items {
+			identity := item.GUID
+			if identity == "" {
+				identity = item.Link
+			}
+			if identity == "" || seen[identity] || len(item.Enclosures) == 0 {
+				continue
+			}
+			if item.ITunesExt != nil && item.ITunesExt.EpisodeType != "" && item.ITunesExt.EpisodeType != "full" {
+				continue
+			}
+			seen[identity] = true
+			selected = append(selected, item)
+			if len(selected) == 2 {
+				break
+			}
+		}
+	}
+	if len(selected) == 0 {
+		return nil, errors.New("no eligible podcast episodes")
+	}
+	for _, item := range selected {
+		if len(item.Enclosures) == 0 || publicURL(item.Enclosures[0].URL) != nil {
+			return nil, errors.New("invalid podcast enclosure")
+		}
+	}
+	return selected, nil
+}
+
+func episodeSource(item *gofeed.Item) string {
+	encoded, _ := json.Marshal([]string{item.GUID, item.Link, item.Published, item.Updated, item.Enclosures[0].URL, item.Enclosures[0].Length, item.Enclosures[0].Type})
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }

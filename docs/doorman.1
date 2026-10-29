@@ -1405,6 +1405,17 @@ is allowed, logging the digits is not.
 Withheld caller ID always meets the bouncer, and anonymous callers share a
 single rate\-limit bucket. One persistent blocked caller therefore makes the
 lobby stricter for every other withheld number. That is the intended trade.
+.SH PUBLIC PODCAST FEEDS
+.B doorman podcasts subscribe --handset id --feed-url https://publisher.example.org/show.xml --title "Show"
+adds a public HTTPS source and handset subscription atomically.
+.B doorman podcasts unsubscribe --handset id --feed-url URL
+removes only that handset/feed pair. Use --config and --handsets for nondefault paths.
+Schema 2 permits eight generic feeds and 100 handset/feed pairs; schema 1 preserves
+the pinned Brains On pilot. Generic sync requires podcast.subscribeFeed capability.
+The background worker selects two eligible items per show; preparation failure
+keeps the previous catalog. Per-feed menus and bookmarks are handset scoped;
+active playback delays cache collection. See docs/PODCASTS.md for bounds and rollout.
+
 .SH SEE ALSO
 .IR asterisk (8),
 .IR journalctl (1)

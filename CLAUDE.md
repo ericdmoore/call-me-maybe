@@ -441,3 +441,9 @@ Podcast pilot: `doorman schema podcasts` describes the separate handset subscrip
 JSON; validate with `doorman podcasts check --config <file> --handsets <inventory>`.
 See docs/PODCASTS.md for the shared Opus pool, optional worker and *7637 trial. The
 calling daemon never refreshes a feed or prepares an episode.
+
+Public podcast feeds (#172): schema 2 and the separately negotiated
+`podcast.subscribeFeed` verb carry canonical public-HTTPS sources. CLI subscribe/
+unsubscribe use the same podcastconfig validation. Feed/enclosure network access
+stays in the background worker; per-feed menu checks and playback leases protect
+handset access and active cache files. See docs/PODCASTS.md for bounds and rollout.

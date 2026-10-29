@@ -127,3 +127,91 @@ func TestPodcastOpusPlaybackAndHandsetProgress(t *testing.T) {
 func convertTestAudio(input, output string) error {
 	return exec.Command("ffmpeg", "-nostdin", "-v", "error", "-f", "s16le", "-ar", "16000", "-ac", "1", "-i", input, "-y", output).Run()
 }
+
+func TestGenericPodcastProgressAndReapLease(t *testing.T) {
+	requireAudio(t, "ffmpeg")
+	requireAudio(t, "ffprobe")
+	requireAudio(t, "espeak-ng")
+	dir := t.TempDir()
+	root := filepath.Join(dir, "cmm-media-cache/podcasts/library")
+	input := filepath.Join(dir, "input.sln16")
+	pcm(t, input, 2)
+	wav := filepath.Join(dir, "audio.wav")
+	if err := convertTestAudio(input, wav); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "source.json")
+	c := Catalog{Schema: 1, Books: []Book{{ID: "pod-generic", Feed: "feed-0123456789abcdef0123456789abcdef", Title: "Nature: Birds", Language: "en", Origin: "podcast", Chapters: []Chapter{{Title: "Birds", Audio: wav}}}}}
+	other := c.Books[0]
+	other.ID = "pod-other"
+	other.Feed = "feed-abcdef0123456789abcdef0123456789"
+	c.Books = append(c.Books, other)
+	if err := writeJSON(source, c); err != nil {
+		t.Fatal(err)
+	}
+	if err := Prepare(context.Background(), source, root); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := c.Books[0]
+	for _, feed := range []string{b.Feed, other.Feed} {
+		a, tr := fakeAGI(t, func(command string) string {
+			switch {
+			case strings.Contains(command, "CHANNEL(endpoint)"), strings.Contains(command, "CMM_BOOKS_HANDSET"):
+				return "200 result=1 (kitchen)"
+			case strings.Contains(command, "ASTSPOOLDIR"):
+				return fmt.Sprintf("200 result=1 (%s)", dir)
+			case strings.Contains(command, "/last\""):
+				return result('0')
+			}
+			return result(0)
+		})
+		if err = RunPodcastFeeds(context.Background(), a, func(_ string, id string) bool { return id == feed }); err != nil {
+			t.Fatal(err)
+		}
+		expected, hidden := "pod-generic-", "pod-other-"
+		if feed == other.Feed {
+			expected, hidden = hidden, expected
+		}
+		if !strings.Contains(tr.text(), expected) || strings.Contains(tr.text(), hidden) {
+			t.Fatal("feed authorization leaked catalog", tr.text())
+		}
+	}
+	state := filepath.Join(dir, "progress")
+	_ = os.MkdirAll(state, 0700)
+	kitchen := &menu{handset: "kitchen", state: state}
+	bedroom := &menu{handset: "bedroom", state: state}
+	if err = kitchen.saveProgress(b, Position{Speed: 10, Seconds: 1, Started: true}); err != nil {
+		t.Fatal(err)
+	}
+	if bedroom.loadProgress(b).Started || kitchen.loadProgress(b).Seconds != 1 {
+		t.Fatal("handset bookmarks conflated")
+	}
+	release, err := podcastPlaybackLock(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Retire the edition while a menu still references its immutable file paths.
+	if err = publishJSON(filepath.Join(root, "catalog.json"), Catalog{Schema: 1, Books: []Book{}}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err = ReapPodcasts(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(bookDir(root, b)); err != nil {
+		t.Fatal("active artifact reaped", err)
+	}
+	release()
+	if err = ReapPodcasts(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(bookDir(root, b)); !os.IsNotExist(err) {
+		t.Fatal("unreferenced artifact retained")
+	}
+	if kitchen.loadProgress(b).Seconds != 1 {
+		t.Fatal("eviction deleted bookmark")
+	}
+}

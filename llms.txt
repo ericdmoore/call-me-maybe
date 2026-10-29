@@ -225,3 +225,15 @@ two pinned Brains On episodes into a shared Opus pool; *PODS (*7637) uses the lo
 player with independent handset bookmarks. See docs/PODCASTS.md. No feed, network
 or speech service runs on call admission. This prototype does not yet rotate new
 episodes, generate transcripts, evict audio or back up podcast bookmarks.
+
+## Public podcast subscriptions
+
+`doorman schema podcasts` and `doorman podcasts check` describe and validate the
+optional JSON subscription file. `doorman podcasts subscribe --handset <id>
+--feed-url <public-HTTPS-url> --title <show>` configures a feed; `unsubscribe`
+removes that handset/feed pair. Schema 1 preserves the pinned Brains On pilot;
+schema 2 supports eight public feeds and multiple shows per handset. Generic
+sync uses the separate `podcast.subscribeFeed` capability, never assumed from
+pilot support. A background worker prepares up to two eligible episodes per
+show; *7637 plays only that handset's subscriptions. Shared Opus cache, separate
+bookmarks, bounded fetching and last-good-on-failure are in docs/PODCASTS.md.

@@ -169,7 +169,7 @@ func (m *menu) listen(b Book, p *Position) error {
 	defer stop()
 	defer func() { _ = m.saveProgress(b, *p) }()
 	for {
-		if m.allowed != nil && !m.allowed(m.handset) {
+		if (m.allowed != nil && !m.allowed(m.handset)) || (m.allowedBook != nil && !m.allowedBook(m.handset, b)) {
 			return errors.New("podcast subscription ended")
 		}
 		if err := m.ctx.Err(); err != nil {

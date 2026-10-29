@@ -52,3 +52,42 @@ func TestPodcastSubscriptionSync(t *testing.T) {
 		t.Fatalf("stale %+v %v", r, err)
 	}
 }
+
+func TestGenericPodcastSyncAndConflict(t *testing.T) {
+	m, p, _ := fixture(t)
+	p.Podcasts = filepath.Join(filepath.Dir(p.Policy), "subscriptions.json")
+	m.paths = p
+	s, err := m.Observe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := "https://podcasts.example.org/nature.xml"
+	id, _ := podcastconfig.IDForURL(url)
+	source := map[string]any{"id": id, "url": url, "title": "Nature"}
+	verb := map[string]any{"name": "podcast.subscribeFeed", "handset": "kitchen", "feed": source, "enabled": true}
+	q := proposal(t, s, verb)
+	r, err := m.Apply(q)
+	if err != nil || r.Status != syncwire.ReceiptStatusApplied {
+		t.Fatalf("generic %+v %v", r, err)
+	}
+	c, err := podcastconfig.Load(p.Podcasts)
+	if err != nil || !c.AllowsFeed("kitchen", id) || c.Schema != 2 {
+		t.Fatal("generic not saved", err)
+	}
+	r, err = m.Apply(q)
+	if err != nil || r.Status != syncwire.ReceiptStatusApplied {
+		t.Fatal("retry", err)
+	}
+	s, err = m.Observe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Configuration.PodcastFeeds == nil || len(*s.Configuration.PodcastFeeds) != 1 {
+		t.Fatal("missing source projection")
+	}
+	source["url"] = "https://127.0.0.1/private"
+	r, err = m.Apply(proposal(t, s, verb))
+	if err != nil || r.Status != syncwire.ReceiptStatusRejected {
+		t.Fatal("invalid URL applied", err)
+	}
+}

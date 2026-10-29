@@ -53,6 +53,7 @@ type Schema struct {
 	Required             []string           `json:"required,omitempty"`
 	AdditionalProperties *bool              `json:"additionalProperties,omitempty"`
 
+	MaxItems *int `json:"maxItems,omitempty"`
 	// Arrays
 	Items       *Schema `json:"items,omitempty"`
 	MinItems    *int    `json:"minItems,omitempty"`
@@ -1332,8 +1333,12 @@ func Webhook() *Schema {
 
 // Podcasts is a separate opt-in JSON file; no podcast work runs on admission.
 func Podcasts() *Schema {
+	source := &Schema{Type: "object", AdditionalProperties: falsy, Required: []string{"id", "url", "title"}, Properties: map[string]*Schema{
+		"id": {Type: "string", Pattern: "^(brains-on|feed-[a-f0-9]{32})$"}, "url": {Type: "string", MaxLength: ptr(2048), Description: "Canonical public HTTPS URL, no credentials, query or fragment."}, "title": {Type: "string", MinLength: ptr(1), MaxLength: ptr(240)},
+	}}
 	return &Schema{SchemaURI: "https://json-schema.org/draft/2020-12/schema", ID: "https://callmemaybe.cc/schema/podcasts.json", Title: "Podcast handset subscriptions", Type: "object", AdditionalProperties: falsy, Required: []string{"schema", "subscriptions"}, Properties: map[string]*Schema{
-		"schema":        {Type: "integer", Const: 1},
-		"subscriptions": {Type: "array", Items: &Schema{Type: "object", AdditionalProperties: falsy, Required: []string{"handset", "feed"}, Properties: map[string]*Schema{"handset": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]{0,63}$", MaxLength: ptr(64), CrossRefs: []string{"handsets.toml [[handsets]].id"}}, "feed": {Type: "string", Enum: []any{"brains-on"}}}}, Rules: []string{"At most 100 subscriptions; one per handset. Handsets must exist in the box inventory.", "Audio is cached once per box; bookmarks are per handset. The first pilot pins two Brains On episodes; it does not follow the whole archive."}},
-	}, Rules: []string{"Default file: /var/spool/call-me-maybe/podcasts/subscriptions.json. Missing file means no subscriptions.", "Validate a local file with doorman podcasts check --config <path> --handsets <inventory>. Sync validates the same file before writing."}}
+		"schema":        {Type: "integer", Enum: []any{1, 2}},
+		"feeds":         {Type: "array", MaxItems: ptr(8), Items: source},
+		"subscriptions": {Type: "array", MaxItems: ptr(100), Items: &Schema{Type: "object", AdditionalProperties: falsy, Required: []string{"handset", "feed"}, Properties: map[string]*Schema{"handset": {Type: "string", Pattern: "^[a-z0-9][a-z0-9_-]{0,63}$", MaxLength: ptr(64), CrossRefs: []string{"handsets.toml [[handsets]].id"}}, "feed": {Type: "string", Pattern: "^(brains-on|feed-[a-f0-9]{32})$"}}}},
+	}, Rules: []string{"Schema 1 retains the pinned Brains On pilot. Schema 2 requires 1–8 unique public feeds, each ID computed from its canonical URL; the pilot remains optional.", "At most 100 unique handset/feed pairs. Handsets must exist; each non-pilot feed must be defined. Audio is shared; bookmarks remain per handset and episode revision.", "Default file: /var/spool/call-me-maybe/podcasts/subscriptions.json. Missing file means no subscriptions.", "Use doorman podcasts subscribe/unsubscribe --handset <id> --feed-url <url> --title <show>; check validates the same runtime rules."}}
 }
