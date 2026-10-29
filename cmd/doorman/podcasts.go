@@ -20,10 +20,15 @@ func runPodcasts(args []string) int {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if len(args) == 1 && args[0] == "menu" {
+		reported := false
 		a, err := books.Connect(os.Stdin, os.Stdout)
 		if err == nil {
 			err = books.RunPodcastFeeds(ctx, a, func(handset, feed string) bool {
 				c, e := podcastconfig.Load(podcasts.DefaultConfig)
+				if e != nil && !reported {
+					fmt.Fprintln(os.Stderr, "podcasts: subscriptions unreadable or invalid")
+					reported = true
+				}
 				return e == nil && c.AllowsFeed(handset, feed)
 			})
 		}
@@ -37,7 +42,9 @@ func runPodcasts(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: doorman podcasts refresh|status|check|subscribe|unsubscribe [--config file] [--pool directory]")
 		return 2
 	}
+	scheduled := false
 	fs := flag.NewFlagSet("podcasts", flag.ContinueOnError)
+	fs.BoolVar(&scheduled, "scheduled", false, "respect per-feed polling and retry intervals")
 	handsets := fs.String("handsets", handsetsPathArg(""), "handset inventory (check)")
 	handset := fs.String("handset", "", "handset ID (subscribe/unsubscribe)")
 	feedURL := fs.String("feed-url", "", "public HTTPS feed (subscribe/unsubscribe)")
@@ -106,7 +113,11 @@ func runPodcasts(args []string) int {
 		return 0
 	}
 	if args[0] == "refresh" {
-		if err := podcasts.Refresh(ctx, *config, *root); err != nil {
+		refresh := podcasts.Refresh
+		if scheduled {
+			refresh = podcasts.RefreshScheduled
+		}
+		if err := refresh(ctx, *config, *root); err != nil {
 			fmt.Fprintln(os.Stderr, "podcasts: refresh failed; previous prepared episodes remain available:", err)
 			return 1
 		}

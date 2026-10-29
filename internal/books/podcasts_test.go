@@ -215,3 +215,38 @@ func TestGenericPodcastProgressAndReapLease(t *testing.T) {
 		t.Fatal("eviction deleted bookmark")
 	}
 }
+
+func TestHeaderlessVBRPodcastUsesDecodedDuration(t *testing.T) {
+	requireAudio(t, "ffmpeg")
+	requireAudio(t, "espeak-ng")
+	dir := t.TempDir()
+	a := filepath.Join(dir, "short.mp3")
+	b := filepath.Join(dir, "long.mp3")
+	input := filepath.Join(dir, "variable.mp3")
+	// Concatenated headerless segments have sharply different bitrates, so the
+	// container estimate cannot be used as a sample-accurate duration authority.
+	for _, job := range []struct{ path, rate, duration string }{{a, "320k", "1"}, {b, "32k", "8"}} {
+		if err := exec.Command("ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration="+job.duration, "-c:a", "libmp3lame", "-b:a", job.rate, "-write_xing", "0", "-id3v2_version", "0", "-y", job.path).Run(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, _ := os.ReadFile(a)
+	second, _ := os.ReadFile(b)
+	if err := os.WriteFile(input, append(first, second...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	seconds, err := sourceDuration(context.Background(), input)
+	if err != nil || seconds < 8.9 || seconds > 9.2 {
+		t.Fatal("decoded source duration", seconds, err)
+	}
+	book := Book{ID: "pod-vbr", Title: "Variable bitrate", Language: "en", Origin: "podcast", Chapters: []Chapter{{Title: "Variable bitrate", Audio: input}}}
+	prepared, err := StagePodcast(context.Background(), filepath.Join(dir, "library"), book)
+	if err != nil || prepared.Chapters[0].Seconds < 8.9 {
+		t.Fatal("valid headerless MP3 rejected", prepared, err)
+	}
+	counter := &sampleCounter{}
+	counter.n = 7200 * 16000
+	if _, err = counter.Write([]byte{1, 2}); err == nil {
+		t.Fatal("unbounded source decoder")
+	}
+}

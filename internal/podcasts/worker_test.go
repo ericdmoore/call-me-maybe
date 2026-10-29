@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"callmemaybe/internal/books"
 	"callmemaybe/internal/podcastconfig"
@@ -69,8 +70,8 @@ func TestSharedPilotCacheAndRetry(t *testing.T) {
 	if s := ReadStatus(root); s == nil || s.State != "error" || s.ReadyEpisodes != 0 {
 		t.Fatalf("failed download status %+v", s)
 	}
-	if _, err := books.Load(filepath.Join(root, "library")); !os.IsNotExist(err) {
-		t.Fatal("failed preparation published a catalog")
+	if c, err := books.Load(filepath.Join(root, "library")); err != nil || len(c.Books) != 0 {
+		t.Fatal("failed preparation published episodes", err)
 	}
 	fail = false
 	if err := refresh(context.Background(), config, root, client); err != nil {
@@ -259,5 +260,195 @@ func TestDNSAndRedirectBoundaries(t *testing.T) {
 	req, _ := http.NewRequestWithContext(context.WithValue(context.Background(), feedRequestKey{}, true), "GET", "https://example.org/private?token=x", nil)
 	if client.CheckRedirect(req, nil) == nil {
 		t.Fatal("private feed redirect accepted")
+	}
+}
+
+func TestFourFeedsPrepareIndependentlyAndScheduledValidation(t *testing.T) {
+	wav := audio(t)
+	dir := t.TempDir()
+	config := filepath.Join(dir, "subscriptions.json")
+	root := filepath.Join(dir, "pool")
+	var data []byte
+	sources := []podcastconfig.Source{}
+	for i := 0; i < 4; i++ {
+		url := fmt.Sprintf("https://publisher%d.example.org/rss", i)
+		id, _ := podcastconfig.IDForURL(url)
+		source := podcastconfig.Source{ID: id, URL: url, Title: fmt.Sprintf("Show %d", i)}
+		sources = append(sources, source)
+		var err error
+		data, err = podcastconfig.SelectFeed(data, "kitchen", source, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := podcastconfig.Save(config, data); err != nil {
+		t.Fatal(err)
+	}
+	feeds, downloads := 0, 0
+	broken := ""
+	add := false
+	token := "one"
+	conditional := 0
+	client := &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+		headers := make(http.Header)
+		var body []byte
+		if strings.HasSuffix(r.URL.Path, "rss") {
+			feeds++
+			if r.URL.Host == broken {
+				return nil, fmt.Errorf("offline")
+			}
+			if r.Header.Get("If-None-Match") == "v1" && !add {
+				conditional++
+				return &http.Response{StatusCode: 304, Body: io.NopCloser(strings.NewReader("")), Header: headers}, nil
+			}
+			headers.Set("ETag", "v1")
+			newer := ""
+			if add {
+				newer = `<item><title>New</title><guid>new</guid><enclosure url="https://media.example.org/new.wav"/></item>`
+			}
+			body = []byte(`<rss version="2.0"><channel><title>Show</title>` + newer + `<item><title>Bad HTTP</title><guid>bad</guid><enclosure url="http://media.example.org/no.wav"/></item><item><title>First</title><guid>one</guid><enclosure url="https://media.example.org/one.wav?signature=` + token + `"/></item><item><title>Second</title><guid>two</guid><enclosure url="https://media.example.org/two.wav"/></item></channel></rss>`)
+		} else {
+			downloads++
+			body = wav
+		}
+		return &http.Response{StatusCode: 200, Header: headers, Body: io.NopCloser(bytes.NewReader(body))}, nil
+	})}
+	now := time.Unix(2000000000, 0)
+	run := func(scheduled bool) error {
+		return refreshRun(context.Background(), config, root, client, now, scheduled)
+	}
+	if err := run(true); err != nil {
+		t.Fatal(err)
+	}
+	c, err := books.Load(filepath.Join(root, "library"))
+	if err != nil || len(c.Books) != 8 || downloads != 8 || feeds != 4 {
+		t.Fatal("four-feed working set", len(c.Books), feeds, downloads, err)
+	}
+	catalog, _ := os.ReadFile(filepath.Join(root, "library/catalog.json"))
+	st, _ := os.Stat(filepath.Join(root, "library/catalog.json"))
+	status, _ := os.Stat(filepath.Join(root, "status.json"))
+	for i := 0; i < 59; i++ {
+		now = now.Add(time.Minute)
+		if err = run(true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if feeds != 4 || downloads != 8 {
+		t.Fatal("scheduled polling repeated", feeds, downloads)
+	}
+	again, _ := os.Stat(filepath.Join(root, "library/catalog.json"))
+	againStatus, _ := os.Stat(filepath.Join(root, "status.json"))
+	if !again.ModTime().Equal(st.ModTime()) || !againStatus.ModTime().Equal(status.ModTime()) {
+		t.Fatal("unchanged catalog/status rewritten")
+	}
+	now = now.Add(time.Minute)
+	if err = run(true); err != nil || conditional != 4 || downloads != 8 {
+		t.Fatal("hourly conditional polling", conditional, downloads, err)
+	}
+	// Signed URL churn does not change source identity or transcode unchanged audio.
+	token = "two"
+	add = true
+	broken = strings.TrimPrefix(strings.TrimSuffix(sources[0].URL, "/rss"), "https://")
+	if err = run(false); err == nil {
+		t.Fatal("missing per-feed failure")
+	}
+	c, _ = books.Load(filepath.Join(root, "library"))
+	if len(c.Books) != 8 || downloads != 11 {
+		t.Fatal("healthy feeds stalled", len(c.Books), downloads)
+	}
+	for _, source := range sources {
+		if source.ID == sources[0].ID {
+			if !readFeedState(filepath.Join(root, ".feed-"+source.ID+".json")).Failed {
+				t.Fatal("source failure not recorded")
+			}
+		}
+	}
+	// Stable feed ordering does not depend on whether each episode was reused.
+	previousFeed := ""
+	for _, b := range c.Books {
+		if b.Feed < previousFeed {
+			t.Fatal("menu feed order changed")
+		}
+		previousFeed = b.Feed
+	}
+	if bytes.Equal(catalog, mustRead(t, filepath.Join(root, "library/catalog.json"))) {
+		t.Fatal("healthy additions not published")
+	}
+	broken = ""
+	add = false
+	sources[1].Title = "Renamed show"
+	data, err = podcastconfig.SelectFeed(data, "kitchen", sources[1], true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = podcastconfig.Save(config, data)
+	if err = run(false); err != nil {
+		t.Fatal(err)
+	}
+	renamed, _ := books.Load(filepath.Join(root, "library"))
+	foundRename := false
+	for _, b := range renamed.Books {
+		if b.Feed == sources[1].ID {
+			foundRename = true
+			if !strings.HasPrefix(b.Title, "Renamed show: ") {
+				t.Fatal("stale spoken show title", b.Title)
+			}
+		}
+	}
+	if !foundRename || downloads != 13 {
+		t.Fatal("title refresh or signed URL reuse failed", downloads)
+	}
+	// Removing all subscriptions clears both audio and RSS caches, preserving bookmarks.
+	if err = podcastconfig.Save(config, []byte(`{"schema":1,"subscriptions":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err = run(true); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = books.Load(filepath.Join(root, "library"))
+	s := ReadStatus(root)
+	if len(c.Books) != 0 || s == nil || s.State != "idle" || s.ReadyEpisodes != 0 || s.Bytes != 0 {
+		t.Fatal("idle retains audio", s)
+	}
+	entries, _ := os.ReadDir(filepath.Join(root, "library"))
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "pod-") {
+			t.Fatal("audio retained", e.Name())
+		}
+	}
+}
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	b, e := os.ReadFile(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	return b
+}
+
+func TestBadAudioDoesNotBlockOtherEpisodes(t *testing.T) {
+	wav := audio(t)
+	dir := t.TempDir()
+	config := filepath.Join(dir, "subscriptions.json")
+	root := filepath.Join(dir, "pool")
+	url := "https://publisher.example.org/rss"
+	id, _ := podcastconfig.IDForURL(url)
+	data, _ := podcastconfig.SelectFeed(nil, "kitchen", podcastconfig.Source{ID: id, URL: url, Title: "Show"}, true)
+	_ = podcastconfig.Save(config, data)
+	client := &http.Client{Transport: transport(func(r *http.Request) (*http.Response, error) {
+		body := wav
+		if r.URL.String() == url {
+			body = []byte(`<rss version="2.0"><channel><title>Show</title><item><title>Corrupt</title><guid>bad</guid><enclosure url="https://media.example.org/bad"/></item><item><title>Good</title><guid>good</guid><enclosure url="https://media.example.org/good"/></item></channel></rss>`)
+		} else if r.URL.Path == "/bad" {
+			body = []byte("corrupt audio")
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body))}, nil
+	})}
+	if err := refresh(context.Background(), config, root, client); err == nil {
+		t.Fatal("bad item not reported")
+	}
+	c, err := books.Load(filepath.Join(root, "library"))
+	if err != nil || len(c.Books) != 1 || c.Books[0].ID != episodeIDFor(id, "good") {
+		t.Fatal("bad item blocked valid audio", c, err)
 	}
 }

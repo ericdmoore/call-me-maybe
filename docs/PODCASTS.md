@@ -42,8 +42,8 @@ Use `--config` and `--handsets` for nondefault paths. CLI edits validate the
 same source and handset rules as sync and publish atomically. Unsubscribing one
 pair preserves other feeds and handsets. An unused generic definition is removed;
 removing the last generic subscription returns the file to schema 1. Removing all
-subscriptions stops background downloads and retains the last cache for reuse;
-small bookmarks are not deleted.
+subscriptions publishes an empty catalog and reclaims audio/RSS caches after
+active playback leases end; small bookmarks are not deleted.
 
 The new `podcast.subscribeFeed` verb contains `handset`, `enabled` and a `feed`
 object `{id, url, title}`. It requires the separately advertised capability of
@@ -56,21 +56,27 @@ receive a generic verb just because they support the pilot.
 
 ## Background refresh and safe failure
 
-`doorman-podcasts.timer` invokes `doorman podcasts refresh` about once a minute.
+`doorman-podcasts.timer` invokes `doorman podcasts refresh --scheduled` about once
+a minute to notice subscription changes. Existing feeds poll at most hourly,
+using ETag/Last-Modified conditional GET. Failed sources retry after five minutes.
+An explicit `doorman podcasts refresh` bypasses the waiting interval.
 The separate oneshot service runs as asterisk, with read-only subscription access,
 a 512 MiB memory limit and low priority. The calling daemon and menu never fetch
 feeds, download episodes or transcode audio. Missing configuration skips the
 service; zero subscriptions produce no network work.
 
-One worker lock coalesces every handset's demand. Generic feeds are polled once
-per refresh, selecting the first two eligible entries in publisher order. Tagged
+One worker lock coalesces every handset's demand. Generic feeds select the first two playable eligible entries in publisher order. Tagged
 trailers/bonus entries are skipped; absent tags do not certify ordinary content
 or absence of ads. Episode identity is scoped by feed plus GUID, with publisher
-item link as fallback. Missing identity or invalid metadata refuses preparation.
+item link as fallback. Missing identity, invalid metadata or an unsafe enclosure skips that item.
 Unchanged selected episodes reuse verified immutable artifacts; a changed
 source URL/date/length signature triggers preparation again. This is metadata
 change detection, not a promise to detect changed bytes behind an unchanged URL.
-The fixed pilot skips network after both pinned episodes are ready.
+Expiring signature/token query parameters do not cause reconversion; meaningful
+query parameters remain in the source signature. A show title change refreshes
+spoken titles. The fixed pilot skips network after both pinned episodes are
+ready, including when other feeds are configured. Menu order groups by stable
+feed ID, then publisher episode order, regardless of which editions were new.
 
 Fetching accepts public HTTPS only. Every DNS answer must be public, and the
 validated IP is the one dialled; TLS still validates the publisher hostname.
@@ -84,9 +90,16 @@ Bounds: 8 MiB per feed, at most 5,000 exposed items, 64 MiB per enclosure and tw
 hours per episode. The shared disk pool has a conservative 512 MiB ceiling,
 including staging reservations for conversion and prompts. The worker prepares
 48 kbit/s stereo Opus and verifies codec, duration and full decode. No source MP3
-or full-episode PCM is retained after successful preparation. One new catalog is
-published only after all selected additions are ready. A fetch, parse, download,
-conversion or capacity failure keeps the last-good catalog for another retry.
+or full-episode PCM is retained after successful preparation. One episode is downloaded/prepared at a time; the disk budget reserves a single
+working set, rather than multiplying a worst-case reservation by the catalog
+size. At most four candidate preparations per source are attempted per pass.
+Failed sources retain their own last-good episodes while healthy sources update;
+bad audio is skipped so older eligible episodes can fill the slots. Source
+failure/retry metadata lives in protected `.feed-<id>.json` cache records. A new
+complete menu is published once after the pass; unchanged menus and status
+records are not rewritten. Aggregate error status can coexist with playable
+new episodes from healthy sources. Source duration is measured from a bounded,
+discarded decoded sample stream, avoiding inaccurate VBR container estimates.
 
 Cache collection removes unreferenced immutable podcast editions, retaining the
 current catalog. A shared playback lease covers a menu's entire frozen list;
@@ -100,7 +113,10 @@ in `prompts-podcasts-v2`, with legacy pilot prompts still readable.
 ## Installed paths and status
 
 - `/var/spool/call-me-maybe/podcasts/subscriptions.json`: durable configuration,
-  mode 0640, readable by the worker and written by sync/CLI.
+  mode 0644, public feed metadata only, written by sync/CLI. The installed parent
+  directories restrict traversal to Asterisk/doorman. Read permission allows the
+  Asterisk AGI UID to enforce handset subscriptions without inheriting all daemon
+  group access. `doorman init services` migrates existing metadata permissions.
 - `/var/spool/asterisk/cmm-media-cache/podcasts/library`: shared prepared audio,
   immutable edition directories, menu prompts and transactional catalog.
 - `.../podcasts/progress`: per-handset episode/revision bookmarks.
@@ -119,3 +135,10 @@ Automated tests exercise generic sync and replay, old-capability withholding on
 the host, public-address/DNS/redirect limits, shared downloads, last-good failure,
 per-feed menu isolation, separate bookmarks and playback-safe eviction. Before
 release run `make check` and `make cover`; no production host is changed by tests.
+
+Optional-media failures do not block other sync. An invalid/unreadable podcast
+file omits the podcast projection (and disables podcast edits until repaired),
+while policy/phonebook/webhook sync continues. A removed handset's subscription
+is excluded from projection; its durable file is not silently rewritten. New
+podcast edits still require a known handset. The sync unit's podcast write path
+is optional so hosts without that directory can still start sync.

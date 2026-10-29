@@ -623,29 +623,29 @@ func observe(paths Paths) (*observed, error) {
 	}
 	var subscriptions []podcastconfig.Subscription
 	var podcastFeeds = []podcastconfig.Source{}
+	podcastAvailable := false
 	if paths.Podcasts != "" {
-		data, err := j.read(paths.Podcasts)
-		if err != nil && !errors.Is(err, errMissing) {
-			return nil, j.unreadable(paths.Podcasts, err)
-		}
-		c, err := podcastconfig.Parse(data)
-		if err != nil {
-			return nil, j.reject(paths.Podcasts, "invalid podcast subscriptions")
-		}
-		known := map[string]bool{}
-		for _, raw := range handsets {
-			known[str(raw.(map[string]any), "id")] = true
-		}
-		for _, sub := range c.Subscriptions {
-			if !known[sub.Handset] {
-				return nil, j.reject(paths.Podcasts, "unknown podcast handset")
+		data, readErr := j.read(paths.Podcasts)
+		c, parseErr := podcastconfig.Parse(data)
+		// An optional media file must not stop policy/phonebook/webhook sync.
+		// Omit its capability projection on corruption; do not overwrite the file.
+		if (readErr == nil || errors.Is(readErr, errMissing)) && parseErr == nil {
+			podcastAvailable = true
+			subscriptions = []podcastconfig.Subscription{}
+			known := map[string]bool{}
+			for _, raw := range handsets {
+				known[str(raw.(map[string]any), "id")] = true
 			}
+			for _, sub := range c.Subscriptions {
+				if known[sub.Handset] {
+					subscriptions = append(subscriptions, sub)
+				}
+			}
+			if c.Feeds != nil {
+				podcastFeeds = c.Feeds
+			}
+			out.files[paths.Podcasts] = data
 		}
-		subscriptions = c.Subscriptions
-		if c.Feeds != nil {
-			podcastFeeds = c.Feeds
-		}
-		out.files[paths.Podcasts] = data
 	}
 	digest, err := json.Marshal(map[string]any{"podcasts": subscriptions, "podcastFeeds": podcastFeeds, "handsets": handsets, "contacts": boxContacts, "phonebooks": boxBooks, "policies": policies, "validation": context})
 	if err != nil {
@@ -656,7 +656,7 @@ func observe(paths Paths) (*observed, error) {
 	if webhook != nil {
 		configuration["webhook"] = webhook
 	}
-	if paths.Podcasts != "" {
+	if podcastAvailable {
 		configuration["podcasts"] = subscriptions
 		configuration["podcastFeeds"] = podcastFeeds
 	}

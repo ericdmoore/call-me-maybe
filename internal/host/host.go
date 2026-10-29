@@ -223,6 +223,11 @@ func Build(ctx context.Context, x Exec, lay Layout, w Wants) (*Plan, error) {
 			Argv: []string{"install", "-d", "-o", lay.AsteriskUser, "-g", lay.DoormanGroup, "-m", "2770", lay.Spool}})
 		podcastDir := filepath.Join(lay.Spool, "podcasts")
 		p.Steps = append(p.Steps, Step{Describe: "podcast subscriptions (shared with Asterisk)", Argv: []string{"install", "-d", "-o", lay.AsteriskUser, "-g", lay.DoormanGroup, "-m", "2770", podcastDir}})
+		// Public feed metadata must also be readable by Asterisk's AGI UID.
+		// Parent directories still restrict traversal to the service identities.
+		if fileExists(filepath.Join(podcastDir, "subscriptions.json")) {
+			p.Steps = append(p.Steps, Step{Describe: "podcast AGI metadata read access", Argv: []string{"chmod", "0644", filepath.Join(podcastDir, "subscriptions.json")}})
+		}
 		if lay.VoicemailState != "" {
 			p.Steps = append(p.Steps, Step{Describe: "directory " + lay.VoicemailState + " (" + lay.AsteriskUser + ", 0750 — the voicemail links)",
 				Argv: []string{"install", "-d", "-o", lay.AsteriskUser, "-g", lay.AsteriskUser, "-m", "0750", lay.VoicemailState}})

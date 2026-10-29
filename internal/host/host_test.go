@@ -388,3 +388,33 @@ func TestTheVoicemailDirectoryAndUnit(t *testing.T) {
 		}
 	}
 }
+
+func TestOptionalPodcastUnitAndMetadataMigration(t *testing.T) {
+	l := layout(t)
+	path := filepath.Join(l.Spool, "podcasts", "subscriptions.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"schema":1,"subscriptions":[]}`), 0640); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Build(context.Background(), &fakeExec{users: map[string]bool{"asterisk": true}}, l, Wants{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, step := range p.Steps {
+		if strings.Join(step.Argv, " ") == "chmod 0644 "+path {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("existing AGI metadata permissions not migrated")
+	}
+	units, _ := Units()
+	for _, u := range units {
+		if u.Name == "doorman-sync.service" && !strings.Contains(string(u.Content), "-/var/spool/call-me-maybe/podcasts") {
+			t.Fatal("optional path required")
+		}
+	}
+}

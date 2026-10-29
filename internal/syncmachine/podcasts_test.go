@@ -91,3 +91,64 @@ func TestGenericPodcastSyncAndConflict(t *testing.T) {
 		t.Fatal("invalid URL applied", err)
 	}
 }
+
+func TestOptionalPodcastsDoNotBlockOtherSync(t *testing.T) {
+	for _, data := range []string{`{"schema":1,"subscriptions":[{"handset":"retired","feed":"brains-on"}]}`, `{broken`} {
+		t.Run(data, func(t *testing.T) {
+			m, p, _ := fixture(t)
+			p.Podcasts = filepath.Join(filepath.Dir(p.Policy), "subscriptions.json")
+			m.paths = p
+			if err := os.WriteFile(p.Podcasts, []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			s, err := m.Observe()
+			if err != nil {
+				t.Fatal("optional file blocked sync", err)
+			}
+			if data == `{broken` && s.Configuration.Podcasts != nil {
+				t.Fatal("corrupt file advertised")
+			}
+			if data != `{broken` && (s.Configuration.Podcasts == nil || len(*s.Configuration.Podcasts) != 0) {
+				t.Fatal("stale handset projected")
+			}
+			q := proposal(t, s, map[string]any{"name": "policy.setSchedule", "policy": "default", "schedule": map[string]any{"id": "bedtime", "start": "22:00", "end": "07:00", "days": []string{"MO", "TU"}, "enabled": true}})
+			r, err := m.Apply(q)
+			if err != nil || r.Status != syncwire.ReceiptStatusSaved {
+				t.Fatal("unrelated change blocked", r, err)
+			}
+			after, _ := os.ReadFile(p.Podcasts)
+			if string(after) != data {
+				t.Fatal("unrelated apply rewrote podcasts")
+			}
+		})
+	}
+}
+func TestPodcastSyncReadAccessForAGI(t *testing.T) {
+	m, p, _ := fixture(t)
+	p.Podcasts = filepath.Join(filepath.Dir(p.Policy), "subscriptions.json")
+	m.paths = p
+	s, err := m.Observe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := map[string]any{"name": "podcast.subscribe", "handset": "kitchen", "feed": "brains-on", "enabled": true}
+	r, err := m.Apply(proposal(t, s, v))
+	if err != nil || r.Status != syncwire.ReceiptStatusApplied {
+		t.Fatal(r, err)
+	}
+	st, err := os.Stat(p.Podcasts)
+	if err != nil || st.Mode().Perm() != 0644 {
+		t.Fatal("AGI cannot read sync-created metadata", st, err)
+	}
+	_ = os.Chmod(p.Podcasts, 0640)
+	s, _ = m.Observe()
+	v["enabled"] = false
+	r, err = m.Apply(proposal(t, s, v))
+	if err != nil || r.Status != syncwire.ReceiptStatusApplied {
+		t.Fatal(r, err)
+	}
+	st, _ = os.Stat(p.Podcasts)
+	if st.Mode().Perm() != 0644 {
+		t.Fatal("AGI cannot read replaced metadata")
+	}
+}

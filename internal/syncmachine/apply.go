@@ -236,11 +236,11 @@ func (m *Machine) Apply(item syncwire.QueueItem) (syncwire.Receipt, error) {
 		var done bool
 		switch {
 		case w.Before == "":
-			done, err = atomicCreateMode(w.Path, view[w.Path], w.Path == m.paths.Webhook)
+			done, err = atomicCreateMode(w.Path, view[w.Path], w.Path == m.paths.Webhook, w.Path == m.paths.Podcasts)
 		case w.After == "":
 			done, err = atomicRemove(w.Path, o.files[w.Path])
 		default:
-			done, err = atomicReplaceMode(w.Path, o.files[w.Path], view[w.Path], w.Path == m.paths.Webhook)
+			done, err = atomicReplaceMode(w.Path, o.files[w.Path], view[w.Path], w.Path == m.paths.Webhook, w.Path == m.paths.Podcasts)
 		}
 		if err != nil && done {
 			// Leave prepared intent intact. The next pass recognises the
@@ -357,7 +357,7 @@ func (m *Machine) plan(item syncwire.QueueItem, list []syncwire.Verb, current sy
 		raw, _ := v.MarshalJSON()
 		switch verbName(raw) {
 		case "podcast.subscribe", "podcast.subscribeFeed":
-			if len(list) != 1 || m.paths.Podcasts == "" {
+			if len(list) != 1 || m.paths.Podcasts == "" || current.Configuration.Podcasts == nil {
 				return refuse(syncwire.Unsupported)
 			}
 			var sub struct {
@@ -573,21 +573,7 @@ func (m *Machine) validate(o *observed, view map[string][]byte) *refusal {
 	if err != nil {
 		return refuse(syncwire.Invalid)
 	}
-	if m.paths.Podcasts != "" {
-		c, err := podcastconfig.Parse(view[m.paths.Podcasts])
-		if err != nil {
-			return refuse(syncwire.Invalid)
-		}
-		known := map[string]bool{}
-		for _, h := range handsets {
-			known[h.ID] = true
-		}
-		for _, sub := range c.Subscriptions {
-			if !known[sub.Handset] {
-				return refuse(syncwire.Invalid)
-			}
-		}
-	}
+
 	books := map[string][]byte{}
 	if m.paths.Phonebooks != "" {
 		dir := filepath.Join(m.paths.Phonebooks, accountbook.Dir)

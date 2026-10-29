@@ -20,6 +20,10 @@ func TestPodcastCLIConfigurationOnly(t *testing.T) {
 	if code := runPodcasts(append([]string{"subscribe", "--title", "Nature"}, args...)); code != 0 {
 		t.Fatal(code)
 	}
+	st, statErr := os.Stat(config)
+	if statErr != nil || st.Mode().Perm() != 0644 {
+		t.Fatal("AGI metadata not readable", st, statErr)
+	}
 	c, err := podcastconfig.Load(config)
 	if err != nil || len(c.Feeds) != 1 || len(c.Subscriptions) != 1 {
 		t.Fatal(c, err)

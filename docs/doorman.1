@@ -1416,6 +1416,14 @@ The background worker selects two eligible items per show; preparation failure
 keeps the previous catalog. Per-feed menus and bookmarks are handset scoped;
 active playback delays cache collection. See docs/PODCASTS.md for bounds and rollout.
 
+.PP
+The podcast timer uses refresh --scheduled: existing feeds poll hourly with HTTP
+validators, failed feeds retry after five minutes, and explicit refresh bypasses
+the interval. Episodes are staged one at a time and failures isolated by feed.
+Removing the last subscription reclaims cached audio after active menus end.
+Public metadata is readable by the AGI inside protected service-owned directories;
+invalid optional podcast configuration does not stop other sync.
+
 .SH SEE ALSO
 .IR asterisk (8),
 .IR journalctl (1)

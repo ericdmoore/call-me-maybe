@@ -227,3 +227,9 @@ sync uses the separate `podcast.subscribeFeed` capability, never assumed from
 pilot support. A background worker prepares up to two eligible episodes per
 show; *7637 plays only that handset's subscriptions. Shared Opus cache, separate
 bookmarks, bounded fetching and last-good-on-failure are in docs/PODCASTS.md.
+
+Scheduled podcast refresh notices subscription changes every minute but polls
+existing feeds hourly with validators. Publisher failures retain only that
+source's last-good episodes; other shows still refresh. Invalid optional podcast
+configuration does not stop policy/phonebook/webhook sync. Public-only metadata
+is readable by the Asterisk AGI inside protected service-owned directories.

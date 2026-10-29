@@ -269,7 +269,7 @@ func Save(path string, data []byte) error {
 		return err
 	}
 	defer os.Remove(f.Name())
-	if err = f.Chmod(0640); err == nil {
+	if err = f.Chmod(0644); err == nil {
 		_, err = f.Write(data)
 	}
 	if err == nil {
