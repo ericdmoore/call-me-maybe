@@ -39,6 +39,8 @@ doorman sync media list   # --source explicit trusted HTTPS sandbox origin; neve
                           # sync media once downloads/installs bounded previews and reports receipts
                           # manual opt-in lane; does not enable background delivery or restart calls
 doorman books install-preview # --archive local.cmmpack; free local preview import, at most 2 minutes
+doorman books install-audiobook # --archive recorded.cmmpack; verified compressed baseline, no whole-book PCM expansion
+                          # sync media --audiobook-sku explicitly negotiates full-book, disk-backed delivery; docs/media-preview.md
 doorman books prepare     # --source catalog.json imports existing local recordings
 doorman books prompts     # --library directory: offline macOS say menu pages; --voice Samantha
                           # for *2665 (*BOOK); offline ffmpeg/espeak-ng preparation

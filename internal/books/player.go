@@ -82,7 +82,9 @@ func startStream(ctx context.Context, state, input string, seconds float64, spee
 	ctx, cancel := context.WithCancel(ctx)
 	s := &stream{windows: make(chan window), cancel: cancel, done: make(chan struct{}), dir: dir}
 	args := []string{"-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe"}
-	if filepath.Ext(input) != ".opus" {
+	if filepath.Ext(input) == ".ffconcat" {
+		args = append(args, "-f", "concat", "-safe", "1")
+	} else if filepath.Ext(input) != ".opus" {
 		args = append(args, "-f", "s16le", "-ar", "16000", "-ac", "1")
 	}
 	args = append(args, "-ss", fmt.Sprintf("%.6f", seconds), "-i", input, "-af", fmt.Sprintf("atempo=%.1f", float64(speed)/10), "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1")

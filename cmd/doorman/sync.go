@@ -376,14 +376,36 @@ func runSyncMedia(args []string) int {
 	origin := fs.String("source", "", "operator-approved sandbox HTTPS origin (receives the sync credential)")
 	state := fs.String("state", "/var/lib/doorman", "private account state directory")
 	library := fs.String("library", books.DefaultLibrary, "prepared local playback library")
-	menuBundle := fs.String("menu-bundle", "", "prepared menu bundle matching the next preview catalog")
+	menuBundle := fs.String("menu-bundle", "", "prepared menu bundle matching the next catalog")
+	fullBooks := fs.Bool("full-books", false, "opt into recorded-v1 delivery and disk-backed installation")
+	audiobookSKU := fs.String("audiobook-sku", "", "explicitly opt into a full recorded audiobook SKU and disk-backed installation")
 	if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
 		return 2
 	}
-	source, err := account.New(*state).SandboxMedia(*origin)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "sync media: an explicit trusted HTTPS source is required")
+	if *fullBooks && *audiobookSKU != "" {
+		fmt.Fprintln(os.Stderr, "sync media: select either --full-books or --audiobook-sku")
 		return 2
+	}
+	source, err := account.New(*state).SandboxMedia(*origin)
+	if *fullBooks {
+		source, err = account.New(*state).RecordedMedia(*origin)
+	}
+	if *audiobookSKU != "" {
+		source, err = account.New(*state).SandboxAudiobook(*origin, *audiobookSKU)
+	}
+	if err != nil {
+		if errors.Is(err, account.ErrAudiobookSKU) {
+			fmt.Fprintln(os.Stderr, "sync media:", err)
+		} else {
+			fmt.Fprintln(os.Stderr, "sync media: an explicit trusted HTTPS source is required")
+		}
+		return 2
+	}
+	if args[0] == "once" && (*audiobookSKU != "" || *fullBooks) {
+		if err := books.CheckAudiobookTools(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -399,10 +421,22 @@ func runSyncMedia(args []string) int {
 		return 0
 	}
 	var installErr error
-	err = mediadelivery.Receive(ctx, source, filepath.Join(*state, "media-preview"), func(ctx context.Context, data []byte, hash string) error {
-		installErr = books.ImportPreviewWithMenus(ctx, data, hash, *library, *menuBundle)
-		return installErr
-	})
+	if *fullBooks {
+		err = mediadelivery.ReceiveFiles(ctx, source, filepath.Join(*state, "media-preview"), func(ctx context.Context, file, hash string) error {
+			installErr = books.ImportMediaWithMenus(ctx, file, hash, *library, *menuBundle)
+			return installErr
+		})
+	} else if *audiobookSKU != "" {
+		err = mediadelivery.ReceiveAudiobook(ctx, source, filepath.Join(*state, "media-audiobook"), func(ctx context.Context, file, hash string) error {
+			installErr = books.ImportAudiobook(ctx, file, hash, *library, *menuBundle)
+			return installErr
+		})
+	} else {
+		err = mediadelivery.Receive(ctx, source, filepath.Join(*state, "media-preview"), func(ctx context.Context, data []byte, hash string) error {
+			installErr = books.ImportPreviewWithMenus(ctx, data, hash, *library, *menuBundle)
+			return installErr
+		})
+	}
 	if err != nil {
 		if errors.Is(installErr, books.ErrMenuRefresh) {
 			fmt.Fprintln(os.Stderr, books.ErrMenuRefresh)
@@ -411,6 +445,6 @@ func runSyncMedia(args []string) int {
 		}
 		return 1
 	}
-	fmt.Fprintln(os.Stdout, "Sandbox preview pass complete; installation receipts reflect local playback readiness, not a handset listening test.")
+	fmt.Fprintln(os.Stdout, "Sandbox media pass complete; installation receipts reflect local playback readiness, not a handset listening test.")
 	return 0
 }

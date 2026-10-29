@@ -2,6 +2,7 @@ package mediadelivery
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -213,4 +214,117 @@ func TestJournalErrorsDistinguishStorageLockAndInvalidDataWithoutPaths(t *testin
 	source.offer.Sequence = 1
 	source.offer.State = "failed"
 	assert(Receive(t.Context(), source, dir, nil), "reconcile-receipt")
+}
+
+type fileSource struct{ *fakeSource }
+
+func (s *fileSource) DownloadFile(_ context.Context, offer Offer, dir string) (string, error) {
+	if s.downloadErr != nil {
+		return "", s.downloadErr
+	}
+	if int64(len(s.payload)) != offer.Bytes || fmt.Sprintf("%x", sha256.Sum256(s.payload)) != offer.SHA256 {
+		return "", ErrChecksum
+	}
+	f, err := os.CreateTemp(dir, ".archive-")
+	if err != nil {
+		return "", err
+	}
+	_, err = f.Write(s.payload)
+	f.Close()
+	return f.Name(), err
+}
+func TestRecordedReceiveVerificationRecoveryAndCleanup(t *testing.T) {
+	for _, step := range []string{"", "downloading", "downloaded", "installing", "installed"} {
+		t.Run(step, func(t *testing.T) {
+			payload := []byte("compressed recording")
+			source := &fileSource{fake()}
+			source.payload = payload
+			source.offer.Bytes = int64(len(payload))
+			source.offer.SHA256 = fmt.Sprintf("%x", sha256.Sum256(payload))
+			source.failState = step
+			dir := filepath.Join(t.TempDir(), "journal")
+			installs := 0
+			install := func(_ context.Context, file, hash string) error {
+				installs++
+				data, err := os.ReadFile(file)
+				if err != nil || string(data) != string(payload) {
+					t.Fatal("bad scratch", err)
+				}
+				return nil
+			}
+			err := ReceiveFiles(t.Context(), source, dir, install)
+			if step != "" {
+				if err == nil {
+					t.Fatal("expected receipt interruption")
+				}
+				if err = ReceiveFiles(t.Context(), source, dir, install); err != nil {
+					t.Fatal(err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if err = ReceiveFiles(t.Context(), source, dir, install); err != nil {
+				t.Fatal(err)
+			}
+			if installs < 1 {
+				t.Fatal("not installed")
+			}
+			entries, _ := os.ReadDir(dir)
+			for _, e := range entries {
+				if strings.HasPrefix(e.Name(), ".archive-") {
+					t.Fatal("scratch retained")
+				}
+			}
+			os.WriteFile(filepath.Join(dir, ".archive-orphan"), payload, 0600)
+			if err = ReceiveFiles(t.Context(), source, dir, install); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = os.Stat(filepath.Join(dir, ".archive-orphan")); !os.IsNotExist(err) {
+				t.Fatal("orphan not removed")
+			}
+		})
+	}
+	source := &fileSource{fake()}
+	source.payload = []byte("bad")
+	dir := filepath.Join(t.TempDir(), "journal")
+	if err := ReceiveFiles(t.Context(), source, dir, func(context.Context, string, string) error { t.Fatal("installed wrong hash"); return nil }); !errors.Is(err, ErrChecksum) {
+		t.Fatal(err)
+	}
+}
+
+type brokenFileSource struct {
+	*fakeSource
+	path func(string) string
+}
+
+func (s *brokenFileSource) DownloadFile(_ context.Context, _ Offer, dir string) (string, error) {
+	return s.path(dir), nil
+}
+func TestRecordedEarlyFailuresReportFailure(t *testing.T) {
+	for _, kind := range []string{"unsupported", "outside", "missing", "empty", "directory"} {
+		t.Run(kind, func(t *testing.T) {
+			base := fake()
+			var source Source = base
+			if kind != "unsupported" {
+				source = &brokenFileSource{base, func(dir string) string {
+					switch kind {
+					case "outside":
+						return filepath.Join(t.TempDir(), "outside")
+					case "empty":
+						return ""
+					case "directory":
+						p := filepath.Join(dir, ".archive-directory")
+						os.Mkdir(p, 0700)
+						return p
+					default:
+						return filepath.Join(dir, ".archive-missing")
+					}
+				}}
+			}
+			err := ReceiveFiles(t.Context(), source, filepath.Join(t.TempDir(), "journal"), func(context.Context, string, string) error { t.Fatal("installed invalid scratch"); return nil })
+			if err == nil || !reflect.DeepEqual(base.events, []string{"downloading", "failed"}) {
+				t.Fatal("left delivery downloading", err, base.events)
+			}
+		})
+	}
 }

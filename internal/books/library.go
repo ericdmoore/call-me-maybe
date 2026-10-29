@@ -43,20 +43,31 @@ type Catalog struct {
 }
 
 type Book struct {
-	ID       string    `json:"id"`
-	Title    string    `json:"title"`
-	Language string    `json:"language"`
-	Origin   string    `json:"origin"`
-	Preview  bool      `json:"preview,omitempty"`
-	Revision string    `json:"revision,omitempty"`
-	Chapters []Chapter `json:"chapters"`
+	Storage     string    `json:"storage,omitempty"`
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Language    string    `json:"language"`
+	Origin      string    `json:"origin"`
+	Preview     bool      `json:"preview,omitempty"`
+	Revision    string    `json:"revision,omitempty"`
+	IndexSHA256 string    `json:"indexSha256,omitempty"`
+	Chapters    []Chapter `json:"chapters"`
+}
+
+type Segment struct {
+	Audio   string  `json:"audio"`
+	Bytes   int64   `json:"bytes"`
+	SHA256  string  `json:"sha256"`
+	Seconds float64 `json:"seconds"`
 }
 
 type Chapter struct {
-	Title   string  `json:"title"`
-	Audio   string  `json:"audio"`
-	Seconds float64 `json:"seconds,omitempty"`
-	Bytes   int64   `json:"bytes,omitempty"`
+	Segments     []Segment `json:"-"`
+	SegmentCount int       `json:"segmentCount,omitempty"`
+	Title        string    `json:"title"`
+	Audio        string    `json:"audio"`
+	Seconds      float64   `json:"seconds,omitempty"`
+	Bytes        int64     `json:"bytes,omitempty"`
 }
 
 func readJSON(path string, dst any) error {
@@ -136,14 +147,31 @@ func validate(c Catalog, prepared bool) error {
 		if b.Origin != "cli" && b.Origin != "store" && b.Origin != "browser" && b.Origin != "podcast" {
 			return errors.New("book origin must be explicit")
 		}
+		if b.Storage != "" && (!prepared || b.Storage != "opus" || b.IndexSHA256 != "") {
+			return errors.New("unsupported recording storage")
+		}
 		if prepared && !revisionPattern.MatchString(b.Revision) {
 			return errors.New("invalid recording revision")
+		}
+		compressed := false
+		for _, ch := range b.Chapters {
+			compressed = compressed || ch.SegmentCount > 0
+		}
+		if prepared && ((compressed && !revisionPattern.MatchString(b.IndexSHA256)) || (!compressed && b.IndexSHA256 != "")) {
+			return errors.New("invalid recording index")
 		}
 		for i, ch := range b.Chapters {
 			if !validText(ch.Title) || ch.Audio == "" || strings.ContainsAny(ch.Audio, "\r\n\x00") {
 				return errors.New("invalid chapter")
 			}
-			if prepared && (ch.Audio != chapterName(i)+audioSuffix(b) || ch.Seconds <= 0 || ch.Seconds > 86400) {
+			audioValid := validChapterAudio(ch, i)
+			if b.Storage == "opus" {
+				audioValid = ch.Audio == chapterName(i)+".ffconcat" && ch.SegmentCount == 0
+			}
+			if b.Origin == "podcast" {
+				audioValid = ch.Audio == chapterName(i)+".opus" && ch.SegmentCount == 0
+			}
+			if prepared && (!audioValid || ch.Seconds <= 0 || ch.Seconds > 86400) {
 				return errors.New("invalid prepared chapter")
 			}
 		}
@@ -195,10 +223,36 @@ func ready(root string, b Book) bool {
 	if !found {
 		return false
 	}
-	for _, ch := range b.Chapters {
-		s, err := os.Lstat(filepath.Join(bookDir(root, b), ch.Audio))
-		if err != nil || !s.Mode().IsRegular() || !audioSizeOK(b, ch, s.Size()) {
+	if b.IndexSHA256 != "" {
+		b, err = hydrateRecorded(root, b)
+		if err != nil {
 			return false
+		}
+	}
+	for _, ch := range b.Chapters {
+		if b.Storage == "opus" {
+			if !compressedChapterReady(bookDir(root, b), ch) {
+				return false
+			}
+			continue
+		}
+		if len(ch.Segments) == 0 {
+			st, err := os.Lstat(filepath.Join(bookDir(root, b), ch.Audio))
+			if err != nil || !st.Mode().IsRegular() || !audioSizeOK(b, ch, st.Size()) {
+				return false
+			}
+		} else {
+			expected := concatChapter(ch)
+			actual, err := os.ReadFile(filepath.Join(bookDir(root, b), ch.Audio))
+			if err != nil || string(actual) != expected {
+				return false
+			}
+			for _, seg := range ch.Segments {
+				st, err := os.Lstat(filepath.Join(bookDir(root, b), seg.Audio))
+				if err != nil || !st.Mode().IsRegular() || st.Size() != seg.Bytes {
+					return false
+				}
+			}
 		}
 	}
 	return true
@@ -312,6 +366,9 @@ func preflightCatalog(c Catalog) error {
 		b.Chapters = append([]Chapter(nil), b.Chapters...)
 		for j := range b.Chapters {
 			b.Chapters[j].Audio = chapterName(j) + ".sln16"
+			b.Chapters[j].Segments = nil
+			b.Chapters[j].SegmentCount = 0
+			b.IndexSHA256 = ""
 			b.Chapters[j].Seconds = 1
 		}
 		prepared.Books[i] = b
@@ -383,6 +440,9 @@ func prepareBook(ctx context.Context, source, stage string, b *Book) error {
 				return errors.New("Opus conversion changed episode duration")
 			}
 		}
+		ch.Segments = nil
+		ch.SegmentCount = 0
+		b.IndexSHA256 = ""
 		if ch.Seconds > 86400 {
 			return errors.New("chapter exceeds one day")
 		}

@@ -1040,6 +1040,19 @@ uses the same free local importer without an account. Previews are limited to
 1 MiB archives and two minutes. Full books require compressed playback support;
 this importer deliberately refuses them. An installed receipt is not proof of
 handset playback. See docs/media-preview.md for limits and recovery semantics.
+.PP
+.B doorman sync media list|once --source https://trusted-sandbox-origin --audiobook-sku sandbox-recorded-book-v1
+explicitly negotiates a selected complete audiobook through the v2 media format.
+Downloads stream to private disk and are size/hash verified before installation.
+The importer retains compressed Opus segments and bounds decoding, archive
+expansion and playback windows; it never expands the complete book to PCM.
+Supply --menu-bundle when the next catalog needs matching
+offline-prepared prompts.
+.PP
+.B doorman books install-audiobook --archive recorded.cmmpack
+uses that free full-book importer without an account or commerce receipts.
+Archives are capped at 256 MiB, expanded members at 512 MiB, and recordings at
+48 hours. The separate preview importer keeps its existing limits.
 .SH FILES
 .TP
 .I policy.toml
@@ -1514,3 +1527,12 @@ prepares two pinned Brains On episodes off the call path;
 prints readiness separately from subscription sync.
 The local *PODS (*7637) AGI shares Opus audio and keeps per-handset bookmarks.
 See docs/PODCASTS.md for release installation and a real handset trial.
+.SH COMPLETE RECORDED AUDIOBOOKS
+.B doorman books install-recorded --archive book.cmmpack
+verifies and installs a local recorded audiobook without an account.
+.B doorman sync media once --source https://trusted.example --full-books
+opts into disk-streamed complete recordings (256 MiB maximum).
+Both retain compressed Opus audio and use bounded playback conversion.
+Prepared menu voices require a matching offline bundle before catalog
+activation;
+see docs/media-preview.md for the candidate catalog and --menu-bundle workflow.
