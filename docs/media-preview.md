@@ -211,3 +211,39 @@ books). Render that candidate offline and retry with `--menu-bundle`. Failed
 imports never replace the previous playable revision. Immutable unactivated or
 superseded revisions are retained; operators should remove them only when no
 active call uses them. Installation is not evidence of a handset listening test.
+
+## Production-owned audiobooks
+
+Production delivery is a separate explicit mode, with no fallback to staging:
+
+```sh
+doorman sync media list --source https://store.example.invalid --owned-books
+doorman sync media once --source https://store.example.invalid --owned-books \
+  --menu-bundle ./prepared-menu
+```
+
+Replace the example with the operator-approved HTTPS store origin. This mode
+cannot be combined with `--audiobook-sku` or `--full-books`. It discovers the
+family's currently deliverable editions from `/v1/store/packs/owned`
+(`pack-owned-v1`), then requests each SKU from `/v1/store/packs`
+(`pack-delivery-v1`). Every request carries the sync bearer and
+`X-Doorman-Media-Format: audiobook-v1`. The offered version and SHA-256 must match
+the discovery snapshot. Downloads and receipts must use the fixed production
+paths at the trusted origin; redirects, sandbox schemas and changed editions
+are refused. A later pass can discover updated ownership, but a link refresh
+cannot silently substitute an edition mid-install.
+
+Each title is processed independently. If one fails, the others are attempted
+and the command exits nonzero; retry preserves the existing receipt outbox and
+replays lost acknowledgements without repeating completed installation. A partial
+`list` can print valid offers while exiting nonzero, so callers must check status.
+Discovery failure is an error, not an empty shelf. Empty/refunded/missing items
+never remove local books. Playback stays offline and has no entitlement checks.
+
+Production receipt state is stored under `media-production/<origin-hash>` in the
+private account state directory, separate from staging state. Signed addresses
+and credentials are never persisted there. Full-book import, size/hash bounds,
+menu publication safeguards and handset verification requirements are unchanged.
+This command adds no automatic download timer, production provisioning or purchase
+flow. Use the paired production service and an approved release before real
+purchase/delivery acceptance.

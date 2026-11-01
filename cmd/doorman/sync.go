@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -373,7 +375,8 @@ func runSyncMedia(args []string) int {
 		return 2
 	}
 	fs := flag.NewFlagSet("sync media "+args[0], flag.ContinueOnError)
-	origin := fs.String("source", "", "operator-approved sandbox HTTPS origin (receives the sync credential)")
+	ownedBooks := fs.Bool("owned-books", false, "discover and deliver production-owned audiobooks (separate from sandbox)")
+	origin := fs.String("source", "", "operator-approved HTTPS origin (receives the sync credential)")
 	state := fs.String("state", "/var/lib/doorman", "private account state directory")
 	library := fs.String("library", books.DefaultLibrary, "prepared local playback library")
 	menuBundle := fs.String("menu-bundle", "", "prepared menu bundle matching the next catalog")
@@ -382,8 +385,8 @@ func runSyncMedia(args []string) int {
 	if fs.Parse(args[1:]) != nil || fs.NArg() != 0 {
 		return 2
 	}
-	if *fullBooks && *audiobookSKU != "" {
-		fmt.Fprintln(os.Stderr, "sync media: select either --full-books or --audiobook-sku")
+	if (*fullBooks && *audiobookSKU != "") || (*ownedBooks && (*fullBooks || *audiobookSKU != "")) {
+		fmt.Fprintln(os.Stderr, "sync media: select only one of --full-books, --audiobook-sku or --owned-books")
 		return 2
 	}
 	source, err := account.New(*state).SandboxMedia(*origin)
@@ -401,7 +404,7 @@ func runSyncMedia(args []string) int {
 		}
 		return 2
 	}
-	if args[0] == "once" && (*audiobookSKU != "" || *fullBooks) {
+	if args[0] == "once" && (*audiobookSKU != "" || *fullBooks || *ownedBooks) {
 		if err := books.CheckAudiobookTools(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
@@ -409,6 +412,9 @@ func runSyncMedia(args []string) int {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	if *ownedBooks {
+		return runOwnedMedia(ctx, account.New(*state), *origin, *state, *library, *menuBundle, args[0])
+	}
 	if args[0] == "list" {
 		offers, err := source.List(ctx)
 		if err != nil {
@@ -446,5 +452,68 @@ func runSyncMedia(args []string) int {
 		return 1
 	}
 	fmt.Fprintln(os.Stdout, "Sandbox media pass complete; installation receipts reflect local playback readiness, not a handset listening test.")
+	return 0
+}
+
+// Each edition gets its own pass: a missing archive or failed receipt must not
+// starve the rest of the family's shelf. The receiver retains its durable outbox.
+func runOwnedMedia(ctx context.Context, client *account.Client, origin, state, library, menus, command string) int {
+	sources, err := client.OwnedAudiobooks(ctx, origin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	inputs := make([]mediadelivery.FileSource, len(sources))
+	for i, source := range sources {
+		inputs[i] = source
+	}
+	// Independent origins cannot share receipt identities, even with colliding IDs.
+	scope := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimSuffix(origin, "/"))))
+	return runOwnedMediaSources(ctx, inputs, filepath.Join(state, "media-production", scope), command, func(ctx context.Context, file, hash string) error {
+		return books.ImportAudiobook(ctx, file, hash, library, menus)
+	})
+}
+
+func runOwnedMediaSources(ctx context.Context, sources []mediadelivery.FileSource, journal, command string, install mediadelivery.FileInstall) int {
+	offers := []account.MediaOffer{}
+	failed := false
+	for _, source := range sources {
+		if ctx.Err() != nil {
+			return 1
+		}
+		if command == "list" {
+			listed, e := source.List(ctx)
+			if e != nil {
+				fmt.Fprintln(os.Stderr, e)
+				failed = true
+			} else {
+				offers = append(offers, listed...)
+			}
+		} else {
+			var installErr error
+			err := mediadelivery.ReceiveAudiobook(ctx, source, journal, func(ctx context.Context, file, hash string) error {
+				installErr = install(ctx, file, hash)
+				return installErr
+			})
+			if errors.Is(installErr, books.ErrMenuRefresh) {
+				err = books.ErrMenuRefresh
+			}
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				failed = true
+			}
+		}
+	}
+	if command == "list" {
+		if json.NewEncoder(os.Stdout).Encode(offers) != nil {
+			return 1
+		}
+	}
+	if failed {
+		return 1
+	}
+	if command == "once" {
+		fmt.Fprintln(os.Stdout, "Owned audiobook pass complete; installation receipts are not a handset listening test.")
+	}
 	return 0
 }

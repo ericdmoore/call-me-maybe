@@ -19,9 +19,12 @@ import (
 )
 
 const mediaPath = "/v1/store/sandbox/packs"
+const productionMediaPath = "/v1/store/packs"
 const MaxPreviewBytes = mediadelivery.MaxPreviewBytes
 
 var ErrAudiobookSKU = errors.New("media: invalid audiobook SKU; use lowercase letters, digits and hyphens")
+var audiobookSKU = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`)
+var mediaVersion = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 var mediaID = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 var mediaHash = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
@@ -30,6 +33,9 @@ var mediaHash = regexp.MustCompile(`^[a-f0-9]{64}$`)
 // Constructing one does not enable background downloads or change ordinary sync.
 type MediaSource struct {
 	fullBookSKU string
+	production  bool
+	version     string
+	sha256      string
 	account     *Client
 	origin      string
 	downloads   map[string]string
@@ -51,7 +57,7 @@ func (c *Client) SandboxMedia(origin string) (*MediaSource, error) {
 // SandboxAudiobook is an explicit opt-in to a selected full-book SKU. Old preview
 // clients keep their original size limits and never receive a large offer.
 func (c *Client) SandboxAudiobook(origin, sku string) (*MediaSource, error) {
-	if !regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`).MatchString(sku) {
+	if !audiobookSKU.MatchString(sku) {
 		return nil, ErrAudiobookSKU
 	}
 	source, err := c.SandboxMedia(origin)
@@ -74,7 +80,7 @@ func (s *MediaSource) response(ctx context.Context, method, path string, data []
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	if s.fullBookSKU != "" {
+	if s.fullBookSKU != "" || s.production {
 		req.Header.Set("X-Doorman-Media-Format", "audiobook-v1")
 	} else if s.maxBytes > MaxPreviewBytes {
 		req.Header.Set("X-Doorman-Media", "recorded-v1")
@@ -114,11 +120,16 @@ func (s *MediaSource) request(ctx context.Context, method, path string, data []b
 }
 
 func (s *MediaSource) List(ctx context.Context) ([]MediaOffer, error) {
-	path := mediaPath
+	s.downloads = map[string]string{}
+	s.expires = map[string]int64{}
+	path := s.mediaRoot()
 	expectedSchema := "sandbox-pack-delivery-v1"
 	if s.fullBookSKU != "" {
 		path += "?sku=" + url.QueryEscape(s.fullBookSKU)
 		expectedSchema = "sandbox-pack-delivery-v2"
+	}
+	if s.production {
+		expectedSchema = "pack-delivery-v1"
 	}
 	data, err := s.request(ctx, http.MethodGet, path, nil, 64<<10)
 	if err != nil {
@@ -141,11 +152,17 @@ func (s *MediaSource) List(ctx context.Context) ([]MediaOffer, error) {
 	}
 	s.downloads = map[string]string{}
 	s.expires = map[string]int64{}
+	if s.production && len(wire.Packs) != 1 {
+		return nil, ErrProtocol
+	}
 	offers := make([]MediaOffer, 0, len(wire.Packs))
 	seen := map[string]bool{}
 	for _, p := range wire.Packs {
 		u, e := url.Parse(p.Download.URL)
-		if e != nil || u.Scheme+"://"+u.Host != s.origin || u.User != nil || u.Fragment != "" || u.Path != mediaPath+"/download" || p.Download.Authorization != "sync-bearer" || p.Download.ExpiresAt <= time.Now().UnixMilli() || p.Receipts != mediaPath+"/receipts" || !mediaID.MatchString(p.Delivery) || seen[p.Delivery] || !mediaHash.MatchString(p.SHA256) || p.Bytes <= 0 || p.Bytes > mediadelivery.MaxRecordedBytes || (s.fullBookSKU != "" && p.SKU != s.fullBookSKU) || p.Sequence < 0 || p.Sequence >= 1_000_000_000 || len(p.SKU) == 0 || len(p.SKU) > 128 || len(p.Version) == 0 || len(p.Version) > 64 || !mediaState(p.State) {
+		if e != nil || u.Scheme+"://"+u.Host != s.origin || u.User != nil || u.Fragment != "" || u.Path != s.mediaRoot()+"/download" || p.Download.Authorization != "sync-bearer" || p.Download.ExpiresAt <= time.Now().UnixMilli() || p.Receipts != s.mediaRoot()+"/receipts" || !mediaID.MatchString(p.Delivery) || seen[p.Delivery] || !mediaHash.MatchString(p.SHA256) || p.Bytes <= 0 || p.Bytes > mediadelivery.MaxRecordedBytes || (s.fullBookSKU != "" && p.SKU != s.fullBookSKU) || p.Sequence < 0 || p.Sequence >= 1_000_000_000 || len(p.SKU) == 0 || len(p.SKU) > 128 || len(p.Version) == 0 || len(p.Version) > 64 || !mediaState(p.State) {
+			return nil, ErrProtocol
+		}
+		if s.production && (p.Version != s.version || p.SHA256 != s.sha256) {
 			return nil, ErrProtocol
 		}
 		seen[p.Delivery] = true
@@ -173,7 +190,7 @@ func mediaState(s string) bool {
 // stay in this source and are never marshalled, persisted, or included in errors.
 func (s *MediaSource) Download(ctx context.Context, p MediaOffer) ([]byte, error) {
 	download := s.downloads[p.Delivery+"/"+p.SHA256]
-	if !strings.HasPrefix(download, mediaPath+"/download?") || p.Bytes <= 0 || p.Bytes > MaxPreviewBytes || !mediaHash.MatchString(p.SHA256) {
+	if !strings.HasPrefix(download, s.mediaRoot()+"/download?") || p.Bytes <= 0 || p.Bytes > MaxPreviewBytes || !mediaHash.MatchString(p.SHA256) {
 		return nil, ErrProtocol
 	}
 	data, err := s.request(ctx, http.MethodGet, download, nil, p.Bytes)
@@ -207,7 +224,7 @@ func (s *MediaSource) Receipt(ctx context.Context, p MediaOffer, sequence int64,
 		State    string `json:"state"`
 		Error    string `json:"error,omitempty"`
 	}{p.Delivery, p.SHA256, sequence, state, code})
-	body, err := s.request(ctx, http.MethodPost, mediaPath+"/receipts", data, 2048)
+	body, err := s.request(ctx, http.MethodPost, s.mediaRoot()+"/receipts", data, 2048)
 	if err != nil {
 		return err
 	}
@@ -234,7 +251,7 @@ func (c *Client) RecordedMedia(origin string) (*MediaSource, error) {
 // interrupted, oversized or hash-mismatched transfer deletes its scratch file.
 func (s *MediaSource) DownloadFile(ctx context.Context, p MediaOffer, dir string) (name string, err error) {
 	download := s.downloads[p.Delivery+"/"+p.SHA256]
-	if !strings.HasPrefix(download, mediaPath+"/download?") || p.Bytes <= 0 || p.Bytes > s.maxBytes || !mediaHash.MatchString(p.SHA256) {
+	if !strings.HasPrefix(download, s.mediaRoot()+"/download?") || p.Bytes <= 0 || p.Bytes > s.maxBytes || !mediaHash.MatchString(p.SHA256) {
 		return "", ErrProtocol
 	}
 	resp, cleanup, err := s.openDownload(ctx, p)
@@ -290,7 +307,7 @@ func (r progressReader) Read(p []byte) (int, error) {
 // hashes while staging before publication. Provider URLs and credentials stay here.
 func (s *MediaSource) DownloadTo(ctx context.Context, p MediaOffer, dst io.Writer) error {
 	download := s.downloads[p.Delivery+"/"+p.SHA256]
-	if s.fullBookSKU == "" || p.SKU != s.fullBookSKU || !strings.HasPrefix(download, mediaPath+"/download?") || p.Bytes <= 0 || p.Bytes > mediadelivery.MaxAudiobookBytes || !mediaHash.MatchString(p.SHA256) {
+	if s.fullBookSKU == "" || p.SKU != s.fullBookSKU || !strings.HasPrefix(download, s.mediaRoot()+"/download?") || p.Bytes <= 0 || p.Bytes > mediadelivery.MaxAudiobookBytes || !mediaHash.MatchString(p.SHA256) {
 		return ErrProtocol
 	}
 	resp, cleanup, err := s.openDownload(ctx, p)
@@ -364,4 +381,47 @@ func (s *MediaSource) openDownload(ctx context.Context, p MediaOffer) (*http.Res
 type progressReadCloser struct {
 	io.Reader
 	io.Closer
+}
+
+// mediaRoot never comes from the service; production and rehearsal cannot fall back.
+func (s *MediaSource) mediaRoot() string {
+	if s.production {
+		return productionMediaPath
+	}
+	return mediaPath
+}
+
+// OwnedAudiobooks discovers exact owned editions, not the sale catalogue. A failed
+// discovery is an error, never an instruction to remove already installed books.
+func (c *Client) OwnedAudiobooks(ctx context.Context, origin string) ([]*MediaSource, error) {
+	source, err := c.SandboxMedia(origin)
+	if err != nil {
+		return nil, err
+	}
+	source.production = true
+	data, err := source.request(ctx, http.MethodGet, productionMediaPath+"/owned", nil, 1<<20)
+	if err != nil {
+		return nil, err
+	}
+	var wire struct {
+		Schema string `json:"schema"`
+		Packs  []struct {
+			SKU     string `json:"sku"`
+			Version string `json:"version"`
+			SHA256  string `json:"sha256"`
+		} `json:"packs"`
+	}
+	if json.Unmarshal(data, &wire) != nil || wire.Schema != "pack-owned-v1" || wire.Packs == nil || len(wire.Packs) > 1024 {
+		return nil, ErrProtocol
+	}
+	result := make([]*MediaSource, 0, len(wire.Packs))
+	seen := map[string]bool{}
+	for _, p := range wire.Packs {
+		if !audiobookSKU.MatchString(p.SKU) || !mediaVersion.MatchString(p.Version) || !mediaHash.MatchString(p.SHA256) || seen[p.SKU] {
+			return nil, ErrProtocol
+		}
+		seen[p.SKU] = true
+		result = append(result, &MediaSource{account: c, origin: source.origin, production: true, fullBookSKU: p.SKU, version: p.Version, sha256: p.SHA256, maxBytes: mediadelivery.MaxAudiobookBytes, downloads: map[string]string{}})
+	}
+	return result, nil
 }
