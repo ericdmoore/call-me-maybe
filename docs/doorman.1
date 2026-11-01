@@ -1561,3 +1561,14 @@ Both retain compressed Opus audio and use bounded playback conversion.
 Prepared menu voices require a matching offline bundle before catalog
 activation;
 see docs/media-preview.md for the candidate catalog and --menu-bundle workflow.
+.SH PRODUCTION OWNED AUDIOBOOKS
+.B doorman sync media list --source https://trusted.example --owned-books
+explicitly discovers production-owned full-book editions.
+.B doorman sync media once --source https://trusted.example --owned-books
+installs each independently using the full-book importer and durable receipts.
+This mode cannot be combined with --full-books or --audiobook-sku and never
+falls back to sandbox routes. Failures return nonzero while other titles are
+attempted; missing or refunded ownership never deletes local books.
+The operator-approved origin receives the sync credential; redirects and
+cross-origin download or receipt addresses are refused.
+See docs/media-preview.md for the exact protocol and menu preparation workflow.

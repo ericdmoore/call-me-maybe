@@ -59,3 +59,15 @@ func TestSyncMediaRejectsConflictingFullBookProtocols(t *testing.T) {
 		t.Fatal("opened enrolment for ambiguous protocol")
 	}
 }
+
+func TestOwnedBooksRequiresSeparateExplicitMode(t *testing.T) {
+	for _, extra := range [][]string{{"--full-books"}, {"--audiobook-sku", "book"}} {
+		args := append([]string{"list", "--source", "https://example.invalid", "--owned-books", "--state", t.TempDir()}, extra...)
+		if runSyncMedia(args) != 2 {
+			t.Fatal("accepted mixed modes")
+		}
+	}
+	if runSyncMedia([]string{"list", "--source", "https://example.invalid", "--owned-books", "--state", t.TempDir()}) != 1 {
+		t.Fatal("owned discovery without enrollment")
+	}
+}
