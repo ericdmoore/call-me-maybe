@@ -239,3 +239,24 @@ VoIP.ms. Saved callback settings include the media placeholder, and the carrier
 records received MMS, but both API lookups above succeeded with zero media
 for the tested messages. Local shelf tests do not establish end-to-end
 readiness. Carrier tracing and a successful live import remain required.
+
+## Reply identity
+
+Inbox consumers send an optional `in_reply_to` on `POST /h/:house/inbox/send`,
+alongside `to` and `message`. It is the original incoming SMS ID, not whichever
+message was most recently pulled. Immediate replies, unknown-word and passkey
+notices use that message's ID. Delayed contact-shelf notices and results use the
+persisted batch's original card ID, including after restart; multiple phases may
+produce different reply text for that ID. Shortcut uploads still send no SMS.
+`Edge.Send` without an originating message omits the field; the inbox reader uses
+`Edge.SendReply`. Older self-hosted Workers ignore the extra field and retain
+legacy behavior, so this change adds no account dependency.
+
+An endpoint supporting reply identity should verify the inbound ID and recipient
+belong to the authenticated house, then reserve the inbound-ID/recipient/text
+combination durably before the carrier call. A repeated identical request refers
+to the same attempt, while identical answers to different incoming messages are
+separate replies. This is transport correlation, never authority for an action.
+A carrier timeout is uncertain: do not automatically resend, and reconcile before
+another carrier attempt. Client HTTP errors are still reported; this change adds
+no automatic retry of a reply or house action.

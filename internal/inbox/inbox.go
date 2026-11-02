@@ -136,10 +136,22 @@ func (e *Edge) ackContacts(ctx context.Context, ids []string, results []uploadRe
 // Send texts a reply from the house number, through the edge, which holds
 // the carrier credential. The edge applies the same reply rule.
 func (e *Edge) Send(ctx context.Context, to, body string) error {
+	return e.SendReply(ctx, to, body, "")
+}
+
+// SendReply binds a reply to its originating SMS, rather than asking the edge
+// to guess from the recipient's latest message. An empty ID is reserved for
+// callers without an originating SMS; older self-hosted servers ignore the
+// additional JSON field. A timeout is not permission to repeat a carrier send.
+func (e *Edge) SendReply(ctx context.Context, to, body, inReplyTo string) error {
 	if why := policy.ReplyProblem(body); why != "" {
 		return fmt.Errorf("refusing to send a reply that %s", why)
 	}
-	return e.do(ctx, http.MethodPost, "/inbox/send", map[string]string{"to": to, "message": body}, nil)
+	payload := map[string]string{"to": to, "message": body}
+	if inReplyTo != "" {
+		payload["in_reply_to"] = inReplyTo
+	}
+	return e.do(ctx, http.MethodPost, "/inbox/send", payload, nil)
 }
 
 // safeErr strips the URL a *url.Error carries. The token is in a header
@@ -438,7 +450,7 @@ func (r *Reader) Handle(ctx context.Context, m Message) (out Outcome) {
 		out.Word = "" // never log what they typed
 		// A listed person gets the list, once per text.
 		reply := "I know these words: " + strings.Join(r.allowedWords(caller), ", ")
-		if err := r.d.Edge.Send(ctx, n.Value, reply); err != nil {
+		if err := r.d.Edge.SendReply(ctx, n.Value, reply, m.ID); err != nil {
 			out.Detail = "reply failed: " + err.Error()
 		} else {
 			out.Reply = reply
@@ -514,7 +526,7 @@ func (r *Reader) Handle(ctx context.Context, m Message) (out Outcome) {
 		// the passkey door exists, say so and do nothing.
 		out.Result = "needs-confirmation"
 		const notYet = "That one needs your passkey, which is not set up yet"
-		if r.d.Edge.Send(ctx, n.Value, notYet) == nil {
+		if r.d.Edge.SendReply(ctx, n.Value, notYet, m.ID) == nil {
 			out.Reply = notYet
 		}
 		return out
@@ -543,7 +555,7 @@ func (r *Reader) reply(ctx context.Context, out *Outcome, to, text string) {
 		out.Reply = text
 		return
 	}
-	if err := r.d.Edge.Send(ctx, to, text); err != nil {
+	if err := r.d.Edge.SendReply(ctx, to, text, out.ID); err != nil {
 		if out.Detail != "" {
 			out.Detail += "; "
 		}
