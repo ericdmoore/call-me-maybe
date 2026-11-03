@@ -131,11 +131,13 @@ func (s *Session) listen(c policy.ResolvedChoice) (released bool, key string) {
 	// The same release sendToVoicemail makes, and for the same reason it is
 	// a release and not a hangup.
 	s.rec.Outcome = calls.OutcomeListening
-	s.detached.Store(true)
+	s.release.begin()
 	if err := s.deps.ARI.ContinueToDialplan(s.ctx, s.ChannelID, ListenContext, "s", 1); err != nil {
 		// The handoff failed; the caller is still ours after all, and the
 		// phone keeps answering: back to the menu.
-		s.detached.Store(false)
+		if !s.release.failed() {
+			return true, "" // StasisEnd already confirmed the handoff.
+		}
 		s.rec.Outcome = calls.OutcomeAbandoned
 		s.log.Error("listening handoff failed, offering the menu again", "err", err)
 		return s.ctx.Err() != nil, ""

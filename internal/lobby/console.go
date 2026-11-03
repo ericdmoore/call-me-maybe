@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"callmemaybe/internal/calls"
@@ -200,10 +199,10 @@ type Console struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	events chan event
-	// detached: the channel left our app alive, which for a console means the
+	// release: the channel left our app alive, which for a console means the
 	// call was placed and the dialplan owns it now. The final hangup must be
 	// suppressed or the outbound call dies the instant it is made.
-	detached atomic.Bool
+	release channelRelease
 
 	pbSeq int
 
@@ -253,7 +252,7 @@ func (c *Console) CallerGone() { c.cancel() }
 // drop a call that has just been connected. Invariant 8: StasisEnd is not
 // ChannelDestroyed, and only the dead may be hung up by cleanup.
 func (c *Console) CallerLeft() {
-	c.detached.Store(true)
+	c.release.confirmed()
 	c.cancel()
 }
 
@@ -483,10 +482,12 @@ func (c *Console) place(line ConsoleLine, dialledDigits string) {
 	// From here the channel belongs to the dialplan. Invariant 8, and the same
 	// release sendToVoicemail performs: detach first, undo it if the handoff
 	// itself fails, and never hang the channel up afterwards.
-	c.detached.Store(true)
+	c.release.begin()
 	c.rec.Outcome = calls.OutcomePlaced
 	if err := c.deps.ARI.ContinueToDialplan(c.ctx, c.ChannelID, outboundContext, dialledDigits, 1); err != nil {
-		c.detached.Store(false)
+		if !c.release.failed() {
+			return // StasisEnd already confirmed the handoff.
+		}
 		c.log.Error("outbound handoff failed", "context", outboundContext, "err", err)
 		c.gaveUp("handoff-failed")
 		c.say(false, sayInvalid, sayGoodbye)
@@ -570,7 +571,7 @@ func (c *Console) cleanup() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if !c.detached.Load() {
+	if !c.release.detached() {
 		_ = c.deps.ARI.Hangup(ctx, c.ChannelID)
 	}
 
@@ -586,7 +587,7 @@ func (c *Console) cleanup() {
 	if c.deps.Calls != nil {
 		c.deps.Calls.Post(c.rec)
 	}
-	if c.detached.Load() {
+	if c.release.detached() {
 		c.observe(events.CallHandedOff, "left-doorman")
 	}
 	c.observe(events.SessionFinished, "")
