@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"callmemaybe/internal/calls"
@@ -263,10 +262,10 @@ type Session struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	events chan event
-	// detached: the caller's channel left our app alive (transfer); the
+	// release: the caller's channel left our app alive (transfer); the
 	// final cleanup hangup must be suppressed. Written by the event router,
 	// read by the session goroutine, hence atomic.
-	detached atomic.Bool
+	release channelRelease
 
 	bridgeID string
 	legs     map[string]bool
@@ -375,7 +374,7 @@ func (s *Session) CallerGone() { s.cancel() }
 // The session ends, but the final hangup is suppressed: the channel belongs
 // to the dialplan now, and hanging it up would kill the transferred call.
 func (s *Session) CallerLeft() {
-	s.detached.Store(true)
+	s.release.confirmed()
 	s.cancel()
 }
 
@@ -1117,10 +1116,12 @@ func (s *Session) sendToVoicemail(mailbox string) {
 	if err := s.deps.ARI.SetChannelVar(s.ctx, s.ChannelID, "MAILBOX", mailbox); err != nil {
 		s.log.Error("could not set mailbox variable", "err", err)
 	}
-	s.detached.Store(true)
+	s.release.begin()
 	if err := s.deps.ARI.ContinueToDialplan(s.ctx, s.ChannelID, "voicemail-drop", "s", 1); err != nil {
 		// The handoff failed; the caller is still ours after all.
-		s.detached.Store(false)
+		if !s.release.failed() {
+			return // StasisEnd already confirmed the handoff.
+		}
 		s.log.Error("voicemail handoff failed", "err", err)
 		s.dismiss("no-answer")
 	}
@@ -1202,7 +1203,7 @@ func (s *Session) cleanup() {
 	if s.bridgeID != "" {
 		_ = s.deps.ARI.DestroyBridge(ctx, s.bridgeID)
 	}
-	if !s.detached.Load() {
+	if !s.release.detached() {
 		_ = s.deps.ARI.Hangup(ctx, s.ChannelID)
 	}
 
@@ -1220,7 +1221,7 @@ func (s *Session) cleanup() {
 		s.deps.Calls.Post(s.rec)
 	}
 	s.notify(notify.EventCompleted)
-	if s.detached.Load() {
+	if s.release.detached() {
 		s.observe(events.CallHandedOff, "left-doorman")
 	}
 	s.observe(events.SessionFinished, "")
