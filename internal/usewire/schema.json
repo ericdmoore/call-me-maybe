@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:callmemaybe:use-aggregate:v1",
+  "title": "Draft optional recorded-audio activity contract",
+  "description": "Preparation only. No running endpoint or consent control is implemented by this schema. Byte limits, duplicate JSON keys, UTC age, distinct epochs and unique days require semantic validation.",
+  "$defs": {
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "collectionEnabled",
+        "dayTimeZone",
+        "metrics",
+        "maxAgeDays",
+        "maxBodyBytes"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "collectionEnabled": {
+          "type": "boolean"
+        },
+        "dayTimeZone": {
+          "const": "UTC"
+        },
+        "metrics": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "recordedAudioProgress"
+            }
+          ],
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "maxAgeDays": {
+          "const": 7
+        },
+        "maxBodyBytes": {
+          "const": 2048
+        }
+      }
+    },
+    "batch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "consentEpoch",
+        "sourceEpoch",
+        "reports"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "consentEpoch": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "sourceEpoch": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "reports": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "day",
+              "revision",
+              "counts"
+            ],
+            "properties": {
+              "day": {
+                "type": "string",
+                "format": "date",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "counts": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "recordedAudioProgress"
+                ],
+                "properties": {
+                  "recordedAudioProgress": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/capabilities"
+    },
+    {
+      "$ref": "#/$defs/batch"
+    }
+  ]
+}
